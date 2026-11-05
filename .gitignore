@@ -69,6 +69,9 @@ runs/
 parity-java-home/
 # Shared twin-verification write lock (parity-session.sh also adds it to .git/info/exclude)
 TWIN-VERIFICATION.json.lock
+# CI_PENDING.json write lock (tools/ci_pending.py); run records live under runs/ci/
+# and the CPU queue state lives in <git-common-dir>/mindustry-cpu-queue/.
+CI_PENDING.json.lock
 
 screenshots_for_ai/
 # Vars.checkLaunch marker (Vars.java:398-408); never commit a crash marker

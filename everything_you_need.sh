@@ -30,6 +30,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resolve cargo/godot even from non-login shells (CI); harmless when already on PATH.
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard bootstrap "$REPO_ROOT/everything_you_need.sh" "$@"
+
 RELEASE=0
 PACK=1
 STDB=0

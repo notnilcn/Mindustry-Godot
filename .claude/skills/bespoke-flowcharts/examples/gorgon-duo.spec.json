@@ -1,0 +1,2322 @@
+{
+ "doc": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Duo Fight - End to End.md",
+ "lane_gap": 2,
+ "align_lanes": true,
+ "lanes": [
+  {
+   "id": "L-server",
+   "label": "Server Table"
+  },
+  {
+   "id": "L-relay",
+   "label": "Relay"
+  },
+  {
+   "id": "L-p1",
+   "label": "Player Client 1"
+  },
+  {
+   "id": "L-p2",
+   "label": "Player Client 2"
+  }
+ ],
+ "sections": [
+  {
+   "id": "S-spawn",
+   "label": "Spawning and observing",
+   "until_gx": 15
+  },
+  {
+   "id": "S-engage",
+   "label": "Engagement: target and phase 0",
+   "until_gx": 42
+  },
+  {
+   "id": "S-taken",
+   "label": "The boss fires and a player is hit",
+   "until_gx": 78
+  },
+  {
+   "id": "S-dealt",
+   "label": "A player hits the boss",
+   "until_gx": 108
+  },
+  {
+   "id": "S-phase",
+   "label": "The first phase change",
+   "until_gx": 120
+  },
+  {
+   "id": "S-run",
+   "label": "Phases 1 to 9",
+   "until_gx": 180
+  },
+  {
+   "id": "S-death",
+   "label": "Death and cleanup",
+   "until_gx": 198
+  }
+ ],
+ "groups": [
+  {
+   "id": "G-pre",
+   "label": "Before t0 · both players routed (relay)",
+   "fork": "Before the fight - routing players in",
+   "color": "5",
+   "lane": "L-relay"
+  },
+  {
+   "id": "G-pre-s",
+   "label": "Before t0 · both players enter the world (server)",
+   "fork": "Before the fight - routing players in",
+   "color": "5",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-spawnfail",
+   "label": "Fork · spawn refused",
+   "fork": "Fork - spawn refused",
+   "color": "1",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-rules-move",
+   "label": "rules.rs · movement claim",
+   "lane": "L-server",
+   "color": "#8a5cf6"
+  },
+  {
+   "id": "G-nobody",
+   "label": "Fork · nobody in range",
+   "fork": "Fork - nobody in aggro range",
+   "color": "3",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-rules-taken",
+   "label": "rules.rs · enemy-bullet claim",
+   "lane": "L-server",
+   "color": "#8a5cf6"
+  },
+  {
+   "id": "G-cap",
+   "label": "Fork · bullet store full",
+   "fork": "Fork - bullet store cap",
+   "color": "#7f9cff",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-aoi",
+   "label": "Fork · P1 walks out of AoI / the leash (P1)",
+   "fork": "Fork - P1 leaves the AoI ring or the leash",
+   "color": "3",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-aoi-s",
+   "label": "Fork · P1 walks out of AoI / the leash (server)",
+   "fork": "Fork - P1 leaves the AoI ring or the leash",
+   "color": "3",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-tie-p2",
+   "label": "Fork · clients disagree about a bullet",
+   "fork": "Fork - clients disagree about a bullet",
+   "color": "6",
+   "lane": "L-p2"
+  },
+  {
+   "id": "G-tie",
+   "label": "Fork · clients disagree (server)",
+   "fork": "Fork - clients disagree about a bullet",
+   "color": "6",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-taken",
+   "label": "Fork · taken hits refused / too many",
+   "fork": "Fork - taken hits refused",
+   "color": "1",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-live",
+   "label": "Fork · live hit check on",
+   "fork": "Fork - live hit check",
+   "color": "6",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-rules-fire",
+   "label": "rules.rs · fire claim",
+   "lane": "L-server",
+   "color": "#8a5cf6"
+  },
+  {
+   "id": "G-rules-dealt",
+   "label": "rules.rs · player-bullet claim",
+   "lane": "L-server",
+   "color": "#8a5cf6"
+  },
+  {
+   "id": "G-dc-p2",
+   "label": "Fork · P2 disconnects / times out",
+   "fork": "Fork - P2 disconnects",
+   "color": "4",
+   "lane": "L-p2"
+  },
+  {
+   "id": "G-dc-s",
+   "label": "Fork · P2 disconnects (server)",
+   "fork": "Fork - P2 disconnects",
+   "color": "4",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-dc-p1",
+   "label": "Fork · P2 disconnects (P1)",
+   "fork": "Fork - P2 disconnects",
+   "color": "4",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-phantom",
+   "label": "Fork · refused report_fire (phantom arrow)",
+   "fork": "Fork - refused report_fire",
+   "color": "1",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-phantom-p2",
+   "label": "Fork · phantom arrow (P2)",
+   "fork": "Fork - refused report_fire",
+   "color": "1",
+   "lane": "L-p2"
+  },
+  {
+   "id": "G-lag",
+   "label": "Fork · P1 lags",
+   "fork": "Fork - P1 lags",
+   "color": "4",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-dealt",
+   "label": "Fork · enemy hits refused / too many",
+   "fork": "Fork - dealt hits refused",
+   "color": "1",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-lock",
+   "label": "Fork · lock expiry and shoot-back",
+   "fork": "Fork - lock expiry and shoot-back",
+   "color": "3",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-lock-p2",
+   "label": "Fork · shoot-back (P2)",
+   "fork": "Fork - lock expiry and shoot-back",
+   "color": "3",
+   "lane": "L-p2"
+  },
+  {
+   "id": "G-admin-hp",
+   "label": "Fork · admin sets the HP",
+   "fork": "Fork - admin sets the HP",
+   "color": "2",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-skip",
+   "label": "Fork · one hit skips phases",
+   "fork": "Fork - one hit skips phases",
+   "color": "#7f9cff",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-death-s",
+   "label": "Fork · P1 dies and respawns (server)",
+   "fork": "Fork - P1 dies and respawns",
+   "color": "2",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-death-p1",
+   "label": "Fork · P1 dies and respawns (P1)",
+   "fork": "Fork - P1 dies and respawns",
+   "color": "2",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-patch-s",
+   "label": "Fork · patch departure (server)",
+   "fork": "Fork - patch departure",
+   "color": "5",
+   "lane": "L-server"
+  },
+  {
+   "id": "G-patch-r",
+   "label": "Fork · patch departure (relay)",
+   "fork": "Fork - patch departure",
+   "color": "5",
+   "lane": "L-relay"
+  },
+  {
+   "id": "G-patch-p1",
+   "label": "Fork · patch departure (clients)",
+   "fork": "Fork - patch departure",
+   "color": "5",
+   "lane": "L-p1"
+  },
+  {
+   "id": "G-despawn",
+   "label": "Fork · admin despawns the Gorgon",
+   "fork": "Fork - admin despawns the Gorgon",
+   "color": "2",
+   "lane": "L-server"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "r-pre",
+   "lane": "L-relay",
+   "gx": 0,
+   "gy": 0,
+   "heading": "Relay routes both players into the region",
+   "text": "ensure_account on kg-global -> RoutePlayer outbox -> kg-relay -> handle_route_player writes the player row",
+   "group": "G-pre",
+   "color": "5"
+  },
+  {
+   "id": "s-enter",
+   "lane": "L-server",
+   "gx": 3,
+   "gy": 3,
+   "heading": "Server puts both players in the world",
+   "text": "enter_world inserts online_player; health and weapon rows; the subscriptions start; players become aggro candidates",
+   "group": "G-pre-s",
+   "color": "5"
+  },
+  {
+   "id": "s-spawn",
+   "lane": "L-server",
+   "gx": 6,
+   "gy": 0,
+   "heading": "Server spawns the Gorgon",
+   "text": "admin_spawn_enemy(gorgon, 1, q, r): require_admin, resolve key at step 1, wrap anchor, slot_of_pos, mint_entity_id, seed derive",
+   "main": true
+  },
+  {
+   "id": "s-rows",
+   "lane": "L-server",
+   "gx": 9,
+   "gy": 0,
+   "heading": "Server inserts the Gorgon rows",
+   "text": "enemy row (template, difficulty, seed, anchor, slot, empty phases/targets, dead_tick None) + enemy_health hp=max_hp=1000; audit; fires nothing yet",
+   "main": true
+  },
+  {
+   "id": "f-spawnfail",
+   "lane": "L-server",
+   "gx": 12,
+   "gy": 3,
+   "heading": "Spawn refused",
+   "text": "every check before the first insert; Err rolls back",
+   "group": "G-spawnfail",
+   "color": "1"
+  },
+  {
+   "id": "p1-rows",
+   "lane": "L-p1",
+   "gx": 12,
+   "gy": 0,
+   "heading": "Both clients receive the Gorgon rows",
+   "text": "nearby_enemies / nearby_enemy_health in subscribe_region, AoI ring -> EnemySeen -> ModelEvent::Enemy -> WorldModel.enemies, combat_rev -> CombatRuntime::sync EnemyUpsert",
+   "main": true
+  },
+  {
+   "id": "p2-rows",
+   "lane": "L-p2",
+   "gx": 12,
+   "gy": 0,
+   "heading": "Both clients receive the Gorgon rows",
+   "text": "same heading as P1",
+   "main": true
+  },
+  {
+   "id": "p1-see",
+   "lane": "L-p1",
+   "gx": 15,
+   "gy": 0,
+   "heading": "P1 sees the Gorgon",
+   "text": "KgEnemySpawnerComponent2D instances enemy.tscn; position_at from the anchor, lerp by fraction; nova fallback; 1000/1000 bar",
+   "main": true
+  },
+  {
+   "id": "p2-see",
+   "lane": "L-p2",
+   "gx": 15,
+   "gy": 0,
+   "heading": "P2 sees the Gorgon",
+   "text": "same body on the same sub-unit, nearest torus copy to P2's focus; only while in P2's ring",
+   "main": true
+  },
+  {
+   "id": "p1-move",
+   "lane": "L-p1",
+   "gx": 18,
+   "gy": 0,
+   "heading": "Both clients report their movement",
+   "text": "KgPositionSyncComponent -> report_movement on a segment change or the 500 ms heartbeat",
+   "main": true
+  },
+  {
+   "id": "p2-move",
+   "lane": "L-p2",
+   "gx": 18,
+   "gy": 0,
+   "heading": "Both clients report their movement",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-accept-move",
+   "lane": "L-server",
+   "gx": 21,
+   "gy": 0,
+   "heading": "Rule - accept_movement",
+   "text": "require_online_woke (Quiet), alive (Dead), judge_report: rate token (RateLimited), charge slow-down, grapple allowance, check_report (Rejected); Verdict MoveAccepted / MoveRefused",
+   "main": true,
+   "group": "G-rules-move"
+  },
+  {
+   "id": "s-move",
+   "lane": "L-server",
+   "gx": 24,
+   "gy": 0,
+   "heading": "Server records both player tracks",
+   "text": "report_movement applies the verdict: touch_presence, store_report (player_position), push_track_sample (player_track, movement_log), set_player_patch",
+   "main": true
+  },
+  {
+   "id": "p1-tracks",
+   "lane": "L-p1",
+   "gx": 27,
+   "gy": 0,
+   "heading": "Both clients receive the tracks",
+   "text": "my_track / nearby_tracks -> TrackSeen -> ModelEvent::Track -> sync_tracks; zero-velocity staircase (F1)",
+   "main": true
+  },
+  {
+   "id": "p2-tracks",
+   "lane": "L-p2",
+   "gx": 27,
+   "gy": 0,
+   "heading": "Both clients receive the tracks",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-pass",
+   "lane": "L-server",
+   "gx": 27,
+   "gy": 0,
+   "heading": "Server runs the 1 Hz combat pass",
+   "text": "combat_pass order: quiet_pass (presence), aggro_pass, cleanup_dead; why presence goes first",
+   "main": true
+  },
+  {
+   "id": "s-aggro",
+   "lane": "L-server",
+   "gx": 30,
+   "gy": 0,
+   "heading": "Server aggro pass picks P1",
+   "text": "candidates: online, alive, in the ring, position predicted from player_track; next_target nearest anchor within 16 hexes, tie lower id",
+   "main": true
+  },
+  {
+   "id": "s-stamp",
+   "lane": "L-server",
+   "gx": 33,
+   "gy": 0,
+   "heading": "Server stamps the target and phase 0",
+   "text": "TargetSegment{P1, t+60}, locked_until t+1860, first engagement PhaseSegment{0, t+60}; one row update",
+   "main": true
+  },
+  {
+   "id": "s-ph0",
+   "lane": "L-server",
+   "gx": 36,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 0 - Intro.canvas"
+  },
+  {
+   "id": "f-nobody",
+   "lane": "L-server",
+   "gx": 39,
+   "gy": 3,
+   "heading": "Nobody in aggro range",
+   "text": "no candidate: no change, no write; repeats next second",
+   "group": "G-nobody",
+   "color": "3"
+  },
+  {
+   "id": "p1-pre",
+   "lane": "L-p1",
+   "gx": 39,
+   "gy": 0,
+   "heading": "P1 receives the target and phase 0",
+   "text": "nearby_enemies update = insert(new)+delete(old); region_has_enemy keeps it; one upsert, combat_rev, re-derive",
+   "main": true
+  },
+  {
+   "id": "p2-pre",
+   "lane": "L-p2",
+   "gx": 39,
+   "gy": 0,
+   "heading": "P2 receives the same schedule",
+   "text": "same update on P2; P2 is not the target and that changes nothing",
+   "main": true
+  },
+  {
+   "id": "p1-engage",
+   "lane": "L-p1",
+   "gx": 42,
+   "gy": 0,
+   "heading": "Both clients wait out the preload and the rest",
+   "text": "target_at None until t+60; engaged_at true from t+60; phase 0 [rest 120][clip 528]; first shot >= t+60+120+33",
+   "main": true
+  },
+  {
+   "id": "p2-engage",
+   "lane": "L-p2",
+   "gx": 42,
+   "gy": 0,
+   "heading": "Both clients wait out the preload and the rest",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "p1-sched",
+   "lane": "L-p1",
+   "gx": 45,
+   "gy": 0,
+   "heading": "P1 runs the phase 0 schedule each tick",
+   "text": "clip_tick_of (rest/clip), fires_at (window), fires_shot (cadence); engaged and alive gates; emitter (phase<<8)|index",
+   "main": true
+  },
+  {
+   "id": "p2-derive",
+   "lane": "L-p2",
+   "gx": 45,
+   "gy": 0,
+   "heading": "P2 derives the same volleys",
+   "text": "same row, seed and tick -> same BulletKeys; only aim input can differ",
+   "main": true
+  },
+  {
+   "id": "p1-aim",
+   "lane": "L-p1",
+   "gx": 48,
+   "gy": 0,
+   "heading": "P1 aims the targeted ring",
+   "text": "aim_angle: Fixed = base+spin; Target reads aim_point at fire_tick-15 (AIM_DELAY_TICKS) on the target's canonical path; no sample -> Fixed",
+   "main": true
+  },
+  {
+   "id": "p1-expand",
+   "lane": "L-p1",
+   "gx": 51,
+   "gy": 0,
+   "heading": "P1 expands each volley into bullets",
+   "text": "volley_rng_enemy(seed, emitter, fire_tick); three draws per bullet; BulletKey{fire_tick, source, emitter, ordinal}",
+   "main": true
+  },
+  {
+   "id": "p1-step",
+   "lane": "L-p1",
+   "gx": 54,
+   "gy": 0,
+   "heading": "P1 steps and draws the boss bullets",
+   "text": "Bullet::step order, remainder, spawn tick integrated, life cap 720; KgBulletLayerComponent2D MultiMesh per family",
+   "main": true
+  },
+  {
+   "id": "p2-digest",
+   "lane": "L-p2",
+   "gx": 54,
+   "gy": 0,
+   "heading": "Both clients print the same digest",
+   "text": "spawn_digest every 600 ticks recomputed from rows and tracks; HUD combat digest line",
+   "main": true
+  },
+  {
+   "id": "p1-bodies",
+   "lane": "L-p1",
+   "gx": 57,
+   "gy": 0,
+   "heading": "P1 builds a body for each player",
+   "text": "one Body per connected player: Track from reported samples, Life from health, canonical vs exact collision mode",
+   "main": true
+  },
+  {
+   "id": "p1-contact",
+   "lane": "L-p1",
+   "gx": 60,
+   "gy": 0,
+   "heading": "P1 resolver decides P1 was hit",
+   "text": "capsule_hits_circle radius 307; earliest (tick, player id) wins; immediate report mode decides own contact at once",
+   "main": true
+  },
+  {
+   "id": "p2-contact",
+   "lane": "L-p2",
+   "gx": 60,
+   "gy": 0,
+   "heading": "P2 resolver reaches the same verdict",
+   "text": "remote contact decided once no earlier one is possible; CONFIRM_MAX_WAIT 120",
+   "main": true
+  },
+  {
+   "id": "p1-hold",
+   "lane": "L-p1",
+   "gx": 63,
+   "gy": 0,
+   "heading": "P1 holds the contact, then consumes the bullet",
+   "text": "REPORT_HOLD_TICKS 12; a new BulletPath serial retracts; handed out -> Input::Consumed, bullet vanishes",
+   "main": true
+  },
+  {
+   "id": "p1-send",
+   "lane": "L-p1",
+   "gx": 66,
+   "gy": 0,
+   "heading": "P1 reports the hit",
+   "text": "take_reports, flush_reports while clock settled, HIT_BATCH_MAX 64, PlayerHitReport fields",
+   "main": true
+  },
+  {
+   "id": "s-batch",
+   "lane": "L-server",
+   "gx": 69,
+   "gy": 0,
+   "heading": "Rule - accept_player_damaged",
+   "text": "report_player_damaged calls it: caller is victim; require_online, batch > 64 Err, player_health row, empty Ok(None); sort order; TakenBatch",
+   "main": true,
+   "group": "G-rules-taken"
+  },
+  {
+   "id": "s-taken",
+   "lane": "L-server",
+   "gx": 72,
+   "gy": 0,
+   "heading": "Rule - TakenJudge.judge",
+   "text": "per entry: kg_rules::enemy_bullet::judge -> dead, duplicate, no_enemy, check_hit (window, enemy_shot, enemy_hit_window), off_path, rate_limited",
+   "main": true,
+   "group": "G-rules-taken"
+  },
+  {
+   "id": "s-apply",
+   "lane": "L-server",
+   "gx": 75,
+   "gy": 0,
+   "heading": "Server applies the hit to P1",
+   "text": "report_player_damaged: apply_player_hit: resolve 10 vs defence 0, hp 100->90, recent_hits; TakenJudge::accepted, hit_log, TakenJudge::save",
+   "main": true
+  },
+  {
+   "id": "p1-hp",
+   "lane": "L-p1",
+   "gx": 78,
+   "gy": 0,
+   "heading": "P1 HP bar drops to 110",
+   "text": "my_health -> HealthSeen -> ModelEvent::Health -> KgHealthBar",
+   "main": true
+  },
+  {
+   "id": "p2-hp",
+   "lane": "L-p2",
+   "gx": 78,
+   "gy": 0,
+   "heading": "P2 sees P1 at 110 HP",
+   "text": "nearby_health -> KgRemotePlayer::set_health; Life for P2's resolver",
+   "main": true
+  },
+  {
+   "id": "f-cap",
+   "lane": "L-p1",
+   "gx": 54,
+   "gy": 6,
+   "heading": "P1 bullet store is full",
+   "text": "LIVE_BULLET_CAP 20000; rest of batch rejected in key order; HUD rej; the one place a corrected re-run differs",
+   "group": "G-cap",
+   "color": "#7f9cff"
+  },
+  {
+   "id": "f-a1",
+   "lane": "L-p1",
+   "gx": 57,
+   "gy": 3,
+   "heading": "P1 walks out of the AoI ring",
+   "text": "view deletes the row -> EnemyRemove -> rederive away; P1 derives nothing",
+   "group": "G-aoi",
+   "color": "3"
+  },
+  {
+   "id": "f-a2",
+   "lane": "L-server",
+   "gx": 60,
+   "gy": 3,
+   "heading": "The Gorgon keeps P1 as its target",
+   "text": "aggro_pass keep rule: lock live, online, alive, within leash 32768",
+   "group": "G-aoi-s",
+   "color": "3"
+  },
+  {
+   "id": "f-a4",
+   "lane": "L-server",
+   "gx": 63,
+   "gy": 3,
+   "heading": "P1 leaves the leash",
+   "text": "keep fails; re-pick P2 (+60) or disengage (+12); ends",
+   "group": "G-aoi-s",
+   "color": "3"
+  },
+  {
+   "id": "f-a3",
+   "lane": "L-p1",
+   "gx": 63,
+   "gy": 3,
+   "heading": "P1 walks back into range",
+   "text": "row returns; body re-derived in place; bullets in flight appear",
+   "group": "G-aoi",
+   "color": "3"
+  },
+  {
+   "id": "f-c1",
+   "lane": "L-p2",
+   "gx": 63,
+   "gy": 3,
+   "heading": "A black bullet on P2",
+   "text": "prediction vs undecided contact; black means might be gone",
+   "group": "G-tie-p2",
+   "color": "6"
+  },
+  {
+   "id": "f-c2",
+   "lane": "L-p2",
+   "gx": 66,
+   "gy": 3,
+   "heading": "P2 paths say P2 was hit first",
+   "text": "different samples, staircase F1, F3; P2 reports the same key",
+   "group": "G-tie-p2",
+   "color": "6"
+  },
+  {
+   "id": "f-c3",
+   "lane": "L-server",
+   "gx": 69,
+   "gy": 3,
+   "heading": "Server accepts both victims",
+   "text": "no cross-player rule; per-victim guard keys; F4 counter",
+   "group": "G-tie",
+   "color": "6"
+  },
+  {
+   "id": "f-t1",
+   "lane": "L-server",
+   "gx": 78,
+   "gy": 3,
+   "heading": "A taken hit is refused",
+   "text": "reason codes in order, hit_log, reducer Ok",
+   "group": "G-taken",
+   "color": "1",
+   "section": "S-taken"
+  },
+  {
+   "id": "f-t2",
+   "lane": "L-server",
+   "gx": 81,
+   "gy": 3,
+   "heading": "Too many taken hits",
+   "text": "30 hits/s bucket; batch over 64 is Err",
+   "group": "G-taken",
+   "color": "1",
+   "section": "S-taken"
+  },
+  {
+   "id": "f-t3",
+   "lane": "L-server",
+   "gx": 84,
+   "gy": 3,
+   "heading": "What a taken refusal costs",
+   "text": "no HP change, no event; bullet already consumed locally",
+   "group": "G-taken",
+   "color": "1",
+   "section": "S-taken"
+  },
+  {
+   "id": "f-l1",
+   "lane": "L-server",
+   "gx": 78,
+   "gy": 6,
+   "heading": "Live hit check is on",
+   "text": "admin switches; bullet_touches_path replays the bullet against movement_log",
+   "group": "G-live",
+   "color": "6",
+   "section": "S-taken"
+  },
+  {
+   "id": "f-l2",
+   "lane": "L-server",
+   "gx": 81,
+   "gy": 6,
+   "heading": "Replay misses, off_path",
+   "text": "same function, no margin; F1 can refuse an honest victim",
+   "group": "G-live",
+   "color": "6",
+   "section": "S-taken"
+  },
+  {
+   "id": "p2-fire",
+   "lane": "L-p2",
+   "gx": 81,
+   "gy": 0,
+   "heading": "P2 fires the bow",
+   "text": "KgWeaponComponent fire action, refusals (build mode, GUI, control inactive), cursor -> binary angle",
+   "main": true
+  },
+  {
+   "id": "p2-predict",
+   "lane": "L-p2",
+   "gx": 84,
+   "gy": 0,
+   "heading": "P2 adds the arrows and sends report_fire",
+   "text": "KgCombatComponent::try_fire RTT <= 300 ms; CombatRuntime::try_fire cadence 15 ticks; arrows in P2's own world; NetSession::report_fire(fire_tick, origin, angle)",
+   "main": true
+  },
+  {
+   "id": "p2-collide",
+   "lane": "L-p2",
+   "gx": 87,
+   "gy": 0,
+   "heading": "P2 arrow hits the Gorgon",
+   "text": "CombatWorld collides player bullets with enemies alive at the tick; radius 768; non-pierce removed",
+   "main": true
+  },
+  {
+   "id": "s-fire",
+   "lane": "L-server",
+   "gx": 87,
+   "gy": 0,
+   "heading": "Rule - accept_fire",
+   "text": "report_fire calls it: online, alive, weapon row and mode, position row; check_fire: window -30/+2, stamp (cadence), muzzle bound",
+   "main": true,
+   "group": "G-rules-fire"
+  },
+  {
+   "id": "s-shotrec",
+   "lane": "L-server",
+   "gx": 90,
+   "gy": 0,
+   "heading": "Server appends the ShotRec",
+   "text": "report_fire applies FireAccepted: ShotRec{fire_tick, weapon_id, mode, origin, angle} into recent_shots (16), last_fire_tick; volley never stored",
+   "main": true
+  },
+  {
+   "id": "p2-hold",
+   "lane": "L-p2",
+   "gx": 90,
+   "gy": 0,
+   "heading": "P2 holds and reports the dealt hit",
+   "text": "REPORT_HOLD 12; take_reports; flush_reports; EnemyHitReport{enemy, fire_tick, ordinal, hit_tick}",
+   "main": true
+  },
+  {
+   "id": "p1-shots",
+   "lane": "L-p1",
+   "gx": 93,
+   "gy": 0,
+   "heading": "P1 receives the shot ring",
+   "text": "nearby_weapons -> WeaponSeen -> ModelEvent::Weapon -> combat_rev -> sync_remote_shots -> Input::Shot; P2 skips its own row",
+   "main": true
+  },
+  {
+   "id": "p1-expand-arrow",
+   "lane": "L-p1",
+   "gx": 96,
+   "gy": 0,
+   "heading": "P1 expands the arrow from the shot ring",
+   "text": "volley_rng_player(P2, weapon, mode, fire_tick); same three arrows drawn",
+   "main": true
+  },
+  {
+   "id": "s-price",
+   "lane": "L-server",
+   "gx": 96,
+   "gy": 0,
+   "heading": "Rule - accept_enemy_damaged",
+   "text": "report_enemy_damaged calls it: online, batch <= 64, alive, weapon row; sort; Strength, dealt_rate_ceiling, load_dealt_ledger; DealtBatch",
+   "main": true,
+   "group": "G-rules-dealt"
+  },
+  {
+   "id": "p1-arrow",
+   "lane": "L-p1",
+   "gx": 99,
+   "gy": 0,
+   "heading": "P1 collides the arrow without reporting",
+   "text": "P1's world collides P2's arrows too and removes them at contact, but only the shooter reports",
+   "main": true
+  },
+  {
+   "id": "s-dealt",
+   "lane": "L-server",
+   "gx": 99,
+   "gy": 0,
+   "heading": "Rule - DealtJudge.judge",
+   "text": "six checks: find_shot, score, dealt key, enemy, check_hit, dealt token; damage from the shot's mode",
+   "main": true,
+   "group": "G-rules-dealt"
+  },
+  {
+   "id": "s-hp",
+   "lane": "L-server",
+   "gx": 102,
+   "gy": 0,
+   "heading": "Server applies damage to the Gorgon",
+   "text": "report_enemy_damaged: DealtHit damage 0 -> apply_enemy_hit -> resolve 10-8=2 -> apply_enemy_hp 1000->998; recent_hits; DealtJudge::accepted / save; no shoot-back while locked",
+   "main": true
+  },
+  {
+   "id": "p1-bar",
+   "lane": "L-p1",
+   "gx": 105,
+   "gy": 0,
+   "heading": "P1 boss bar drops to 998",
+   "text": "nearby_enemy_health -> EnemyHealthSeen -> update_rows -> set_health + flash",
+   "main": true
+  },
+  {
+   "id": "p2-bar",
+   "lane": "L-p2",
+   "gx": 105,
+   "gy": 0,
+   "heading": "P2 boss bar drops to 998",
+   "text": "same bar; P2 skips its own recent_hits entries",
+   "main": true
+  },
+  {
+   "id": "p1-consume",
+   "lane": "L-p1",
+   "gx": 108,
+   "gy": 0,
+   "heading": "P1 consumes the arrow from recent_hits",
+   "text": "sync_consumed turns P2's DealtHit into Input::Consumed where P1's world missed the contact",
+   "main": true
+  },
+  {
+   "id": "f-x1",
+   "lane": "L-p2",
+   "gx": 81,
+   "gy": 3,
+   "heading": "P2 drops out",
+   "text": "closed socket -> client_disconnected; silent -> quiet_pass after 5 s",
+   "group": "G-dc-p2",
+   "color": "4"
+  },
+  {
+   "id": "f-x2",
+   "lane": "L-server",
+   "gx": 87,
+   "gy": 6,
+   "heading": "Server removes P2 and moves it to the spawn",
+   "text": "online_player deleted; disconnect nexus: a living P2 moves to the spawn slot (+ nexus mark if in danger); leaves aggro candidates",
+   "group": "G-dc-s",
+   "color": "4"
+  },
+  {
+   "id": "f-x3",
+   "lane": "L-p1",
+   "gx": 90,
+   "gy": 3,
+   "heading": "P2 puppet vanishes on P1",
+   "text": "nearby_players delete -> PlayerRemove -> puppet freed; not a body",
+   "group": "G-dc-p1",
+   "color": "4"
+  },
+  {
+   "id": "f-x4",
+   "lane": "L-p2",
+   "gx": 93,
+   "gy": 3,
+   "heading": "P2 reconnects",
+   "text": "Backoff; resubscribe replays rows; enter_world / wake_quiet",
+   "group": "G-dc-p2",
+   "color": "4"
+  },
+  {
+   "id": "f-pa1",
+   "lane": "L-server",
+   "gx": 90,
+   "gy": 3,
+   "heading": "Server refuses report_fire",
+   "text": "check_fire refusal codes; Err; ActionError on P2",
+   "group": "G-phantom",
+   "color": "1"
+  },
+  {
+   "id": "f-pa2",
+   "lane": "L-p2",
+   "gx": 93,
+   "gy": 6,
+   "heading": "P2 keeps a phantom arrow",
+   "text": "added locally before the call; hits refused no_shot",
+   "group": "G-phantom-p2",
+   "color": "1"
+  },
+  {
+   "id": "f-g1",
+   "lane": "L-p1",
+   "gx": 99,
+   "gy": 3,
+   "heading": "P1 fire is held while the clock settles",
+   "text": "RTT gate; reports wait",
+   "group": "G-lag",
+   "color": "4"
+  },
+  {
+   "id": "f-g2",
+   "lane": "L-p1",
+   "gx": 102,
+   "gy": 3,
+   "heading": "Late rows trigger a correction",
+   "text": "rederive from tick T; held contacts retracted",
+   "group": "G-lag",
+   "color": "4"
+  },
+  {
+   "id": "f-g3",
+   "lane": "L-p1",
+   "gx": 105,
+   "gy": 3,
+   "heading": "A long stall restarts the world",
+   "text": "MAX_CATCHUP_TICKS; runtime restart",
+   "group": "G-lag",
+   "color": "4"
+  },
+  {
+   "id": "f-d1",
+   "lane": "L-server",
+   "gx": 105,
+   "gy": 3,
+   "heading": "A dealt hit is refused",
+   "text": "no_shot, unknown_weapon, duplicate, no_enemy, check_hit codes, rate_limited",
+   "group": "G-dealt",
+   "color": "1"
+  },
+  {
+   "id": "f-d2",
+   "lane": "L-server",
+   "gx": 108,
+   "gy": 3,
+   "heading": "What a dealt refusal costs",
+   "text": "arrow differs by screen; spectators keep it until life ends",
+   "group": "G-dealt",
+   "color": "1"
+  },
+  {
+   "id": "f-k1",
+   "lane": "L-server",
+   "gx": 105,
+   "gy": 6,
+   "heading": "The target lock expires",
+   "text": "lock not renewed (F5); fight past t+1860",
+   "group": "G-lock",
+   "color": "3"
+  },
+  {
+   "id": "f-k2",
+   "lane": "L-server",
+   "gx": 108,
+   "gy": 6,
+   "heading": "Shoot-back retargets to P2",
+   "text": "apply_enemy_hit appends TargetSegment{P2} when lock expired",
+   "group": "G-lock",
+   "color": "3"
+  },
+  {
+   "id": "f-k3",
+   "lane": "L-p2",
+   "gx": 111,
+   "gy": 3,
+   "heading": "P2 becomes the target",
+   "text": "aimed emitters read P2's track",
+   "group": "G-lock-p2",
+   "color": "3",
+   "section": "S-dealt"
+  },
+  {
+   "id": "f-adm",
+   "lane": "L-server",
+   "gx": 111,
+   "gy": 9,
+   "heading": "An admin sets the Gorgon HP",
+   "text": "admin_set_enemy_hp: same sink apply_enemy_hp, can jump phases, refuses hp > max_hp",
+   "group": "G-admin-hp",
+   "color": "2",
+   "section": "S-phase"
+  },
+  {
+   "id": "s-ph1",
+   "lane": "L-server",
+   "gx": 114,
+   "gy": 0,
+   "heading": "Server stamps phase 1",
+   "text": "hp <= 900: phase_for_hp, hp_floor, PhaseSegment{1} at max(now+12, last+1)",
+   "main": true
+  },
+  {
+   "id": "p1-ph1",
+   "lane": "L-p1",
+   "gx": 117,
+   "gy": 0,
+   "heading": "P1 sees phase 1 begin",
+   "text": "row update; segment_at answers phase 1 from the stamp; the timeline restarts with a rest",
+   "main": true
+  },
+  {
+   "id": "p2-ph1",
+   "lane": "L-p2",
+   "gx": 117,
+   "gy": 0,
+   "heading": "P2 sees phase 1 begin",
+   "text": "same stamp, same tick",
+   "main": true
+  },
+  {
+   "id": "s-window",
+   "lane": "L-server",
+   "gx": 120,
+   "gy": 0,
+   "heading": "Server refuses hits after the segment start",
+   "text": "enemy_hit_window: after_segment for phase 0 bullets hitting at/after the stamp",
+   "main": true
+  },
+  {
+   "id": "p1-wipe",
+   "lane": "L-p1",
+   "gx": 120,
+   "gy": 0,
+   "heading": "Both clients cull the bullets in flight",
+   "text": "CombatWorld cull at the segment start: every phase 0 bullet gone, no message",
+   "main": true
+  },
+  {
+   "id": "p2-wipe",
+   "lane": "L-p2",
+   "gx": 120,
+   "gy": 0,
+   "heading": "Both clients cull the bullets in flight",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "f-skip",
+   "lane": "L-server",
+   "gx": 117,
+   "gy": 3,
+   "heading": "One hit crosses two thresholds",
+   "text": "one segment for the highest phase reached; hp_floor",
+   "group": "G-skip",
+   "color": "#7f9cff"
+  },
+  {
+   "id": "s-phases",
+   "lane": "L-server",
+   "gx": 123,
+   "gy": 0,
+   "heading": "Phases 1 to 9 in brief",
+   "text": "caption: each phase canvas, the HP thresholds, what repeats",
+   "main": true
+  },
+  {
+   "id": "s-p1",
+   "lane": "L-server",
+   "gx": 126,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 1 - Tentacles and Shotguns.canvas"
+  },
+  {
+   "id": "p1-f1",
+   "lane": "L-p1",
+   "gx": 129,
+   "gy": 0,
+   "heading": "Phase 1 at the players",
+   "text": "what phase 1 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f1",
+   "lane": "L-p2",
+   "gx": 129,
+   "gy": 0,
+   "heading": "Phase 1 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p2",
+   "lane": "L-server",
+   "gx": 132,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 2 - Whirlpools.canvas"
+  },
+  {
+   "id": "p1-f2",
+   "lane": "L-p1",
+   "gx": 135,
+   "gy": 0,
+   "heading": "Phase 2 at the players",
+   "text": "what phase 2 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f2",
+   "lane": "L-p2",
+   "gx": 135,
+   "gy": 0,
+   "heading": "Phase 2 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p3",
+   "lane": "L-server",
+   "gx": 138,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 3 - Enemy Gun and Sunburst.canvas"
+  },
+  {
+   "id": "p1-f3",
+   "lane": "L-p1",
+   "gx": 141,
+   "gy": 0,
+   "heading": "Phase 3 at the players",
+   "text": "what phase 3 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f3",
+   "lane": "L-p2",
+   "gx": 141,
+   "gy": 0,
+   "heading": "Phase 3 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p4",
+   "lane": "L-server",
+   "gx": 144,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 4 - Orbit and Star Lines.canvas"
+  },
+  {
+   "id": "p1-f4",
+   "lane": "L-p1",
+   "gx": 147,
+   "gy": 0,
+   "heading": "Phase 4 at the players",
+   "text": "what phase 4 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f4",
+   "lane": "L-p2",
+   "gx": 147,
+   "gy": 0,
+   "heading": "Phase 4 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p5",
+   "lane": "L-server",
+   "gx": 150,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 5 - Wormy Loop.canvas"
+  },
+  {
+   "id": "p1-f5",
+   "lane": "L-p1",
+   "gx": 153,
+   "gy": 0,
+   "heading": "Phase 5 at the players",
+   "text": "what phase 5 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f5",
+   "lane": "L-p2",
+   "gx": 153,
+   "gy": 0,
+   "heading": "Phase 5 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p6",
+   "lane": "L-server",
+   "gx": 156,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 6 - Twins.canvas"
+  },
+  {
+   "id": "p1-f6",
+   "lane": "L-p1",
+   "gx": 159,
+   "gy": 0,
+   "heading": "Phase 6 at the players",
+   "text": "what phase 6 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f6",
+   "lane": "L-p2",
+   "gx": 159,
+   "gy": 0,
+   "heading": "Phase 6 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p7",
+   "lane": "L-server",
+   "gx": 162,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 7 - Interleaved Pulses.canvas"
+  },
+  {
+   "id": "p1-f7",
+   "lane": "L-p1",
+   "gx": 165,
+   "gy": 0,
+   "heading": "Phase 7 at the players",
+   "text": "what phase 7 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f7",
+   "lane": "L-p2",
+   "gx": 165,
+   "gy": 0,
+   "heading": "Phase 7 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p8",
+   "lane": "L-server",
+   "gx": 168,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 8 - Three Mounts.canvas"
+  },
+  {
+   "id": "p1-f8",
+   "lane": "L-p1",
+   "gx": 171,
+   "gy": 0,
+   "heading": "Phase 8 at the players",
+   "text": "what phase 8 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f8",
+   "lane": "L-p2",
+   "gx": 171,
+   "gy": 0,
+   "heading": "Phase 8 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "s-p9",
+   "lane": "L-server",
+   "gx": 174,
+   "gy": 0,
+   "main": true,
+   "file": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 9 - Mirror Streams.canvas"
+  },
+  {
+   "id": "p1-f9",
+   "lane": "L-p1",
+   "gx": 177,
+   "gy": 0,
+   "heading": "Phase 9 at the players",
+   "text": "what phase 9 fires (gorgon.ron), aimed or not, movement; players take hits and hit back as in chapters 3 and 4",
+   "main": true
+  },
+  {
+   "id": "p2-f9",
+   "lane": "L-p2",
+   "gx": 177,
+   "gy": 0,
+   "heading": "Phase 9 at the players",
+   "text": "same heading",
+   "main": true
+  },
+  {
+   "id": "f-r1",
+   "lane": "L-server",
+   "gx": 141,
+   "gy": 3,
+   "heading": "P1 takes the killing hit",
+   "text": "apply_player_hit kills (23rd hit at 115 HP, defence 5): dead_until DEAD_UNTIL_RESPAWN, died_tick, killed_by, log_death",
+   "group": "G-death-s",
+   "color": "2"
+  },
+  {
+   "id": "f-r2",
+   "lane": "L-p1",
+   "gx": 144,
+   "gy": 3,
+   "heading": "P1 sees the death panel",
+   "text": "Dead bar, You died panel",
+   "group": "G-death-p1",
+   "color": "2"
+  },
+  {
+   "id": "f-r3",
+   "lane": "L-server",
+   "gx": 147,
+   "gy": 3,
+   "heading": "The Gorgon retargets away from P1",
+   "text": "next pass drops P1; dead target aimed at up to 60 t",
+   "group": "G-death-s",
+   "color": "2"
+  },
+  {
+   "id": "f-r4",
+   "lane": "L-p1",
+   "gx": 150,
+   "gy": 3,
+   "heading": "P1 presses Respawn",
+   "text": "respawn reducer",
+   "group": "G-death-p1",
+   "color": "2"
+  },
+  {
+   "id": "f-r5",
+   "lane": "L-server",
+   "gx": 153,
+   "gy": 3,
+   "heading": "Server respawns P1",
+   "text": "respawn_player: starter kit again, recompute, full HP and mana at spawn slot",
+   "group": "G-death-s",
+   "color": "2"
+  },
+  {
+   "id": "f-r6",
+   "lane": "L-server",
+   "gx": 144,
+   "gy": 6,
+   "heading": "Server leaves P1 corpse",
+   "text": "corpse::on_death: corpse row with all gear at the death spot (300 s, loot_corpse); level, XP, stats, loadout wiped; CharacterDied to global",
+   "group": "G-death-s",
+   "color": "2"
+  },
+  {
+   "id": "f-p1",
+   "lane": "L-server",
+   "gx": 159,
+   "gy": 3,
+   "heading": "Global swaps the patch",
+   "text": "admin_swap_patches on kg-global",
+   "group": "G-patch-s",
+   "color": "5"
+  },
+  {
+   "id": "f-p2",
+   "lane": "L-relay",
+   "gx": 162,
+   "gy": 0,
+   "heading": "Relay delivers PatchDepart",
+   "text": "kg-relay",
+   "group": "G-patch-r",
+   "color": "5"
+  },
+  {
+   "id": "f-p3",
+   "lane": "L-server",
+   "gx": 165,
+   "gy": 3,
+   "heading": "Region handles the patch departure",
+   "text": "handle_patch_depart: delete_enemy, delete_player_rows",
+   "group": "G-patch-s",
+   "color": "5"
+  },
+  {
+   "id": "f-p4",
+   "lane": "L-relay",
+   "gx": 168,
+   "gy": 0,
+   "heading": "Relay delivers PatchDeparted and PatchArrive",
+   "text": "kg-relay",
+   "group": "G-patch-r",
+   "color": "5"
+  },
+  {
+   "id": "f-p5",
+   "lane": "L-p1",
+   "gx": 174,
+   "gy": 3,
+   "heading": "Clients transfer and lose the Gorgon",
+   "text": "Transferring; EnemyGone; fight ends without a death",
+   "group": "G-patch-p1",
+   "color": "5"
+  },
+  {
+   "id": "f-ds",
+   "lane": "L-server",
+   "gx": 177,
+   "gy": 3,
+   "heading": "An admin despawns the Gorgon",
+   "text": "admin_despawn_enemy: dead_tick = now + 12, refuses already dead; then the death path",
+   "group": "G-despawn",
+   "color": "2",
+   "section": "S-run"
+  },
+  {
+   "id": "s-lethal",
+   "lane": "L-server",
+   "gx": 183,
+   "gy": 0,
+   "heading": "Server stamps the death",
+   "text": "lethal hit: dead_tick = now + 12, once",
+   "main": true
+  },
+  {
+   "id": "s-loot",
+   "lane": "L-server",
+   "gx": 186,
+   "gy": 0,
+   "heading": "Server rolls loot for the contributors",
+   "text": "apply_enemy_hp died: loot::on_enemy_death (gorgon table, one roll per contributor >= 50 HP) -> loot_bag rows; kill XP",
+   "main": true
+  },
+  {
+   "id": "p1-dead",
+   "lane": "L-p1",
+   "gx": 186,
+   "gy": 0,
+   "heading": "P1 sees the Gorgon die",
+   "text": "dead_tick arrives; volleys culled at dead_tick; 600 ms fade",
+   "main": true
+  },
+  {
+   "id": "p2-dead",
+   "lane": "L-p2",
+   "gx": 186,
+   "gy": 0,
+   "heading": "P2 sees the Gorgon die",
+   "text": "same tick on P2",
+   "main": true
+  },
+  {
+   "id": "s-late",
+   "lane": "L-server",
+   "gx": 189,
+   "gy": 0,
+   "heading": "Server still accepts late reports",
+   "text": "row readable MAX_BULLET_LIFE_TICKS 720 so pre-death hit_ticks validate; after dead_tick refused",
+   "main": true
+  },
+  {
+   "id": "s-clean",
+   "lane": "L-server",
+   "gx": 192,
+   "gy": 0,
+   "heading": "Server deletes the Gorgon rows",
+   "text": "cleanup_dead in combat_pass: enemy_health then enemy",
+   "main": true
+  },
+  {
+   "id": "p1-gone",
+   "lane": "L-p1",
+   "gx": 195,
+   "gy": 0,
+   "heading": "P1 frees the Gorgon node",
+   "text": "view delete -> EnemyGone -> EnemyRemove -> node freed",
+   "main": true
+  },
+  {
+   "id": "p2-gone",
+   "lane": "L-p2",
+   "gx": 195,
+   "gy": 0,
+   "heading": "P2 frees the Gorgon node",
+   "text": "same",
+   "main": true
+  }
+ ],
+ "edges": [
+  {
+   "from": "r-pre",
+   "to": "s-enter",
+   "label": "in world"
+  },
+  {
+   "from": "s-spawn",
+   "to": "s-rows"
+  },
+  {
+   "from": "s-spawn",
+   "to": "f-spawnfail"
+  },
+  {
+   "from": "s-rows",
+   "to": "p1-rows",
+   "label": "`nearby_enemies`"
+  },
+  {
+   "from": "s-rows",
+   "to": "p2-rows"
+  },
+  {
+   "from": "r-pre",
+   "to": "p1-rows",
+   "label": "routed"
+  },
+  {
+   "from": "r-pre",
+   "to": "p2-rows"
+  },
+  {
+   "from": "p1-rows",
+   "to": "p1-see"
+  },
+  {
+   "from": "p2-rows",
+   "to": "p2-see"
+  },
+  {
+   "from": "p1-see",
+   "to": "p1-move"
+  },
+  {
+   "from": "p2-see",
+   "to": "p2-move"
+  },
+  {
+   "from": "p1-move",
+   "to": "s-accept-move",
+   "label": "`report_movement`"
+  },
+  {
+   "from": "p2-move",
+   "to": "s-accept-move"
+  },
+  {
+   "from": "s-accept-move",
+   "to": "s-move",
+   "label": "Accept"
+  },
+  {
+   "from": "s-move",
+   "to": "p1-tracks",
+   "label": "`nearby_tracks`"
+  },
+  {
+   "from": "s-move",
+   "to": "p2-tracks"
+  },
+  {
+   "from": "s-move",
+   "to": "s-pass"
+  },
+  {
+   "from": "s-enter",
+   "to": "s-aggro",
+   "label": "online_player"
+  },
+  {
+   "from": "s-pass",
+   "to": "s-aggro"
+  },
+  {
+   "from": "s-aggro",
+   "to": "s-stamp"
+  },
+  {
+   "from": "s-aggro",
+   "to": "f-nobody"
+  },
+  {
+   "from": "s-stamp",
+   "to": "s-ph0",
+   "label": "schedule"
+  },
+  {
+   "from": "s-stamp",
+   "to": "p1-pre",
+   "label": "+60 t lead"
+  },
+  {
+   "from": "s-stamp",
+   "to": "p2-pre"
+  },
+  {
+   "from": "p1-see",
+   "to": "p1-pre"
+  },
+  {
+   "from": "p2-see",
+   "to": "p2-pre"
+  },
+  {
+   "from": "p1-pre",
+   "to": "p1-engage"
+  },
+  {
+   "from": "p2-pre",
+   "to": "p2-engage"
+  },
+  {
+   "from": "p1-engage",
+   "to": "p1-sched"
+  },
+  {
+   "from": "p2-engage",
+   "to": "p2-derive"
+  },
+  {
+   "from": "s-ph0",
+   "to": "p1-sched",
+   "label": "phase 0 fires"
+  },
+  {
+   "from": "s-ph0",
+   "to": "p2-derive"
+  },
+  {
+   "from": "s-ph0",
+   "to": "s-taken",
+   "label": "same schedule"
+  },
+  {
+   "from": "p1-sched",
+   "to": "p1-aim"
+  },
+  {
+   "from": "p1-tracks",
+   "to": "p1-aim",
+   "label": "track -15 t"
+  },
+  {
+   "from": "p2-tracks",
+   "to": "p2-derive"
+  },
+  {
+   "from": "p1-aim",
+   "to": "p1-expand"
+  },
+  {
+   "from": "p1-expand",
+   "to": "p1-step"
+  },
+  {
+   "from": "p1-expand",
+   "to": "p2-digest",
+   "label": "same keys"
+  },
+  {
+   "from": "p2-derive",
+   "to": "p2-digest"
+  },
+  {
+   "from": "p1-step",
+   "to": "p1-bodies"
+  },
+  {
+   "from": "p1-tracks",
+   "to": "p1-bodies"
+  },
+  {
+   "from": "p1-bodies",
+   "to": "p1-contact"
+  },
+  {
+   "from": "p2-digest",
+   "to": "p2-contact"
+  },
+  {
+   "from": "p2-tracks",
+   "to": "p2-contact"
+  },
+  {
+   "from": "p1-contact",
+   "to": "p1-hold",
+   "label": "+12 t"
+  },
+  {
+   "from": "p1-hold",
+   "to": "p1-send"
+  },
+  {
+   "from": "p1-send",
+   "to": "s-batch",
+   "label": "`report_player_damaged`"
+  },
+  {
+   "from": "s-batch",
+   "to": "s-taken"
+  },
+  {
+   "from": "s-taken",
+   "to": "s-apply"
+  },
+  {
+   "from": "s-apply",
+   "to": "p1-hp",
+   "label": "`my_health`"
+  },
+  {
+   "from": "s-apply",
+   "to": "p2-hp",
+   "label": "`nearby_health`"
+  },
+  {
+   "from": "p1-expand",
+   "to": "f-cap"
+  },
+  {
+   "from": "p1-step",
+   "to": "f-a1"
+  },
+  {
+   "from": "f-a1",
+   "to": "f-a2",
+   "label": "still targeted"
+  },
+  {
+   "from": "f-a2",
+   "to": "f-a4"
+  },
+  {
+   "from": "f-a2",
+   "to": "f-a3"
+  },
+  {
+   "from": "f-a3",
+   "to": "p1-hp",
+   "label": "back in"
+  },
+  {
+   "from": "p2-contact",
+   "to": "f-c1"
+  },
+  {
+   "from": "f-c1",
+   "to": "f-c2"
+  },
+  {
+   "from": "f-c2",
+   "to": "f-c3",
+   "label": "`report_player_damaged`"
+  },
+  {
+   "from": "f-c3",
+   "to": "p2-hp",
+   "label": "both bars drop"
+  },
+  {
+   "from": "s-taken",
+   "to": "f-t1"
+  },
+  {
+   "from": "f-t1",
+   "to": "f-t2"
+  },
+  {
+   "from": "f-t2",
+   "to": "f-t3"
+  },
+  {
+   "from": "s-taken",
+   "to": "f-l1"
+  },
+  {
+   "from": "f-l1",
+   "to": "f-l2"
+  },
+  {
+   "from": "p2-hp",
+   "to": "p2-fire"
+  },
+  {
+   "from": "p2-fire",
+   "to": "p2-predict"
+  },
+  {
+   "from": "p2-predict",
+   "to": "s-fire",
+   "label": "`report_fire`"
+  },
+  {
+   "from": "p2-predict",
+   "to": "p2-collide"
+  },
+  {
+   "from": "s-fire",
+   "to": "s-shotrec"
+  },
+  {
+   "from": "s-shotrec",
+   "to": "p1-shots",
+   "label": "`nearby_weapons`"
+  },
+  {
+   "from": "p2-collide",
+   "to": "p2-hold",
+   "label": "+12 t"
+  },
+  {
+   "from": "p2-hold",
+   "to": "s-price",
+   "label": "`report_enemy_damaged`"
+  },
+  {
+   "from": "p1-shots",
+   "to": "p1-expand-arrow"
+  },
+  {
+   "from": "p1-expand-arrow",
+   "to": "p1-arrow"
+  },
+  {
+   "from": "s-price",
+   "to": "s-dealt"
+  },
+  {
+   "from": "s-shotrec",
+   "to": "s-dealt",
+   "label": "find_shot"
+  },
+  {
+   "from": "s-dealt",
+   "to": "s-hp"
+  },
+  {
+   "from": "s-hp",
+   "to": "p1-bar",
+   "label": "`nearby_enemy_health`"
+  },
+  {
+   "from": "s-hp",
+   "to": "p2-bar"
+  },
+  {
+   "from": "p1-bar",
+   "to": "p1-consume"
+  },
+  {
+   "from": "p1-arrow",
+   "to": "p1-consume"
+  },
+  {
+   "from": "p2-hp",
+   "to": "f-x1"
+  },
+  {
+   "from": "f-x1",
+   "to": "f-x2"
+  },
+  {
+   "from": "f-x2",
+   "to": "f-x3"
+  },
+  {
+   "from": "f-x3",
+   "to": "f-x4"
+  },
+  {
+   "from": "f-x4",
+   "to": "p2-bar",
+   "label": "back in"
+  },
+  {
+   "from": "s-fire",
+   "to": "f-pa1"
+  },
+  {
+   "from": "f-pa1",
+   "to": "f-pa2",
+   "label": "ActionError"
+  },
+  {
+   "from": "p1-expand-arrow",
+   "to": "f-g1"
+  },
+  {
+   "from": "f-g1",
+   "to": "f-g2"
+  },
+  {
+   "from": "f-g2",
+   "to": "f-g3"
+  },
+  {
+   "from": "f-g3",
+   "to": "p1-consume",
+   "label": "caught up"
+  },
+  {
+   "from": "s-dealt",
+   "to": "f-d1"
+  },
+  {
+   "from": "f-d1",
+   "to": "f-d2"
+  },
+  {
+   "from": "s-hp",
+   "to": "f-k1"
+  },
+  {
+   "from": "f-k1",
+   "to": "f-k2"
+  },
+  {
+   "from": "f-k2",
+   "to": "f-k3",
+   "label": "+60 t"
+  },
+  {
+   "from": "s-hp",
+   "to": "s-ph1",
+   "label": "HP <= 900"
+  },
+  {
+   "from": "f-adm",
+   "to": "s-ph1",
+   "label": "same sink"
+  },
+  {
+   "from": "s-ph1",
+   "to": "p1-ph1",
+   "label": "+12 t lead"
+  },
+  {
+   "from": "s-ph1",
+   "to": "p2-ph1"
+  },
+  {
+   "from": "s-ph1",
+   "to": "s-window"
+  },
+  {
+   "from": "s-ph1",
+   "to": "f-skip"
+  },
+  {
+   "from": "p1-ph1",
+   "to": "p1-wipe"
+  },
+  {
+   "from": "p2-ph1",
+   "to": "p2-wipe"
+  },
+  {
+   "from": "p1-wipe",
+   "to": "s-phases",
+   "label": "phase 1 running"
+  },
+  {
+   "from": "f-skip",
+   "to": "s-phases"
+  },
+  {
+   "from": "f-k3",
+   "to": "s-phases",
+   "label": "fight continues"
+  },
+  {
+   "from": "s-p1",
+   "to": "p1-f1"
+  },
+  {
+   "from": "s-p1",
+   "to": "p2-f1"
+  },
+  {
+   "from": "p1-f1",
+   "to": "s-p2",
+   "label": "<= 800"
+  },
+  {
+   "from": "p2-f1",
+   "to": "s-p2"
+  },
+  {
+   "from": "s-p2",
+   "to": "p1-f2"
+  },
+  {
+   "from": "s-p2",
+   "to": "p2-f2"
+  },
+  {
+   "from": "p1-f2",
+   "to": "s-p3",
+   "label": "<= 700"
+  },
+  {
+   "from": "p2-f2",
+   "to": "s-p3"
+  },
+  {
+   "from": "s-p3",
+   "to": "p1-f3"
+  },
+  {
+   "from": "s-p3",
+   "to": "p2-f3"
+  },
+  {
+   "from": "p1-f3",
+   "to": "s-p4",
+   "label": "<= 600"
+  },
+  {
+   "from": "p2-f3",
+   "to": "s-p4"
+  },
+  {
+   "from": "s-p4",
+   "to": "p1-f4"
+  },
+  {
+   "from": "s-p4",
+   "to": "p2-f4"
+  },
+  {
+   "from": "p1-f4",
+   "to": "s-p5",
+   "label": "<= 500"
+  },
+  {
+   "from": "p2-f4",
+   "to": "s-p5"
+  },
+  {
+   "from": "s-p5",
+   "to": "p1-f5"
+  },
+  {
+   "from": "s-p5",
+   "to": "p2-f5"
+  },
+  {
+   "from": "p1-f5",
+   "to": "s-p6",
+   "label": "<= 400"
+  },
+  {
+   "from": "p2-f5",
+   "to": "s-p6"
+  },
+  {
+   "from": "s-p6",
+   "to": "p1-f6"
+  },
+  {
+   "from": "s-p6",
+   "to": "p2-f6"
+  },
+  {
+   "from": "p1-f6",
+   "to": "s-p7",
+   "label": "<= 300"
+  },
+  {
+   "from": "p2-f6",
+   "to": "s-p7"
+  },
+  {
+   "from": "s-p7",
+   "to": "p1-f7"
+  },
+  {
+   "from": "s-p7",
+   "to": "p2-f7"
+  },
+  {
+   "from": "p1-f7",
+   "to": "s-p8",
+   "label": "<= 200"
+  },
+  {
+   "from": "p2-f7",
+   "to": "s-p8"
+  },
+  {
+   "from": "s-p8",
+   "to": "p1-f8"
+  },
+  {
+   "from": "s-p8",
+   "to": "p2-f8"
+  },
+  {
+   "from": "p1-f8",
+   "to": "s-p9",
+   "label": "<= 100"
+  },
+  {
+   "from": "p2-f8",
+   "to": "s-p9"
+  },
+  {
+   "from": "s-p9",
+   "to": "p1-f9"
+  },
+  {
+   "from": "s-p9",
+   "to": "p2-f9"
+  },
+  {
+   "from": "p1-f9",
+   "to": "s-lethal",
+   "label": "HP 0"
+  },
+  {
+   "from": "p2-f9",
+   "to": "s-lethal"
+  },
+  {
+   "from": "s-phases",
+   "to": "s-p1"
+  },
+  {
+   "from": "p1-f2",
+   "to": "f-r1",
+   "label": "killing hit"
+  },
+  {
+   "from": "f-r1",
+   "to": "f-r2"
+  },
+  {
+   "from": "f-r2",
+   "to": "f-r3"
+  },
+  {
+   "from": "f-r3",
+   "to": "f-r4"
+  },
+  {
+   "from": "f-r4",
+   "to": "f-r5",
+   "label": "`respawn`"
+  },
+  {
+   "from": "f-r1",
+   "to": "f-r6"
+  },
+  {
+   "from": "f-r6",
+   "to": "f-r5",
+   "label": "empty bag"
+  },
+  {
+   "from": "f-r5",
+   "to": "s-p6",
+   "label": "back in"
+  },
+  {
+   "from": "s-p6",
+   "to": "f-p1"
+  },
+  {
+   "from": "f-p1",
+   "to": "f-p2"
+  },
+  {
+   "from": "f-p2",
+   "to": "f-p3"
+  },
+  {
+   "from": "f-p3",
+   "to": "f-p4"
+  },
+  {
+   "from": "f-p4",
+   "to": "f-p5"
+  },
+  {
+   "from": "s-p9",
+   "to": "f-ds"
+  },
+  {
+   "from": "f-ds",
+   "to": "p1-dead",
+   "label": "same death path"
+  },
+  {
+   "from": "f-ds",
+   "to": "p2-dead"
+  },
+  {
+   "from": "s-lethal",
+   "to": "p1-dead",
+   "label": "+12 t"
+  },
+  {
+   "from": "s-lethal",
+   "to": "p2-dead"
+  },
+  {
+   "from": "s-lethal",
+   "to": "s-loot"
+  },
+  {
+   "from": "s-loot",
+   "to": "s-late"
+  },
+  {
+   "from": "s-late",
+   "to": "s-clean",
+   "label": "+720 t"
+  },
+  {
+   "from": "s-clean",
+   "to": "p1-gone",
+   "label": "view delete"
+  },
+  {
+   "from": "s-clean",
+   "to": "p2-gone"
+  },
+  {
+   "from": "p1-dead",
+   "to": "p1-gone"
+  },
+  {
+   "from": "p2-dead",
+   "to": "p2-gone"
+  }
+ ]
+}

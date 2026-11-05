@@ -1,0 +1,53 @@
+{
+ "doc": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 8 - Three Mounts.md",
+ "loose_chapter": "The phase timeline",
+ "chapters": {
+  "p8-grp-server": "Server tables",
+  "p8-grp-kg": "kg_combat"
+ },
+ "cards": {
+  "p8-title0": "Phase 8 at a glance",
+  "p8-seg": "Segment start",
+  "p8-rest": "Opening rest",
+  "p8-clip": "The clip",
+  "p8-w0": "Fire 0, clip 5 to 20",
+  "p8-w1": "Fire 2, clip 10 to 25",
+  "p8-w2": "Fire 4, clip 15 to 30",
+  "p8-w3": "Fire 6, clip 16 to 60",
+  "p8-w4": "Fire 1, clip 35 to 50",
+  "p8-w5": "Fire 3, clip 40 to 55",
+  "p8-w6": "Fire 5, clip 45 to 60",
+  "p8-loop": "Clip end and loop",
+  "nc": "Rows this phase reads",
+  "ne": "report_player_hits",
+  "nf": "apply_player_hit",
+  "ng": "player_health",
+  "nl": "report_enemy_hits",
+  "nm": "apply_enemy_hit",
+  "nn": "apply_enemy_hp",
+  "ns": "Refusal gates for this phase",
+  "nv": "This phase in brief",
+  "nx": "What resolved hands you",
+  "n10": "Schedule in clip order",
+  "n11": "Schedule from entry 1",
+  "n15": "clip_tick_of",
+  "n16": "fires_at",
+  "n17": "fires_shot",
+  "n1c": "volley_angle_origin",
+  "n1d": "aim_point",
+  "n1e": "Expanding the volley",
+  "n1j": "The segment start wipes bullets"
+ },
+ "group_headings": {
+  "the rows this phase reads": "What this phase reads",
+  "the taken direction, step by step": "The taken direction",
+  "the dealt direction, step by step": "The dealt direction",
+  "the gates that name this phase": "Where a report for this phase is refused",
+  "what this phase is": "What this phase is",
+  "resolve: what `resolved()` hands you": "What resolution produces",
+  "the schedule, entry by entry (Normal)": "The schedule, entry by entry (Normal)",
+  "whether it fires: three pure functions": "Whether it fires",
+  "where it fires from, and what leaves": "Where it fires from, and what leaves",
+  "what this phase does to bullets already flying": "Bullets already flying"
+ }
+}

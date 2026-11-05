@@ -12,6 +12,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard build "$REPO_ROOT/tools/build.sh" "$@"
+
 cargo build \
   --manifest-path "$REPO_ROOT/client/rust/Cargo.toml" \
   -p mind-gdext -p mind-headless -p phantom-camera-rust \

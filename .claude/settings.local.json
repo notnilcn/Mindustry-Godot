@@ -1,7 +1,22 @@
 {
-  "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": ["open-godot-mcp"],
   "permissions": {
-    "allow": ["mcp__open-godot-mcp"]
-  }
+    "allow": [
+      "mcp__open-godot-mcp",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(cd ~/g/code_examples/Mindustry-Godot/client/rust; sed -n 1,60p mind-core/src/async_work/physics.rs; wc -l mind-core/src/async_work/*.rs ~/g/code_examples/Mindustry/core/src/mindustry/async/*.java; sed -n 3665,3680p mind-gdext/src/campaign.rs; sed -n 225,236p mind-core/src/game/schematics.rs)",
+      "Read(//home/clintonnguyen/g/code_examples/Mindustry/core/src/mindustry/**)",
+      "Bash(sed -n '/public double sense\\(LAccess sensor\\)/,/^    }/p' entities/comp/UnitComp.java)",
+      "Bash(cd ~/g/code_examples/Mindustry-Godot/client/rust/mind-core/src; grep -n \"insulat\\\\|hit_ground\\\\|air\\\\|ground\" combat/lightning.rs | head; grep -n \"insulated\\\\|collidesAir\\\\|collidesGround\\\\|hitter\\\\|Damage\\\\.\" ~/g/code_examples/Mindustry/core/src/mindustry/entities/Lightning.java)",
+      "Bash(grep -vE '^\\\\s*$')",
+      "Bash(cd ~/g/code_examples/Mindustry/core/src/mindustry; grep -rn \"ParticleRenderer\\\\|CubemapMesh\\\\|IntelGpuCheck\\\\|NvGpuInfo\\\\|MultiPacker\" --include=*.java . | grep -v \"^./graphics/\\\\\\(ParticleRenderer\\\\|CubemapMesh\\\\|IntelGpuCheck\\\\|NvGpuInfo\\\\|MultiPacker\\\\\\).java\" | head; cd ~/g/code_examples/Mindustry-Godot; grep -rln \"cubemap\\\\|unlitwhite\\\\|unlit.gdshader\\\\|mesh.gdshader\\\\|caustics\\\\|space.gdshader\\\\|screenspace\" client/rust/mind-gdext/src client/scenes 2>/dev/null | head; ls client | head -30)",
+      "Bash(awk '/pub fn vanilla_chain/,/^}/' draw_desc.rs)",
+      "Bash(awk -F'[ \\(]' '{print $1\" \"$\\(NF-1\\)}')",
+      "Bash(awk '{print $1, $2}')",
+      "Bash(awk -F: '{a[$1]=a[$1]\" \"$2} END{for\\(k in a\\) print k\": \"a[k]}')"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "open-godot-mcp"
+  ]
 }

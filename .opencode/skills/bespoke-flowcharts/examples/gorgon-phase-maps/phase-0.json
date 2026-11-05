@@ -1,0 +1,48 @@
+{
+ "doc": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 0 - Intro.md",
+ "loose_chapter": "The phase timeline",
+ "chapters": {
+  "p0-grp-server": "Server tables",
+  "p0-grp-kg": "kg_combat"
+ },
+ "cards": {
+  "p0-title0": "Phase 0 at a glance",
+  "p0-seg": "Segment start",
+  "p0-rest": "Opening rest",
+  "p0-clip": "The clip",
+  "p0-w0": "Fire 0, clip 33 to 424",
+  "p0-w1": "Fire 1, clip 235 to 424",
+  "p0-w2": "Fire 2, clip 504 to 528",
+  "p0-loop": "Clip end and loop",
+  "n8": "Rows this phase reads",
+  "na": "report_player_hits",
+  "nb": "apply_player_hit",
+  "nc": "player_health",
+  "nh": "report_enemy_hits",
+  "ni": "apply_enemy_hit",
+  "nj": "apply_enemy_hp",
+  "no": "Refusal gates for this phase",
+  "nr": "This phase in brief",
+  "nt": "What resolved hands you",
+  "nw": "Schedule in clip order",
+  "nz": "clip_tick_of",
+  "n10": "fires_at",
+  "n11": "fires_shot",
+  "n16": "volley_angle_origin",
+  "n17": "aim_point",
+  "n18": "Expanding the volley",
+  "n1d": "The segment start wipes bullets"
+ },
+ "group_headings": {
+  "the rows this phase reads": "What this phase reads",
+  "the taken direction, step by step": "The taken direction",
+  "the dealt direction, step by step": "The dealt direction",
+  "the gates that name this phase": "Where a report for this phase is refused",
+  "what this phase is": "What this phase is",
+  "resolve: what `resolved()` hands you": "What resolution produces",
+  "the schedule, entry by entry (Normal)": "The schedule, entry by entry (Normal)",
+  "whether it fires: three pure functions": "Whether it fires",
+  "where it fires from, and what leaves": "Where it fires from, and what leaves",
+  "what this phase does to bullets already flying": "Bullets already flying"
+ }
+}

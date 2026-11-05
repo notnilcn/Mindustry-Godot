@@ -48,7 +48,9 @@ import/parse pass.
 ## Windows
 
 The `tools/*.sh` scripts assume a Linux/bash host. On Windows, run the equivalent
-commands in PowerShell from the repo root:
+commands in PowerShell from the repo root (or use WSL if you want the serialized
+CPU queue; the wrapper needs `flock`). Never start two heavy builds or gates at
+once on either host.
 
 ```powershell
 # 1. Build the GDExtension (debug) and the headless oracle into client/bin/rust
@@ -73,6 +75,23 @@ Or open `client/project.godot` in the Godot editor and press F5.
 | Rust code under `client/rust/` | step 1 (the Rust build) |
 | Art under `assets-raw/` | step 2 (the asset pack) |
 | `scenarios/*.json` | step 3 (the scenario sync) |
+
+## CI and heavy builds
+
+Builds, tests and gates are serialized across agents and worktrees, so two of
+them can never compile or run at once:
+
+```bash
+tools/run-cpu-intensive-task.sh --build      # or --cargo-build, --cargo-test, --pack, --godot ...
+tools/run-cpu-intensive-task.sh --ci         # full local gate (the CI fixer runs this)
+tools/run-cpu-intensive-task.sh --status     # holder, waiters, recent history
+```
+
+`tools/build.sh`, `tools/ci.sh` and the other heavy scripts self-queue when
+invoked directly. Do not run the full gate after every edit: run the targeted
+check, record the change with `python3 tools/ci_pending.py add ...`, and let the
+dedicated CI fixer run the batch. Details:
+[`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md).
 
 ## Troubleshooting
 

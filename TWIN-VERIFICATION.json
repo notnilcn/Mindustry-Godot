@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-03T09:23:50Z",
+  "updated": "2026-11-03T14:26:18Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -7971,8 +7971,8 @@
           "parity/twin/PAR-0029/godot/01-action.avif"
         ]
       },
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:16Z"
     },
     "PAR-0030": {
       "title": "Campaign world: Godot in-game pause button (558,54) with no Java HUD counterpart",
@@ -11000,8 +11000,8 @@
           }
         ]
       },
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:19Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:16Z"
     },
     "PAR-0058": {
       "title": "Tutorial: the player unit offloads mined ore into the nearest core within mineTransferRange (MinerComp offload branch)",
@@ -14183,8 +14183,8 @@
           "text": "Per-weapon shadow (Weapon.shadow -> Drawf.shadow, Weapon.java:238-240) landed as PAR-0461 / commit 21830976; this umbrella item's remaining scope may now be empty (legs/parts/cell/soft shadow landed in 92ba15aa + 1e0003af) but was not re-verified end-to-end in this session."
         }
       ],
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:16Z"
     },
     "PAR-0127": {
       "title": "Campaign weather never happens: no rain, snow, sandstorm or fog",
@@ -15038,8 +15038,8 @@
         ]
       },
       "similarity": 2.1,
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0152": {
       "title": "Placed buildings render the 'Wrong texture folder' placeholder sprite in the live world",
@@ -15851,8 +15851,8 @@
     "PAR-0296": {
       "title": "Interplanetary Accelerator is a stub",
       "status": "fixing",
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0297": {
       "title": "attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)",
@@ -16096,8 +16096,8 @@
     "PAR-0346": {
       "title": "power-node laser shimmer uses ticks where Java uses `Time.time` seconds (T5 note)",
       "status": "fixing",
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0347": {
       "title": "`$I.configure_building` on a door can time out and stall the frame loop",
@@ -16173,8 +16173,8 @@
     "PAR-0363": {
       "title": "Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames",
       "status": "fixing",
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0364": {
       "title": "Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)",
@@ -16198,8 +16198,8 @@
           "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
         }
       ],
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0367": {
       "title": "Weapon `layerOffset` not applied when drawing weapons",
@@ -16223,8 +16223,8 @@
           "text": "Independent read-only audit (2026-11-03): block payloads are complete (square shadow + block-<name>-full icon, units.rs:580-620 vs BuildPayload.draw:114-133; z -0.03 matches Java prev(z-0.01)-0.02). Remaining residual for this item: (1) the carried UNIT's soft shadow is missing — Java UnitPayload.draw (UnitPayload.java:152-160) calls unit.type.draw() at elevation 0, which reaches drawSoftShadow (UnitType.java:276 default true, :1527) and emits a circle-shadow quad at payloadZ-0.01 sized max(region.w,region.h)*scl*softShadowScl*1.6; the port (units.rs:499-577) emits outline/body/cell only; (2) payload rotation uses the pickup snapshot (CarriedPayload::Unit.rotation, comp.rs:268-277) while Java pay.set(x,y,unit.rotation) re-rotates to the carrier facing every frame (UnitPayload.set:78-81)."
         }
       ],
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0370": {
       "title": "Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)",
@@ -16266,8 +16266,8 @@
     "PAR-0378": {
       "title": "`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)",
       "status": "fixing",
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0379": {
       "title": "Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)",
@@ -16279,8 +16279,8 @@
     "PAR-0380": {
       "title": "Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)",
       "status": "fixing",
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0381": {
       "title": "Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)",
@@ -16342,8 +16342,8 @@
     "PAR-0394": {
       "title": "Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)",
       "status": "fixing",
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0395": {
       "title": "Script mods: unsupported reason was not shown in the Mods dialog row (9f33ceaa)",
@@ -16404,8 +16404,8 @@
     "PAR-0407": {
       "title": "J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)",
       "status": "fixing",
-      "claimed_by": "p1a",
-      "claimed_at": "2026-11-03T09:20:56Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0408": {
       "title": "Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)",
@@ -16504,8 +16504,8 @@
       "title": "Core Database rows sit 10-16 px lower than Java",
       "status": "fixing",
       "similarity": 95.2,
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0427": {
       "title": "Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)",
@@ -16543,8 +16543,8 @@
       "title": "Logic editor: 'Built-in Variables' clipped on one line over Add (Java wraps to two lines); Java pauses the game behind the editor",
       "status": "fixing",
       "similarity": 95.2,
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0434": {
       "title": "World Processors empty-state text left-aligned (Java centres it)",
@@ -16555,15 +16555,15 @@
       "title": "Settings Graphics list starts 9 px higher than Java",
       "status": "fixing",
       "similarity": 82.2,
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0436": {
       "title": "Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)",
       "status": "fixing",
       "similarity": 52.3,
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:17Z"
     },
     "PAR-0437": {
       "title": "Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported",
@@ -16580,8 +16580,8 @@
       "status": "fixing",
       "similarity": 93.0,
       "evidence": "fix landed, Godot read-model+live verified: runs/PAR-0439 (affinities row); unit test attribute_crafter_affinities_rows; fresh Java leg pending",
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:19Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     },
     "PAR-0440": {
       "title": "Game Over left the HUD drawn behind it (MindUi.hud_set_visible only stored a flag)",
@@ -16598,8 +16598,8 @@
       "title": "Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')",
       "status": "fixing",
       "evidence": "fix landed, live Godot verified: runs/PAR-0442/godot/20261103-001721-02-live-gameover-headline.png headline 'Sector Ground Zero lost!'; fresh Java leg pending",
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:19Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     },
     "PAR-0443": {
       "title": "Planet page sector grid/selection not faded by uiAlpha when zoomed out",
@@ -16639,8 +16639,8 @@
     "PAR-0449": {
       "title": "Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped",
       "status": "fixing",
-      "claimed_by": "p1c",
-      "claimed_at": "2026-11-03T09:23:50Z"
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     },
     "PAR-0450": {
       "title": "Map previews ignore the tinted ColoredFloor/ColoredWall tile colour (extraData), drawing the default block colour",
@@ -17151,8 +17151,6 @@
           }
         ]
       },
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "combat/status-damage",
       "java": "core/src/mindustry/entities/bullet/BulletType.java:606-614",
       "rust": "client/rust/mind-core/src/combat/bullet/mod.rs:938-972",
@@ -17164,7 +17162,9 @@
           "by": "orch-a:orch-a",
           "text": "Extra detail for the fixer (verified against Java 2026-11-03): Java createSplashDamage calls Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration, collidesAir, collidesGround, statusChance) (BulletType.java:606-614). Damage.status (Damage.java:475-491) filters entities by 'entity.team == team || !entity.checkTarget(air, ground) || !entity.hittable() || !entity.within(x, y, radius)' before the chance roll, where UnitType.checkTarget(air, ground) = (isGrounded() && ground) || (isFlying() && air). The ported combat::damage::status::status_area (status.rs:350) has NO air/ground params and no hittable check, so the fix should extend status_area with air/ground (+ hittable) and call it from create_splash_damage after damage_area with def.collides_air/collides_ground/def.status_chance. Also note create_splash_damage currently omits Java's 'if(heals()) heal allied buildings in radius' branch (BulletType.java:616-621) - separate gap, do not bundle unless trivial."
         }
-      ]
+      ],
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     },
     "PAR-0466": {
       "title": "Editor resize does not shift relative build configs (Java BuildPlan.pointConfig p.sub(offsetX, offsetY), ignoreResizeConfig blocks excluded)",
@@ -17189,13 +17189,13 @@
           }
         ]
       },
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "editor/map-data",
       "java": "core/src/mindustry/editor/MapEditor.java:332-352,core/src/mindustry/entities/units/BuildPlan.java:88-110,core/src/mindustry/world/blocks/logic/LogicBlock.java:58",
       "rust": "client/rust/mind-core/src/editor/grid.rs:360-410,client/rust/mind-core/src/editor/lifecycle.rs:119-136",
       "evidence": "Java MapEditor.resize captures each center build's config before re-assigning x/y, then after reassignment runs 'Object out = BuildPlan.pointConfig(tile.block(), config, p -> { if(!tile.build.block.ignoreResizeConfig){ p.sub(offsetX, offsetY); } });' and re-applies it with 'tile.build.configureAny(out)' (MapEditor.java:340-352). Blocks that store relative points (ItemBridge links, LogicBlock positions, logic displays etc.) are therefore translated with the content; blocks with ignoreResizeConfig=true keep their raw config. The Rust editor resize (grid.rs::resize_shift + editor/lifecycle.rs:119-136, comment 'Plan 07 owns live building configs (BuildPlan::point_config); M1 shifts the center builds (block/team/rotation)') reattaches only block/team/rotation and never shifts any config, so after a resize all relative configs point at their pre-resize offsets and links/displays become wrong or stale. PAR-0464 fixed only the tile-centring half of the same Java function; this config half is not covered by any open item (dedupe checked).",
-      "acceptance": "cargo test -p mind-core editor::resize: place an ItemBridge (or a logic block) with a relative config at (3,3), resize 8x8->6x6 shift(-1,-1), assert the config's stored point moved with the tile by the same offset (Java: p.sub(offsetX, offsetY) = -2,-2 there) and that an ignoreResizeConfig block's config is unchanged."
+      "acceptance": "cargo test -p mind-core editor::resize: place an ItemBridge (or a logic block) with a relative config at (3,3), resize 8x8->6x6 shift(-1,-1), assert the config's stored point moved with the tile by the same offset (Java: p.sub(offsetX, offsetY) = -2,-2 there) and that an ignoreResizeConfig block's config is unchanged.",
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     },
     "PAR-0467": {
       "title": "Block emitLight light sources are a fixed 60 px white circle: Java per-block lightRadius/lightColor dropped (impact reactor 115, differential generator 195, landing pad 90 #eab678)",
@@ -17220,13 +17220,13 @@
           }
         ]
       },
-      "claimed_by": "p1b",
-      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "render",
       "java": "core/src/mindustry/world/Block.java:344,350-351,493-495",
       "rust": "client/rust/mind-gdext/src/sim_host.rs:4849-4855 ; client/rust/mind-core/src/content/registries/blocks/mod.rs:2336,2772 ; client/rust/mind-gdext/src/render/light.rs:14-18",
       "evidence": "Java Block.drawEnvironmentLight (core/src/mindustry/world/Block.java:493-495) emits Drawf.light(x, y, lightRadius, lightColor, lightColor.a) with per-block overrides (Block.java:344/350-351): ImpactReactor 115, ConsumeGenerator 65*size (130 for size 2, 195 for size 3), LandingPad 90 with color #eab678, Accelerator 70 with Pal.accent, NuclearReactor #7f19ea, MendProjector/OverdriveProjector 50. Rust BlockDef carries only emit_light (mind-core/src/content/registries/blocks/mod.rs:2336,2772) and light_sources hardcodes radius 60.0 and color [1,1,1,1] (mind-gdext/src/sim_host.rs:4849-4855), so every emitLight block lights the floor with the same small white circle; light.rs:14-18 documents the deviation (S16-5) but it was never queued. Found by an independent read-only audit at HEAD 96b1873a.",
-      "acceptance": "cargo test -p mind-core asserting BlockDef light_radius/light_color per Java override (impact-reactor 115, landing-pad 90/#eab678, accelerator 70/accent, nuclear-reactor 60/#7f19ea, mend/overdrive 50, differential-generator 195, steam-generator 130) plus a mind-gdext light_sources test that a placed impact-reactor yields radius 115; live: a lit custom game shows the 115 px glow and the landing-pad #eab678 tint."
+      "acceptance": "cargo test -p mind-core asserting BlockDef light_radius/light_color per Java override (impact-reactor 115, landing-pad 90/#eab678, accelerator 70/accent, nuclear-reactor 60/#7f19ea, mend/overdrive 50, differential-generator 195, steam-generator 130) plus a mind-gdext light_sources test that a placed impact-reactor yields radius 115; live: a lit custom game shows the 115 px glow and the landing-pad #eab678 tint.",
+      "claimed_by": "p1-orch",
+      "claimed_at": "2026-11-03T14:26:18Z"
     }
   },
   "recipes": {

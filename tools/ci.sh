@@ -20,6 +20,14 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# One full gate at a time. Invoked directly, ci.sh re-execs through the repo-wide
+# CPU queue; when it is already running under the queue (or calls build.sh /
+# server/build.sh internally) MIND_CPU_QUEUE_HELD makes those nested scripts run
+# without trying to take the lock again. See docs/CI-WORKFLOW.md.
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard ci "$REPO_ROOT/tools/ci.sh" "$@"
+
 MANIFEST="client/rust/Cargo.toml"
 
 # Baseline refresh (2026-10-09, session2 merge): plan-loop landings since the
@@ -39,7 +47,54 @@ WARN_P99_NS=$((BASE_P99_NS * 120 / 100))
 FAIL_P50_NS=$((BASE_P50_NS * 150 / 100))
 FAIL_P99_NS=$((BASE_P99_NS * 150 / 100))
 
-say() { printf '\n== %s ==\n' "$1"; }
+# --- batch record (docs/CI-WORKFLOW.md) -------------------------------------
+# Every run archives CI_PENDING.json to runs/ci/<run-id>/pending.json and resets
+# the live file. On failure run.json names the stage and log that the dedicated
+# CI fixer reads (docs/CI-FIXER-PROMPT.md); the snapshot is the batch under test.
+CI_RUN_ID="${MIND_CI_RUN_ID:-$(date -u +%Y%m%d-%H%M%S)-$$}"
+CI_RUN_DIR="$REPO_ROOT/runs/ci/$CI_RUN_ID"
+mkdir -p "$CI_RUN_DIR"
+# Mirror every stage's output into the run log. tee writes as it reads, so the
+# very last lines can land after this shell exits; run.json carries the stage and
+# exit code, and the log is authoritative for the fixer.
+exec > >(tee -a "$CI_RUN_DIR/ci.log") 2>&1
+
+say() { STAGE="$1"; printf '\n== %s ==\n' "$1"; }
+
+STAGE="startup"
+GODOT_LOG=""
+finish() {
+  local rc=$?
+  trap - EXIT INT TERM
+  if [[ -n "$GODOT_LOG" ]]; then
+    rm -f "$GODOT_LOG"
+  fi
+  local status="failed"
+  if (( rc == 0 )); then
+    status="passed"
+  fi
+  python3 "$REPO_ROOT/tools/ci_pending.py" finish-run \
+    --run-id "$CI_RUN_ID" --status "$status" --stage "$STAGE" --exit-code "$rc" \
+    --log "$CI_RUN_DIR/ci.log" >/dev/null 2>&1 \
+    || echo "ci: warning: could not write runs/ci/$CI_RUN_ID/run.json; the log is still at runs/ci/$CI_RUN_ID/ci.log" >&2
+  if (( rc == 0 )); then
+    printf '\nci: PASS (run %s; CI_PENDING.json reset for the next batch)\n' "$CI_RUN_ID"
+  else
+    printf '\nci: FAIL at "%s" (exit %d)\n' "$STAGE" "$rc"
+    printf '  run:     runs/ci/%s/run.json\n' "$CI_RUN_ID"
+    printf '  log:     runs/ci/%s/ci.log\n' "$CI_RUN_ID"
+    printf '  pending: runs/ci/%s/pending.json\n' "$CI_RUN_ID"
+    printf '  fixer:   docs/CI-FIXER-PROMPT.md\n'
+  fi
+  exit "$rc"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+say "ci-pending: archive batch + reset (run $CI_RUN_ID)"
+python3 "$REPO_ROOT/tools/ci_pending.py" begin-run \
+  --run-id "$CI_RUN_ID" --log "$CI_RUN_DIR/ci.log"
 
 say "cargo fmt (workspace --check)"
 cargo fmt --manifest-path "$MANIFEST" --all -- --check
@@ -133,7 +188,6 @@ bash tools/build.sh
 
 say "godot: headless editor import/parse check"
 GODOT_LOG="$(mktemp)"
-trap 'rm -f "$GODOT_LOG"' EXIT
 if ! bash tools/godot.sh --headless --editor --quit --path client >"$GODOT_LOG" 2>&1; then
   echo "FAIL: godot --headless --editor --quit exited non-zero" >&2
   tail -n 40 "$GODOT_LOG" >&2

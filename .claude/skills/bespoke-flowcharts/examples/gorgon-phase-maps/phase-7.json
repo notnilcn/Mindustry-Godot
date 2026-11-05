@@ -1,0 +1,52 @@
+{
+ "doc": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 7 - Interleaved Pulses.md",
+ "loose_chapter": "The phase timeline",
+ "chapters": {
+  "p7-grp-server": "Server tables",
+  "p7-grp-kg": "kg_combat"
+ },
+ "cards": {
+  "p7-title0": "Phase 7 at a glance",
+  "p7-seg": "Segment start",
+  "p7-rest": "Opening rest",
+  "p7-clip": "The clip",
+  "p7-w0": "Fire 0, clip 90 to 120",
+  "p7-w1": "Fire 1, clip 120 to 150",
+  "p7-w2": "Fire 2, clip 270 to 361",
+  "p7-w3": "Fire 4, clip 360 to 415",
+  "p7-w4": "Fire 3, clip 539 to 630",
+  "p7-w5": "Fire 5, clip 629 to 684",
+  "p7-loop": "Clip end and loop",
+  "nb": "Rows this phase reads",
+  "nd": "report_player_hits",
+  "ne": "apply_player_hit",
+  "nf": "player_health",
+  "nk": "report_enemy_hits",
+  "nl": "apply_enemy_hit",
+  "nm": "apply_enemy_hp",
+  "nr": "Refusal gates for this phase",
+  "nu": "This phase in brief",
+  "nw": "What resolved hands you",
+  "nz": "Schedule in clip order",
+  "n10": "Schedule from entry 3",
+  "n14": "clip_tick_of",
+  "n15": "fires_at",
+  "n16": "fires_shot",
+  "n1b": "volley_angle_origin",
+  "n1c": "aim_point",
+  "n1d": "Expanding the volley",
+  "n1i": "The segment start wipes bullets"
+ },
+ "group_headings": {
+  "the rows this phase reads": "What this phase reads",
+  "the taken direction, step by step": "The taken direction",
+  "the dealt direction, step by step": "The dealt direction",
+  "the gates that name this phase": "Where a report for this phase is refused",
+  "what this phase is": "What this phase is",
+  "resolve: what `resolved()` hands you": "What resolution produces",
+  "the schedule, entry by entry (Normal)": "The schedule, entry by entry (Normal)",
+  "whether it fires: three pure functions": "Whether it fires",
+  "where it fires from, and what leaves": "Where it fires from, and what leaves",
+  "what this phase does to bullets already flying": "Bullets already flying"
+ }
+}

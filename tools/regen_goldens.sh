@@ -16,6 +16,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard goldens "$REPO_ROOT/tools/regen_goldens.sh" "$@"
+
 MANIFEST="$REPO_ROOT/client/rust/Cargo.toml"
 MANIFEST_JSON="$REPO_ROOT/parity/golden_manifest.json"
 MINDY_SRC="${MINDY_SRC:-$REPO_ROOT/../Mindustry}"

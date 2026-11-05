@@ -24,6 +24,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard export "$REPO_ROOT/tools/export.sh" "$@"
+
 GODOT_BIN="${GODOT_BIN:-$(command -v godot4 || command -v godot4-mono || command -v godot || true)}"
 PLATFORM="windows"
 TARGET="release"

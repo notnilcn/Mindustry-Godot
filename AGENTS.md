@@ -16,12 +16,13 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 | `docs/` | Implementation plans, round summaries and platform handoffs. |
 | `bench/` | Recorded performance baselines behind `parity/bench_budgets.json`. |
 | `.github/` | CI workflows: `ci.yml`, `parity-nightly.yml`. |
+| `CI_PENDING.json` | Batch of landed changes for the next full CI run; write it with `tools/ci_pending.py` ([`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md)). |
 
 ## Generated / transient — do not hand-edit
 
 - `client/bin/`, `client/.godot/`, `client/rust/target/`, `server/spacetimedb/target/`, `build/` — build and import caches (`tools/build.sh`, `bash tools/pack.sh`); `client/scenarios/` — mirror of `scenarios/` (`bash tools/sync_scenarios.sh`).
 - `assets/sprites/sprites*.png`, `sprites.atlas.json`, `fallback/`, `block_colors.png`, `assets/icons/icon_codes.json`, `assets/icons/icons.properties`, `assets/sounds.index.json`, `assets/locales/`, `assets/shaders/godot/`, `assets/shaders/shader.index.json`, `assets/parity/region_names.txt` — atlas/index outputs (`bash tools/pack.sh pack`); `assets/ASSET_PROVENANCE.md` — `mind-tools migrate` output; `client/rust/mind-stdb/src/module_bindings/` — `spacetime generate` output (`bash server/build.sh`).
-- `runs/`, `parity-java-home/`, `screenshots_for_ai/`, `client/assets/version.properties`, `.opencode/` session state, `.claude/worktrees/` — transient outputs and session state; the worktrees are stale duplicates, ignore them.
+- `runs/`, `parity-java-home/`, `screenshots_for_ai/`, `client/assets/version.properties`, `.opencode/` session state (the tracked `.opencode/agents/` definitions are source), `.claude/worktrees/` — transient outputs and session state; the worktrees are stale duplicates, ignore them. `runs/ci/` holds per-run gate records (see below); the CPU queue state lives in `<git-common-dir>/mindustry-cpu-queue/`.
 
 ## Global invariants
 
@@ -29,6 +30,71 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 - Toolchain: Rust `1.98.1` (`rust-toolchain.toml`), Godot `4.7.x` (`4.7.2` recommended).
 - Rust owns behavior and the native UI (`client/rust/mind-gdext/src/ui/`); scenes only name the classes and never mutate simulation state. **All non-addon code is `.rs` or `.tscn`**: there is no hand-written GDScript outside vendored addons, no `.gd`/`.gd.uid` file, and no `script = ExtResource(...)` on a non-addon scene. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
 - ABIs are append-only: content IDs, entity field order, UI manifests, STDB schema and bindings. Never hand-edit generated outputs.
+- Only one CPU-intensive task at a time: route builds, tests and gates through `tools/run-cpu-intensive-task.sh` (see **CPU-intensive work** below).
+
+## CPU-intensive work: one at a time
+
+Never run two heavy jobs concurrently — a full `ci.sh` racing a `cargo build` has
+crashed the dev laptop. Every build, test, gate, asset pack, export and headless
+Godot batch is serialized by `tools/run-cpu-intensive-task.sh`; a second call
+waits its turn, it does not compete.
+
+```bash
+tools/run-cpu-intensive-task.sh --ci                  # full gate (the CI fixer runs this)
+tools/run-cpu-intensive-task.sh --cargo-build -p mind-gdext
+tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib
+tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings
+tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent history
+```
+
+- The lock is one `flock` under `<git-common-dir>/mindustry-cpu-queue/`, shared by
+  every worktree of the repo. `--no-wait` exits `75`; `--timeout SECS` bounds the
+  wait; `--history` shows recent runs. `MIND_CPU_QUEUE_DIR` overrides the state dir.
+- `tools/ci.sh`, `build.sh`, `pack.sh`, `parity.sh`, `pcam_parity.sh`, `export.sh`,
+  `regen_goldens.sh`, `server/build.sh` and `everything_you_need.sh` re-exec through
+  the wrapper, so a direct `bash tools/build.sh` also queues. Nested calls detect
+  `MIND_CPU_QUEUE_HELD` and never take the lock twice.
+- Not queued: an interactive `tools/godot.sh` editor/game session (it would hold the
+  lock for hours) and `tools/mcp-smoke.sh` (needs the editor). Still do not run
+  headless Godot checks or MCP batches alongside a build; stop the editor before a
+  release build on Windows.
+- **Do not run the full gate after every edit.** Run the targeted check for the
+  touched area, record the change in `CI_PENDING.json`, and leave the full gate to
+  the CI fixer. Details, schema and the fixer contract:
+  [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) and
+  [`docs/CI-FIXER-PROMPT.md`](docs/CI-FIXER-PROMPT.md). The opencode agent is
+  [`.opencode/agents/ci-fixer.md`](.opencode/agents/ci-fixer.md).
+
+## CI handoff: `CI_PENDING.json`
+
+Every landed change that a later full gate must validate gets one entry, written
+with the lock-protected helper (parallel agents can append concurrently):
+
+```bash
+python3 tools/ci_pending.py add "Add MindFoo dialog + widget" \
+  --agent ui-port \
+  --area client/rust/mind-gdext/src/ui \
+  --files path/foo.rs,path/dialogs.rs \
+  --gates fmt,clippy,cargo-check,godot-import,ui-widgets-check \
+  --repro "cargo test -p mind-gdext foo" \
+  --expected "dialog_sweep_check reports failed=0" \
+  --risk "UI manifest/row sizing; check MindTable min-size propagation"
+python3 tools/ci_pending.py list
+```
+
+- Always use `tools/ci_pending.py` (`add`/`list`/`show`/`check`/`remove`/`clear`):
+  it takes `CI_PENDING.json.lock` and replaces the file atomically. Hand-editing
+  while another agent appends loses data.
+- `tools/ci.sh` archives the file to `runs/ci/<run-id>/pending.json`, resets
+  `CI_PENDING.json`, and writes `runs/ci/<run-id>/{run.json,ci.log}` plus
+  `runs/ci/last-run.json`. On failure `run.json` names the failed stage; that
+  archive is the CI fixer's input. Entries added while a run is in progress belong
+  to the next batch.
+- An entry should answer: what changed, where, how to reproduce the local check,
+  what success looks like, and what is most likely to fail. Fields: `summary`,
+  `area`, `files`, `gates`, `repro`, `expected`, `risk`, `notes`; the gate
+  vocabulary and stage triage map are in
+  [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md).
 
 ## Quickstart (`tools/AGENTS.md` covers every script and gate)
 
@@ -36,9 +102,13 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 ./everything_you_need.sh    # first checkout: Rust build + asset pack + scenario sync
 tools/build.sh              # rebuild mind-gdext + mind-headless, sync scenarios
 bash tools/pack.sh pack     # regenerate the runtime asset tree under assets/
+tools/run-cpu-intensive-task.sh --ci   # full local gate (queued; the CI fixer runs this)
 bash tools/godot.sh         # launch the client (-e opens the editor)
-bash tools/ci.sh            # full local gate
 ```
+
+Direct calls to `tools/ci.sh`, `tools/build.sh` and the other heavy scripts
+self-queue through the wrapper; the wrapper form is canonical because it makes the
+serialization explicit.
 
 ## Guide index
 
@@ -67,3 +137,4 @@ bash tools/ci.sh            # full local gate
 - Networking: `server/spacetimedb/AGENTS.md` for schema/reducers, `client/rust/mind-stdb/AGENTS.md` for the client.
 - Asset pipeline, atlas or icons: `client/rust/mind-tools/AGENTS.md`.
 - Parity evidence: `parity/AGENTS.md` and `TWIN-VERIFICATION.json` (minimal items: `title`/`status`/`similarity`/`fork`/`action`/`images`, plus paired recipes and gaps); in-engine checks use the `playtest` skill, Java↔Godot walks use `parity-eval`.
+- Full local CI, a red gate, or handing a pending batch to the CI fixer: [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) and [`docs/CI-FIXER-PROMPT.md`](docs/CI-FIXER-PROMPT.md).

@@ -70,6 +70,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md). The harness
+# restores the tree on exit, so it must never overlap another Godot/build task.
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard pcam-parity "$REPO_ROOT/tools/pcam_parity.sh" "$@"
+
 # Paths handed to Godot must be in the *host* form. Native Linux shells already
 # are; Git Bash (`pwd -W`) and WSL (`wslpath -w`) must hand a Windows Godot a
 # C:/... path instead of /c/... or /mnt/c/...

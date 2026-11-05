@@ -27,6 +27,12 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard stdb "$REPO_ROOT/server/build.sh" "$@"
+
 MODULE_PATH="$SCRIPT_DIR/spacetimedb"
 BINDINGS_DIR="$REPO_ROOT/client/rust/mind-stdb/src/module_bindings"
 

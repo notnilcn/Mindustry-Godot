@@ -21,6 +21,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard parity "$REPO_ROOT/tools/parity.sh" "$@"
+
 MANIFEST="$REPO_ROOT/client/rust/Cargo.toml"
 OUT_DIR="${PARITY_OUT_DIR:-$REPO_ROOT/client/rust/target/parity}"
 mkdir -p "$OUT_DIR"

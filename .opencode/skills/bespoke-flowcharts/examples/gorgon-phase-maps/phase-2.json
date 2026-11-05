@@ -1,0 +1,49 @@
+{
+ "doc": "docs/HUMAN/_TDD/Enemies and bullets/Gorgon Phase 2 - Whirlpools.md",
+ "loose_chapter": "The phase timeline",
+ "chapters": {
+  "p2-grp-server": "Server tables",
+  "p2-grp-kg": "kg_combat"
+ },
+ "cards": {
+  "p2-title0": "Phase 2 at a glance",
+  "p2-seg": "Segment start",
+  "p2-rest": "Opening rest",
+  "p2-clip": "The clip",
+  "p2-w0": "Fire 0, clip 0 to 387",
+  "p2-w1": "Fire 1, clip 0 to 388",
+  "p2-w2": "Fire 2, clip 0 to 388",
+  "p2-w3": "Fire 3, clip 431 to 501",
+  "p2-loop": "Clip end and loop",
+  "n9": "Rows this phase reads",
+  "nb": "report_player_hits",
+  "nc": "apply_player_hit",
+  "nd": "player_health",
+  "ni": "report_enemy_hits",
+  "nj": "apply_enemy_hit",
+  "nk": "apply_enemy_hp",
+  "np": "Refusal gates for this phase",
+  "ns": "This phase in brief",
+  "nu": "What resolved hands you",
+  "nx": "Schedule in clip order",
+  "n10": "clip_tick_of",
+  "n11": "fires_at",
+  "n12": "fires_shot",
+  "n17": "volley_angle_origin",
+  "n18": "aim_point",
+  "n19": "Expanding the volley",
+  "n1e": "The segment start wipes bullets"
+ },
+ "group_headings": {
+  "the rows this phase reads": "What this phase reads",
+  "the taken direction, step by step": "The taken direction",
+  "the dealt direction, step by step": "The dealt direction",
+  "the gates that name this phase": "Where a report for this phase is refused",
+  "what this phase is": "What this phase is",
+  "resolve: what `resolved()` hands you": "What resolution produces",
+  "the schedule, entry by entry (Normal)": "The schedule, entry by entry (Normal)",
+  "whether it fires: three pure functions": "Whether it fires",
+  "where it fires from, and what leaves": "Where it fires from, and what leaves",
+  "what this phase does to bullets already flying": "Bullets already flying"
+ }
+}

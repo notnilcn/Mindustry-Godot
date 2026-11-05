@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "description": "Batch of landed changes waiting for the next full CI run. Append with `python3 tools/ci_pending.py add ...`; tools/ci.sh archives this file to runs/ci/<run-id>/pending.json and resets it at the start of every run. See docs/CI-WORKFLOW.md.",
+  "policy": {
+    "full_gate": "tools/run-cpu-intensive-task.sh --ci, owned by the CI fixer; do not run the full gate after every edit",
+    "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
+    "wipe": "archived and reset by tools/ci.sh at run start"
+  },
+  "updated": "2026-11-05T04:22:38Z",
+  "entries": [
+    {
+      "id": "CP-20261105-042043",
+      "created_at": "2026-11-05T04:22:38Z",
+      "agent": "godot-scenes-refactor",
+      "branch": "godot-scenes-refactor",
+      "head": "a2009258",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 22,
+      "area": "client/rust/mind-gdext/src",
+      "summary": "Scene-spine dependency wiring: 73 path lookups replaced by node_paths exports (S2–S4) + closeout docs (S5)",
+      "files": [
+        "client/rust/mind-gdext/src/audio/mod.rs",
+        "client/rust/mind-gdext/src/camera.rs",
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/fx.rs",
+        "client/rust/mind-gdext/src/input/desktop.rs",
+        "client/rust/mind-gdext/src/input/mod.rs",
+        "client/rust/mind-gdext/src/lib.rs",
+        "client/rust/mind-gdext/src/net/mod.rs",
+        "client/rust/mind-gdext/src/render.rs",
+        "client/rust/mind-gdext/src/render/minimap.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-gdext/src/tile_grid.rs",
+        "client/rust/mind-gdext/src/ui/landing.rs",
+        "client/rust/mind-gdext/src/ui/menu_background.rs",
+        "client/rust/mind-gdext/src/ui/menu_flyers.rs",
+        "client/rust/mind-gdext/src/ui/root.rs",
+        "client/rust/mind-gdext/src/ui/state_inspector.rs",
+        "client/rust/mind-gdext/src/wiring.rs",
+        "client/scenes/game.tscn",
+        "docs/GODOT-SCENES-REFACTOR.md",
+        "client/AGENTS.md",
+        "client/rust/mind-gdext/AGENTS.md"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "ui-widgets-check",
+        "ui-layout-check",
+        "dialog-sweep-check",
+        "shaders-check"
+      ],
+      "repro": "cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check && tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext && tools/run-cpu-intensive-task.sh --cmd -- cargo clippy --manifest-path client/rust/Cargo.toml -p mind-gdext --all-targets -- -D warnings -A clippy::collapsible_if",
+      "expected": "Headless boot of res://scenes/game.tscn: 0 `missing required` warnings; dialog_sweep_check prints `DIALOGCHECK: failed=0`; fmt/cargo-check/clippy exit 0.",
+      "risk": "node_paths resolution can silently null a dep if a scene path/order is wrong; pre-existing clippy::collapsible_if at editor/mod.rs:2138 (allowed via -A); cargo test -p mind-gdext engine-dependent tests fail without Godot.",
+      "notes": "S5 closeout: removed unused MindUiRoot::is_menu_visible; docs updated (mind-gdext/AGENTS.md, client/AGENTS.md, docs/GODOT-SCENES-REFACTOR.md). Verified at a2009258: build exit 0; headless boot 0 missing required, 0 ERROR/SCRIPT ERROR; probe CHECKED 16 nodes null deps 0; SHADERCHECK total=30 failed=0; UICHECK/LAYOUTCHECK/DIALOGCHECK failed=0; cargo test --lib 185 passed/17 engine-unavailable failures.",
+      "status": "pending"
+    }
+  ]
+}
