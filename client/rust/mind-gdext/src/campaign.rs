@@ -294,16 +294,20 @@ impl MindCampaign {
                 }
                 let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
                 settings_hub::with_settings(|settings| campaign.load_all(settings));
-                // `Saves.load` assigns sector save files; reflect them on the
-                // runtime sectors so launches take the resume branch (C-3).
-                for planet in campaign.planets.values_mut() {
-                    for sector in &mut planet.sectors {
-                        let file = self.paths.sector_save(&planet.name, sector.id as u32);
-                        if NativeFs.exists(&file) {
-                            sector.save = Some(format!("sector-{}-{}", planet.name, sector.id));
-                        }
-                    }
-                }
+                // `Saves.load` assigns sector save slots from save **meta**
+                // (`Saves.java:120-186`): a readable slot backs the sector its
+                // rules name, so a copy under another name still resumes
+                // (CG-SAVE-05). `Saves::slots` only holds files whose meta
+                // decoded (main or backup; `SaveIO.isSaveValid`), so an
+                // undecodable file can no longer manufacture a base that the
+                // load path would silently regenerate (CG-SAVE-06).
+                let assignments = self.saves.sector_save_assignments(&registry);
+                let applied =
+                    mind_core::game::saves::apply_sector_saves(&mut campaign, &assignments);
+                log::info!(
+                    "sector saves assigned from meta: {applied} of {} readable slot(s)",
+                    self.saves.slots.len()
+                );
                 // `Planet.init` (`Planet.java:469-471`) recomputes base coverage
                 // after `sector.loadInfo`; run it once more now that the stored
                 // infos and save files are on the sectors, so boot threat and
@@ -873,10 +877,38 @@ impl MindCampaign {
     #[signal]
     fn block_unlocked();
 
+    /// The file backing a sector's save association (`Sector.save` stores the
+    /// slot's **stem**, `Saves.SaveSlot.index`): the listed slot with that
+    /// stem, else the canonical sector file when the stem names it (a save
+    /// queued earlier this session), else `saves/<stem>.msav`.
+    ///
+    /// Never re-derives the path from the sector id alone: the association
+    /// came from save meta, so a copy under another name resolves to its own
+    /// file (CG-SAVE-05).
+    fn sector_save_file(&self, planet_name: &str, sector: u16, stem: &str) -> std::path::PathBuf {
+        if let Some(slot) = self.saves.slot_for_stem(stem) {
+            return slot.file.clone();
+        }
+        let canonical = self.paths.sector_save(planet_name, sector as u32);
+        if canonical
+            .file_stem()
+            .is_some_and(|name| name.to_string_lossy() == stem)
+        {
+            canonical
+        } else {
+            self.paths.saves().join(format!("{stem}.{SAVE_EXTENSION}"))
+        }
+    }
+
     /// Primes the host's sector-generation extras from the campaign record
     /// (`Sector.threat`/`hasEnemyBase`/`hasBase`) so the next `load_sector` of
     /// a numbered sector generates with the live campaign state (H05 T2).
     /// Call before `MindSimHost.load_sector` for the same planet+sector.
+    ///
+    /// Also hands the host the sector's associated save file
+    /// (`Control.playSector` -> `Sector.save`, `Control.java:450-456`): the
+    /// resume source is the slot the meta association picked, not a guessed
+    /// file name (CG-SAVE-05).
     #[func]
     pub fn prime_sector_load(&mut self, planet: GString, sector: i32) -> bool {
         let planet_name = planet.to_string();
@@ -897,11 +929,21 @@ impl MindCampaign {
             has_enemy_base: record.has_enemy_base(),
             has_base: record.has_base(),
         };
+        let save_file = record
+            .save
+            .as_deref()
+            .map(|stem| self.sector_save_file(&planet_name, sector as u16, stem));
         let Some(mut host) = self.host() else {
             return false;
         };
         host.bind_mut()
             .set_sector_gen_extras_rs(&planet_name, sector, extras);
+        host.bind_mut().set_sector_resume_file(GString::from(
+            save_file
+                .map(|file| file.to_string_lossy().into_owned())
+                .unwrap_or_default()
+                .as_str(),
+        ));
         true
     }
 
@@ -963,7 +1005,7 @@ impl MindCampaign {
         let always_unlocked = record.preset_always_unlocked;
         let require_unlock = record.preset_require_unlock;
         let preset_id = record.preset;
-        let has_save = record.has_save();
+        let mut has_save = record.has_save();
         let spawn_position = record.info.info.spawn_position;
         let had_no_core = !record.info.info.has_core;
         let tech_unlocked = preset_id.is_none_or(|preset| {
@@ -974,6 +1016,40 @@ impl MindCampaign {
             self.registry = Some(registry);
             self.campaign = Some(campaign);
             return false;
+        }
+        // `Control.playSector`'s `catch(SaveException)` (`Control.java:555-561`):
+        // the host found the associated resume save unreadable between listing
+        // and load. Java clears `sector.save`, deletes the slot, reports
+        // `@save.corrupted` and replays the sector; it never resumes a
+        // regenerated world under the stale record (CG-SAVE-06). The load path
+        // only flags it — the record is cleared here, before the resume branch
+        // is chosen.
+        let corrupt_resume = self
+            .host()
+            .and_then(|mut host| host.bind_mut().take_corrupt_sector_save());
+        if let Some(path) = corrupt_resume {
+            let file = std::path::PathBuf::from(&path);
+            if let Some(sector) = campaign.sector_mut(planet_id, sector_id) {
+                sector.save = None;
+            }
+            has_save = false;
+            // `SaveSlot.delete()`: the file and its backup, then the list entry
+            // (`Slot.delete` removes itself from `saves`).
+            let mut deleted = false;
+            if let Some(slot) = self.saves.slots.iter_mut().find(|slot| slot.file == file) {
+                deleted = slot.delete(&NativeFs).is_ok();
+            }
+            if !deleted {
+                let _ = NativeFs.delete(&file);
+                let _ = NativeFs.delete(&mind_core::io::SaveIo::backup_file_for(&file));
+            }
+            self.saves.forget_file(&file);
+            // `Time.runTask(10f, () -> ui.showErrorMessage("@save.corrupted"))`.
+            self.show_error("@save.corrupted");
+            log::warn!(
+                "start_sector: `{planet_name}:{sector_id}` resume save `{path}` was corrupt; \
+                 deleted the slot and replaying the sector (`@save.corrupted`)"
+            );
         }
 
         // `Control.playSector` (`Control.java:437-448`): quiet-unlock the preset
@@ -1404,7 +1480,11 @@ impl MindCampaign {
                 .and_then(|campaign| campaign.sector(planet_id, sector_id))
                 .and_then(|sector| sector.save.clone())
         {
-            let file = self.paths.sector_save(&planet_name, sector_id as u32);
+            // `Sector.save` is the slot's stem; resolve it through the listed
+            // slots so a resumed copy under another name keeps writing back to
+            // its own file (`Saves.saveSector` reuses `sector.save`,
+            // `Saves.java:257-259`) (CG-SAVE-05).
+            let file = self.sector_save_file(&planet_name, sector_id, &save_name);
             if has_save {
                 // `World.loadSector` -> `SaveSlot.load`: the resumed slot is
                 // current, so the save policy pumps against it.

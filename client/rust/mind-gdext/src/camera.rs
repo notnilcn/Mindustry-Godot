@@ -137,6 +137,18 @@ impl ICamera2D for MindCamera2D {
             self.shadow_position = (node_position.x, node_position.y);
             self.follow_target = None;
         }
+        // Zoom echo-guard (PAR-0495): mirror the position guard for a zoom
+        // authored outside the rig (`MindRender.set_camera_pose`, previews).
+        // Without it, a pose write during a landing left `camerascale` at the
+        // cutscene's value while the canvas kept the written zoom; the landing
+        // sprite then scaled by `4 / cutscene_scale` and its accent glow painted
+        // the whole world out until the process restarted. Adopting the applied
+        // zoom lets the cutscene/scroll path re-assert its own scale next.
+        let node_zoom = self.base().get_zoom().x.abs().max(0.01);
+        if (node_zoom - self.shadow_scale).abs() > 1e-4 * node_zoom.max(1.0) {
+            self.camera.camerascale = node_zoom;
+            self.shadow_scale = node_zoom;
+        }
 
         self.view_tick = self.view_tick.wrapping_add(1);
         self.read_view_settings();
@@ -359,6 +371,25 @@ impl ICamera2D for MindCamera2D {
 
 #[godot_api]
 impl MindCamera2D {
+    /// Pins the rig at world pixel `(x, y)` with `zoom` (the
+    /// `MindRender.set_camera_pose` screenshot/preview seam). The write goes
+    /// through the rig state *and* the node echo guards, so a pose change can
+    /// never leave `camerascale`/`shadow_scale` disagreeing with the applied
+    /// canvas zoom (PAR-0495: that mismatch made the landing sprite scale by
+    /// `4 / cutscene_scale` and paint the world out until a process restart).
+    #[func]
+    pub fn set_pose(&mut self, x: f32, y: f32, zoom: f32) {
+        let zoom = zoom.max(0.01);
+        self.camera.position = (x, y);
+        self.camera.camerascale = zoom;
+        self.follow_target = Some((x, y));
+        self.shadow_position = (x, y);
+        self.shadow_scale = zoom;
+        self.base_mut().set_position(Vector2::new(x, y));
+        // Same y-up projection as `process`: Godot 2D is y-down.
+        self.base_mut().set_zoom(Vector2::new(zoom, -zoom));
+    }
+
     /// `Renderer.showLanding(core)` + `Trigger.newGame` (`Renderer.java:567-574`,
     /// `Control.java:198-222`; PAR-0131): center the camera on the dropped core
     /// and run the 160-tick `CoreLandAnimator` zoom. `core_x`/`core_y` are world
@@ -378,6 +409,13 @@ impl MindCamera2D {
         self.cutscene
             .show_landing(Box::new(CoreLandAnimator::new()));
         self.camera.camerascale = self.cutscene.camerascale();
+        // The node must show the landing zoom immediately: the landing sprite
+        // scales by `4 / getDisplayScale()`, so a frame at the pre-landing zoom
+        // would draw it oversized (see `set_pose`/the zoom echo-guard).
+        let landing_zoom = self.camera.camerascale;
+        self.base_mut()
+            .set_zoom(Vector2::new(landing_zoom, -landing_zoom));
+        self.shadow_scale = landing_zoom;
         // The input lock follows in `process` (no sim-host borrow from here:
         // callers may hold one).
         true

@@ -2324,13 +2324,27 @@ impl MindRender {
             return;
         };
         let size = TILESIZE as f64;
-        camera.set_position(Vector2::new(
-            (x + 0.5) as f32 * size as f32,
-            (y + 0.5) as f32 * size as f32,
-        ));
+        let world_x = (x + 0.5) as f32 * size as f32;
+        let world_y = (y + 0.5) as f32 * size as f32;
         let zoom = (zoom as f32).max(0.01);
-        // Same Java y-up projection as `MindCamera2D::process`: Godot 2D is
-        // y-down, so the rendered y axis is negated.
+        // Write through the rig state, not the node alone: `MindCamera2D`'s
+        // echo guards must agree with the applied zoom, otherwise a pose pin
+        // during a landing leaves the cutscene scale and the canvas zoom
+        // disagreeing and the landing sprite covers the world (PAR-0495).
+        if camera.has_method("set_pose") {
+            let _ = camera.call(
+                "set_pose",
+                &[
+                    world_x.to_variant(),
+                    world_y.to_variant(),
+                    zoom.to_variant(),
+                ],
+            );
+            return;
+        }
+        // Fallback for a plain `Camera2D`: same Java y-up projection as
+        // `MindCamera2D::process` (Godot 2D is y-down).
+        camera.set_position(Vector2::new(world_x, world_y));
         camera.set_zoom(Vector2::new(zoom, -zoom));
     }
 

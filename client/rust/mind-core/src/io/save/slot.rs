@@ -481,4 +481,32 @@ mod tests {
         let image = decode_png(&bytes).expect("decodes");
         assert_eq!((image.width, image.height), (16, 16));
     }
+
+    /// `SaveIO.isSaveValid` (`SaveIO.java:62-73`): a torn primary save is
+    /// still a slot while its `-backup` decodes, and stops being one when the
+    /// backup is gone too — the listing gate that keeps an unreadable sector
+    /// file from manufacturing a base (CG-SAVE-06).
+    #[test]
+    fn listing_uses_backup_fallback_like_java() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let file = paths.sector_save("serpulo", 170);
+        save_with_wave(&fs, &file, 3, "gz");
+        // A second save rotates the first into `<stem>-backup.msav`.
+        save_with_wave(&fs, &file, 4, "gz");
+        let backup = SaveIo::backup_file_for(&file);
+        assert!(fs.exists(&backup), "the previous save is the backup");
+
+        // Torn primary: the backup still lists the slot (wave from the backup).
+        fs.write(&file, &[0u8; 1024]).unwrap();
+        assert!(SaveIo::is_save_valid(&fs, &file));
+        let slots = list_save_slots(&fs, &paths);
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].get_wave(), 3, "meta came from the backup");
+
+        // Torn primary and no backup: the file is not a slot at all.
+        fs.delete(&backup).unwrap();
+        assert!(!SaveIo::is_save_valid(&fs, &file));
+        assert!(list_save_slots(&fs, &paths).is_empty());
+    }
 }

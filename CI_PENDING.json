@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T08:57:09Z",
+  "updated": "2026-11-06T09:55:22Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -735,6 +735,60 @@
       "repro": "emit MindCampaign.campaign_complete; 2 s later campaign_complete.is_shown()",
       "expected": "overlay shown, planet page closed, banner + playtime + Menu/Continue",
       "risk": "root.rs signal wiring + one-shot SceneTreeTimer; FLOAT playtime parsing",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-093430",
+      "created_at": "2026-11-06T09:34:30Z",
+      "agent": "camp-saverobust",
+      "branch": "main",
+      "head": "69fda3ec",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 7,
+      "area": "client/rust/mind-core/src,client/rust/mind-gdext/src",
+      "summary": "CG-SAVE-05/06: sector saves attach from save meta, unreadable slots cannot resume",
+      "files": [
+        "client/rust/mind-core/src/game/saves.rs",
+        "client/rust/mind-core/src/io/save/slot.rs",
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/sim_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib game::saves; cargo test -p mind-core --lib io::save::slot",
+      "expected": "17 game::saves tests and 7 io::save::slot tests pass; clippy -p mind-core -p mind-gdext -D warnings clean",
+      "risk": "Boot now clears every sector.save before applying meta associations; check legacy remap profiles, clear-campaign-saves and the accelerator path still resume, and that SimHost::load_sector without a prior prime still falls back to the canonical sector file",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-095522",
+      "created_at": "2026-11-06T09:55:22Z",
+      "agent": "camp-render",
+      "branch": "main",
+      "head": "69fda3ec",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-core/src/world/blocks/storage",
+      "summary": "Core incineration belt/drill burn + camera pose zoom echo guard",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/storage/storage_block.rs",
+        "client/rust/mind-core/src/world/blocks/storage/core_block.rs",
+        "client/rust/mind-gdext/src/camera.rs",
+        "client/rust/mind-gdext/src/render.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib storage_block",
+      "expected": "5 storage_block tests pass; incinerate_effect predicate/facing-edge/fullness gate pinned; cargo check -p mind-gdext passes",
+      "risk": "View-only RngStream::Fx draw (not checksummed). Camera zoom echo-guard affects MCP pose pins during landing cutscenes.",
       "status": "pending"
     }
   ]

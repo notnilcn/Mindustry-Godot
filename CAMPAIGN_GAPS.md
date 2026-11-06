@@ -423,7 +423,8 @@ from file names instead of save meta.
   `NativeFs.exists(paths.sector_save(planet, id))`; `assign_sector_saves`
   (`mc/game/saves.rs:149-223`) only plans remaps and never sets `sector.save`.
   Java associates from save meta (`up/game/Saves.java:120-186`), so a copy under
-  another name still resumes. **Status.** Code-confirmed.
+  another name still resumes.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0506` (similarity 56.3; resumed pair 75.2).** Boot now ports `Saves.java:120-186`: every listed slot whose meta decodes (main or backup = `SaveIO.isSaveValid`) backs the sector named by `meta.rules.sector`, with a remap target for pre-remap saves (`sector_save_assignments`/`apply_sector_saves`/`slot_for_stem`/`forget_file`). `Sector.save` stores the slot stem and `MindCampaign::sector_save_file` resolves the file, so a renamed `mybase.msav` attaches and resumes in both clients. See `runs/PAR-0506/`.
 
 #### CG-SAVE-06 — A base is inferred from file existence, not a readable save — **P1 (likely)**
 - With a sector file present but undecodable, the planet page offers Resume;
@@ -431,7 +432,8 @@ from file names instead of save meta.
   stale record items are stocked into the new core. Java catches
   `SaveException`, deletes the slot and shows `@save.corrupted`
   (`up/core/Control.java:555-561`). The same asymmetry hides such files from
-  `Saves.slots`/clear paths (`mc/io/save/slot.rs:305-314`). **Status.** Likely.
+  `Saves.slots`/clear paths (`mc/io/save/slot.rs:305-314`).
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0505` (similarity 57.1; corrupted-save toast pair 94.8).** The `NativeFs.exists` inference is gone (meta-based assignment above, only readable slots); `prime_sector_load` hands the host the associated file; `start_sector` catches the load-time `SaveException` (clear `sector.save`, delete slot + backup, show `@save.corrupted`, replay fresh); `load_sector_world` resumes the primed file, falls back to `-backup`, and flags an undecodable slot. Zeroed 1 KB `sector-serpulo-170.msav` → both clients show a Launch-only GZ panel, 0 slots; corrupting it while the page is open and clicking Go shows the same corrupted-save modal and replays. See `runs/PAR-0505/`.
 
 #### CG-SAVE-07 — Beta megabase cleanup deletes the save but leaves the record — **P2**
 - `mc/game/saves.rs:129-147` deletes the file only; Java also calls
@@ -796,7 +798,7 @@ finding.
   `handle_stack` (player offload) emits the real burn (`core_block.rs:390-420`).
   Java `StorageBlock.java:40-49` plays `Fx.coreBurn` with 30% chance and a
   `wasVisible` gate whenever the core is full.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — `verified` on code + unit tests (`PAR-0504`); no in-engine burn capture.** `incinerate_effect` now rolls the view-only `RngStream::Fx` at 30%, gates on `Building.was_visible`, computes `Edges.getFacingEdge` midpoints with `BlockDef.size`, and emits `Fx.coreBurn` through a shared `emit_core_burn_at`; the linked-storage path burns only when the linked core is full and latches `CoreBuild.no_effect` (no double emit), matching `StorageBlock.java:40-71`. `storage_block` tests 5/5. The planned sandbox burst + `MindFx.dump_effects` probe is documented in `runs/PAR-0504/` for a future in-engine pass.
 
 ### CG-ECON-07 — Fresh Ground Zero core stock is empty at HEAD (no gap) — **refuted**
 - `gx/campaign.rs:1060-1070` clears `rules.loadout` for an empty payload;
@@ -1052,6 +1054,10 @@ full recipes in `runs/<PAR>/`.
 | CG-UI-04 (P1) | PAR-0491 | twin-verified (81.4) | `MindUiRoot` connects `campaign_complete` → one-shot 2 s timer → close planet page + open the overlay; dialog playtime/naming/buttons fixed | `runs/PAR-0491/`, `parity/twin/PAR-0491/` |
 | CG-UI-02 (P1) | PAR-0493 | verified (Godot; arcs staged only as code+unit tests — the shield/attack sectors are unreachable on this host) | `SectorView` arc/fill data + `arc_ribbon`/`SectorArcs` primitive + current-sector fill; both clients fill the played GZ cell | `runs/PAR-0493/`, `parity/twin/PAR-0493/` |
 | New: played sector not marked attacked (P2) | PAR-0503 | twin-verified (93.0) | `playing: Option<(bool,bool)>` threaded from the live rules; `attacked`/`captured`/`frozen` use the `is_*_(playing)` variants, so the panel shows `Under attack!` and stats `Threat: Low` | `runs/PAR-0503/`, `parity/twin/PAR-0503/` |
+| CG-SAVE-06 (P1) | PAR-0505 | twin-verified (57.1; toast pair 94.8) | meta-based slot association (`Saves.java:120-186`); `prime_sector_load` + `start_sector` `SaveException` catch (delete slot+backup, `@save.corrupted`, replay); `load_sector_world` primed-file/backup fallback + corrupt flag | `runs/PAR-0505/`, `parity/twin/PAR-0505/` |
+| CG-SAVE-05 (P2) | PAR-0506 | twin-verified (56.3; resumed 75.2) | `Sector.save` stores the slot stem, `MindCampaign::sector_save_file` resolves it; a renamed `mybase.msav` attaches and resumes in both clients | `runs/PAR-0506/`, `parity/twin/PAR-0506/` |
+| New: PAR-0495 mid-session reload blank (P2) | PAR-0495 | verified (no pair; pre-fix frames) | camera zoom echo-guard + atomic `MindCamera2D.set_pose`; `set_camera_pose` routed through it and the landing zoom applied immediately, so the cutscene sprite no longer scales by `4/0.02` over the viewport | `runs/PAR-0495/`, `parity/twin/PAR-0495/` (godot frames) |
+| CG-ECON-06 (P2) | PAR-0504 | verified (code + 5 unit tests; no in-engine burn capture) | `incinerate_effect` 30% `RngStream::Fx` + `was_visible` + facing-edge `Fx.coreBurn`, no double emit on linked cores | `runs/PAR-0504/` |
 
 Closed after this pass: **PAR-0503**'s `playing` threading also fixes the
 observed `captured=false` while a sector is being played (the old
@@ -1059,12 +1065,14 @@ observed `captured=false` while a sector is being played (the old
 
 New bugs recorded while fixing (still open in `TWIN-VERIFICATION.json`):
 
-- **PAR-0495** (P2, mismatch) — a mid-session sector reload leaves the world
-  renderer blank until the process restarts (observed while staging PAR-0492;
-  not investigated).
 - Not filed, pre-existing, noted in PAR-0498: `get_mine_result` never falls back
   to `tile.floor().itemDrop`, so the `playerUnmineable` floor gate is currently
   unobservable in vanilla.
+
+**PAR-0495** (the mid-session reload blank, originally recorded as a mismatch)
+is now fixed and marked `verified`; see the row above. The only open campaign
+P1 left is **CG-TECH-02 / PAR-0489** (launch cost priced from the
+planet-default-core loadout list), which needs a foundation/nucleus launcher.
 
 The remaining doc-only findings in §3–§9 are still open and are the next twin
 queue batch.

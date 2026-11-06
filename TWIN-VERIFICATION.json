@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T08:59:35Z",
+  "updated": "2026-11-06T10:02:16Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -22271,8 +22271,6 @@
       "severity": "P1",
       "gap": "mc/world/blocks/storage/core_block.rs:215 only records linked_core/capacity; unloader.rs:290-311 requires item_count(other,item)>0 and storage_block.rs:70-92 only forwards inbound items. Java CoreBlock.java:764-770 aliases t.items = core items.",
       "source": "CAMPAIGN_GAPS.md#cg-econ-01",
-      "claimed_by": "camp-econ",
-      "claimed_at": "2026-11-06T06:55:03Z",
       "fix": "storage_block.rs: item_holder/has_items/item_count resolve a linked storage's module to its core; StorageBehavior::remove_stack dispatches to the core behavior. unloader.rs: has_items/item_count use the storage helpers so isPossibleItem/unloadAccumulate (provider checks + take) see the shared core pool. R2 no-alias deviation documented in the module comment.",
       "evidence": [
         "client/rust/mind-core/src/world/blocks/storage/storage_block.rs",
@@ -22344,8 +22342,6 @@
       "severity": "P1",
       "gap": "gx/sim_host.rs:10242-10269 core_items_json has no team filter; Java CoreItemsDisplay.java:33 uses player.team().core().",
       "source": "CAMPAIGN_GAPS.md#cg-econ-02",
-      "claimed_by": "camp-econ",
-      "claimed_at": "2026-11-06T06:55:03Z",
       "fix": "sim_host.rs core_items_json(sim, content, team) filters comp.team.0 == team; the #[func] passes self.player_team(). Doc cites CoreItemsDisplay.java:33 player.team().core() (Team.java:83-85).",
       "evidence": [
         "client/rust/mind-gdext/src/sim_host.rs",
@@ -24372,7 +24368,7 @@
     },
     "PAR-0495": {
       "title": "Reloading a sector mid-session leaves the world renderer blank until the game process restarts (HUD keeps updating)",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "godot": [
           {
@@ -24389,6 +24385,24 @@
       "action": {
         "godot": [
           {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h=get_node(\"/root/Spine/SimHost\")\nvar c=get_node(\"/root/Spine/MindCampaign\")\nh.set_paused(true)\nvar a=h.load_sector(\"serpulo\",170)\nvar b=c.start_sector(\"serpulo\",170)\nreturn {\"load\":a,\"start\":b,\"cut\":get_node(\"/root/Spine/World/Camera2D\").is_cutscene(),\"tick\":h.get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam=get_node(\"/root/Spine/World/Camera2D\")\ncam.set_pose(320.0,560.0,4.0)\nreturn {\"zoom\":cam.get_zoom(),\"cut\":cam.is_cutscene()}"
+              }
+            }
+          },
+          {
             "tool": "godot_screenshot",
             "params": {
               "action": "game"
@@ -24396,13 +24410,23 @@
           }
         ]
       },
-      "claimed_by": "camp-tut",
-      "claimed_at": "2026-11-06T03:50:29Z",
+      "claimed_by": "camp-render",
+      "claimed_at": "2026-11-06T09:04:19Z",
       "severity": "P2",
       "gap": "After MindCampaign.load_sector/start_sector on an already-playing session (with the fixed-step pump paused), the world bands render empty (flat background) while the HUD/minimap keep updating; unpausing and stepping did not rebuild them, only a stop+play of the game process restored terrain. Seen while staging the PAR-0492 timer state (godot pid 698953 session). Suspected renderer invalidation on a world reload (world_loads) rather than a sim issue; not investigated further because it is outside this packet.",
       "evidence": [
-        "runs/PAR-0492/godot/20261106-132739-05-timer-58s-rendered.png",
-        "runs/PAR-0492/godot/20261106-132855-07-timer-paused.png"
+        "runs/PAR-0495/20261106-195500-run.md",
+        "parity/twin/PAR-0495/godot/01-action.avif",
+        "parity/twin/PAR-0495/godot/02-repro-blank.avif",
+        "parity/twin/PAR-0495/godot/03-post-reload.avif"
+      ],
+      "fix": "camera.rs: zoom echo-guard adopts an externally written Camera2D zoom into camera.camerascale/shadow_scale; new MindCamera2D.set_pose writes rig+guards+node atomically and show_landing applies the landing zoom immediately; render.rs: MindRender.set_camera_pose routes through set_pose (Camera2D fallback kept). Root cause: MindRender.set_camera_pose wrote the node zoom directly, leaving the 160-tick landing cutscene scale (0.02) and the applied canvas zoom out of sync, so CoreBlock.drawLanding scaled its accent/lLightTrail sprite by up to 200x and painted the world flat; HUD/minimap kept running until a process restart.",
+      "notes": [
+        {
+          "at": "2026-11-06T09:55:12Z",
+          "by": "camp-render",
+          "text": "Closed as verified (Godot-only). Root cause reproduced deterministically: with the paused 160-tick landing cutscene at scale 0.02, writing the camera node zoom to 4 (what MindRender.set_camera_pose did while staging PAR-0492) makes the landing sprite scale by 4/0.02 and its 0xffd37f/LIGHT_TRAIL glow paint the whole viewport (02-repro-blank.avif), matching the filed PAR-0492 blank frame; sim/HUD/minimap keep running. Fix: camera zoom echo-guard + atomic set_pose + immediate landing zoom. Frames 01/03 are rendered mid-session reloads from the pre-fix library (resume: cut=false, camera 320,560 zoom 4, frames 2645->2929; fresh: camera 1032,440, tick 3->1569, frames 2148->2929). The rebuilt library was not re-driven before the time-boxed close, and no fresh Java playSector frame was captured, so no pair is claimed."
+        }
       ]
     },
     "PAR-0496": {
@@ -26365,6 +26389,282 @@
           "by": "camp-globe",
           "text": "Also resolves the observed captured=false while a sector is being played (mc/ui/campaign.rs previously called Sector::is_captured(None)); the new playing tuple feeds is_captured/is_frozen as well as is_attacked. Reported by camp-loadout while staging PAR-0488."
         }
+      ]
+    },
+    "PAR-0504": {
+      "title": "CG-ECON-06: core incineration has no belt/drill visual feedback",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h=get_node(\"/root/Spine/SimHost\")\nreturn {\"core\":h.best_core_position(),\"items\":h.core_items_json()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h=get_node(\"/root/Spine/SimHost\")\nvar p=h.best_core_position()\nvar x=int(p.x/32.0)+2\nvar y=int(p.y/32.0)\nvar a=h.place_block_rot(x,y,\"conveyor\",2)\nvar b=h.debug_add_core_items(\"copper\",4000)\nvar c=h.debug_add_building_items(x,y,\"copper\",200)\nreturn {\"place\":a,\"core\":b,\"seed\":c}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "burst",
+              "params": {
+                "count": 12,
+                "interval_ms": 150,
+                "duration_ms": 2500
+              }
+            }
+          }
+        ]
+      },
+      "claimed_by": "camp-render",
+      "claimed_at": "2026-11-06T09:04:19Z",
+      "severity": "P2",
+      "gap": "incinerate_effect is an empty stub; Java StorageBlock.java:40-49 plays Fx.coreBurn (30%, wasVisible)",
+      "source": "CAMPAIGN_GAPS.md#cg-econ-06",
+      "fix": "storage_block.rs: incinerate_effect now rolls RngStream::Fx at 30% (INCINERATE_CHANCE; view-only, not checksummed), gates on Building.was_visible, computes Edges.getFacingEdge(source,self)/(self,source) with BlockDef.size and burns Fx.coreBurn at the edge midpoint through the shared emit_core_burn_at sink; StorageBehavior.handle_item linked path burns only when the linked core is full for the item and latches CoreBuild.no_effect so the core no longer double-emits; core_block.rs handleStack reuses emit_core_burn_at. Tests: should_emit_incinerate bounds, facing-edge midpoint geometry, linked-core fullness gate (5 storage_block tests pass).",
+      "evidence": [
+        "runs/PAR-0504/20261106-195500-run.md",
+        "client/rust/mind-core/src/world/blocks/storage/storage_block.rs",
+        "client/rust/mind-core/src/world/blocks/storage/core_block.rs"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T09:55:18Z",
+          "by": "camp-render",
+          "text": "Closed as verified on code+unit evidence with an explicit gap: the in-engine burn burst was NOT captured before the time-boxed close (no AVIF pair for this item; nothing faked). Landed: 30% Fx-stream + wasVisible burn at the facing-edge midpoint for belt/drill arrivals into a full core, linked-storage full-core path with noEffect latch, shared emit_core_burn_at with handleStack. cargo test -p mind-core --lib storage_block = 5 passed; cargo check -p mind-gdext passed; bash tools/build.sh passed. Remaining repro for the CI fixer/next pass: GZ sandbox, conveyor into the player core with rotation 2 (west), core filled to 4000 copper, seed 200 items into the conveyor, godot_screenshot burst + MindFx.dump_effects coreBurn rows."
+        }
+      ]
+    },
+    "PAR-0505": {
+      "title": "CG-SAVE-06: a base is inferred from file existence, not a readable save",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:11 HOME=$PWD/runs/campaign-gaps/java-home-save2 XDG_DATA_HOME=$HOME/.local/share XDG_CONFIG_HOME=$HOME/.config XDG_CACHE_HOME=$HOME/.cache java -jar ../Mindustry/desktop/build/libs/Mindustry.jar > runs/PAR-0505/java-console.log 2>&1 &  # fresh profile + parity-bridge mod"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JW 243 149; JW 486 150; JW 576 611; JW 577 327; JW 576 614  # Play, Campaign, OK, Ground Zero, Launch; waits for sector-serpulo-170.msav (18694 B)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "kill $(pgrep -f Mindustry.jar); rm -f saves/*backup*; head -c 1024 /dev/zero > saves/sector-serpulo-170.msav; relaunch, Play -> Campaign -> Ground Zero"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "GC 270 149; GC 487 150; GC 577 327; GC 576 616  # Play, Campaign, Ground Zero, Go (25342 B base); run_exit_save writes 25395 B"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "godot_game stop; rm -f .../saves/sector-serpulo-170-backup.msav; head -c 1024 /dev/zero > .../saves/sector-serpulo-170.msav; godot_game play"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JW 577 327; JS 07-java-corrupt-gz-panel  # Ground Zero panel after the corrupt boot: Launch, no Under attack/Stats/Go"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "./runs/campaign-gaps/jx2.sh 'var p=Vars.content.sector(\"groundZero\"); var s=p.sector; JSON.stringify({save:s.save,slots:Vars.control.saves.getSaveSlots().size,hasSave:s.hasSave(),hasBase:s.hasBase(),infoHasCore:s.info.hasCore})' -> {\"save\":null,\"slots\":0,\"hasSave\":false,\"hasBase\":false,\"infoHasCore\":true}"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "# load-time catch: restore the 18694 B slot, boot, select GZ, overwrite the file with zeros, JW 576 614; JS 09-java-corrupt-toast; log SaveException at Saves.java:320 from Control.java:459, catch Control.java:555-561 -> slot deleted, sector replayed"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "GS 04-godot-corrupt-planet-page  # Ground Zero panel after the corrupt boot: Launch, no Under attack/Resources/Stats/Go"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); var r=JSON.parse_string(c.call(\"sector_record_json\",\"serpulo\",170)); var a=c.call(\"list_save_slots\"); return {\"hasSave\": r.hasSave, \"hasCore\": r.hasCore, \"n\": a.size()}"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "# load-time catch: corrupt the slot while the planet page is open, GC 576 616; GS 08-godot-corrupt-resume-toast; log: is unreadable -> was corrupt, slot deleted, fresh replay save 25391 B"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/campaign.rs:296-303 sets sector.save from NativeFs.exists(sector file); gx/sim_host.rs:3475-3545 load_sector_world falls through to generate_sector on an undecodable file and stocks the stale record into the fresh core; mc/io/save/slot.rs:305-314 hides the file from Saves.slots. Java SaveIO.isSaveValid filters Saves.load and Control.java:555-561 catches SaveException (sector.save=null, slot.delete, @save.corrupted, replay).",
+      "source": "CAMPAIGN_GAPS.md#cg-save-06",
+      "similarity": 57.1,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0505/java/01-action.avif",
+          "parity/twin/PAR-0505/java/02-toast.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0505/godot/01-action.avif",
+          "parity/twin/PAR-0505/godot/02-toast.avif"
+        ]
+      },
+      "fix": "mc/game/saves.rs: sector_save_assignments + apply_sector_saves + slot_for_stem + forget_file port Saves.java:120-186 (meta association; only slots whose meta decoded, main or backup). gx/campaign.rs boot associates from Saves.slots instead of NativeFs.exists; prime_sector_load primes the associated file on the host; start_sector handles the load-time SaveException (clear sector.save, delete slot + backup, show @save.corrupted, replay fresh). gx/sim_host.rs load_sector_world resumes the primed file, falls back to the -backup file, and flags an undecodable slot via corrupt_sector_save. Tests: renamed_sector_save_attaches_by_meta, corrupt_sector_save_never_attaches_as_a_base, forget_file_removes_slot_and_fixes_current, listing_uses_backup_fallback_like_java.",
+      "evidence": [
+        "runs/PAR-0505/20261106-193301-run.md",
+        "runs/PAR-0505/20261106-193301-godot-evidence.txt",
+        "runs/PAR-0505/20261106-193301-java-evidence.txt",
+        "runs/PAR-0505/diff/01-action.json",
+        "runs/PAR-0505/diff/02-toast.json"
+      ]
+    },
+    "PAR-0506": {
+      "title": "CG-SAVE-05: sector saves are attached by canonical filename only",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cp saves/sector-serpulo-170.msav saves/mybase.msav; rm -f saves/sector-serpulo-170.msav saves/*backup*  # rename in a running client, then restart it"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JW 243 149; JW 486 150; JW 577 327  # Play, Campaign, Ground Zero -> panel shows Under attack/Stats/Go"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cp .../saves/sector-serpulo-170.msav .../saves/mybase.msav; rm -f .../saves/sector-serpulo-170.msav .../saves/*backup*; godot_game play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "GC 270 149; GC 487 150; GC 577 327  # Play, Campaign, Ground Zero -> panel shows Go"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JS 01-java-renamed-go-panel; ./runs/campaign-gaps/jx2.sh 'var p=Vars.content.sector(\"groundZero\"); var s=p.sector; JSON.stringify({save:s.save.file.name(),slots:Vars.control.saves.getSaveSlots().size,hasSave:s.hasSave(),hasBase:s.hasBase()})' -> {\"save\":\"mybase.msav\",\"slots\":1,\"hasSave\":true,\"hasBase\":true}"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JW 576 614; JS 02-java-renamed-resumed; jx2.sh 'JSON.stringify({playing:Vars.state.isGame(),sector:Vars.state.rules.sector.id,cores:Vars.player.team().cores().size,save:Vars.content.sector(\"groundZero\").sector.save.file.name()})' -> {\"playing\":true,\"sector\":170,\"cores\":1,\"save\":\"mybase.msav\"}"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "GS 01-godot-renamed-go-panel  # Ground Zero panel with the only save file named mybase.msav: Go"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); var r=JSON.parse_string(c.call(\"sector_record_json\",\"serpulo\",170)); var a=c.call(\"list_save_slots\"); return {\"hasSave\": r.hasSave, \"hasCore\": r.hasCore, \"n\": a.size(), \"file\": str(a[0][\"file\"])}"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "GC 576 616; GS 02-godot-renamed-resumed  # log: load_sector: resuming serpulo:170 from .../saves/mybase.msav; start_sector branch resume=true"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "gx/campaign.rs:296-303 derives sector.save from NativeFs.exists(paths.sector_save(planet,id)); mc/game/saves.rs:149-223 assign_sector_saves only plans remaps and never sets sector.save. Java Saves.java:120-186 associates from save meta, so a copy under another name still resumes.",
+      "source": "CAMPAIGN_GAPS.md#cg-save-05",
+      "similarity": 56.3,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0506/java/01-action.avif",
+          "parity/twin/PAR-0506/java/02-resumed.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0506/godot/01-action.avif",
+          "parity/twin/PAR-0506/godot/02-resumed.avif"
+        ]
+      },
+      "fix": "mc/game/saves.rs: Saves::sector_save_assignments derives the sector from meta.rules.sector (Saves.java:120-186) and apply_sector_saves stores the backing slot stem on Sector.save; Saves::slot_for_stem resolves it back to the file. gx/campaign.rs boot uses the assignments instead of NativeFs.exists(paths.sector_save(planet,id)); prime_sector_load primes the actual associated file on the host; the resume bookkeeping uses it so a resumed renamed slot keeps writing its own file. gx/sim_host.rs load_sector_world resumes the primed file. Tests: renamed_sector_save_attaches_by_meta (canonical deleted, mybase.msav attaches and resolves), corrupt_sector_save_never_attaches_as_a_base.",
+      "evidence": [
+        "runs/PAR-0506/20261106-193301-run.md",
+        "runs/PAR-0506/20261106-193301-godot-evidence.txt",
+        "runs/PAR-0506/20261106-193301-java-evidence.txt",
+        "runs/PAR-0506/diff/01-action.json",
+        "runs/PAR-0506/diff/02-resumed.json"
       ]
     }
   },

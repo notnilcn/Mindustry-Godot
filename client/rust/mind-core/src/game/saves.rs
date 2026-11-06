@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use super::State;
 use crate::content::{ContentRegistry, PlanetId};
+use crate::game::universe::Campaign;
 use crate::io::IoError;
 use crate::io::fs::{FileSystem, Paths, SAVE_EXTENSION};
 use crate::io::json::content_serde::SectorKey;
@@ -75,6 +76,25 @@ impl MissingModsReport {
     pub fn is_empty(&self) -> bool {
         self.missing.is_empty()
     }
+}
+
+/// One sector↔save-slot association (`Saves.load`'s "automatically assign
+/// sector save slots" pass, `Saves.java:120-186`).
+///
+/// The association is derived from the save's **meta** (`meta.rules.sector`),
+/// never from the file name: a readable copy under any name still backs its
+/// sector, and an unreadable file is not listed as a slot at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectorSaveAssignment {
+    /// The planet whose sector the slot backs.
+    pub planet: PlanetId,
+    /// The sector index the slot backs (the remap target for a save that
+    /// still carries its pre-remap sector).
+    pub sector: u16,
+    /// The slot file.
+    pub file: PathBuf,
+    /// The slot's stem (`SaveSlot.index`), the value `Sector.save` stores.
+    pub stem: String,
 }
 
 /// Save-slot policy resource (`Saves`).
@@ -343,6 +363,65 @@ impl Saves {
         paths.sector_save(planet, id as u32)
     }
 
+    /// The listed slot whose stem is `stem` (`Sector.save`'s reference).
+    ///
+    /// `Sector.save` stores a slot *name*, not a path: resolving it through
+    /// the listed slots keeps a save that was copied under another name
+    /// attached to its sector (CG-SAVE-05).
+    pub fn slot_for_stem(&self, stem: &str) -> Option<&SaveSlot> {
+        self.slots.iter().find(|slot| slot.index() == stem)
+    }
+
+    /// `Saves.load`'s "automatically assign sector save slots" pass: every
+    /// listed slot whose **meta** names a sector backs that sector.
+    ///
+    /// Ported from `Saves.java:120-186`. Java walks the slots and sets
+    /// `sector.save = slot` (or `remapTarget.save = slot` for a slot that
+    /// still names its pre-remap sector); the file name plays no part, so a
+    /// copy under another name still resumes. [`Saves::slots`] only holds
+    /// slots whose meta decoded (main or backup, `SaveIO.isSaveValid`), so an
+    /// undecodable file can never manufacture a base (CG-SAVE-06).
+    pub fn sector_save_assignments(&self, registry: &ContentRegistry) -> Vec<SectorSaveAssignment> {
+        let mut out = Vec::new();
+        for slot in &self.slots {
+            let Some((planet, sector)) = sector_of_slot(registry, slot) else {
+                continue;
+            };
+            let preset_tag = slot
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.tags.get("sectorPreset").cloned());
+            let target =
+                plan_remap(registry, planet, sector, preset_tag.as_deref()).unwrap_or(sector);
+            out.push(SectorSaveAssignment {
+                planet,
+                sector: target,
+                file: slot.file.clone(),
+                stem: slot.index(),
+            });
+        }
+        out
+    }
+
+    /// Removes the slot backed by `file` from the list, fixing `current`
+    /// (`SaveSlot.delete`'s `saves.remove(this, true)` and its `current`
+    /// handling, `Saves.java:400-415`).
+    pub fn forget_file(&mut self, file: &Path) -> bool {
+        let Some(index) = self.slots.iter().position(|slot| slot.file == file) else {
+            return false;
+        };
+        self.slots.remove(index);
+        self.current = match self.current {
+            Some(current) if current == index => None,
+            Some(current) if current > index => Some(current - 1),
+            other => other,
+        };
+        if self.last_sector_save.as_deref() == Some(file) {
+            self.last_sector_save = None;
+        }
+        true
+    }
+
     /// `Saves.saveSector` slot bookkeeping without the world write: creates or
     /// reuses the sector's autosave slot, records `last-sector-save` and makes
     /// it `current` (`SaveSlot.save`'s `state.isGame()` branch; the live host
@@ -500,6 +579,42 @@ impl Saves {
     }
 }
 
+/// Applies [`Saves::sector_save_assignments`] to a campaign's sectors
+/// (`Saves.load`'s `sector.save = slot`): a readable slot's stem backs its
+/// sector and nothing else does.
+///
+/// Every sector's association is cleared first, so a slot that vanished (or
+/// no longer decodes) cannot leave a stale base behind. Returns the number of
+/// sectors that ended up with a base. A second slot for one sector wins, with
+/// Java's "two corresponding saves" warning (`Saves.java:161-163`).
+pub fn apply_sector_saves(campaign: &mut Campaign, assignments: &[SectorSaveAssignment]) -> usize {
+    for planet in campaign.planets.values_mut() {
+        for sector in &mut planet.sectors {
+            sector.save = None;
+        }
+    }
+    let mut applied = 0;
+    for assignment in assignments {
+        let planet_name = campaign
+            .planet(assignment.planet)
+            .map(|planet| planet.name.clone())
+            .unwrap_or_default();
+        let Some(sector) = campaign.sector_mut(assignment.planet, assignment.sector) else {
+            continue;
+        };
+        if let Some(existing) = sector.save.as_deref() {
+            log::warn!(
+                "Sector {planet_name}:{} has two corresponding saves: `{existing}` and `{}`",
+                assignment.sector,
+                assignment.stem
+            );
+        }
+        sector.save = Some(assignment.stem.clone());
+        applied += 1;
+    }
+    applied
+}
+
 /// `Saves.getNextSlotFile`: `saves/<n>.msav` for the first free `n`.
 pub fn get_next_slot_file(fs: &dyn FileSystem, paths: &Paths) -> PathBuf {
     let mut index = 0u32;
@@ -578,6 +693,7 @@ mod tests {
     use super::*;
     use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
     use crate::io::fs::MockFs;
+    use crate::io::save::SaveIo;
     use crate::io::save::versions::v1::base_meta_tags;
     use crate::io::{StringMap, WireReader, WireWriter};
 
@@ -991,5 +1107,137 @@ mod tests {
         }
         let mut reader = WireReader::new(&buf);
         assert!(reader.bool().unwrap());
+    }
+
+    /// CG-SAVE-05 (`Saves.java:120-186`): the sector a slot backs comes from
+    /// the save's **meta**, so a copy under a user name still resumes. The
+    /// canonical file is gone; only `mybase.msav` exists.
+    #[test]
+    fn renamed_sector_save_attaches_by_meta() {
+        use crate::game::planet::EmptyNeighborhood;
+
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let registry = registry();
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let ctx = meta_ctx(
+            r#"{"sector":"serpulo-170"}"#,
+            &[("sectorPreset", "groundZero")],
+        );
+        let canonical = paths.sector_save("serpulo", 170);
+        SaveSlot::new(canonical.clone())
+            .save(&fs, &paths, &ctx, &SaveOptions::new())
+            .unwrap();
+        let renamed = paths.saves().join("mybase.msav");
+        fs.copy(&canonical, &renamed).unwrap();
+        fs.delete(&canonical).unwrap();
+
+        saves.load(&fs, &paths, &registry, &mut settings);
+        assert_eq!(saves.slots.len(), 1, "the renamed copy is a readable slot");
+        let assignments = saves.sector_save_assignments(&registry);
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(
+            assignments[0].planet,
+            registry.planet_id("serpulo").unwrap()
+        );
+        assert_eq!(assignments[0].sector, 170);
+        assert_eq!(assignments[0].stem, "mybase");
+        assert_eq!(assignments[0].file, renamed);
+        assert_eq!(
+            saves.slot_for_stem("mybase").map(|slot| slot.file.clone()),
+            Some(renamed.clone()),
+            "`Sector.save`'s stem resolves back to the renamed file"
+        );
+
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        assert_eq!(apply_sector_saves(&mut campaign, &assignments), 1);
+        let sector = campaign
+            .sector(registry.planet_id("serpulo").unwrap(), 170)
+            .unwrap();
+        assert_eq!(sector.save.as_deref(), Some("mybase"));
+        assert!(sector.has_save());
+    }
+
+    /// CG-SAVE-06: a sector file whose meta no longer decodes is not a slot
+    /// (`SaveIO.isSaveValid`), so it cannot manufacture a base — even when the
+    /// stored record still says one existed. The association pass clears the
+    /// stale value instead of stocking the record into a fresh core.
+    #[test]
+    fn corrupt_sector_save_never_attaches_as_a_base() {
+        use crate::game::planet::EmptyNeighborhood;
+
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let registry = registry();
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let ctx = meta_ctx(
+            r#"{"sector":"serpulo-170"}"#,
+            &[("sectorPreset", "groundZero")],
+        );
+        let canonical = paths.sector_save("serpulo", 170);
+        SaveSlot::new(canonical.clone())
+            .save(&fs, &paths, &ctx, &SaveOptions::new())
+            .unwrap();
+        let backup = SaveIo::backup_file_for(&canonical);
+        let _ = fs.delete(&backup);
+        // A torn write: 1 KB of zero bytes and no backup to fall back to.
+        fs.write(&canonical, &[0u8; 1024]).unwrap();
+        assert!(!SaveIo::is_save_valid(&fs, &canonical));
+
+        saves.load(&fs, &paths, &registry, &mut settings);
+        assert!(saves.slots.is_empty(), "unreadable files are not slots");
+        assert!(saves.sector_save_assignments(&registry).is_empty());
+
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = registry.planet_id("serpulo").unwrap();
+        {
+            // The settings record survived the corruption (Java keeps it too);
+            // only the slot is gone.
+            let record = campaign.sector_mut(serpulo, 170).unwrap();
+            record.save = Some("sector-serpulo-170".to_owned());
+            record.info.info.has_core = true;
+        }
+        assert_eq!(apply_sector_saves(&mut campaign, &[]), 0);
+        let sector = campaign.sector(serpulo, 170).unwrap();
+        assert!(sector.save.is_none(), "the stale association is cleared");
+        assert!(!sector.has_save());
+        assert!(!sector.has_base(), "no base without a readable save");
+    }
+
+    /// `SaveSlot.delete` removes the list entry and clears `current` when it is
+    /// the deleted slot (`Saves.java:400-415`); the corrupt-resume path uses
+    /// the same bookkeeping.
+    #[test]
+    fn forget_file_removes_slot_and_fixes_current() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let ctx = WriteContext::meta_only(base_meta_tags(8, 8, 1, "a"));
+        let mut indexes = Vec::new();
+        for slot in 0..3 {
+            indexes.push(
+                saves
+                    .add_save(
+                        &fs,
+                        &paths,
+                        &mut settings,
+                        &format!("s{slot}"),
+                        &ctx,
+                        &SaveOptions::new(),
+                    )
+                    .unwrap(),
+            );
+        }
+        saves.current = Some(indexes[1]);
+        assert!(saves.forget_file(&paths.save_slot(0)));
+        assert_eq!(saves.slots.len(), 2);
+        assert_eq!(saves.current, Some(0), "the current index shifts down");
+        saves.current = Some(0);
+        assert!(saves.forget_file(&paths.save_slot(1)));
+        assert_eq!(saves.current, None, "deleting the current slot clears it");
+        assert!(!saves.forget_file(&PathBuf::from("/data/saves/nope.msav")));
     }
 }

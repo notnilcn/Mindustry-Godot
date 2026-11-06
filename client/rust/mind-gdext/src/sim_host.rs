@@ -576,6 +576,18 @@ pub struct MindSimHost {
     /// `MindCampaign.prime_sector_load` primes this before `load_sector`;
     /// `load_sector_world` falls back to `game::planet::static_gen_extras`.
     pending_gen_extras: Option<(String, u16, mind_core::maps::planet::SectorGenExtras)>,
+    /// Resume source for the next `load_sector` (`Control.playSector`'s
+    /// `sector.save` slot): the file `MindCampaign.prime_sector_load` resolved
+    /// from the meta association, or an empty path for "no base here".
+    /// `None` (never primed) keeps the canonical
+    /// `saves/sector-<planet>-<id>.msav` fallback for direct host calls
+    /// (CG-SAVE-05).
+    pending_sector_save: Option<String>,
+    /// The resume file the last `load_sector` was asked to load but could not
+    /// decode (`Control.playSector`'s `SaveException` catch): the campaign
+    /// clears the association, deletes the slot and reports
+    /// `@save.corrupted` instead of resuming a regenerated world (CG-SAVE-06).
+    corrupt_sector_save: Option<String>,
     /// Launch payload for the next generated sector (H05 T4): schematic index
     /// (`-1` = planet default) and launch-resource stacks JSON.
     pending_launch: Option<(i32, String)>,
@@ -633,6 +645,8 @@ impl INode for MindSimHost {
             sector_resume: None,
             last_limit_area: None,
             pending_gen_extras: None,
+            pending_sector_save: None,
+            corrupt_sector_save: None,
             pending_launch: None,
             pending_launch_core: None,
             generated_loadout_placed: false,
@@ -3234,6 +3248,26 @@ impl MindSimHost {
         self.pending_gen_extras = Some((planet.to_owned(), sector as u16, extras));
     }
 
+    /// Sets the resume source for the next `load_sector` (Rust-only; called by
+    /// `MindCampaign.prime_sector_load`). The campaign resolves it from the
+    /// sector's meta-derived save association, so a save copied under another
+    /// name is still the resume source (`Control.playSector` loads
+    /// `sector.save`, `Control.java:450-456`); an empty path means "no
+    /// associated save, so this is a fresh launch" (CG-SAVE-05). The host only
+    /// falls back to the canonical `saves/sector-<planet>-<id>.msav` when it
+    /// was never primed (a direct host call).
+    pub fn set_sector_resume_file(&mut self, path: GString) {
+        self.pending_sector_save = Some(path.to_string());
+    }
+
+    /// Takes the resume file the last `load_sector` could not decode
+    /// (`Control.playSector`'s `catch(SaveException)`, `Control.java:555-561`):
+    /// the campaign clears the sector's save association, deletes the slot and
+    /// reports `@save.corrupted` (CG-SAVE-06).
+    pub fn take_corrupt_sector_save(&mut self) -> Option<String> {
+        self.corrupt_sector_save.take()
+    }
+
     /// Sets the launch loadout the next generated sector places
     /// (`Control.playNewSector`/`Universe.getLastLoadout`; H05 T4).
     /// `schematic_index = -1` = planet default (free launch); `stacks_json` is
@@ -3369,6 +3403,8 @@ impl MindSimHost {
         self.sim.ecs.0.remove_resource::<CampaignRuntime>();
         // Resume metadata is per load; clear before this load decides.
         self.sector_resume = None;
+        // A non-sector load cannot report a corrupt sector slot.
+        self.corrupt_sector_save = None;
         // The loadout placement flag is per load (H05 T4).
         self.generated_loadout_placed = false;
         let Some(mut registry) = self.content_snapshot.take() else {
@@ -3472,14 +3508,55 @@ impl MindSimHost {
             log::warn!("load_sector: content registry unavailable");
             return false;
         };
-        // `Control.playSector`: an existing sector save is the resume source.
-        let save_path = sector_save_path(planet_name, sector as u16);
-        let resume_file = use_save && std::path::Path::new(&save_path).is_file();
-        let loaded = if resume_file {
-            log::info!("load_sector: resuming `{planet_name}:{sector}` from `{save_path}`");
-            load_grid_file(&save_path, &mut registry)
-        } else if let Some(preset_path) =
-            resolve_preset_map_path(planet_name, sector as u16, &registry)
+        // `Control.playSector`: the save slot the campaign associated with this
+        // sector is the resume source. `MindCampaign.prime_sector_load` primes
+        // the exact file (meta association, so a renamed copy works —
+        // CG-SAVE-05) or an empty path for "no base here"; `sector_save_path`
+        // is the canonical fallback for a direct host call that never primed.
+        let resume_path = match self.pending_sector_save.take() {
+            Some(path) => path,
+            None => sector_save_path(planet_name, sector as u16),
+        };
+        self.corrupt_sector_save = None;
+        let resume_file =
+            use_save && !resume_path.is_empty() && std::path::Path::new(&resume_path).is_file();
+        let mut resumed = false;
+        let mut loaded = None;
+        if resume_file {
+            log::info!("load_sector: resuming `{planet_name}:{sector}` from `{resume_path}`");
+            loaded = load_grid_file(&resume_path, &mut registry);
+            if loaded.is_none() {
+                // `SaveIO.load(Fi)`'s backup fallback (`SaveIO.java:147-160`):
+                // a torn primary save with a readable `-backup` still resumes.
+                let backup =
+                    mind_core::io::SaveIo::backup_file_for(std::path::Path::new(&resume_path));
+                if backup.is_file() {
+                    log::warn!(
+                        "load_sector: `{resume_path}` failed to decode; trying backup `{}`",
+                        backup.display()
+                    );
+                    loaded = load_grid_file(backup.to_string_lossy().as_ref(), &mut registry);
+                }
+            }
+            resumed = loaded.is_some();
+            if !resumed {
+                // `Control.playSector`'s `catch(SaveException)`
+                // (`Control.java:555-561`): the slot was readable when the
+                // saves were listed but no longer decodes and has no readable
+                // backup. Hand it to the campaign (clear association, delete
+                // slot, `@save.corrupted`) and fall through to a fresh world
+                // like Java's replay — never resume a regenerated world under
+                // the stale record (CG-SAVE-06).
+                log::error!(
+                    "load_sector: `{planet_name}:{sector}` save `{resume_path}` is unreadable; \
+                     replaying the sector fresh (`@save.corrupted`)"
+                );
+                self.corrupt_sector_save = Some(resume_path.clone());
+            }
+        }
+        if loaded.is_none()
+            && let Some(preset_path) =
+                resolve_preset_map_path(planet_name, sector as u16, &registry)
         {
             // `World.loadSector` -> `sector.preset.generator.generate` ->
             // `SaveIO.load(map.file, world.new FilterContext(map))`
@@ -3489,7 +3566,7 @@ impl MindSimHost {
             // map load. Java's `filter.randomize()` draws from the global rand;
             // the port draws a recorded seed per load (`map_gen_seed`).
             let seed = self.next_map_gen_seed();
-            let loaded = load_map_grid_file(&preset_path, &mut registry, seed);
+            loaded = load_map_grid_file(&preset_path, &mut registry, seed);
             if let Some(loaded) = loaded.as_ref() {
                 log::info!(
                     "load_sector: loaded preset map `{preset_path}` ({}x{}, gen seed {seed})",
@@ -3497,11 +3574,7 @@ impl MindSimHost {
                     loaded.grid.tiles.height
                 );
             }
-            loaded
-        } else {
-            // No preset map: planet sectors fall back to the planet generator.
-            None
-        };
+        }
         let generated_sector = if loaded.is_none() {
             // H05 T2: the campaign primes the live threat/enemy-base flags;
             // the static fallback reproduces `updateBaseCoverage` for an
@@ -3558,9 +3631,9 @@ impl MindSimHost {
             },
         };
         // A resume save only counts when the save file supplied the world (a
-        // failed decode falls back to the generator; a preset map is not a
-        // resume).
-        let resume_from_save = resume_file && loaded.save.is_some();
+        // failed decode reports `corrupt_sector_save` and loads the preset map
+        // or generator instead; a preset map is not a resume).
+        let resume_from_save = resumed && loaded.save.is_some();
         // H05 T3: a generated sector is bounded by its projected polygon
         // (`World.getDarkness` sector term, `World.java:505-529`); presets and
         // saves of preset sectors keep the square map. A resumed generated

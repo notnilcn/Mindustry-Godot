@@ -25,7 +25,7 @@ use crate::world::block::BlockTable;
 use crate::world::config::ConfigValue;
 use crate::world::modules::ItemModule;
 
-use super::storage_block::{StorageBuild, incinerate_effect};
+use super::storage_block::{StorageBuild, emit_core_burn_at, incinerate_effect};
 
 /// Campaign/core policy hooks owned by plan 12 (`Rules`/`SectorInfo`).
 pub trait CoreCampaignHooks: Send + Sync {
@@ -157,25 +157,17 @@ fn incinerates(world: &World, e: Entity, item: ItemId) -> bool {
         .unwrap_or(true)
 }
 
-/// `Fx.coreBurn.at(x, y)` (`CoreBlock.java:797`, view-only) through the live
-/// unit runtime's FX sink.
+/// `Fx.coreBurn.at(x, y)` (`CoreBlock.java:797`, view-only): the core's own
+/// centre (the `handleStack` player-offload burn; no chance roll in Java).
 fn emit_core_burn(world: &World, e: Entity) {
-    let Some(fx) = world
-        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
-        .map(|runtime| runtime.fx.clone())
-    else {
-        return;
-    };
     let Some(building) = world.get::<crate::entities::comp::Building>(e) else {
         return;
     };
     let ts = crate::config::TILESIZE as f32;
-    fx.effect(
-        &crate::content::registries::fx_meta::EffectRef::Named(crate::content::EffectId::CORE_BURN),
+    emit_core_burn_at(
+        world,
         building.tile.x() as f32 * ts,
         building.tile.y() as f32 * ts,
-        0.0,
-        crate::content::Rgba::WHITE,
     );
 }
 
