@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 use crate::io::json::objectives::{
     BuildCountObjective, CoreItemObjective, DestroyBlockObjective, DestroyBlocksObjective,
     DestroyUnitsObjective, FlagObjective, ItemObjective, MapObjective,
-    MapObjectives as ObjectiveData, TimerObjective, UnitCountObjective,
+    MapObjectives as ObjectiveData, Point2, TimerObjective, UnitCountObjective,
 };
 
 use super::rules::Rules;
@@ -74,6 +74,52 @@ pub trait ObjectiveLocale {
     /// `UnlockableContent.localizedName` for an item (`item.<name>.name`).
     fn item_name(&self, item: &str) -> String {
         item.to_owned()
+    }
+    /// `UnlockableContent.localizedName` for any content kind — blocks and
+    /// units behind `block.<name>.name` / `unit.<name>.name`, items behind
+    /// [`Self::item_name`] (`Content.localizedName`, resolved by the host's
+    /// typed bundle lookup).
+    fn content_name(&self, name: &str) -> String {
+        name.to_owned()
+    }
+    /// `UnlockableContent.emoji() + " "` — the content-icon token the
+    /// `objective.*` bundle keys place before the localized name. The client
+    /// renders `:name:` through `UI.formatIcons`; a headless locale keeps the
+    /// literal token (upstream `emoji()` is the icon-font glyph).
+    fn content_emoji(&self, name: &str) -> String {
+        format!(":{name}: ")
+    }
+    /// `state.stats.placedBlockCount.get(block, 0)` — `BuildCountObjective`
+    /// shows `count - placed` (`MapObjectives.java:442-444`).
+    fn placed_block_count(&self, _block: &str) -> i32 {
+        0
+    }
+    /// `state.rules.defaultTeam.data().countType(unit)` — `UnitCountObjective`
+    /// shows `count - countType` (`MapObjectives.java:470-472`).
+    fn unit_count(&self, _unit: &str) -> i32 {
+        0
+    }
+    /// `state.stats.enemyUnitsDestroyed` — `DestroyUnitsObjective` shows
+    /// `count - destroyed` (`MapObjectives.java:501`).
+    fn enemy_units_destroyed(&self) -> i32 {
+        0
+    }
+    /// `DestroyBlocksObjective.progress()` — destroyed/missing positions
+    /// (`MapObjectives.java:646-648`). `index` is the objective's executor
+    /// index so a host can key a precomputed progress map.
+    fn destroy_blocks_progress(
+        &self,
+        _index: usize,
+        _positions: &[Point2],
+        _team: u8,
+        _block: &str,
+    ) -> i32 {
+        0
+    }
+    /// `state.rules.objectiveTimerMultiplier` — scales every `TimerObjective`
+    /// duration (`MapObjectives.java:516-518`).
+    fn timer_multiplier(&self) -> f32 {
+        1.0
     }
 }
 
@@ -241,6 +287,15 @@ impl MapObjectivesRuntime {
     /// not part of the persisted data).
     pub fn timer_countup(&self, index: usize) -> f32 {
         self.countup.get(index).copied().unwrap_or(0.0)
+    }
+
+    /// Overrides a timer's transient `countup` (the live HUD text path reads
+    /// the executor's own accumulator; a re-parsed rules copy only carries the
+    /// once-a-second persisted value).
+    pub fn set_timer_countup(&mut self, index: usize, countup: f32) {
+        if let Some(slot) = self.countup.get_mut(index) {
+            *slot = countup;
+        }
     }
 
     /// `MapObjective.qualified()`: not completed and all parents done.
@@ -416,9 +471,13 @@ impl MapObjectivesRuntime {
     }
 
     /// `Objective.text()` (`None` = fall back to the type name).
+    ///
+    /// Reads the transient `TimerObjective.countup` of `index` for the
+    /// remaining-time term; every other live counter comes from `locale`
+    /// (`state.stats`/`TeamData` hooks, `MapObjectives.java:377-548`).
     pub fn text(&self, index: usize, locale: &dyn ObjectiveLocale) -> Option<String> {
         let objective = self.data.all.get(index)?;
-        objective_text(objective, locale)
+        objective_text(index, objective, self.timer_countup(index), locale)
     }
 
     /// `Objective.details()`.
@@ -577,13 +636,39 @@ pub fn objective_type_key(class_tag: &str) -> String {
 }
 
 /// `Objective.text()` for every class, using the locale hooks.
-fn objective_text(objective: &MapObjective, locale: &dyn ObjectiveLocale) -> Option<String> {
+///
+/// Argument tuples/order mirror the `objective.*` bundle keys
+/// (`core/assets/bundles/bundle.properties:859-874`) and each Java `text()`:
+/// the content-icon token (`emoji() + " "`) precedes the localized name, and
+/// count-based classes show the **remaining** count, not the target.
+fn objective_text(
+    index: usize,
+    objective: &MapObjective,
+    countup: f32,
+    locale: &dyn ObjectiveLocale,
+) -> Option<String> {
     match objective {
         MapObjective::Research(o) => {
-            Some(locale.format("objective.research", &[o.content.as_deref().unwrap_or("")]))
+            let content = o.content.as_deref().unwrap_or("");
+            // `ResearchObjective.text()` (`MapObjectives.java:350-352`).
+            Some(locale.format(
+                "objective.research",
+                &[
+                    &locale.content_emoji(content),
+                    &locale.content_name(content),
+                ],
+            ))
         }
         MapObjective::Produce(o) => {
-            Some(locale.format("objective.produce", &[o.content.as_deref().unwrap_or("")]))
+            let content = o.content.as_deref().unwrap_or("");
+            // `ProduceObjective.text()` (`MapObjectives.java:338-340`).
+            Some(locale.format(
+                "objective.produce",
+                &[
+                    &locale.content_emoji(content),
+                    &locale.content_name(content),
+                ],
+            ))
         }
         MapObjective::Item(o) => {
             let item = o.item.as_deref().unwrap_or("");
@@ -596,7 +681,7 @@ fn objective_text(objective: &MapObjective, locale: &dyn ObjectiveLocale) -> Opt
                 &[
                     &locale.item_count(item).to_string(),
                     &o.amount.to_string(),
-                    &format!(":{}: ", item),
+                    &locale.content_emoji(item),
                     &locale.item_name(item),
                 ],
             ))
@@ -611,47 +696,84 @@ fn objective_text(objective: &MapObjective, locale: &dyn ObjectiveLocale) -> Opt
                 &[
                     &locale.core_item_count(item).to_string(),
                     &o.amount.to_string(),
-                    &format!(":{}: ", item),
+                    &locale.content_emoji(item),
                     &locale.item_name(item),
                 ],
             ))
         }
-        MapObjective::BuildCount(o) => Some(locale.format(
-            "objective.build",
-            &[o.block.as_deref().unwrap_or(""), &o.count.to_string()],
-        )),
-        MapObjective::UnitCount(o) => Some(locale.format(
-            "objective.buildunit",
-            &[o.unit.as_deref().unwrap_or(""), &o.count.to_string()],
-        )),
-        MapObjective::DestroyUnits(o) => {
-            Some(locale.format("objective.destroyunits", &[&o.count.to_string()]))
+        MapObjective::BuildCount(o) => {
+            let block = o.block.as_deref().unwrap_or("");
+            // `BuildCountObjective.text()` (`MapObjectives.java:442-444`):
+            // `count - placedBlockCount`, then `emoji() + " "`, then the name.
+            Some(locale.format(
+                "objective.build",
+                &[
+                    &(o.count - locale.placed_block_count(block)).to_string(),
+                    &locale.content_emoji(block),
+                    &locale.content_name(block),
+                ],
+            ))
         }
-        MapObjective::Timer(o) => timer_text(o, locale),
-        MapObjective::DestroyBlock(o) => Some(locale.format(
-            "objective.destroyblock",
-            &[o.block.as_deref().unwrap_or("")],
-        )),
-        MapObjective::DestroyBlocks(o) => Some(locale.format(
-            "objective.destroyblocks",
-            &[
-                o.block.as_deref().unwrap_or(""),
-                &o.positions.len().to_string(),
-            ],
-        )),
+        MapObjective::UnitCount(o) => {
+            let unit = o.unit.as_deref().unwrap_or("");
+            // `UnitCountObjective.text()` (`MapObjectives.java:470-472`).
+            Some(locale.format(
+                "objective.buildunit",
+                &[
+                    &(o.count - locale.unit_count(unit)).to_string(),
+                    &locale.content_emoji(unit),
+                    &locale.content_name(unit),
+                ],
+            ))
+        }
+        MapObjective::DestroyUnits(o) => {
+            // `DestroyUnitsObjective.text()` (`MapObjectives.java:501`).
+            Some(locale.format(
+                "objective.destroyunits",
+                &[&(o.count - locale.enemy_units_destroyed()).to_string()],
+            ))
+        }
+        MapObjective::Timer(o) => timer_text(o, countup, locale),
+        MapObjective::DestroyBlock(o) => {
+            let block = o.block.as_deref().unwrap_or("");
+            // `DestroyBlockObjective.text()` (`MapObjectives.java:590-592`).
+            Some(locale.format(
+                "objective.destroyblock",
+                &[&locale.content_emoji(block), &locale.content_name(block)],
+            ))
+        }
+        MapObjective::DestroyBlocks(o) => {
+            let block = o.block.as_deref().unwrap_or("");
+            // `DestroyBlocksObjective.text()` (`MapObjectives.java:646-648`):
+            // `progress()`, total positions, then `emoji() + " "` and the name.
+            Some(
+                locale.format(
+                    "objective.destroyblocks",
+                    &[
+                        &locale
+                            .destroy_blocks_progress(index, &o.positions, o.team, block)
+                            .to_string(),
+                        &o.positions.len().to_string(),
+                        &locale.content_emoji(block),
+                        &locale.content_name(block),
+                    ],
+                ),
+            )
+        }
         MapObjective::CommandMode(_) => Some(locale.get("objective.command")),
         MapObjective::Flag(o) => flag_text(o, locale),
         MapObjective::DestroyCore(_) => Some(locale.get("objective.destroycore")),
     }
 }
 
-/// `TimerObjective.text()` (exact minute/second formatting + locale lookup).
-fn timer_text(o: &TimerObjective, locale: &dyn ObjectiveLocale) -> Option<String> {
+/// `TimerObjective.text()` (`MapObjectives.java:540-576`): the remaining time
+/// is `(duration * objectiveTimerMultiplier - countup)` **ticks** converted to
+/// seconds (`/ 60f`, truncated), formatted `m:ss` (or bare `s` under a minute)
+/// and substituted into the localized template.
+fn timer_text(o: &TimerObjective, countup: f32, locale: &dyn ObjectiveLocale) -> Option<String> {
     let text = o.text.as_deref()?;
-    // `countup` is not available here; upstream shows remaining time using the
-    // live accumulator, which plan 14 reads through its own state. We format
-    // the full duration as the stable fallback (deterministic, UI-independent).
-    let seconds = o.duration.max(0.0) as i32;
+    let remaining = o.duration * locale.timer_multiplier() - countup;
+    let seconds = (remaining / 60.0) as i32;
     let m = seconds / 60;
     let s = seconds % 60;
     let time_string = if m > 0 {
@@ -1102,6 +1224,169 @@ mod tests {
         assert!(
             !text.contains("1643"),
             "CoreItem text must not read the stored count: {text}"
+        );
+    }
+
+    /// Locale with every live counter the `text()` argument wiring reads
+    /// (`state.stats`/`TeamData`); `format` joins the args so a test can assert
+    /// the exact tuple the bundle key receives.
+    struct LiveCountLocale {
+        placed: i32,
+        units: i32,
+        destroyed: i32,
+        blocks_progress: i32,
+        multiplier: f32,
+    }
+
+    impl ObjectiveLocale for LiveCountLocale {
+        fn fetch_text(&self, text: &str) -> String {
+            text.to_owned()
+        }
+        fn format(&self, key: &str, args: &[&str]) -> String {
+            format!("{key} {}", args.join(" "))
+        }
+        fn get(&self, key: &str) -> String {
+            key.to_owned()
+        }
+        fn content_name(&self, name: &str) -> String {
+            format!("{name}-name")
+        }
+        fn placed_block_count(&self, _block: &str) -> i32 {
+            self.placed
+        }
+        fn unit_count(&self, _unit: &str) -> i32 {
+            self.units
+        }
+        fn enemy_units_destroyed(&self) -> i32 {
+            self.destroyed
+        }
+        fn destroy_blocks_progress(
+            &self,
+            _index: usize,
+            _positions: &[Point2],
+            _team: u8,
+            _block: &str,
+        ) -> i32 {
+            self.blocks_progress
+        }
+        fn timer_multiplier(&self) -> f32 {
+            self.multiplier
+        }
+    }
+
+    fn live_locale() -> LiveCountLocale {
+        LiveCountLocale {
+            placed: 1,
+            units: 1,
+            destroyed: 2,
+            blocks_progress: 3,
+            multiplier: 1.0,
+        }
+    }
+
+    #[test]
+    fn build_and_unit_count_text_use_remaining_icon_and_name() {
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"BuildCount","block":"mechanical-drill","count":2},
+                {"class":"UnitCount","unit":"dagger","count":3}]"#,
+        ));
+        let locale = live_locale();
+        // `objective.build` = `[accent]Build: [][lightgray]{0}[]x\n{1}[lightgray]{2}`:
+        // remaining count, emoji+space, localized name (`MapObjectives.java:442`).
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.build 1 :mechanical-drill:  mechanical-drill-name"
+        );
+        assert_eq!(
+            runtime.text(1, &locale).unwrap(),
+            "objective.buildunit 2 :dagger:  dagger-name"
+        );
+    }
+
+    #[test]
+    fn research_produce_text_use_icon_and_name() {
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Research","content":"mechanical-drill"},
+                {"class":"Produce","content":"silicon"}]"#,
+        ));
+        let locale = live_locale();
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.research :mechanical-drill:  mechanical-drill-name"
+        );
+        assert_eq!(
+            runtime.text(1, &locale).unwrap(),
+            "objective.produce :silicon:  silicon-name"
+        );
+    }
+
+    #[test]
+    fn destroy_units_and_blocks_text_use_remaining_progress() {
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"DestroyUnits","count":5},
+                {"class":"DestroyBlocks","block":"copper-wall","team":2,
+                  "positions":[{"x":1,"y":2},{"x":3,"y":4},{"x":5,"y":6},{"x":7,"y":8}]},
+                {"class":"DestroyBlock","block":"router","pos":{"x":1,"y":2},"team":2}]"#,
+        ));
+        let locale = live_locale();
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.destroyunits 3"
+        );
+        // `objective.destroyblocks` = progress, total, emoji+space, name.
+        assert_eq!(
+            runtime.text(1, &locale).unwrap(),
+            "objective.destroyblocks 3 4 :copper-wall:  copper-wall-name"
+        );
+        assert_eq!(
+            runtime.text(2, &locale).unwrap(),
+            "objective.destroyblock :router:  router-name"
+        );
+    }
+
+    #[test]
+    fn timer_text_counts_down_in_seconds() {
+        // `duration` is **ticks** (3600 = 60 s), `countup` is the live
+        // accumulator restored from the persisted Timer field.
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Timer","text":"@objective.enemiesapproaching","duration":3600,"countup":0}]"#,
+        ));
+        let locale = live_locale();
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.enemiesapproaching 1:00"
+        );
+
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Timer","text":"@objective.enemiesapproaching","duration":3600,"countup":60}]"#,
+        ));
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.enemiesapproaching 59"
+        );
+
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Timer","text":"@objective.enemiesapproaching","duration":3600,"countup":61}]"#,
+        ));
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.enemiesapproaching 58"
+        );
+    }
+
+    #[test]
+    fn timer_text_applies_objective_timer_multiplier() {
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Timer","text":"@objective.enemyescalating","duration":3600,"countup":0}]"#,
+        ));
+        let locale = LiveCountLocale {
+            multiplier: 0.5,
+            ..live_locale()
+        };
+        // 3600 ticks * 0.5 = 30 s.
+        assert_eq!(
+            runtime.text(0, &locale).unwrap(),
+            "objective.enemyescalating 30"
         );
     }
 }

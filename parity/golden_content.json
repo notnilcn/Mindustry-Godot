@@ -18420,7 +18420,10 @@
               33000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead"
+          ]
         },
         {
           "path": "conveyor",
@@ -18433,7 +18436,9 @@
               5
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "junction",
@@ -18446,7 +18451,9 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "router",
@@ -18459,7 +18466,9 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "advanced-launch-pad",
@@ -18485,6 +18494,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:silicon",
+            "research:lead",
+            "research:titanium",
             "sector-complete:extractionOutpost"
           ]
         },
@@ -18507,7 +18520,11 @@
               3300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:titanium"
+          ]
         },
         {
           "path": "interplanetary-accelerator",
@@ -18541,6 +18558,13 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:silicon",
+            "research:thorium",
+            "research:titanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
+            "research:lead",
             "sector-complete:planetaryTerminal"
           ]
         },
@@ -18559,7 +18583,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "sorter",
@@ -18576,7 +18603,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "inverted-sorter",
@@ -18593,7 +18623,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "overflow-gate",
@@ -18610,7 +18643,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "underflow-gate",
@@ -18627,7 +18663,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "container",
@@ -18641,6 +18680,7 @@
             ]
           ],
           "objectives": [
+            "research:titanium",
             "sector-complete:biomassFacility"
           ]
         },
@@ -18659,7 +18699,10 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:silicon"
+          ]
         },
         {
           "path": "vault",
@@ -18677,6 +18720,8 @@
             ]
           ],
           "objectives": [
+            "research:titanium",
+            "research:thorium",
             "sector-complete:stainedMountains"
           ]
         },
@@ -18695,7 +18740,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "titanium-conveyor",
@@ -18717,6 +18765,9 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:titanium",
             "sector-complete:crateredBattleground"
           ]
         },
@@ -18744,6 +18795,10 @@
             ]
           ],
           "objectives": [
+            "research:titanium",
+            "research:silicon",
+            "research:lead",
+            "research:thorium",
             "sector-complete:tarFields"
           ]
         },
@@ -18770,7 +18825,12 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric",
+            "research:silicon",
+            "research:lead",
+            "research:graphite"
+          ]
         },
         {
           "path": "payload-conveyor",
@@ -18787,7 +18847,10 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:copper"
+          ]
         },
         {
           "path": "payload-router",
@@ -18804,7 +18867,10 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:copper"
+          ]
         },
         {
           "path": "plastanium-conveyor",
@@ -18825,7 +18891,11 @@
               80
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:plastanium",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "armored-conveyor",
@@ -18846,7 +18916,11 @@
               80
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:plastanium",
+            "research:thorium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "core-foundation",
@@ -18867,7 +18941,11 @@
               6400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "core-nucleus",
@@ -18892,7 +18970,12 @@
               21000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon",
+            "research:thorium"
+          ]
         },
         {
           "path": "mechanical-drill",
@@ -18905,7 +18988,9 @@
               10
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "mechanical-pump",
@@ -18922,7 +19007,10 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:metaglass"
+          ]
         },
         {
           "path": "conduit",
@@ -18935,7 +19023,9 @@
               80
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:metaglass"
+          ]
         },
         {
           "path": "liquid-junction",
@@ -18952,7 +19042,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:metaglass"
+          ]
         },
         {
           "path": "liquid-router",
@@ -18969,7 +19062,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:metaglass"
+          ]
         },
         {
           "path": "liquid-container",
@@ -18986,7 +19082,10 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "liquid-tank",
@@ -19003,7 +19102,10 @@
               1200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "bridge-conduit",
@@ -19020,7 +19122,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:metaglass"
+          ]
         },
         {
           "path": "pulse-conduit",
@@ -19038,6 +19143,8 @@
             ]
           ],
           "objectives": [
+            "research:titanium",
+            "research:metaglass",
             "sector-complete:windsweptIslands"
           ]
         },
@@ -19064,7 +19171,12 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric",
+            "research:silicon",
+            "research:metaglass",
+            "research:titanium"
+          ]
         },
         {
           "path": "plated-conduit",
@@ -19085,7 +19197,11 @@
               80
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:thorium",
+            "research:metaglass",
+            "research:plastanium"
+          ]
         },
         {
           "path": "rotary-pump",
@@ -19110,7 +19226,12 @@
               1000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:metaglass",
+            "research:silicon",
+            "research:titanium"
+          ]
         },
         {
           "path": "impulse-pump",
@@ -19139,7 +19260,13 @@
               1000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:metaglass",
+            "research:silicon",
+            "research:titanium",
+            "research:thorium"
+          ]
         },
         {
           "path": "graphite-press",
@@ -19156,7 +19283,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:coal"
+          ]
         },
         {
           "path": "pneumatic-drill",
@@ -19174,6 +19305,8 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:graphite",
             "sector-complete:frozenForest"
           ]
         },
@@ -19197,6 +19330,9 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon",
             "sector-complete:biomassFacility"
           ]
         },
@@ -19223,7 +19359,12 @@
               600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:silicon",
+            "research:titanium"
+          ]
         },
         {
           "path": "blast-drill",
@@ -19249,6 +19390,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:silicon",
+            "research:titanium",
+            "research:thorium",
             "sector-complete:nuclearComplex"
           ]
         },
@@ -19276,6 +19421,10 @@
             ]
           ],
           "objectives": [
+            "research:metaglass",
+            "research:graphite",
+            "research:lead",
+            "research:copper",
             "sector-complete:saltFlats"
           ]
         },
@@ -19306,7 +19455,14 @@
               2400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:lead",
+            "research:thorium",
+            "research:silicon",
+            "research:sand"
+          ]
         },
         {
           "path": "pyratite-mixer",
@@ -19324,6 +19480,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:coal",
+            "research:sand",
             "sector-complete:crateredBattleground"
           ]
         },
@@ -19343,6 +19503,10 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:titanium",
+            "research:pyratite",
+            "research:spore-pod",
             "sector-complete:facility32m"
           ]
         },
@@ -19362,6 +19526,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:coal",
+            "research:sand",
             "sector-complete:frozenForest"
           ]
         },
@@ -19380,7 +19548,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:spore-pod"
+          ]
         },
         {
           "path": "coal-centrifuge",
@@ -19401,7 +19573,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:graphite",
+            "research:lead"
+          ]
         },
         {
           "path": "multi-press",
@@ -19426,7 +19602,13 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:silicon",
+            "research:lead",
+            "research:graphite",
+            "research:coal"
+          ]
         },
         {
           "path": "silicon-crucible",
@@ -19451,7 +19633,15 @@
               1900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:metaglass",
+            "research:plastanium",
+            "research:silicon",
+            "research:coal",
+            "research:sand",
+            "research:pyratite"
+          ]
         },
         {
           "path": "plastanium-compressor",
@@ -19477,6 +19667,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:lead",
+            "research:graphite",
+            "research:titanium",
             "sector-complete:windsweptIslands"
           ]
         },
@@ -19500,6 +19694,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:lead",
+            "research:thorium",
+            "research:sand",
             "sector-complete:impact0078"
           ]
         },
@@ -19523,6 +19721,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:lead",
+            "research:sand",
             "on-sector:crateredBattleground"
           ]
         },
@@ -19541,7 +19743,11 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:scrap"
+          ]
         },
         {
           "path": "incinerator",
@@ -19558,7 +19764,10 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:lead"
+          ]
         },
         {
           "path": "melter",
@@ -19579,7 +19788,12 @@
               1400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:graphite",
+            "research:scrap"
+          ]
         },
         {
           "path": "surge-smelter",
@@ -19601,6 +19815,11 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:lead",
+            "research:thorium",
+            "research:copper",
+            "research:titanium",
             "sector-complete:coastline"
           ]
         },
@@ -19619,7 +19838,10 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:titanium"
+          ]
         },
         {
           "path": "disassembler",
@@ -19644,7 +19866,13 @@
               2600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:plastanium",
+            "research:titanium",
+            "research:silicon",
+            "research:thorium",
+            "research:scrap"
+          ]
         },
         {
           "path": "cryofluid-mixer",
@@ -19665,7 +19893,11 @@
               1900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:titanium"
+          ]
         },
         {
           "path": "micro-processor",
@@ -19686,7 +19918,11 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "switch",
@@ -19703,7 +19939,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:copper"
+          ]
         },
         {
           "path": "message",
@@ -19720,7 +19959,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:copper"
+          ]
         },
         {
           "path": "logic-display",
@@ -19741,7 +19983,11 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:metaglass"
+          ]
         },
         {
           "path": "large-logic-display",
@@ -19766,7 +20012,12 @@
               2400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:metaglass",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "tile-logic-display",
@@ -19791,7 +20042,12 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:metaglass",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "memory-cell",
@@ -19812,7 +20068,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:copper"
+          ]
         },
         {
           "path": "memory-bank",
@@ -19837,7 +20097,12 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:phase-fabric",
+            "research:copper"
+          ]
         },
         {
           "path": "logic-processor",
@@ -19862,7 +20127,12 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:graphite",
+            "research:thorium"
+          ]
         },
         {
           "path": "hyper-processor",
@@ -19887,7 +20157,12 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:thorium",
+            "research:surge-alloy"
+          ]
         },
         {
           "path": "illuminator",
@@ -19908,7 +20183,11 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:lead"
+          ]
         },
         {
           "path": "combustion-generator",
@@ -19926,6 +20205,8 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
             "research:coal"
           ]
         },
@@ -19944,7 +20225,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead"
+          ]
         },
         {
           "path": "power-node-large",
@@ -19965,7 +20249,11 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "diode",
@@ -19986,7 +20274,11 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:plastanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "surge-tower",
@@ -20011,7 +20303,12 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:lead",
+            "research:silicon",
+            "research:surge-alloy"
+          ]
         },
         {
           "path": "battery",
@@ -20028,7 +20325,10 @@
               600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead"
+          ]
         },
         {
           "path": "battery-large",
@@ -20049,7 +20349,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "mender",
@@ -20066,7 +20370,10 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "mend-projector",
@@ -20091,7 +20398,12 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:titanium",
+            "research:silicon",
+            "research:copper"
+          ]
         },
         {
           "path": "force-projector",
@@ -20113,6 +20425,9 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:titanium",
+            "research:silicon",
             "sector-complete:impact0078"
           ]
         },
@@ -20140,6 +20455,10 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:titanium",
+            "research:silicon",
+            "research:plastanium",
             "sector-complete:impact0078"
           ]
         },
@@ -20171,6 +20490,12 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:titanium",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "sector-complete:desolateRift"
           ]
         },
@@ -20193,7 +20518,11 @@
               600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:copper",
+            "research:silicon"
+          ]
         },
         {
           "path": "repair-turret",
@@ -20214,7 +20543,11 @@
               1900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:thorium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "steam-generator",
@@ -20240,6 +20573,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:lead",
+            "research:silicon",
             "sector-complete:crateredBattleground"
           ]
         },
@@ -20270,7 +20607,13 @@
               1200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:lead",
+            "research:silicon",
+            "research:metaglass"
+          ]
         },
         {
           "path": "differential-generator",
@@ -20299,7 +20642,14 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:titanium",
+            "research:lead",
+            "research:silicon",
+            "research:metaglass",
+            "research:pyratite"
+          ]
         },
         {
           "path": "thorium-reactor",
@@ -20329,6 +20679,11 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:graphite",
+            "research:thorium",
+            "research:metaglass",
             "research:cryofluid",
             "on-sector:nuclearComplex"
           ]
@@ -20364,7 +20719,15 @@
               9200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:graphite",
+            "research:thorium",
+            "research:surge-alloy",
+            "research:metaglass",
+            "research:blast-compound"
+          ]
         },
         {
           "path": "rtg-generator",
@@ -20393,7 +20756,13 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:phase-fabric",
+            "research:plastanium",
+            "research:thorium"
+          ]
         },
         {
           "path": "solar-panel",
@@ -20410,7 +20779,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "solar-panel-large",
@@ -20431,7 +20803,11 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "duo",
@@ -20444,7 +20820,9 @@
               50
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "copper-wall",
@@ -20457,7 +20835,9 @@
               20
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "copper-wall-large",
@@ -20470,7 +20850,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper"
+          ]
         },
         {
           "path": "scrap-wall",
@@ -20483,7 +20865,9 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:scrap"
+          ]
         },
         {
           "path": "scrap-wall-large",
@@ -20496,7 +20880,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:scrap"
+          ]
         },
         {
           "path": "scrap-wall-huge",
@@ -20509,7 +20895,9 @@
               1700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:scrap"
+          ]
         },
         {
           "path": "scrap-wall-gigantic",
@@ -20522,7 +20910,9 @@
               3200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:scrap"
+          ]
         },
         {
           "path": "titanium-wall",
@@ -20535,7 +20925,9 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium"
+          ]
         },
         {
           "path": "titanium-wall-large",
@@ -20548,7 +20940,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium"
+          ]
         },
         {
           "path": "door",
@@ -20565,7 +20959,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:silicon"
+          ]
         },
         {
           "path": "door-large",
@@ -20582,7 +20979,10 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:titanium",
+            "research:silicon"
+          ]
         },
         {
           "path": "plastanium-wall",
@@ -20599,7 +20999,10 @@
               100
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:plastanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "plastanium-wall-large",
@@ -20616,7 +21019,10 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:plastanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "thorium-wall",
@@ -20629,7 +21035,9 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:thorium"
+          ]
         },
         {
           "path": "thorium-wall-large",
@@ -20642,7 +21050,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:thorium"
+          ]
         },
         {
           "path": "surge-wall",
@@ -20655,7 +21065,9 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy"
+          ]
         },
         {
           "path": "surge-wall-large",
@@ -20668,7 +21080,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy"
+          ]
         },
         {
           "path": "phase-wall",
@@ -20681,7 +21095,9 @@
               200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "phase-wall-large",
@@ -20694,7 +21110,9 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "scatter",
@@ -20711,7 +21129,10 @@
               70
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead"
+          ]
         },
         {
           "path": "hail",
@@ -20729,6 +21150,8 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:graphite",
             "sector-complete:crateredBattleground"
           ]
         },
@@ -20751,7 +21174,11 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:titanium"
+          ]
         },
         {
           "path": "swarmer",
@@ -20776,7 +21203,12 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:titanium",
+            "research:plastanium",
+            "research:silicon"
+          ]
         },
         {
           "path": "cyclone",
@@ -20797,7 +21229,11 @@
               2600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "spectre",
@@ -20827,6 +21263,11 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:surge-alloy",
+            "research:plastanium",
+            "research:thorium",
             "sector-complete:nuclearComplex"
           ]
         },
@@ -20849,7 +21290,11 @@
               1900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:titanium"
+          ]
         },
         {
           "path": "fuse",
@@ -20870,7 +21315,11 @@
               3300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite",
+            "research:thorium"
+          ]
         },
         {
           "path": "arc",
@@ -20888,6 +21337,8 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
             "on-sector:frozenForest"
           ]
         },
@@ -20906,7 +21357,10 @@
               600
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:graphite"
+          ]
         },
         {
           "path": "wave",
@@ -20927,7 +21381,11 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:metaglass",
+            "research:lead",
+            "research:copper"
+          ]
         },
         {
           "path": "parallax",
@@ -20948,7 +21406,11 @@
               1500
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:titanium",
+            "research:graphite"
+          ]
         },
         {
           "path": "segment",
@@ -20973,7 +21435,12 @@
               1200
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:thorium",
+            "research:phase-fabric",
+            "research:titanium"
+          ]
         },
         {
           "path": "tsunami",
@@ -20999,6 +21466,10 @@
             ]
           ],
           "objectives": [
+            "research:metaglass",
+            "research:lead",
+            "research:titanium",
+            "research:thorium",
             "sector-complete:navalFortress"
           ]
         },
@@ -21025,7 +21496,12 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon",
+            "research:titanium"
+          ]
         },
         {
           "path": "meltdown",
@@ -21054,7 +21530,13 @@
               12000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:graphite",
+            "research:surge-alloy",
+            "research:silicon"
+          ]
         },
         {
           "path": "foreshadow",
@@ -21083,7 +21565,13 @@
               24000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:metaglass",
+            "research:surge-alloy",
+            "research:plastanium",
+            "research:silicon"
+          ]
         },
         {
           "path": "shock-mine",
@@ -21100,7 +21588,10 @@
               300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "ground-factory",
@@ -21121,7 +21612,11 @@
               1300
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "dagger",
@@ -21138,7 +21633,10 @@
               5
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:lead"
+          ]
         },
         {
           "path": "mace",
@@ -21155,7 +21653,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "fortress",
@@ -21176,7 +21678,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "scepter",
@@ -21197,7 +21704,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "reign",
@@ -21223,6 +21735,11 @@
             ]
           ],
           "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "sector-complete:desolateRift"
           ]
         },
@@ -21246,6 +21763,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:lead",
+            "research:titanium",
             "sector-complete:fungalPass"
           ]
         },
@@ -21264,7 +21784,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "quasar",
@@ -21285,7 +21809,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "vela",
@@ -21306,7 +21835,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "corvus",
@@ -21331,7 +21865,13 @@
               17000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "crawler",
@@ -21348,7 +21888,10 @@
               400
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:coal"
+          ]
         },
         {
           "path": "atrax",
@@ -21365,7 +21908,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "spiroct",
@@ -21386,7 +21933,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "arkyid",
@@ -21407,7 +21959,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "toxopid",
@@ -21433,6 +21990,11 @@
             ]
           ],
           "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "sector-complete:mycelialBastion"
           ]
         },
@@ -21455,7 +22017,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon"
+          ]
         },
         {
           "path": "flare",
@@ -21468,7 +22034,9 @@
               7
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon"
+          ]
         },
         {
           "path": "horizon",
@@ -21485,7 +22053,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "zenith",
@@ -21506,7 +22078,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "antumbra",
@@ -21527,7 +22104,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "eclipse",
@@ -21552,7 +22134,13 @@
               17000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "mono",
@@ -21569,7 +22157,10 @@
               700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:lead"
+          ]
         },
         {
           "path": "poly",
@@ -21586,7 +22177,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "mega",
@@ -21607,7 +22202,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "quad",
@@ -21628,7 +22228,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "oct",
@@ -21653,7 +22258,13 @@
               17000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric"
+          ]
         },
         {
           "path": "naval-factory",
@@ -21675,6 +22286,9 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:metaglass",
             "sector-complete:ruinousShores"
           ]
         },
@@ -21693,7 +22307,10 @@
               1700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:metaglass"
+          ]
         },
         {
           "path": "minke",
@@ -21710,7 +22327,11 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite"
+          ]
         },
         {
           "path": "bryde",
@@ -21731,7 +22352,12 @@
               2000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass"
+          ]
         },
         {
           "path": "sei",
@@ -21752,7 +22378,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "omura",
@@ -21778,6 +22409,11 @@
             ]
           ],
           "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "sector-complete:littoralShipyard"
           ]
         },
@@ -21797,6 +22433,8 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:titanium",
             "sector-complete:windsweptIslands"
           ]
         },
@@ -21816,6 +22454,9 @@
             ]
           ],
           "objectives": [
+            "research:additive-reconstructor",
+            "research:silicon",
+            "research:graphite",
             "sector-complete:coastline"
           ]
         },
@@ -21839,6 +22480,10 @@
             ]
           ],
           "objectives": [
+            "research:multiplicative-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:metaglass",
             "sector-complete:perilousHarbor"
           ]
         },
@@ -21861,7 +22506,12 @@
               32000
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:exponential-reconstructor",
+            "research:silicon",
+            "research:titanium",
+            "research:plastanium"
+          ]
         },
         {
           "path": "navanax",
@@ -21887,6 +22537,11 @@
             ]
           ],
           "objectives": [
+            "research:tetrative-reconstructor",
+            "research:silicon",
+            "research:plastanium",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "sector-complete:navalFortress"
           ]
         },
@@ -21910,6 +22565,10 @@
             ]
           ],
           "objectives": [
+            "research:copper",
+            "research:lead",
+            "research:silicon",
+            "research:graphite",
             "sector-complete:fungalPass"
           ]
         },
@@ -21937,6 +22596,11 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:titanium",
+            "research:thorium",
+            "research:metaglass",
             "sector-complete:frontier"
           ]
         },
@@ -21972,6 +22636,12 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:titanium",
+            "research:thorium",
+            "research:plastanium",
+            "research:phase-fabric",
             "sector-complete:overgrowth"
           ]
         },
@@ -22007,6 +22677,12 @@
             ]
           ],
           "objectives": [
+            "research:lead",
+            "research:silicon",
+            "research:thorium",
+            "research:plastanium",
+            "research:phase-fabric",
+            "research:surge-alloy",
             "sector-complete:mycelialBastion"
           ]
         },
@@ -22646,7 +23322,11 @@
               2070
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:beryllium"
+          ]
         },
         {
           "path": "duct",
@@ -22660,6 +23340,7 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
             "on-planet:1"
           ]
         },
@@ -22674,7 +23355,9 @@
               27
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "duct-bridge",
@@ -22687,7 +23370,9 @@
               90
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "armored-duct",
@@ -22704,7 +23389,10 @@
               90
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium",
+            "research:tungsten"
+          ]
         },
         {
           "path": "surge-conveyor",
@@ -22721,7 +23409,10 @@
               72
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy",
+            "research:tungsten"
+          ]
         },
         {
           "path": "surge-router",
@@ -22738,7 +23429,10 @@
               72
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy",
+            "research:tungsten"
+          ]
         },
         {
           "path": "unit-cargo-loader",
@@ -22759,7 +23453,11 @@
               27
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:surge-alloy",
+            "research:oxide"
+          ]
         },
         {
           "path": "unit-cargo-unload-point",
@@ -22776,7 +23474,10 @@
               18
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "overflow-duct",
@@ -22794,6 +23495,8 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:beryllium",
             "on-sector:aegis"
           ]
         },
@@ -22812,7 +23515,10 @@
               270
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-container",
@@ -22829,7 +23535,10 @@
               1080
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten",
+            "research:graphite"
+          ]
         },
         {
           "path": "duct-unloader",
@@ -22850,7 +23559,11 @@
               270
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "reinforced-vault",
@@ -22871,7 +23584,11 @@
               2970
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten",
+            "research:thorium",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-message",
@@ -22889,6 +23606,8 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:beryllium",
             "on-sector:aegis"
           ]
         },
@@ -22907,7 +23626,10 @@
               270
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:beryllium"
+          ]
         },
         {
           "path": "large-canvas",
@@ -22928,7 +23650,11 @@
               90
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:surge-alloy"
+          ]
         },
         {
           "path": "reinforced-payload-conveyor",
@@ -22942,6 +23668,7 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
             "on-sector:atlas"
           ]
         },
@@ -22965,6 +23692,9 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:silicon",
+            "research:graphite",
             "research:silicon-arc-furnace",
             "on-sector:split"
           ]
@@ -22988,7 +23718,11 @@
               2700
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "payload-unloader",
@@ -23009,7 +23743,11 @@
               5760
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "large-payload-mass-driver",
@@ -23038,7 +23776,13 @@
               810
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric",
+            "research:tungsten",
+            "research:silicon",
+            "research:graphite",
+            "research:oxide"
+          ]
         },
         {
           "path": "constructor",
@@ -23060,6 +23804,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten",
             "on-sector:split"
           ]
         },
@@ -23087,6 +23834,10 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:silicon",
+            "research:oxide",
+            "research:graphite",
             "on-sector:peaks"
           ]
         },
@@ -23114,6 +23865,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:oxide",
+            "research:tungsten",
+            "research:thorium",
             "on-sector:siege"
           ]
         },
@@ -23141,6 +23896,10 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:oxide",
+            "research:silicon",
+            "research:carbide",
             "on-sector:siege"
           ]
         },
@@ -23155,7 +23914,9 @@
               1620
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten"
+          ]
         },
         {
           "path": "plasma-bore",
@@ -23168,7 +23929,9 @@
               9
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "impact-drill",
@@ -23190,6 +23953,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:graphite",
             "on-sector:aegis"
           ]
         },
@@ -23217,6 +23983,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:oxide",
+            "research:beryllium",
+            "research:tungsten",
             "on-sector:caldera-erekir"
           ]
         },
@@ -23244,6 +24014,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:oxide",
+            "research:tungsten",
+            "research:thorium",
             "on-sector:stronghold"
           ]
         },
@@ -23271,6 +24045,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:surge-alloy",
+            "research:beryllium",
+            "research:tungsten",
             "on-sector:stronghold"
           ]
         },
@@ -23285,7 +24063,9 @@
               13
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "beam-node",
@@ -23298,7 +24078,9 @@
               4
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "vent-condenser",
@@ -23316,6 +24098,8 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:beryllium",
             "on-sector:aegis"
           ]
         },
@@ -23343,6 +24127,10 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:tungsten",
+            "research:oxide",
+            "research:silicon",
             "on-sector:basin"
           ]
         },
@@ -23370,6 +24158,10 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:carbide",
+            "research:oxide",
+            "research:silicon",
             "on-sector:crevice"
           ]
         },
@@ -23401,6 +24193,11 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:carbide",
+            "research:oxide",
+            "research:silicon",
+            "research:surge-alloy",
             "on-sector:crossroads",
             "research:cyanogen-synthesizer"
           ]
@@ -23437,6 +24234,12 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:carbide",
+            "research:oxide",
+            "research:silicon",
+            "research:phase-fabric",
+            "research:surge-alloy",
             "on-sector:karst"
           ]
         },
@@ -23460,6 +24263,9 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:oxide",
+            "research:silicon",
             "on-sector:peaks"
           ]
         },
@@ -23495,6 +24301,12 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:silicon",
+            "research:oxide",
+            "research:carbide",
+            "research:surge-alloy",
+            "research:phase-fabric",
             "on-sector:crossroads"
           ]
         },
@@ -23522,6 +24334,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:tungsten",
+            "research:oxide",
+            "research:beryllium",
             "on-sector:peaks"
           ]
         },
@@ -23545,6 +24361,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:oxide",
+            "research:thorium",
             "on-sector:stronghold"
           ]
         },
@@ -23572,6 +24391,10 @@
             ]
           ],
           "objectives": [
+            "research:surge-alloy",
+            "research:silicon",
+            "research:oxide",
+            "research:tungsten",
             "on-sector:siege"
           ]
         },
@@ -23587,6 +24410,7 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
             "on-sector:aegis"
           ]
         },
@@ -23610,6 +24434,9 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:tungsten",
+            "research:silicon",
             "on-sector:basin"
           ]
         },
@@ -23628,7 +24455,10 @@
               180
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-bridge-conduit",
@@ -23645,7 +24475,10 @@
               540
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-liquid-router",
@@ -23662,7 +24495,10 @@
               360
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-liquid-container",
@@ -23679,7 +24515,10 @@
               1710
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten",
+            "research:beryllium"
+          ]
         },
         {
           "path": "reinforced-liquid-tank",
@@ -23697,6 +24536,8 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:beryllium",
             "sector-complete:intersect"
           ]
         },
@@ -23715,7 +24556,10 @@
               36
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:graphite",
+            "research:beryllium"
+          ]
         },
         {
           "path": "silicon-arc-furnace",
@@ -23732,7 +24576,11 @@
               45
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium",
+            "research:graphite",
+            "research:sand"
+          ]
         },
         {
           "path": "electrolyzer",
@@ -23758,6 +24606,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:graphite",
+            "research:beryllium",
+            "research:tungsten",
             "on-sector:atlas"
           ]
         },
@@ -23785,6 +24637,10 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:graphite",
+            "research:silicon",
+            "research:beryllium",
             "research:tank-refabricator",
             "on-sector:marsh"
           ]
@@ -23813,6 +24669,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:graphite",
+            "research:tungsten",
+            "research:oxide",
             "on-sector:ravine"
           ]
         },
@@ -23832,6 +24692,8 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:graphite",
             "on-sector:ravine"
           ]
         },
@@ -23855,6 +24717,9 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:oxide",
+            "research:beryllium",
             "on-sector:ravine",
             "research:afflict"
           ]
@@ -23879,6 +24744,9 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:oxide",
+            "research:beryllium",
             "on-sector:caldera-erekir"
           ]
         },
@@ -23902,6 +24770,9 @@
             ]
           ],
           "objectives": [
+            "research:oxide",
+            "research:beryllium",
+            "research:silicon",
             "on-sector:caldera-erekir"
           ]
         },
@@ -23929,6 +24800,11 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:silicon",
+            "research:beryllium",
+            "research:oxide",
+            "research:graphite",
             "on-sector:siege"
           ]
         },
@@ -23952,6 +24828,10 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:thorium",
+            "research:oxide",
+            "research:graphite",
             "on-sector:crevice"
           ]
         },
@@ -23979,6 +24859,11 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:silicon",
+            "research:thorium",
+            "research:tungsten",
+            "research:sand",
             "on-sector:karst"
           ]
         },
@@ -24002,6 +24887,10 @@
             ]
           ],
           "objectives": [
+            "research:oxide",
+            "research:carbide",
+            "research:beryllium",
+            "research:phase-fabric",
             "research:phase-synthesizer"
           ]
         },
@@ -24020,7 +24909,10 @@
               2790
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten",
+            "research:graphite"
+          ]
         },
         {
           "path": "small-heat-redirector",
@@ -24037,7 +24929,10 @@
               2610
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy",
+            "research:graphite"
+          ]
         },
         {
           "path": "slag-incinerator",
@@ -24051,6 +24946,7 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
             "on-sector:basin"
           ]
         },
@@ -24074,6 +24970,9 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:silicon",
+            "research:graphite",
             "research:silicon-arc-furnace",
             "research:tank-fabricator"
           ]
@@ -24089,7 +24988,9 @@
               180
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "beryllium-wall-large",
@@ -24102,7 +25003,9 @@
               630
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:beryllium"
+          ]
         },
         {
           "path": "tungsten-wall",
@@ -24115,7 +25018,9 @@
               180
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten"
+          ]
         },
         {
           "path": "tungsten-wall-large",
@@ -24128,7 +25033,9 @@
               630
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten"
+          ]
         },
         {
           "path": "blast-door",
@@ -24145,7 +25052,10 @@
               630
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:tungsten",
+            "research:silicon"
+          ]
         },
         {
           "path": "reinforced-surge-wall",
@@ -24162,7 +25072,10 @@
               90
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy",
+            "research:tungsten"
+          ]
         },
         {
           "path": "reinforced-surge-wall-large",
@@ -24179,7 +25092,10 @@
               180
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:surge-alloy",
+            "research:tungsten"
+          ]
         },
         {
           "path": "shielded-wall",
@@ -24200,7 +25116,11 @@
               270
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:phase-fabric",
+            "research:surge-alloy",
+            "research:beryllium"
+          ]
         },
         {
           "path": "carbide-wall",
@@ -24217,7 +25137,10 @@
               180
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:thorium",
+            "research:carbide"
+          ]
         },
         {
           "path": "carbide-wall-large",
@@ -24234,7 +25157,10 @@
               630
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:thorium",
+            "research:carbide"
+          ]
         },
         {
           "path": "diffuse",
@@ -24260,6 +25186,10 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:silicon",
+            "research:graphite",
+            "research:tungsten",
             "on-sector:lake"
           ]
         },
@@ -24287,6 +25217,10 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:silicon",
+            "research:oxide",
+            "research:beryllium",
             "on-sector:marsh"
           ]
         },
@@ -24314,6 +25248,10 @@
             ]
           ],
           "objectives": [
+            "research:surge-alloy",
+            "research:silicon",
+            "research:graphite",
+            "research:oxide",
             "on-sector:ravine"
           ]
         },
@@ -24337,6 +25275,9 @@
             ]
           ],
           "objectives": [
+            "research:tungsten",
+            "research:silicon",
+            "research:thorium",
             "on-sector:stronghold"
           ]
         },
@@ -24364,6 +25305,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:graphite",
+            "research:oxide",
+            "research:carbide",
             "on-sector:crevice"
           ]
         },
@@ -24395,6 +25340,11 @@
             ]
           ],
           "objectives": [
+            "research:oxide",
+            "research:surge-alloy",
+            "research:silicon",
+            "research:carbide",
+            "research:phase-fabric",
             "on-sector:karst"
           ]
         },
@@ -24422,6 +25372,10 @@
             ]
           ],
           "objectives": [
+            "research:thorium",
+            "research:oxide",
+            "research:silicon",
+            "research:beryllium",
             "on-sector:stronghold"
           ]
         },
@@ -24453,6 +25407,11 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:graphite",
+            "research:tungsten",
+            "research:oxide",
+            "research:carbide",
             "on-sector:siege"
           ]
         },
@@ -24484,6 +25443,11 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:beryllium",
+            "research:silicon",
+            "research:graphite",
+            "research:phase-fabric",
             "sector-complete:karst"
           ]
         },
@@ -24503,6 +25467,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:graphite",
+            "research:beryllium",
             "research:beam-node",
             "research:turbine-condenser",
             "research:tank-fabricator",
@@ -24533,6 +25500,10 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten",
+            "research:oxide",
             "sector-complete:peaks"
           ]
         },
@@ -24564,6 +25535,11 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:silicon",
+            "research:tungsten",
+            "research:carbide",
+            "research:oxide",
             "sector-complete:siege"
           ]
         },
@@ -24587,6 +25563,8 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
             "research:silicon-arc-furnace",
             "research:plasma-bore",
             "research:turbine-condenser"
@@ -24620,6 +25598,9 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:silicon",
+            "research:tungsten",
             "on-sector:ravine",
             "research:mech-refabricator"
           ]
@@ -24640,6 +25621,8 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
             "on-sector:lake"
           ]
         },
@@ -24671,6 +25654,9 @@
             ]
           ],
           "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten",
             "on-sector:intersect"
           ]
         },
@@ -24702,6 +25688,9 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:tungsten",
+            "research:silicon",
             "on-sector:atlas"
           ]
         },
@@ -24711,7 +25700,9 @@
           "parent": "tank-refabricator",
           "depth": 5,
           "requirements": [],
-          "objectives": []
+          "objectives": [
+            "research:tank-refabricator"
+          ]
         },
         {
           "path": "mech-refabricator",
@@ -24733,6 +25724,9 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:tungsten",
+            "research:silicon",
             "on-sector:basin"
           ]
         },
@@ -24751,7 +25745,11 @@
               360
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:mech-refabricator",
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "ship-refabricator",
@@ -24777,6 +25775,10 @@
             ]
           ],
           "objectives": [
+            "research:beryllium",
+            "research:tungsten",
+            "research:silicon",
+            "research:oxide",
             "on-sector:peaks"
           ]
         },
@@ -24795,7 +25797,11 @@
               360
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:ship-refabricator",
+            "research:silicon",
+            "research:tungsten"
+          ]
         },
         {
           "path": "prime-refabricator",
@@ -24821,6 +25827,10 @@
             ]
           ],
           "objectives": [
+            "research:thorium",
+            "research:oxide",
+            "research:tungsten",
+            "research:silicon",
             "on-sector:stronghold"
           ]
         },
@@ -24830,7 +25840,9 @@
           "parent": "prime-refabricator",
           "depth": 8,
           "requirements": [],
-          "objectives": []
+          "objectives": [
+            "research:prime-refabricator"
+          ]
         },
         {
           "path": "anthicus",
@@ -24847,7 +25859,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:prime-refabricator",
+            "research:thorium",
+            "research:silicon"
+          ]
         },
         {
           "path": "obviate",
@@ -24864,7 +25880,11 @@
               900
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:prime-refabricator",
+            "research:thorium",
+            "research:silicon"
+          ]
         },
         {
           "path": "tank-assembler",
@@ -24890,6 +25910,10 @@
             ]
           ],
           "objectives": [
+            "research:thorium",
+            "research:oxide",
+            "research:carbide",
+            "research:silicon",
             "on-sector:siege",
             "research:constructor",
             "research:atmospheric-concentrator"
@@ -24914,7 +25938,11 @@
               2160
             ]
           ],
-          "objectives": []
+          "objectives": [
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten"
+          ]
         },
         {
           "path": "conquer",
@@ -24944,6 +25972,11 @@
             ]
           ],
           "objectives": [
+            "research:thorium",
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten",
+            "research:carbide",
             "on-sector:karst"
           ]
         },
@@ -24975,6 +26008,11 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:oxide",
+            "research:tungsten",
+            "research:silicon",
+            "research:thorium",
             "on-sector:crossroads"
           ]
         },
@@ -25014,6 +26052,11 @@
             ]
           ],
           "objectives": [
+            "research:graphite",
+            "research:thorium",
+            "research:silicon",
+            "research:tungsten",
+            "research:carbide",
             "on-sector:karst"
           ]
         },
@@ -25045,6 +26088,11 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:thorium",
+            "research:oxide",
+            "research:tungsten",
+            "research:silicon",
             "on-sector:crossroads"
           ]
         },
@@ -25084,6 +26132,11 @@
             ]
           ],
           "objectives": [
+            "research:thorium",
+            "research:silicon",
+            "research:beryllium",
+            "research:tungsten",
+            "research:carbide",
             "on-sector:karst"
           ]
         },
@@ -25111,6 +26164,10 @@
             ]
           ],
           "objectives": [
+            "research:carbide",
+            "research:thorium",
+            "research:oxide",
+            "research:phase-fabric",
             "sector-complete:karst"
           ]
         },

@@ -167,9 +167,10 @@ pub fn can_mine(world: &World, content: &ContentRegistry, entity: Entity) -> boo
     def.mine_speed * speed > 0.0 && def.mine_tier >= 0
 }
 
-/// `Unit.acceptsItem(item)` (`UnitComp.java:601-608`): an empty inventory or
-/// the same item below `itemCapacity` (and not dead).
-fn accepts_item(stack: Option<(ItemId, i32)>, item: ItemId, capacity: i32) -> bool {
+/// `Unit.acceptsItem(item)` (`ItemsComp.java:24-27`): an empty inventory or the
+/// same item below `itemCapacity` (and not dead). Shared with the player's
+/// `canMine` gate (`ai::types::player::can_mine_tile`).
+pub(crate) fn accepts_item(stack: Option<(ItemId, i32)>, item: ItemId, capacity: i32) -> bool {
     match stack {
         None => true,
         Some((held, amount)) => held == item && amount < capacity,

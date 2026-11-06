@@ -2551,6 +2551,20 @@ fn planet_sector_action(
 
 /// `Sector.isBeingPlayed` for a row (`MindCampaign.get_sector_state`).
 fn planet_is_being_played(dialog: &mut MindDialog, sector: &VarDictionary) -> bool {
+    planet_sector_is_being_played(
+        dialog,
+        &row_str(sector, "planet"),
+        row_i64_or(sector, "id", -2),
+    )
+}
+
+/// `Sector.isBeingPlayed` for the page's selected sector, addressed by
+/// planet/id (`MindCampaign.get_sector_state`).
+fn planet_sector_is_being_played(
+    dialog: &mut MindDialog,
+    planet_name: &str,
+    sector_id: i64,
+) -> bool {
     let Some(mut campaign) = dialog.campaign_node() else {
         return false;
     };
@@ -2564,8 +2578,8 @@ fn planet_is_being_played(dialog: &mut MindDialog, sector: &VarDictionary) -> bo
         return false;
     };
     row_bool(&state, "campaign")
-        && row_str(&state, "planet") == row_str(sector, "planet")
-        && row_i64_or(&state, "sector", -1) == row_i64_or(sector, "id", -2)
+        && row_str(&state, "planet") == planet_name
+        && row_i64_or(&state, "sector", -1) == sector_id
 }
 
 fn planet_sector_action_pressed(
@@ -2578,6 +2592,14 @@ fn planet_sector_action_pressed(
 ) {
     match mode {
         "planetLaunch" => planet_accelerator_launch(dialog, st, planet_name, sector_id),
+        // `PlanetDialog.playSelected` (`PlanetDialog.java:1373-1377`):
+        // `if(sector.isBeingPlayed()){ hide(); return; }` — resuming the
+        // sector that is already live only hides the page. Routing it through
+        // the load path reloads the last save, discarding everything built
+        // since and resetting the wave timer (CG-UI-01).
+        "resume" | "go" if planet_sector_is_being_played(dialog, planet_name, sector_id) => {
+            let _ = ui_call("close_dialog", &[GString::from("planet").to_variant()]);
+        }
         "resume" | "go" => planet_launch(dialog, st, planet_name, sector_id, -1, true),
         _ => planet_launch_via_launcher(dialog, state, st, planet_name, sector_id),
     }
@@ -2856,6 +2878,17 @@ fn planet_launch(
         }
         launch_row = planet_find_loadout_row(dialog, st, loadout);
         launch_cost = planet_loadout_launch_stacks(&launch_row, &launch_resources);
+    }
+
+    // `PlanetDialog.playSelected`'s "save before launch"
+    // (`PlanetDialog.java:1380-1386`): write the sector being left BEFORE
+    // `MindSimHost.load_sector` replaces the live world, so a switch keeps
+    // everything built since that sector's last autosave (CG-SECTOR-02).
+    // No-op outside a live match.
+    if let Some(campaign) = campaign.as_mut()
+        && campaign.has_method("save_outgoing_sector")
+    {
+        let _ = campaign.call("save_outgoing_sector", &[]);
     }
 
     // H05: stage the launcher's items before the world load.

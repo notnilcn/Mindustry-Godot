@@ -7,8 +7,9 @@
 // hint whose `shown` predicate turns false is hidden without persisting, and
 // the display gate is `saves.getTotalPlaytime() > 8000` (total, not session,
 // and only when not in a cutscene). Input completions consume
-// `MindInput.take_hint_keys()` (G08 T15); `derelictmouse` is host-detected from
-// the hovered tile's team.
+// `MindInput.take_hint_keys()` (G08 T15) except `desktopPause`, which completes
+// on the `pause` binding's `MindInput.hotkey` press edge (`keyTap`); the
+// `derelictmouse` trigger is host-detected from the hovered tile's team.
 
 //! Hint overlay (`HintsFragment`): the hint catalogue, the queue/state machine
 //! and the `Panel/Layout/Box/Label` + `Skip` presentation.
@@ -111,6 +112,15 @@ impl IControl for MindHintsFragment {
             let callable = self.base().callable("complete_hint");
             if !button.is_connected("pressed", &callable) {
                 button.connect("pressed", &callable);
+            }
+        }
+        // `Binding.pause`'s press edge: `MindInput` emits the binding name as a
+        // `hotkey` signal (`Core.input.keyTap(Binding.pause)` for `desktopPause`,
+        // `HintsFragment.java:189-192`).
+        if let Some(mut input) = self.input_node() {
+            let callable = self.base().callable("_on_hotkey");
+            if input.has_signal("hotkey") && !input.is_connected("hotkey", &callable) {
+                let _ = input.connect("hotkey", &callable);
             }
         }
         self.snapshot_zoom();
@@ -233,6 +243,19 @@ impl MindHintsFragment {
     #[func]
     pub fn skip(&mut self) {
         self.complete_hint();
+    }
+
+    /// `MindInput.hotkey` (`Binding.pause` press edge): `desktopPause`'s
+    /// completion is `Core.input.keyTap(Binding.pause)` (`HintsFragment.java:189-192`).
+    ///
+    /// Completed here rather than in a state predicate so an auto-pause (window
+    /// focus loss, a pause-opening dialog) never completes or persists the hint.
+    #[func]
+    fn _on_hotkey(&mut self, action: GString) {
+        let binding = action.to_string();
+        if pause_key_tap(&self.current, &binding) {
+            self.complete_hint();
+        }
     }
 
     /// The `HINTS` catalogue in upstream declaration order. The GDScript
@@ -449,7 +472,10 @@ impl MindHintsFragment {
                 !dict_bool(hints, "player_dead", true)
                     && !dict_bool(hints, "player_has_item", false)
             }
-            "desktopPause" => self.is_paused(),
+            // `desktopPause` completes on the pause binding's press edge, not on
+            // the paused state (`HintsFragment.java:189-192`), so the completion
+            // runs from `_on_hotkey`; a state predicate here would burn the hint
+            // on any auto-pause (focus loss) or dialog.
             "unitControl" => {
                 !dict_bool(hints, "player_dead", true)
                     && !dict_bool(hints, "player_spawned_by_core", true)
@@ -702,18 +728,6 @@ impl MindHintsFragment {
             .is_ok_and(|state| state == "playing")
     }
 
-    /// `MindSimHost.is_paused()`.
-    fn is_paused(&self) -> bool {
-        let Some(mut host) = self.host() else {
-            return false;
-        };
-        host.has_method("is_paused")
-            && host
-                .call("is_paused", &[])
-                .try_to_relaxed::<bool>()
-                .unwrap_or(false)
-    }
-
     /// `renderer.isCutscene()`: no hint triggers or advances during a cutscene.
     fn is_cutscene(&self) -> bool {
         let Some(mut camera) = self.camera() else {
@@ -922,6 +936,14 @@ fn boss_root(hints: &VarDictionary) -> VarDictionary {
         .unwrap_or_default()
 }
 
+/// `HintsFragment.DefaultHint.desktopPause.complete` (`HintsFragment.java:189-192`):
+/// `Core.input.keyTap(Binding.pause)`, only while the pause hint is the one on
+/// screen. The state of the game is irrelevant (auto-pause and dialog pauses
+/// complete nothing).
+fn pause_key_tap(current: &str, binding: &str) -> bool {
+    current == "desktopPause" && binding == "pause"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,6 +957,18 @@ mod tests {
         assert_eq!(HINTS[1], "zoom");
         assert_eq!(HINTS[HINTS.len() - 1], "coreIncinerate");
         assert!(!HINTS.contains(&"respawn"));
+    }
+
+    #[test]
+    fn desktop_pause_completes_on_the_pause_key_only() {
+        assert!(pause_key_tap("desktopPause", "pause"));
+        // Any other hint ignores the pause key...
+        assert!(!pause_key_tap("desktopMove", "pause"));
+        assert!(!pause_key_tap("", "pause"));
+        // ...and the pause hint ignores every other binding (`keyTap` is per
+        // binding: a dialog or auto-pause sends no pause tap at all).
+        assert!(!pause_key_tap("desktopPause", "shoot"));
+        assert!(!pause_key_tap("desktopPause", ""));
     }
 
     #[test]

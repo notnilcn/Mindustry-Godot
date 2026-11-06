@@ -1539,10 +1539,29 @@ fn research_shown(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
         st.tree = tree.clone();
     }
     research_update_title_button(state);
-    let visible = !row_str(&tree, "root").is_empty();
+    // Java evaluates the button's `visible` lambda against `TechTree.roots`
+    // (`ResearchDialog.java:108`), not "a tree is loaded": with one selectable
+    // tree the button is dead.
+    let selected_locked = row_rows(&tree, "nodes")
+        .first()
+        .is_some_and(|root| row_bool(root, "locked"));
+    let visible = root_select_visible(row_rows(&tree, "roots").len(), selected_locked);
     if let Some(mut button) = state.borrow().title_button.clone() {
         button.set_visible(visible);
     }
+}
+
+/// Java `showTechSelect` (`ResearchDialog.java:108`):
+/// `TechTree.roots.count(node -> !(node.requiresUnlock && !node.content.unlockedHost())) > 1`.
+///
+/// `roots` (the `@techtree.select` picker rows) keeps the *preferred* root even
+/// when it needs unlocking (`node != getPrefRoot()` in Java's loop) while the
+/// visibility count does not, so a locked selected root is subtracted. The
+/// tree's own root row supplies that lock state (`unlockedHost()` as
+/// `nodes[0].locked`; the root rows use `content_unlocked`, the same predicate
+/// in single player).
+fn root_select_visible(picker_rows: usize, selected_root_locked: bool) -> bool {
+    picker_rows.saturating_sub(usize::from(selected_root_locked)) > 1
 }
 
 fn research_open_database(dialog: &mut MindDialog) {
@@ -5447,5 +5466,19 @@ mod tests {
             assert!(dispatch(id).is_some(), "missing controller for `{id}`");
         }
         assert!(dispatch("nope").is_none());
+    }
+
+    #[test]
+    fn root_selector_needs_two_selectable_trees() {
+        assert!(!root_select_visible(0, false));
+        // Fresh Serpulo profile: the only tree is the preferred root.
+        assert!(!root_select_visible(1, false));
+        // Erekir campaign before `core-bastion` unlocks: the picker keeps the
+        // preferred root, Java's count does not.
+        assert!(!root_select_visible(2, true));
+        // Both trees selectable.
+        assert!(root_select_visible(2, false));
+        // The preferred root locked plus two unlocked trees still shows.
+        assert!(root_select_visible(3, true));
     }
 }

@@ -275,9 +275,19 @@ fn angle_deg(x: f32, y: f32) -> f32 {
     if angle < 0.0 { angle + 360.0 } else { angle }
 }
 
-/// `InputHandler.canMine`: the tile holds a drop the unit's tier can mine
-/// (`core/src/mindustry/input/InputHandler.java:2045`), via the shared
-/// `MinerComp.getMineResult` helper.
+/// `InputHandler.canMine` (`core/src/mindustry/input/InputHandler.java:2045-2055`):
+/// the hovered tile is a valid player mine target.
+///
+/// The gates, in upstream order: `MinerComp.validMine` (`MinerComp.java:50-60`,
+/// which includes the `mineRange` check and `getMineResult`), the unit's stack
+/// acceptance (`Unit.acceptsItem(getMineResult(tile))`, `ItemsComp.java:24-27`)
+/// and the `playerUnmineable` floor/overlay rule. `doubletapmine` is a host
+/// setting with no `mind-core` seam; the port applies the upstream default
+/// (`false`), like the harvestable display in `ui::content_stats` — enabling it
+/// only ever loosens the gate.
+///
+/// Both the drill cursor (`CursorContext.can_mine`) and the mine order
+/// (`DesktopInput.tryMineAt` -> `tryBeginMine`) read this predicate.
 pub fn can_mine_tile(
     world: &World,
     grid: &WorldGrid,
@@ -285,13 +295,49 @@ pub fn can_mine_tile(
     entity: Entity,
     tile: TilePos,
 ) -> bool {
+    use crate::entities::comp::unit::comp::ItemsComp;
+    use crate::entities::comp::unit::miner;
+
     let Some(def) = world
         .get::<UnitTypeComp>(entity)
         .and_then(|comp| content.unit(comp.type_id))
     else {
         return false;
     };
-    crate::entities::comp::unit::miner::get_mine_result(content, def, grid, tile).is_some()
+    // `player.unit().validMine(tile)`: in range and a mineable drop.
+    if !miner::valid_mine(world, grid, content, entity, Some(tile), true) {
+        return false;
+    }
+    let Some(item) = miner::get_mine_result(content, def, grid, tile) else {
+        return false;
+    };
+    // `player.unit().acceptsItem(player.unit().getMineResult(tile))`: an empty
+    // stack, or the same item below `itemCapacity`.
+    let stack = world
+        .get::<ItemsComp>(entity)
+        .copied()
+        .unwrap_or_default()
+        .item;
+    if !miner::accepts_item(stack, item, def.item_capacity) {
+        return false;
+    }
+    // `tile.floor().playerUnmineable` without an ore overlay, or a
+    // `playerUnmineable` overlay that carries a drop (`doubletapmine` off).
+    let (tx, ty) = (tile.x() as i32, tile.y() as i32);
+    if !grid.tiles.in_bounds(tx, ty) {
+        return false;
+    }
+    let cell = grid.tiles.get(tx, ty);
+    let floor = content.block(cell.floor);
+    let overlay = content.block(cell.overlay);
+    let overlay_drop = overlay.and_then(|def| def.item_drop);
+    if floor.is_some_and(|def| def.player_unmineable) && overlay_drop.is_none() {
+        return false;
+    }
+    if overlay.is_some_and(|def| def.player_unmineable) && overlay_drop.is_some() {
+        return false;
+    }
+    true
 }
 
 /// `MinerComp.update` wrapper for the player unit (G01 T10a): the ordered tile
@@ -756,5 +802,73 @@ mod tests {
             "mine order clears under a building"
         );
         assert_eq!(sim.player_mined_count(), 0, "nothing mined under the block");
+    }
+
+    /// `InputHandler.canMine` (`InputHandler.java:2045-2055`): the predicate is
+    /// `validMine` (mineRange + result) + `acceptsItem(getMineResult)` + the
+    /// `playerUnmineable` floor gate — not just "the tile has a drop".
+    #[test]
+    fn player_can_mine_checks_range_stack_and_unmineable_floors() {
+        let mut sim = Sim::new(
+            1,
+            64,
+            64,
+            crate::content::BlockId::AIR,
+            crate::content::BlockId::AIR,
+        );
+        let Ok(()) = sim.install_unit_runtime() else {
+            panic!("unit runtime installs");
+        };
+        let runtime = sim.unit_runtime().expect("unit runtime");
+        let content = &runtime.content;
+        let ore = content.block_id("ore-copper").expect("ore-copper");
+        let sand = content.block_id("sand-floor").expect("sand-floor");
+        let copper = content.item_id("copper").expect("copper");
+        let lead = content.item_id("lead").expect("lead");
+        let capacity = 30;
+        // `alpha` is at (100, 100) px; its `mineRange` is the 70 px default.
+        assert!(
+            sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
+                .is_some()
+        );
+        let index = sim.grid.tiles.index(12, 12);
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        sim.refresh_unit_runtime();
+        assert!(sim.player_can_mine(12, 12), "in-range copper ore");
+
+        // Tile corner (256, 96) is 156 px away, past `mineRange`.
+        let index = sim.grid.tiles.index(32, 12);
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        sim.refresh_unit_runtime();
+        assert!(!sim.player_can_mine(32, 12), "out of mineRange");
+
+        let entity = sim.player_unit().expect("player unit");
+        let items = |sim: &mut Sim, stack: Option<(crate::content::ItemId, i32)>| {
+            sim.ecs
+                .0
+                .get_mut::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+                .expect("items component")
+                .item = stack;
+        };
+        items(&mut sim, Some((lead, 1)));
+        assert!(
+            !sim.player_can_mine(12, 12),
+            "a stack of another item rejects the order"
+        );
+        items(&mut sim, Some((copper, capacity - 1)));
+        assert!(sim.player_can_mine(12, 12), "same item below itemCapacity");
+        items(&mut sim, Some((copper, capacity)));
+        assert!(!sim.player_can_mine(12, 12), "a full stack rejects");
+
+        // `sand-floor` is `playerUnmineable` with no ore overlay: the player
+        // cannot hand-mine it (drills still can — this gate is input-only).
+        items(&mut sim, None);
+        let index = sim.grid.tiles.index(13, 12);
+        sim.grid.tiles.geti_mut(index).floor = sand;
+        sim.refresh_unit_runtime();
+        assert!(
+            !sim.player_can_mine(13, 12),
+            "playerUnmineable floor without an ore overlay"
+        );
     }
 }

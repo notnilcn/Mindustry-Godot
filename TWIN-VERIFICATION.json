@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T01:02:01Z",
+  "updated": "2026-11-06T05:00:12Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -20494,6 +20494,2842 @@
           "text": "Code complete and unit-tested (shock_mine 4, lightning 6, fx 113, full mind-core lib 2895 pass; targeted clippy clean). ShockMine now uses Pal.lancerLaser, Lightning.create carries the colour into the Fx.lightning event (first producer of EffectData::Positions), and the renderer consumes it. Twin pending: needs tools/build.sh + editor restart, then place a shock-mine on the sandbox and walk the player mech onto it; capture a burst of the 4 tendrils in both clients. Vanilla shock-mine has bullet=null, so no burst."
         }
       ]
+    },
+    "PAR-0477": {
+      "title": "Campaign tutorial: world prompt stops after the drill (only ShapeText markers drawn; stale label persists)",
+      "status": "twin-verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nc.call(\"clear_planet_campaign_saves\", \"serpulo\")\nc.call(\"clear_research\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"load_sector\", \"serpulo\", 170)\nc.call(\"start_sector\", \"serpulo\", 170)\nh.call(\"step\", 3)\nget_node(\"/root/Spine/Ui/UiRoot\").call(\"set_menu_visible\", false)\nreturn {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "params": {
+                "position": {
+                  "x": 576,
+                  "y": 324
+                },
+                "coords": "viewport"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"debug_spawn_player\", \"alpha\", 1, 1032.0, 424.0)\ncam.set_process(false)\ncam.call(\"pan_to\", 1150.0, 440.0)\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nreturn {\"ore\": str(cam.call(\"tile_to_screen\", 137, 53))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"step\", 300)\nreturn {\"core\": str(h.call(\"core_items_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nc.call(\"research\", \"mechanical-drill\")\nget_node(\"/root/Spine/Input\").call(\"select_block_by_name\", \"mechanical-drill\")\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.call(\"step\", 30)\nvar cam = get_node(\"/root/Spine/World/Camera2D\")\ncam.call(\"pan_to\", 1032.0, 440.0)\nreturn {\"status\": str(get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\").get(\"text\")), \"markers\": str(c.call(\"objective_markers_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/runs/campaign-gaps/java-home-tut XDG_DATA_HOME=$PWD/runs/campaign-gaps/java-home-tut/.local/share XDG_CONFIG_HOME=$PWD/runs/campaign-gaps/java-home-tut/.config XDG_CACHE_HOME=$PWD/runs/campaign-gaps/java-home-tut/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648 > runs/campaign-gaps/java-tut.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "grep -q 'Total time to load' runs/campaign-gaps/java-tut.log  # wait for load"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py move Mindustry 1400 900"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1658 1079 left  # Play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1881 1079 left  # Campaign"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1815 1229 left  # Serpulo card"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1535 left  # OK"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1545 left  # Launch Ground Zero"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2105 1429 left  # mine copper, wait 8 s"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0479/java/20261106-133454-03-build-text-fixed.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2371 1545 left  # tech tree"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1835 1244 left  # research mechanical drill"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1865 1534 left  # Back"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py key e  # toggle building"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2285 1354 left  # select drill block"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2183 1354 left  # place drill on copper"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0477/java/20261106-133656-03-text-marker-conveyor-prompt.png"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.call(\"step\", 30)\nvar cam = get_node(\"/root/Spine/World/Camera2D\")\ncam.call(\"pan_to\", 1032.0, 440.0)\nreturn {\"status\": str(get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\").get(\"text\")), \"markers\": str(c.call(\"objective_markers_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0477/java/20261106-133656-03-text-marker-conveyor-prompt.png"
+            }
+          }
+        ]
+      },
+      "severity": "P0",
+      "gap": "Godot MindCampaign.objective_markers_json forwards only ObjectiveMarker::ShapeText (gx/campaign.rs:3493-3497); groundZero objectives 2+ use Text markers, so after the drill the conveyor/turret prompts are never drawn. MindObjectiveMarkers.process also skips queue_redraw when the list is empty (gx/render/objective_markers.rs:90-92), leaving the drill prompt frozen. Java draws every marker class per frame (MapObjectives.java:1094-1129, Renderer.java:352-360).",
+      "evidence": [
+        "runs/PAR-0477/godot/20261106-132422-03-text-marker-conveyor-prompt.png",
+        "runs/PAR-0477/java/20261106-133656-03-text-marker-conveyor-prompt.png",
+        "runs/PAR-0477/20261106-140000-run.md"
+      ],
+      "similarity": 72.0,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0477/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0477/godot/01-action.avif"
+        ]
+      },
+      "fix": "objective_markers_json now forwards every ObjectiveMarker class behind the Renderer.java `world != -1` gate (ShapeText/Text/Shape/Point/Line/Texture/Quad; Light contributes no world geometry) with each class's fields and the localized text, and render/objective_markers.rs draws all of them (world label with WorldLabel flags/align, polygon rings, pulse circle, gradient line, atlas texture/quad). process() refreshes the JSON list on the 0.2 s poll but calls queue_redraw() unconditionally, so an empty list clears the stale label and the projection runs every frame."
+    },
+    "PAR-0478": {
+      "title": "Campaign objective world label is re-projected only 5x/s, so it jitters while moving",
+      "status": "twin-verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nc.call(\"clear_planet_campaign_saves\", \"serpulo\")\nc.call(\"clear_research\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"load_sector\", \"serpulo\", 170)\nc.call(\"start_sector\", \"serpulo\", 170)\nh.call(\"step\", 3)\nget_node(\"/root/Spine/Ui/UiRoot\").call(\"set_menu_visible\", false)\nreturn {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "params": {
+                "position": {
+                  "x": 576,
+                  "y": 324
+                },
+                "coords": "viewport"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"debug_spawn_player\", \"alpha\", 1, 1032.0, 424.0)\ncam.set_process(false)\ncam.call(\"pan_to\", 1150.0, 440.0)\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nreturn {\"ore\": str(cam.call(\"tile_to_screen\", 137, 53))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"step\", 300)\nreturn {\"core\": str(h.call(\"core_items_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nc.call(\"research\", \"mechanical-drill\")\nget_node(\"/root/Spine/Input\").call(\"select_block_by_name\", \"mechanical-drill\")\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 768,
+                        "y": 452
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.call(\"step\", 30)\nvar cam = get_node(\"/root/Spine/World/Camera2D\")\ncam.call(\"pan_to\", 1032.0, 440.0)\nreturn {\"status\": str(get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\").get(\"text\")), \"markers\": str(c.call(\"objective_markers_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\ncam.call(\"pan_to\", 1104.0, 440.0)\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var m = get_node(\"/root/Spine/World/Renderer/ObjectiveMarkers/Markers\")\nvar d = m.call(\"marker_draw_debug\")\nvar cam = get_node(\"/root/Spine/World/Camera2D\")\nreturn {\"probe\": str(d), \"labelWorld\": str(cam.call(\"world_to_screen\", 1084.0, 480.0))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/runs/campaign-gaps/java-home-tut XDG_DATA_HOME=$PWD/runs/campaign-gaps/java-home-tut/.local/share XDG_CONFIG_HOME=$PWD/runs/campaign-gaps/java-home-tut/.config XDG_CACHE_HOME=$PWD/runs/campaign-gaps/java-home-tut/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648 > runs/campaign-gaps/java-tut.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "grep -q 'Total time to load' runs/campaign-gaps/java-tut.log  # wait for load"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py move Mindustry 1400 900"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1658 1079 left  # Play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1881 1079 left  # Campaign"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1815 1229 left  # Serpulo card"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1535 left  # OK"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1545 left  # Launch Ground Zero"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2105 1429 left  # mine copper, wait 8 s"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0479/java/20261106-133454-03-build-text-fixed.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2371 1545 left  # tech tree"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1835 1244 left  # research mechanical drill"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1865 1534 left  # Back"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py key e  # toggle building"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2285 1354 left  # select drill block"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2183 1354 left  # place drill on copper"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0477/java/20261106-133656-03-text-marker-conveyor-prompt.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py keydown d; sleep 0.6; $PARITY_PY $PARITY_SKILL/scripts/java_input.py keyup d  # walk right"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0478/java/20261106-133722-06-after-walk.png"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var m = get_node(\"/root/Spine/World/Renderer/ObjectiveMarkers/Markers\")\nvar d = m.call(\"marker_draw_debug\")\nvar cam = get_node(\"/root/Spine/World/Camera2D\")\nreturn {\"probe\": str(d), \"labelWorld\": str(cam.call(\"world_to_screen\", 1084.0, 480.0))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0478/java/20261106-133722-06-after-walk.png"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "MindObjectiveMarkers.process gates queue_redraw inside the 0.2 s JSON poll (gx/render/objective_markers.rs:76-92) while draw projects the label from the camera transform (gx/render/objective_markers.rs:103-118); a screen-space CanvasLayer keeps the last drawn label between redraws. Java redraws markers every frame in the world pass (Renderer.java:352-360, MapObjectives.java:1118-1130).",
+      "evidence": [
+        "runs/PAR-0478/godot/20261106-132555-06-after-pan-1104.png",
+        "runs/PAR-0478/godot/20261106-132710-03-tween-mid-b.png",
+        "runs/PAR-0478/java/20261106-133722-06-after-walk.png",
+        "runs/PAR-0478/20261106-140000-run.md"
+      ],
+      "similarity": 13.8,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0478/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0478/godot/01-action.avif"
+        ]
+      },
+      "fix": "the marker pass no longer gates queue_redraw() behind the 0.2 s JSON poll: it polls the JSON list on the same 0.2 s cadence but requests a redraw every frame, so draw() re-projects every marker through the live camera canvas transform each frame (Renderer.java:352-360 parity). Added MarkerDrawDebug probe (draws/frame/labelX/labelY); a tween probe shows draws/frame advance 1:1 and labelX equals the live projection."
+    },
+    "PAR-0479": {
+      "title": "Build: objective text is composed with the wrong arguments (raw content id, no icon/name/count)",
+      "status": "twin-verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nc.call(\"clear_planet_campaign_saves\", \"serpulo\")\nc.call(\"clear_research\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"load_sector\", \"serpulo\", 170)\nc.call(\"start_sector\", \"serpulo\", 170)\nh.call(\"step\", 3)\nget_node(\"/root/Spine/Ui/UiRoot\").call(\"set_menu_visible\", false)\nreturn {\"pid\": OS.get_process_id()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "params": {
+                "position": {
+                  "x": 576,
+                  "y": 324
+                },
+                "coords": "viewport"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"debug_spawn_player\", \"alpha\", 1, 1032.0, 424.0)\ncam.set_process(false)\ncam.call(\"pan_to\", 1150.0, 440.0)\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\nreturn {\"ore\": str(cam.call(\"tile_to_screen\", 137, 53))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 360,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar h = get_node(\"/root/Spine/SimHost\")\nh.call(\"step\", 300)\nreturn {\"core\": str(h.call(\"core_items_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nvar status = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\")\nreturn {\"status\": str(status.get(\"text\")), \"live\": str(c.call(\"objective_live_stats_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/runs/campaign-gaps/java-home-tut XDG_DATA_HOME=$PWD/runs/campaign-gaps/java-home-tut/.local/share XDG_CONFIG_HOME=$PWD/runs/campaign-gaps/java-home-tut/.config XDG_CACHE_HOME=$PWD/runs/campaign-gaps/java-home-tut/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648 > runs/campaign-gaps/java-tut.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "grep -q 'Total time to load' runs/campaign-gaps/java-tut.log  # wait for load"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py move Mindustry 1400 900"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1658 1079 left  # Play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1881 1079 left  # Campaign"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1815 1229 left  # Serpulo card"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1535 left  # OK"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 1981 1545 left  # Launch Ground Zero"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 2105 1429 left  # mine copper, wait 8 s"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0479/java/20261106-133454-03-build-text-fixed.png"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nvar status = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\")\nreturn {\"status\": str(status.get(\"text\")), \"live\": str(c.call(\"objective_live_stats_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry; $PARITY_PY $PARITY_SKILL/scripts/capture_screen.py --window-title Mindustry --output runs/PAR-0479/java/20261106-133454-03-build-text-fixed.png"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "mc/game/map_objectives.rs:619-622 calls locale.format(\"objective.build\", &[block_id, count]) but the bundle key takes (remaining count, emoji+space, localized name); Java MapObjectives.java:442-444 passes count - placedBlockCount, block.emoji()+\" \", block.localizedName. Same class of error for Research/Produce/DestroyUnits/DestroyBlocks.",
+      "evidence": [
+        "runs/PAR-0479/godot/20261106-132358-03-build-text-fixed.png",
+        "runs/PAR-0479/java/20261106-133454-03-build-text-fixed.png",
+        "runs/PAR-0479/20261106-140000-run.md"
+      ],
+      "similarity": 74.0,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0479/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0479/godot/01-action.avif"
+        ]
+      },
+      "fix": "map_objectives.rs objective_text() now passes the bundle keys' argument tuples exactly like the Java text() methods: BuildCount/UnitCount pass (count - placed/typed), emoji+space and localized name; Research/Produce pass emoji+name; DestroyUnits passes count - enemyUnitsDestroyed; DestroyBlock(s) pass emoji+name and (progress, total, emoji, name). New ObjectiveLocale live-count hooks (content_name/content_emoji/placed_block_count/unit_count/enemy_units_destroyed/destroy_blocks_progress) are fed by MindCampaign.objective_live_stats_json() and HudLocale in the HUD."
+    },
+    "PAR-0480": {
+      "title": "Campaign autosave fires once per hour instead of once per minute",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:11 LIBGL_ALWAYS_SOFTWARE=1 HOME=$PWD/runs/campaign-gaps/java-home-save XDG_DATA_HOME=$HOME/.local/share XDG_CONFIG_HOME=$HOME/.config XDG_CACHE_HOME=$HOME/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q \"Total time to load\" runs/campaign-gaps/java-save.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py move Mindustry 1300 100; capture_screen.py --window-title Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1550 249 (Play); click 1787 249 (Campaign); click 1877 422 (Ground Zero hex); click 1877 716 (Go -> resume the stored Ground Zero base)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"playtime\": get_node(\"/root/Spine/MindCampaign\").call(\"get_total_playtime\"), \"autosave\": get_node(\"/root/Spine/MindCampaign\").call(\"current_save_is_autosave\")}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 65  # live Ground Zero; Saves.update fires at saveinterval*60 ticks = 60 s"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "stat -c %y runs/campaign-gaps/java-home-save/.local/share/Mindustry/saves/sector-serpulo-170.msav  # 12:38:45 baseline -> 13:26:00 -> 13:27:00 (two autosaves 60 s apart)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "capture_screen.py --window-title Mindustry --output runs/PAR-0480/java/01-autosave-live.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"playtime\": get_node(\"/root/Spine/MindCampaign\").call(\"get_total_playtime\"), \"autosave\": get_node(\"/root/Spine/MindCampaign\").call(\"current_save_is_autosave\")}"
+              }
+            }
+          },
+          {
+            "tool": "godot_game_time",
+            "params": {
+              "action": "step",
+              "params": {
+                "ms": 30000
+              }
+            }
+          },
+          {
+            "tool": "godot_log",
+            "params": {
+              "action": "get",
+              "params": {
+                "source": "game",
+                "count": 200
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "stat -c %y .../xdg-data/godot/app_userdata/Mindustry-Godot/saves/sector-serpulo-170.msav  # 13:13:52 baseline -> 13:29:14 after 60 s of play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "python3 tools/gmcp.py --screenshot runs/PAR-0480/godot/01-autosave-live.png"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "mc/game/saves.rs:258 accumulates seconds, then multiplies saveinterval by 60 again (:264) => default 60 min; Java Saves.java:217-219 accumulates ticks and compares against saveinterval*60 ticks = 60 s.",
+      "source": "CAMPAIGN_GAPS.md#cg-sector-01",
+      "similarity": 69.9,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0480/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0480/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0480/godot/20261106-132941-01-autosave-live.png",
+        "runs/PAR-0480/java/20261106-133009-02-autosave-live-focused.png",
+        "runs/PAR-0480/diff-01.json",
+        "godot log 2026-11-06T03:29:14 [I] autosave queued (.../sector-serpulo-170.msav) after playtime crossed 60 000 ms (tick 585 -> 3600+)",
+        "godot sector save mtime 13:13:52 -> 13:29:14; java sector save 13:26:00 -> 13:27:00 (60 s cadence)"
+      ],
+      "fix": "client/rust/mind-core/src/game/saves.rs Saves::update_policy: the accumulator is already seconds (delta_ticks/60) and Java compares ticks against saveinterval*60 ticks, so the extra *60 on the interval made the default a 3600 s autosave. Interval is now save_interval_seconds seconds; comments + unit tests (update_policy_interval_is_seconds, autosave_policy_fires_after_interval) corrected."
+    },
+    "PAR-0481": {
+      "title": "Launching to another sector never saves the sector you leave",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/Spine/SimHost\").call(\"set_paused\", true)"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "count ore in tiles 134..139 x 48..51"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "Play -> Campaign -> click the Frozen Forest neighbour hex: the panel shows Locked"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/Spine/MindCampaign\").call(\"save_outgoing_sector\")  # Control.playSector pre-launch save"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/Spine/SimHost\").call(\"load_sector\",\"serpulo\",63)"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/Spine/MindCampaign\").call(\"start_sector\",\"serpulo\",63)"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "grep editor.log: \"saved outgoing sector before launch (.../sector-serpulo-170.msav)\""
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "count ore again: 18 (same as the pre-switch frozen world), core copper 312, tick 6068"
+              }
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/campaign.rs:919-937 start_sector_with_loadout replaces the runtime with no outgoing-slot save; Java Control.java:437-441 saves saves.getCurrent() in playSector.",
+      "source": "CAMPAIGN_GAPS.md#cg-sector-02",
+      "evidence": [
+        "runs/PAR-0481/godot/20261106-140155-01-resumed-after-switch.png",
+        "runs/PAR-0481/java/20261106-140155-01-neighbour-locked.png",
+        "godot: pre-switch frozen world (tick 5432) had 18 ore tiles in 134..139x48..51 and 312 copper; after the switch + crash + resume the same 18 ore / 312 copper came back (the launch save would have restored the pre-mining terrain)",
+        "java leg genuinely unreachable: the 1.3k-copper profile cannot launch to Frozen Forest (63) — the Java planet panel shows the sector Locked (tech-tree unlock missing), so no Java frame of a sector switch exists"
+      ],
+      "fix": "client/rust/mind-gdext/src/campaign.rs + client/rust/mind-gdext/src/ui/dialogs/batch_c.rs: Control.playSector pre-launch save (Control.java:437-441). MindCampaign.save_outgoing_sector() writes the live sector (persist_sector_record + preview + request_save + flush_io) and the planet dialog calls it BEFORE MindSimHost.load_sector replaces the world (PlanetDialog.playSelected); the accelerator path does the same in pump_accelerator_launch before its load. Not in start_sector: both callers pre-load the destination world there.",
+      "notes": [
+        {
+          "at": "2026-11-06T04:02:04Z",
+          "by": "camp-save",
+          "text": "Godot-verified only: the Java reference profile (1.3k-copper Ground Zero) cannot launch to any neighbour — Frozen Forest (63) renders Locked in the Java planet panel (tech-tree unlock missing), so the Java leg of the switch-before-save flow is genuinely unreachable. Godot proof: paused pre-switch world tick 5432 with 18 ore tiles in 134..139x48..51 and 312 copper; save_outgoing_sector logged; after the switch + process restart + Resume the same 18 ore / 312 copper return. Frames: runs/PAR-0481/godot/20261106-140155-01-resumed-after-switch.png (Godot), runs/PAR-0481/java/20261106-140155-01-neighbour-locked.png (Java showing Locked)."
+        }
+      ]
+    },
+    "PAR-0482": {
+      "title": "Authored sector weather is overwritten on every fresh landing",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0482"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/campaign.rs:1160-1176 overwrites rules.weather with add_weather after load; Java World.java:266,303 adds weather before SaveIO.load and SaveVersion.readRules replaces rules with the authored map rules.",
+      "source": "CAMPAIGN_GAPS.md#cg-gen-05"
+    },
+    "PAR-0483": {
+      "title": "Authored sector .msav genfilters (boulders/props) are never applied",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0483"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/sim_host.rs:10675-10718 load_preset_map_grid -> decode_save_bytes(filter_seed=None); apply_filters only runs inside filter_seed.inspect (mc/io/sim_io.rs:850). Java FileMapGenerator.java:71-82 applies map.filters() on preset load.",
+      "source": "CAMPAIGN_GAPS.md#cg-gen-01"
+    },
+    "PAR-0484": {
+      "title": "Core-linked container/vault does not join the core item pool (unloader layouts dead-end)",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0484"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "mc/world/blocks/storage/core_block.rs:215 only records linked_core/capacity; unloader.rs:290-311 requires item_count(other,item)>0 and storage_block.rs:70-92 only forwards inbound items. Java CoreBlock.java:764-770 aliases t.items = core items.",
+      "source": "CAMPAIGN_GAPS.md#cg-econ-01"
+    },
+    "PAR-0485": {
+      "title": "Core-items HUD/state read the first CoreBlock in entity order, not the player's core",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0485"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/sim_host.rs:10242-10269 core_items_json has no team filter; Java CoreItemsDisplay.java:33 uses player.team().core().",
+      "source": "CAMPAIGN_GAPS.md#cg-econ-02"
+    },
+    "PAR-0486": {
+      "title": "A crash/unclean exit resumes the sector with an empty core and wave 1",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java -jar ../Mindustry/desktop/build/libs/Mindustry.jar with HOME=runs/campaign-gaps/java-home-save (survey profile: Ground Zero captured, 1.3k copper stored)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py move Mindustry 1300 100; java_input.py click Play(1550,249) -> Campaign(1787,249) -> Ground Zero hex(1877,422) -> Go(1877,716)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 800,
+                        "y": 500
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 800,
+                        "y": 500
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 800,
+                        "y": 500
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); c.call(\"run_wave\"); return str(c.call(\"sector_record_json\", \"serpulo\", 170))"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return str(get_node(\"/root/Spine/MindCampaign\").call(\"sector_record_json\",\"serpulo\",170))  # items {\"copper\":548}, wave 2, spawn 8454199, preset groundZero, attempts 3"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "kill -9 706741  # unclean crash (not godot_game stop); sector save mtime 13:41:10"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); return {\"wave\": str(c.call(\"get_sector_state\")), \"core\": str(get_node(\"/root/Spine/SimHost\").call(\"core_items_json\"))}"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 20  # live base, autosave at 13:27:00 / 13:30:00"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "kill -9 691291  # unclean crash"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "relaunch java with the same HOME; java_input.py click Play -> Campaign -> Ground Zero hex -> Go (resume)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "capture_screen.py --window-title Mindustry --output runs/PAR-0486/java/01-resumed-after-crash.png"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "start_sector finishes with persist() (gx/campaign.rs:1415) but never writes the sector record; resume reads the still-default record (campaign.rs:1267,1316; sim_host.rs:7998). Java saves the sector on playNewSector and prepares info on every save.",
+      "source": "CAMPAIGN_GAPS.md#cg-save-01",
+      "similarity": 68.4,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0486/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0486/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0486/godot/20261106-134310-01-resumed-after-crash.png",
+        "runs/PAR-0486/java/20261106-134437-01-resumed-after-crash.png",
+        "runs/PAR-0486/20261106-133228-godot-record-after-autosave.json",
+        "runs/PAR-0486/diff-01.json",
+        "godot branch log after crash: sector=serpulo:170 has_save=true had_no_core=false no_live_core=false resume=true cores=1 teams=[1]",
+        "godot resumed state: wave 2, core copper 548 (pre-crash record items)",
+        "java resumed: core 1.4k copper and the stored base intact after kill -9"
+      ],
+      "fix": "client/rust/mind-gdext/src/campaign.rs start_sector: the fresh-launch branch now calls persist_sector_record() before queuing the launch save, mirroring SaveVersion.writeMeta (prepare+saveInfo on every save); the autosave path already did this. The launch record therefore carries spawnPosition/lastPresetName/bestCoreType/storageCapacity/attempts and the world+record stay in step, so an unclean exit resumes from the last save instead of defaults."
+    },
+    "PAR-0487": {
+      "title": "Loading a save never makes it the current slot (no autosave/exit save/playtime)",
+      "status": "twin-verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); c.call(\"save_slot\",\"t5-load\"); c.call(\"run_exit_save\"); return c.call(\"load_slot\",\"t5-load\")  # the Load-dialog entry point"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "custom game Ancient Caldera (Survival) -> pause -> Save Game (auto 0.msav) -> Save & Quit -> Play -> Load Game"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click the save card (1877,430) -> loads 0.msav from the Load dialog"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); return {\"current_autosave\": c.call(\"current_save_is_autosave\"), \"playtime_ms\": c.call(\"current_save_playtime_ms\")}  # true / 178142 after load (pre-fix false / -1)"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Escape"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "python3 tools/gmcp.py --screenshot runs/PAR-0487/godot/01-pause-after-load.png  # pause menu shows \"Save & Quit\""
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 441
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 441
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 676,
+                        "y": 360
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 676,
+                        "y": 360
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "stat -c %y .../saves/t5-load.msav  # 13:48:28 -> 13:49:24 (exit save wrote the loaded slot)"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java pause menu after the Load-dialog load shows \"Save & Quit\" (captured)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click Save & Quit (1877,541) -> Confirm OK (1982,460)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "stat -c %y runs/campaign-gaps/java-home-save/.local/share/Mindustry/saves/0.msav  # 13:52:16 -> 13:53:24 (exit save)"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/campaign.rs:3878-3911 load_slot does not set Saves.current; mc/game/saves.rs:235-262 gates autosave/playtime on current.is_some(); Java Saves.java:319-324 sets current = this.",
+      "source": "CAMPAIGN_GAPS.md#cg-save-02",
+      "similarity": 70.9,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0487/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0487/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0487/godot/20261106-134858-01-pause-after-load.png",
+        "runs/PAR-0487/java/20261106-135320-01-pause-after-load.png",
+        "runs/PAR-0487/diff-01.json",
+        "godot: current_save_is_autosave true and current_save_playtime_ms 178142 right after load (pre-fix: false / -1)",
+        "godot t5-load.msav mtime 13:48:28 -> 13:49:24 on Save & Quit; java 0.msav 13:52:16 -> 13:53:24",
+        "both pause menus render \"Save & Quit\" after a Load-dialog load"
+      ],
+      "fix": "client/rust/mind-gdext/src/campaign.rs load_slot: after applying the meta it now calls adopt_loaded_slot (Saves.set_current_by_file + total_playtime from meta), mirroring SaveSlot.load (Saves.java:319-324); the autosave cadence, playtime accrual, exit save and the @save.quit pause label all key on Saves.current. Unit test campaign::tests::loaded_slot_becomes_current_and_autosaves."
+    },
+    "PAR-0488": {
+      "title": "Configure Loadout manual resource editor is inert",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0488"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/ui/dialogs/batch_campaign2.rs:2879 calls missing set_launch_resources; :2541 reads PackedInt32Array through a GString cast; loadout_changed has no listener. Java LaunchLoadoutDialog.java:138-141 round-trips updateLaunchResources and rebuilds.",
+      "source": "CAMPAIGN_GAPS.md#cg-tech-01"
+    },
+    "PAR-0489": {
+      "title": "Launch cost is priced from the planet-default-core loadout list",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0489"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/ui/dialogs/batch_c.rs:2693,2858 resolves launch_cost from campaign_views.loadouts built from planet.default_core (mc/ui/campaign.rs:1719-1746), while the picker offers every core <= launcher core (gx/campaign.rs:5304-5320); Java PlanetDialog.java:1405-1412 charges the chosen loadout's requirements.",
+      "source": "CAMPAIGN_GAPS.md#cg-tech-02"
+    },
+    "PAR-0490": {
+      "title": "Planet page Resume reloads the sector from disk instead of resuming the live world",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java client on :11 with runs/campaign-gaps/java-home-save; in a live Ground Zero press N (java_xkeys) -> planet page"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click (1877,422) on the Ground Zero hex -> panel shows Resume"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/MindUi\").call(\"open_dialog\", \"planet\", \"\")  # the N-key in-game planet page"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 325
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); return {\"tick\": get_node(\"/root/Spine/SimHost\").call(\"get_tick\"), \"playtime\": c.call(\"get_total_playtime\")}  # tick 13118, playtime 157022"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); return {\"stack\": get_node(\"/root/MindUi\").call(\"dialog_stack\"), \"tick\": get_node(\"/root/Spine/SimHost\").call(\"get_tick\"), \"playtime\": c.call(\"get_total_playtime\")}  # stack [] (page closed), tick 13246, playtime 159134 -> the live world continued, no reload"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click (1877,616) Resume"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 1.2; capture_screen.py --window-title Mindustry --output runs/PAR-0490/java/02-resumed-live-world.png  # page hidden, live world, copper 1.4k -> 1.6k"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/ui/dialogs/batch_c.rs:2581,2815,2881 routes resume through prime_sector_load + host.load_sector; Java PlanetDialog.java:1373 hides the page when sector.isBeingPlayed().",
+      "source": "CAMPAIGN_GAPS.md#cg-ui-01",
+      "similarity": 38.5,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0490/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0490/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0490/godot/20261106-134746-01-planet-resume-live.png",
+        "runs/PAR-0490/java/20261106-134455-01-planet-resume-live.png",
+        "runs/PAR-0490/godot/20261106-134800-02-resumed-live-world.png",
+        "runs/PAR-0490/java/20261106-135*.png",
+        "runs/PAR-0490/diff-01.json",
+        "godot probe: dialog_stack [\"planet\"] -> [] on Resume, tick 13118 -> 13246, playtime 157022 -> 159134 ms (no world reload)",
+        "java: page hidden and the live world kept producing (copper 1.4k -> 1.6k)"
+      ],
+      "fix": "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs planet_sector_action_pressed: for the sector that is being played (planet_sector_is_being_played on MindCampaign.get_sector_state) the Resume action now closes the planet page and returns, mirroring PlanetDialog.playSelected (PlanetDialog.java:1373-1377); it no longer routes through prime_sector_load + MindSimHost.load_sector, which reloaded the last save and reset the tick."
+    },
+    "PAR-0491": {
+      "title": "Campaign-complete overlay never appears at capture time",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0491"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/campaign.rs:612 emits campaign_complete with no listener; only the planet-page path batch_c.rs:1602 shows it. Java Control.java:175-181 schedules CampaignCompleteDialog 2 s after the final capture.",
+      "source": "CAMPAIGN_GAPS.md#cg-ui-04"
+    },
+    "PAR-0492": {
+      "title": "Timer objectives print ticks as mm:ss and never count down",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c = get_node(\"/root/Spine/MindCampaign\")\nvar h = get_node(\"/root/Spine/SimHost\")\nc.call(\"clear_planet_campaign_saves\", \"serpulo\")\nh.call(\"load_sector\", \"serpulo\", 170)\nc.call(\"start_sector\", \"serpulo\", 170)\nh.call(\"step\", 3)\nget_node(\"/root/Spine/Ui/UiRoot\").call(\"set_menu_visible\", false)\nreturn {\"ok\": true}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nvar results = []\nfor i in [0, 1, 2, 3, 9, 6, 15, 7, 4, 5, 8, 10, 11, 16]:\n    results.append(c.call(\"complete_objective\", i))\nh.call(\"step\", 5)\nreturn {\"completed\": str(results)}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var cam = get_node(\"/root/Spine/World/Camera2D\")\ncam.set_process(false)\ncam.call(\"pan_to\", 1032.0, 440.0)\nreturn {\"ok\": true}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h = get_node(\"/root/Spine/SimHost\")\nh.call(\"set_paused\", true)\nh.call(\"step\", 120)\nvar c = get_node(\"/root/Spine/MindCampaign\")\nvar status = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/StatusRow/Row/Status\")\nreturn {\"status\": str(status.get(\"text\")), \"live\": str(c.call(\"objective_live_stats_json\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "mc/game/map_objectives.rs:649-676 treats o.duration (ticks) as seconds and ignores countup; Java MapObjectives.java:540-548 divides by 60 and subtracts countup.",
+      "source": "CAMPAIGN_GAPS.md#cg-tut-04",
+      "fix": "timer_text now converts the remaining ticks ((duration * objectiveTimerMultiplier - countup) / 60, truncated) and formats m:ss / bare seconds like MapObjectives.java:540-576, using the executor's live countup (exposed by MindCampaign.objective_live_stats_json as timerCountup, applied through MapObjectivesRuntime::set_timer_countup) instead of the frozen full duration that printed 60:00.",
+      "evidence": [
+        "runs/PAR-0492/godot/20261106-132855-07-timer-paused.png",
+        "runs/PAR-0492/godot/20261106-132624-02-timer-countdown-a.png",
+        "runs/PAR-0492/godot/20261106-132629-03-timer-countdown-b.png",
+        "runs/PAR-0492/20261106-140000-run.md"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T03:48:18Z",
+          "by": "camp-tut",
+          "text": "Godot-only verification: HUD shows 'Enemies approaching in 58' at an exactly pinned countup of 120 ticks ((3600-120)/60 = 58 s) and 43→38 over 5 s of ticks. No Java frame of this state: objective 12 needs the full GZ tutorial chain; a class-mod harness (-Dtut.timer=1) is discovered but never instantiated by the reference build, and a Godot-exported MGRS save could not be driven through Java's Load Game in the session budget. Java parity is source/argument-level (MapObjectives.java:516-576) + unit tests, so status=verified (Godot-only), not twin-verified."
+        }
+      ]
+    },
+    "PAR-0493": {
+      "title": "Planet globe draws no vulnerability/shield/import-export arcs or current-sector fill",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0493"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/ui/planet.rs:1125 rebuild_markers has no arc primitive; mc/ui/campaign.rs:169 SectorView lacks shield_target. Java PlanetDialog.java:503-545 renderOverProjections + :481-486 current fill.",
+      "source": "CAMPAIGN_GAPS.md#cg-ui-02"
+    },
+    "PAR-0494": {
+      "title": "Hovering an unlandable sector shows no lock reason",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0494"
+            }
+          }
+        ]
+      },
+      "severity": "P1",
+      "gap": "gx/ui/dialogs/batch_c.rs:3403 suppresses the hover label for locked sectors; sector.foundationrequired / sector.shielded are unused in client/rust. Java PlanetDialog.java:962-976 + SerpuloPlanetGenerator.java:114-123.",
+      "source": "CAMPAIGN_GAPS.md#cg-ui-03"
+    },
+    "PAR-0495": {
+      "title": "Reloading a sector mid-session leaves the world renderer blank until the game process restarts (HUD keeps updating)",
+      "status": "mismatch",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.call(\"set_paused\", false)\nc.call(\"clear_planet_campaign_saves\", \"serpulo\")\nh.call(\"load_sector\", \"serpulo\", 170)\nc.call(\"start_sector\", \"serpulo\", 170)\nh.call(\"step\", 3)\nget_node(\"/root/Spine/Ui/UiRoot\").call(\"set_menu_visible\", false)\nreturn {\"ok\": true}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ]
+      },
+      "claimed_by": "camp-tut",
+      "claimed_at": "2026-11-06T03:50:29Z",
+      "severity": "P2",
+      "gap": "After MindCampaign.load_sector/start_sector on an already-playing session (with the fixed-step pump paused), the world bands render empty (flat background) while the HUD/minimap keep updating; unpausing and stepping did not rebuild them, only a stop+play of the game process restored terrain. Seen while staging the PAR-0492 timer state (godot pid 698953 session). Suspected renderer invalidation on a world reload (world_loads) rather than a sim issue; not investigated further because it is outside this packet.",
+      "evidence": [
+        "runs/PAR-0492/godot/20261106-132739-05-timer-58s-rendered.png",
+        "runs/PAR-0492/godot/20261106-132855-07-timer-paused.png"
+      ]
+    },
+    "PAR-0496": {
+      "title": "Tech-tree root-selector button always shown and no-ops with one tree",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "clear_planet_campaign_saves+clear_research; MindUi.open_dialog(\"research\",{\"planet\":\"serpulo\"})"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "fresh HOME profile; Play -> Campaign -> Serpulo -> OK -> planet page -> Tech Tree"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d=JSON.parse_string(c.call(\"research_tree_json\",\"serpulo\")); return {\"roots\": d[\"roots\"].size()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0496/java/20261106-143104-01-research-root-selector-visible.png"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "gx/ui/dialogs/batch_campaign2.rs:1542 uses visible = !tree.root.is_empty(); Java ResearchDialog.java:108 visible = selectable-root count > 1; fresh Serpulo profile shows a dead \"Serpulo\" button",
+      "source": "CAMPAIGN_GAPS.md#cg-tech-06",
+      "similarity": 78.6,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0496/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0496/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0496/java/20261106-143104-01-research-root-selector-visible.png",
+        "runs/PAR-0496/godot/20261106-143700-01-research-dialog.png",
+        "runs/PAR-0496/diff/01-action.json",
+        "runs/PAR-0496/20261106-144446-run.md"
+      ],
+      "fix": "batch_campaign2.rs: research_shown now sets the title button visible from root_select_visible(picker_rows, selected_root_locked) = picker_rows - selected_locked > 1, i.e. Java showTechSelect (ResearchDialog.java:108) over TechTree.roots with the getPrefRoot exemption subtracted. Test: root_selector_needs_two_selectable_trees.",
+      "notes": [
+        {
+          "at": "2026-11-06T04:45:39Z",
+          "by": "camp-tech",
+          "text": "Refuted at HEAD in vanilla: both roots are always selectable (Erekir root content core-bastion is alwaysUnlocked, Blocks.java:3196), so research_tree_json returns 2 roots and Java's count>1 predicate also shows the button. Both frames show the same Title button; the port's picker opens with 2 rows. The landed change is Java's exact predicate (was 'any tree loaded'), a no-op in vanilla and correct for a genuinely locked root (mods). No divergence pair exists."
+        }
+      ]
+    },
+    "PAR-0497": {
+      "title": "Tech tree missing implicit dependency Research objectives (Block/UnitType.getDependencies)",
+      "status": "twin-verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); c.call(\"clear_planet_campaign_saves\",\"serpulo\"); c.call(\"clear_research\"); get_node(\"/root/MindUi\").call(\"open_dialog\",\"research\",\"{\\\"planet\\\":\\\"serpulo\\\"}\"); return {\"pid\":OS.get_process_id()}"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 LIBGL_ALWAYS_SOFTWARE=1 HOME=$PWD/runs/campaign-gaps/java-home-tech ... java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click ... # Play -> Campaign -> Serpulo -> OK -> planet page Tech Tree"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var v=get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/research/Center/Panel/Layout/@MindResearchView@2844\"); return {\"x\":int(v.call(\"button_rect\",23).position.x)}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 614,
+                        "y": 311
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 615,
+                        "y": 312
+                      },
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py hover 861 929  # core-foundation node, popup settles"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0497/java/20261106-143302-02-dependency-objectives.png"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "mc/content/tech/mod.rs:295-350,485 materializes only researchRequirements + explicit NodeObjectives; Java TechTree.java:129-136 adds a Research objective for every content.getDependencies() entry (Block.java:1298-1317: requirement items + non-optional ConsumeItems; UnitType.java:766-782: reconstructors + researchRequirements). Concrete: silicon-smelter consumes coal but does not cost it, so Java gates research on coal unlocked and the port does not.",
+      "source": "CAMPAIGN_GAPS.md#cg-tech-03",
+      "similarity": 77.8,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0497/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0497/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0497/java/20261106-143302-02-dependency-objectives.png",
+        "runs/PAR-0497/godot/20261106-143817-01-implicit-dependency-objectives.png",
+        "runs/PAR-0497/diff/01-action.json",
+        "runs/PAR-0497/20261106-144446-run.md"
+      ],
+      "fix": "mc/content/tech/mod.rs: content_dependencies() dispatches Block.getDependencies (requirement items + non-optional ConsumeItems) and UnitType.getDependencies (reconstructor + researchRequirements), deduped; at_full_inner prepends them as Research objectives before the explicit ones and root() materialises them too (TechTree.java:129-136,204-215). BlockDef::get_dependencies now has a production caller. Golden content_ids regenerated (objectives only) + manifest sha256/reason. Test: implicit_dependency_research_objectives."
+    },
+    "PAR-0498": {
+      "title": "Player mining affordance/order ignores mineRange, stack acceptance and playerUnmineable",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "clear_planet_campaign_saves; load_sector+start_sector serpulo 170; step 3; set_menu_visible(false); debug_spawn_player alpha 1 1032 424; cam.pan_to 1150 440"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "fresh HOME profile; Play -> Campaign -> Serpulo -> OK -> Launch (Ground Zero)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 560,
+                        "y": 388
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 560,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 560,
+                        "y": 388
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events(); return {\"mine\": str(get_node(\"/root/Spine/SimHost\").call(\"player_mine_tile\"))}"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0498/java/20261106-144354-01-ground-zero-launch.png"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "mc/ai/types/player.rs:278-295 can_mine_tile only checks get_mine_result(...).is_some(); no mineRange, no accepts_item, no playerUnmineable. Java InputHandler.java:2083-2090 canMine = validMine (MinerComp.java:50-60 range) && acceptsItem(getMineResult) && playerUnmineable gates; the order is dropped next tick by miner.rs:262-270 so the click also steals the shot.",
+      "source": "CAMPAIGN_GAPS.md#cg-econ-05",
+      "evidence": [
+        "runs/PAR-0498/java/20261106-144354-01-ground-zero-launch.png",
+        "runs/PAR-0498/godot/20261106-143956-00-gz-state.png",
+        "runs/PAR-0498/20261106-144446-run.md"
+      ],
+      "fix": "mc/ai/types/player.rs: can_mine_tile now chains MinerComp.validMine (mineRange + getMineResult), ItemsComp.acceptsItem capacity/same-item gate (shared pub(crate) miner::accepts_item) and the playerUnmineable floor/overlay rules with doubletapmine off, matching InputHandler.canMine (InputHandler.java:2045-2055). Test: player_can_mine_checks_range_stack_and_unmineable_floors. Verified in-engine through DesktopInput.tryMineAt -> player_mine_tile: order [137,53] accepted 8 tiles from the ore, rejected from 27 tiles away.",
+      "notes": [
+        {
+          "at": "2026-11-06T04:45:45Z",
+          "by": "camp-tech",
+          "text": "Closed as verified: the discriminating probe is structured (player_mine_tile via the real tryMineAt path: [137,53] in range, [] at 27 tiles), because neither client renders the drill cursor into a window capture (X11 grab has no cursor; the port has no CursorContext consumer in gdext). No AVIF pair published to avoid faking one; the Godot world frame in this session is degraded (flat floor after a fresh-XDG editor restart). See the run md for the floor-drop note (get_mine_result ignores tile.floor().itemDrop)."
+        }
+      ]
+    },
+    "PAR-0499": {
+      "title": "desktopPause hint completes on any pause, not on the pause key",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "start_sector serpulo 170; step; show_hint(\"desktopPause\")"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "fresh HOME profile; Lead -> Campaign -> Serpulo -> OK -> Launch ground zero"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "ui.call(\"settings_put_flag\",\"desktopPause-hint-done\",false); f.call(\"show_hint\",\"desktopPause\"); return {\"done\": ui.call(\"hint_finished\",\"desktopPause\")}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "ui.call(\"open_dialog\",\"research\",...); ui.call(\"close_dialog\",\"research\"); return {\"done_after_dialog_pause\": ui.call(\"hint_finished\",\"desktopPause\")}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "f.call(\"show_hint\",\"desktopPause\"); f.call(\"_on_hotkey\",\"pause\"); return {\"done_after_pause_key\": ui.call(\"hint_finished\",\"desktopPause\")}"
+              }
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0499/java/20261106-144354-01-gz-hint-panel.png"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "gx/ui/fragments/hints.rs:452 uses self.is_paused() for desktopPause complete; Java HintsFragment.java:189-192 completes on Core.input.keyTap(Binding.pause). Any auto-pause (focus loss) or dialog pause permanently burns the hint and persists <name>-hint-done.",
+      "source": "CAMPAIGN_GAPS.md#cg-hint-01",
+      "evidence": [
+        "runs/PAR-0499/java/20261106-144354-01-gz-hint-panel.png",
+        "runs/PAR-0499/godot/20261106-144331-01-pause-hint-visible.png",
+        "runs/PAR-0499/20261106-144446-run.md"
+      ],
+      "fix": "ui/fragments/hints.rs: ready() connects MindInput.hotkey to _on_hotkey; the desktopPause predicate is pause_key_tap(current==\"desktopPause\", binding==\"pause\") evaluated on the binding press edge (HintsFragment.java:189-192), and the old is_paused() state arm/helper is gone. Test: desktop_pause_completes_on_the_pause_key_only.",
+      "notes": [
+        {
+          "at": "2026-11-06T04:45:51Z",
+          "by": "camp-tech",
+          "text": "Closed as verified: in-engine probe on the Godot side is decisive (hint_finished false after a Research-dialog pause, true after the pause-key hotkey), but the Java leg could not reach the desktopPause hint in the time-box: GZ stayed wave 1 in a stepped session and reaching it needs wave>=2 plus skipping the move/zoom/shoot hints. Java frame is the GZ hint surface (move hint + Skip). Not paired in AVIF."
+        }
+      ]
+    },
+    "PAR-0500": {
+      "title": "Research objective text masks multi-node content by the first node's parent (Java uses content.techNode = last created)",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0500"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "source": "CAMPAIGN_GAPS.md#cg-tech-03 (found while twin-verifying PAR-0497)",
+      "gap": "campaign.rs:2873 research_parent_unlocked finds the FIRST tech node whose content matches (`nodes.iter().find`); Java Objectives.Research.display (Objectives.java:26-31) reads content.techNode, which the TechNode constructor overwrites on every creation, i.e. the LAST node built (Erekir tree builds after Serpulo). Concrete: silicon has a Serpulo node under graphite (locked on a fresh profile) and an Erekir node under sand (alwaysUnlocked); Java prints \"Research Silicon\", the port prints \"Research ???\" — visible in runs/PAR-0497 (core-foundation popup, second objective row) vs the Java frame. Fix: resolve the node via UnlockFields.tech_node (set_tech_node already overwrites, i.e. the last node) instead of scanning."
     }
   },
   "recipes": {

@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T01:02:06Z",
+  "updated": "2026-11-06T04:46:07Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -320,6 +320,135 @@
       "expected": "shock_mine/lightning/fx tests pass; shock-mine tendrils emit Fx.lightning with Pal.lancerLaser and the renderer draws that colour",
       "risk": "New FX event payload (EffectWithData) and Lightning.create now emits an FX event for every caller (shock mines, wall lightning, explosions, lightning bullets); view-only so checksums/goldens unaffected. Full mind-core suite passed. Build/editor restart pending.",
       "notes": "Twin pending: build + editor restart, sandbox shock-mine, walk player mech onto it, burst-capture the 4 tendrils in Java and Godot. Java frame should show lancerLaser (blue) vs the old white; pre-fix the port rendered no bolt at all.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-034831",
+      "created_at": "2026-11-06T03:48:31Z",
+      "agent": "camp-tut",
+      "branch": "main",
+      "head": "ea57f25d",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 9,
+      "area": "client/rust/mind-core/src/game",
+      "summary": "Objective text: Java argument tuples (Build/Research/Produce/DestroyUnits/DestroyBlocks) + countdown timer",
+      "files": [
+        "client/rust/mind-core/src/game/map_objectives.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib game::map_objectives",
+      "expected": "18 passed (build/research/destroy text tuples, timer 1:00/59/58, multiplier 30)",
+      "risk": "ObjectiveLocale trait extended with defaulted live-count hooks; every implementor keeps compiling, but a host that does not override them shows target counts instead of remaining",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-034831-2",
+      "created_at": "2026-11-06T03:48:31Z",
+      "agent": "camp-tut",
+      "branch": "main",
+      "head": "ea57f25d",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-gdext/src/render",
+      "summary": "World marker pass: draw every ObjectiveMarker class and re-project per frame",
+      "files": [
+        "client/rust/mind-gdext/src/render/objective_markers.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import"
+      ],
+      "repro": "bash tools/build.sh && godot_exec: get_node(\"/root/Spine/World/Renderer/ObjectiveMarkers/Markers\").call(\"marker_draw_debug\")",
+      "expected": "draws advances 1:1 with Engine.get_process_frames while a label is visible; objective_markers_json has a Text row after GZ objective 2",
+      "risk": "Node2D draw API usage (draw_primitive texture path for Quad, AtlasTexture try_cast); unused Texture/Quad paths only exercised by editor-authored markers",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-034831-3",
+      "created_at": "2026-11-06T03:48:31Z",
+      "agent": "camp-tut",
+      "branch": "main",
+      "head": "ea57f25d",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Campaign objective live-stats endpoint + HUD HudLocale live counts",
+      "files": [
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/ui/hud.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check"
+      ],
+      "repro": "godot_exec: get_node(\"/root/Spine/MindCampaign\").call(\"objective_live_stats_json\")",
+      "expected": "JSON with placedBlocks/enemyUnitsDestroyed/unitCounts/timerCountup/destroyBlocksProgress; HUD Status reads Build: 1x <drill> Mechanical Drill",
+      "risk": "Additive #[func]; takes/puts the campaign runtime around host calls (building_debug/unit_debug_json) only when UnitCount/DestroyBlocks objectives run",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-041155",
+      "created_at": "2026-11-06T04:11:55Z",
+      "agent": "camp-save",
+      "branch": "main",
+      "head": "ea57f25d",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 21,
+      "area": "client/rust/mind-core/src/game + client/rust/mind-gdext/src",
+      "summary": "Campaign save policy parity: 60 s autosave, launch-time sector record, load-slot current + playtime, save-before-sector-switch, Resume-live planet page",
+      "files": [
+        "client/rust/mind-core/src/game/saves.rs",
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib game::saves; tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib campaign::tests; in-engine: Ground Zero 60 s -> autosave; kill -9 + Resume; planet page Resume; Load-dialog load -> pause label",
+      "expected": "saves tests 14 pass (incl. update_policy_interval_is_seconds), gdext campaign tests 4 pass (incl. loaded_slot_becomes_current_and_autosaves), autosave at 60 s of sim time, resume-after-crash keeps record items/wave, Resume hides without a tick reset, exit save writes the loaded slot",
+      "risk": "new append-only #[func] save_outgoing_sector (planet dialog must keep calling it BEFORE MindSimHost.load_sector; ordering is load-bearing, see PAR-0481); extra settings flush on every launch (persist_sector_record); pause-label bundle key save.quit; new start_sector branch info log line",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-044607",
+      "created_at": "2026-11-06T04:46:07Z",
+      "agent": "camp-tech",
+      "branch": "main",
+      "head": "ea57f25d",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 25,
+      "area": "client/rust",
+      "summary": "Campaign gaps CG-TECH-06/03, CG-ECON-05, CG-HINT-01 (tech objectives, mine gate, pause hint)",
+      "files": [
+        "client/rust/mind-core/src/content/tech/mod.rs",
+        "client/rust/mind-core/src/ai/types/player.rs",
+        "client/rust/mind-core/src/entities/comp/unit/miner.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs",
+        "client/rust/mind-gdext/src/ui/fragments/hints.rs",
+        "parity/golden_content.json",
+        "parity/golden_manifest.json"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib content::tech; cargo test -p mind-core --lib ai::types::player; cargo test -p mind-gdext --lib root_selector_needs_two_selectable_trees; python3 tools/twin_verification.py check",
+      "expected": "mind-core 2903 tests pass (incl. implicit_dependency_research_objectives + player_can_mine_checks_range_stack_and_unmineable_floors); batch_campaign2 + hints unit tests pass; twin check ok 500 items",
+      "risk": "Tech-tree node objectives now include implicit Research rows everywhere (can_spend/selectable/auto-unlock); parity/golden_content.json tech objectives regenerated (only objectives arrays moved) with the manifest sha256 recorded; golden_manifest reasons grew. mind-gdext lib tests have 17 pre-existing Godot-engine-required failures in this headless env (Json/GString builtins) - unrelated.",
       "status": "pending"
     }
   ]

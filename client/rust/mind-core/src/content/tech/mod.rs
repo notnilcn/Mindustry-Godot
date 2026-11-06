@@ -231,6 +231,16 @@ impl<'r> TechTreeBuilder<'r> {
     /// `TechTree.nodeRoot(name, content, children)`.
     pub fn root(&mut self, name: &str, content_name: &str, requires_unlock: bool) {
         let (content, _) = self.resolve_content(content_name);
+        // `nodeRoot` -> `node` -> the `TechNode` constructor's dependency
+        // objectives (`TechTree.java:129-136`).
+        let objectives: Vec<ObjectiveSpec> = content
+            .map(|content| {
+                content_dependencies(self.registry, content)
+                    .into_iter()
+                    .map(ObjectiveSpec::Research)
+                    .collect()
+            })
+            .unwrap_or_default();
         let node = self.push_node(
             0,
             content,
@@ -239,6 +249,9 @@ impl<'r> TechTreeBuilder<'r> {
             requires_unlock,
             Some(name),
         );
+        if let Some(record) = self.registry.tech.node_mut(node) {
+            record.objectives = objectives;
+        }
         self.root = Some(node);
         self.tree_name = name.to_owned();
     }
@@ -331,8 +344,19 @@ impl<'r> TechTreeBuilder<'r> {
             }
         }
 
-        // Materialize objectives and insert the missing sector dependency.
-        let mut resolved_objectives = self.resolve_objectives(objectives);
+        // Materialize objectives: the `TechNode` constructor prepends the
+        // implicit dependency `Research` objectives and `TechTree.node` then
+        // appends the explicit ones (`TechTree.java:129-136,204-215`), so the
+        // sector dependency below is inserted at position 0 on top of both.
+        let mut resolved_objectives: Vec<ObjectiveSpec> = content
+            .map(|content| {
+                content_dependencies(self.registry, content)
+                    .into_iter()
+                    .map(ObjectiveSpec::Research)
+                    .collect()
+            })
+            .unwrap_or_default();
+        resolved_objectives.extend(self.resolve_objectives(objectives));
         if let Some(parent_node) = parent
             && let Some(parent_record) = self.registry.tech.node(parent_node)
             && let Some(ContentRef {
@@ -574,6 +598,62 @@ pub fn content_research_requirements(
             .unwrap_or_default(),
         _ => Vec::new(),
     }
+}
+
+/// `UnlockableContent.getDependencies()` dispatch (`TechTree.java:129-136`):
+/// the content references that become implicit `Research` objectives of the
+/// node.
+///
+/// `Block.getDependencies()` (`Block.java:1298-1317`) yields the build-cost
+/// items and then every non-optional `ConsumeItems` input; `UnitType`'s
+/// (`UnitType.java:766-782`) yields the reconstructor blocks that produce the
+/// unit and the `researchRequirements()` items. Anything else keeps
+/// `UnlockableContent`'s empty default. The order is encounter order, and
+/// `TechNode`'s `ObjectSet` dedup is applied here so a block that costs and
+/// consumes the same item lists it once.
+///
+/// [`BlockDef`]: super::registries::blocks::BlockDef
+pub fn content_dependencies(registry: &ContentRegistry, content: ContentRef) -> Vec<ContentRef> {
+    use super::registries::blocks::Consume;
+
+    let mut out: Vec<ContentRef> = Vec::new();
+    let mut push = |reference: ContentRef| {
+        if !out.contains(&reference) {
+            out.push(reference);
+        }
+    };
+    match content.type_ {
+        ContentType::Block => {
+            if let Some(block) = registry.block(BlockId::new(content.id)) {
+                for stack in &block.requirements {
+                    push(ContentRef::new(ContentType::Item, stack.item.raw()));
+                }
+                for consumer in &block.consumes {
+                    if consumer.optional {
+                        continue;
+                    }
+                    if let Consume::Items(stacks) = &consumer.consume {
+                        for stack in stacks {
+                            push(ContentRef::new(ContentType::Item, stack.item.raw()));
+                        }
+                    }
+                }
+            }
+        }
+        ContentType::Unit => {
+            if let Some(unit) = registry.unit(UnitTypeId::new(content.id)) {
+                let (blocks, items) = unit.get_dependencies(registry);
+                for block in blocks {
+                    push(ContentRef::new(ContentType::Block, block.raw()));
+                }
+                for item in items {
+                    push(ContentRef::new(ContentType::Item, item.raw()));
+                }
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 /// Materializes `TechNode.requirements`/`finished_requirements` for every node
@@ -867,6 +947,76 @@ mod tests {
                 .is_empty(),
             "items have no research cost"
         );
+    }
+
+    /// `TechTree.java:129-136`: the `TechNode` constructor prepends a
+    /// `Research` objective for every `content.getDependencies()` entry; the
+    /// explicit node objectives follow (`TechTree.java:204-215`).
+    #[test]
+    fn implicit_dependency_research_objectives() {
+        let registry = test_support::test_registry();
+        let research_names = |node: &TechNode| -> Vec<String> {
+            node.objectives
+                .iter()
+                .filter_map(|objective| match objective {
+                    ObjectiveSpec::Research(content) => content_name_of(&registry, *content),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // `Block.getDependencies` (`Block.java:1298-1317`): build-cost items,
+        // then the non-optional item inputs. `lead` is both (requirements lead
+        // 25, `consumeItems(coal 1, lead 2, sand 2)`) and appears once, like
+        // `TechNode`'s `ObjectSet`.
+        let mixer = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "pyratite-mixer")
+            .expect("pyratite-mixer tech node");
+        assert_eq!(
+            research_names(mixer),
+            vec!["copper", "lead", "coal", "sand"],
+            "requirements then consumed items, deduplicated"
+        );
+
+        // `UnitType.getDependencies` (`UnitType.java:766-782`): the producing
+        // reconstructor first, then the research-requirement items (the
+        // additive reconstructor's `consumeItems(silicon 40, graphite 40)`).
+        let pulsar = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "pulsar")
+            .expect("pulsar tech node");
+        assert_eq!(
+            research_names(pulsar),
+            vec!["additive-reconstructor", "silicon", "graphite"]
+        );
+
+        // Explicit objectives stay after the implicit ones (`TechTree.node`):
+        // `combustion-generator` declares `new Research(coal)` on its node.
+        let generator = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "combustion-generator")
+            .expect("combustion-generator tech node");
+        assert_eq!(
+            research_names(generator),
+            vec!["copper", "lead", "coal"],
+            "dependency objectives then the explicit `Research(coal)`"
+        );
+
+        // Content without a `getDependencies` override keeps the empty default.
+        let copper = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "copper")
+            .expect("copper tech node");
+        assert!(research_names(copper).is_empty());
     }
 
     /// Vanilla trees are ported verbatim; unresolved names are blocks/units that

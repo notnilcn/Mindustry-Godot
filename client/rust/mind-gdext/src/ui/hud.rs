@@ -496,7 +496,7 @@ impl MindHud {
             && let Ok(rules) = serde_json::from_str::<Rules>(json.to_string().as_str())
         {
             mission = rules.mission.clone().unwrap_or_default();
-            let runtime = MapObjectivesRuntime::from_rules(&rules);
+            let mut runtime = MapObjectivesRuntime::from_rules(&rules);
             let core_items = self
                 .host
                 .clone()
@@ -522,10 +522,49 @@ impl MindHud {
                     serde_json::from_value::<std::collections::HashMap<String, i32>>(value).ok()
                 })
                 .unwrap_or_default();
+            // Live counters the objective text needs beyond the persisted
+            // rules (`state.stats`, `TeamData.countType`, `world.build` and the
+            // executor's timer accumulator; `MapObjectives.java:377-548`).
+            let live = campaign
+                .call("objective_live_stats_json", &[])
+                .try_to::<GString>()
+                .ok()
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(&json.to_string()).ok())
+                .unwrap_or(serde_json::Value::Null);
+            let read_counts = |key: &str| {
+                live.get(key)
+                    .and_then(|value| {
+                        serde_json::from_value::<std::collections::HashMap<String, i32>>(
+                            value.clone(),
+                        )
+                        .ok()
+                    })
+                    .unwrap_or_default()
+            };
+            let placed_blocks = read_counts("placedBlocks");
+            let unit_counts = read_counts("unitCounts");
+            let blocks_progress = read_counts("destroyBlocksProgress");
+            let timer_countup = read_counts("timerCountup");
+            let enemy_units_destroyed = live
+                .get("enemyUnitsDestroyed")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0) as i32;
+            // Re-parsed rules only carry the once-a-second persisted Timer
+            // `countup`; the live accumulator is exact (`timer_countup`).
+            for (index, countup) in &timer_countup {
+                if let Ok(index) = index.parse::<usize>() {
+                    runtime.set_timer_countup(index, *countup as f32);
+                }
+            }
             let locale = HudLocale {
                 bundle: &self.bundle,
                 core_items: &core_items,
                 core_delivered: &core_delivered,
+                placed_blocks: &placed_blocks,
+                unit_counts: &unit_counts,
+                enemy_units_destroyed,
+                blocks_progress: &blocks_progress,
+                timer_multiplier: rules.objective_timer_multiplier,
             };
             for index in 0..runtime.len() {
                 if !runtime.qualified(index) {
@@ -660,6 +699,17 @@ struct HudLocale<'a> {
     /// `state.stats.coreItemCount` — items delivered to the core by conveyors
     /// (`CoreItemObjective.text()`, `MapObjectives.java:410`).
     core_delivered: &'a std::collections::HashMap<String, i32>,
+    /// `state.stats.placedBlockCount` (`BuildCountObjective.text()`, `:442`).
+    placed_blocks: &'a std::collections::HashMap<String, i32>,
+    /// `state.rules.defaultTeam.data().countType(unit)` (`UnitCountObjective`,
+    /// `:470`).
+    unit_counts: &'a std::collections::HashMap<String, i32>,
+    /// `state.stats.enemyUnitsDestroyed` (`DestroyUnitsObjective`, `:501`).
+    enemy_units_destroyed: i32,
+    /// `DestroyBlocksObjective.progress()` keyed by objective index (`:646`).
+    blocks_progress: &'a std::collections::HashMap<String, i32>,
+    /// `state.rules.objectiveTimerMultiplier` (`TimerObjective.text()`, `:540`).
+    timer_multiplier: f32,
 }
 
 impl ObjectiveLocale for HudLocale<'_> {
@@ -687,13 +737,47 @@ impl ObjectiveLocale for HudLocale<'_> {
     }
 
     fn item_name(&self, item: &str) -> String {
-        let key = format!("item.{item}.name");
-        let name = self.bundle.get(&key);
-        if name == key {
-            item.to_owned()
-        } else {
-            name.to_owned()
-        }
+        self.content_name(item)
+    }
+
+    /// `UnlockableContent.localizedName`: content ids are shared across item,
+    /// block and unit namespaces, so probe the typed keys in that order
+    /// (`item.copper.name`, `block.mechanical-drill.name`, `unit.dagger.name`).
+    fn content_name(&self, name: &str) -> String {
+        ["item", "block", "unit"]
+            .iter()
+            .find_map(|kind| {
+                let key = format!("{kind}.{name}.name");
+                let value = self.bundle.get(&key);
+                (value != key).then(|| value.to_owned())
+            })
+            .unwrap_or_else(|| name.to_owned())
+    }
+
+    fn placed_block_count(&self, block: &str) -> i32 {
+        *self.placed_blocks.get(block).unwrap_or(&0)
+    }
+
+    fn unit_count(&self, unit: &str) -> i32 {
+        *self.unit_counts.get(unit).unwrap_or(&0)
+    }
+
+    fn enemy_units_destroyed(&self) -> i32 {
+        self.enemy_units_destroyed
+    }
+
+    fn destroy_blocks_progress(
+        &self,
+        index: usize,
+        _positions: &[mind_core::io::json::objectives::Point2],
+        _team: u8,
+        _block: &str,
+    ) -> i32 {
+        *self.blocks_progress.get(&index.to_string()).unwrap_or(&0)
+    }
+
+    fn timer_multiplier(&self) -> f32 {
+        self.timer_multiplier
     }
 }
 

@@ -929,6 +929,12 @@ impl MindCampaign {
         if sector < 0 {
             return false;
         }
+        // `Control.playSector` (`Control.java:437-441`): a launch that replaces
+        // a live match writes the outgoing slot first (CG-SECTOR-02). The
+        // caller must have done this BEFORE the destination world load (the
+        // planet dialog does it via `save_outgoing_sector`; the accelerator in
+        // `pump_accelerator_launch`), because by now the host already holds the
+        // destination world.
         let sector_id = sector as u16;
         let Some(mut registry) = self.registry.take() else {
             return false;
@@ -1018,6 +1024,19 @@ impl MindCampaign {
             has_save && no_core_branch && !clear_save && spawn_position != 0 && data_matches;
         // Java's load branch: a save that is not in the no-core branch.
         let resume = has_save && !no_core_branch;
+        let (cores, core_teams) = self
+            .host()
+            .map(|host| {
+                let guard = host.bind();
+                (guard.player_core_blocks(default_team), guard.core_teams())
+            })
+            .unwrap_or_default();
+        log::info!(
+            "start_sector branch: sector={planet_name}:{sector_id} has_save={has_save} \
+             had_no_core={had_no_core} no_live_core={no_live_core} default_team={default_team} \
+             clear_save={clear_save} data_matches={data_matches} lost_replay={lost_replay} \
+             resume={resume} cores={cores:?} teams={core_teams:?}"
+        );
         let mut restored_survivors = Vec::new();
         if lost_replay {
             // H05 T2: the replay regenerates the world through the host, so
@@ -1400,6 +1419,13 @@ impl MindCampaign {
                     self.saves
                         .prepare_sector_slot(settings, &self.paths, &planet_name, sector_id);
                 });
+                // `SaveVersion.writeMeta` (`SaveVersion.java:117-118`) runs
+                // `state.rules.sector.info.prepare(sector)` + `saveInfo()` on
+                // EVERY save, including the launch save. Without it the stored
+                // record stays at the default (empty items, `wave: 1`), so a
+                // crash in the first session resumes an empty core at wave 1
+                // while the tile save has everything (CG-SAVE-01).
+                self.persist_sector_record();
                 if let Some(mut host) = self.host() {
                     let path = format!("user://saves/{save_name}.msav");
                     // `Saves.saveSector` -> `SaveSlot.save` -> `savePreview()`.
@@ -3480,41 +3506,259 @@ impl MindCampaign {
         )
     }
 
+    /// Live counters `Objective.text()` reads on top of the objective data:
+    /// `state.stats.placedBlockCount`/`enemyUnitsDestroyed` (`MapObjectives.java:442,501`),
+    /// the running `UnitCount` objective's `TeamData.countType` (`:470`), and
+    /// `DestroyBlocksObjective.progress()` (`:646`, a live `world.build` scan).
+    ///
+    /// The HUD feeds these into its `ObjectiveLocale`; count-based objective
+    /// text shows the **remaining** count, so they must be live, not persisted.
+    #[func]
+    pub fn objective_live_stats_json(&mut self) -> GString {
+        let mut out = serde_json::Map::new();
+        let mut unit_counts = serde_json::Map::new();
+        let mut blocks_progress = serde_json::Map::new();
+        let mut timer_countup = serde_json::Map::new();
+        let taken = self
+            .host()
+            .and_then(|mut host| host.bind_mut().take_campaign_runtime());
+        {
+            let session = taken
+                .as_ref()
+                .map_or(&self.session, |runtime| &runtime.session);
+            out.insert(
+                "placedBlocks".to_owned(),
+                serde_json::to_value(&session.stats.placed_block_count).unwrap_or_default(),
+            );
+            out.insert(
+                "enemyUnitsDestroyed".to_owned(),
+                serde_json::json!(session.stats.enemy_units_destroyed),
+            );
+            let team = i64::from(session.rules.default_team);
+            for index in session.objectives.running_indices() {
+                match session.objectives.get(index) {
+                    Some(mind_core::io::json::objectives::MapObjective::Timer(_)) => {
+                        timer_countup.insert(
+                            index.to_string(),
+                            serde_json::json!(session.objectives.timer_countup(index)),
+                        );
+                    }
+                    Some(mind_core::io::json::objectives::MapObjective::UnitCount(objective)) => {
+                        let unit = objective.unit.as_deref().unwrap_or("");
+                        // `state.rules.defaultTeam.data().countType(unit)`.
+                        let count = self
+                            .host()
+                            .map(|mut host| host.call("unit_debug_json", &[]).to_string())
+                            .and_then(|json| {
+                                serde_json::from_str::<Vec<serde_json::Value>>(&json).ok()
+                            })
+                            .map(|rows| {
+                                rows.iter()
+                                    .filter(|row| {
+                                        row.get("type").and_then(|value| value.as_str())
+                                            == Some(unit)
+                                            && row.get("team").and_then(|value| value.as_i64())
+                                                == Some(team)
+                                    })
+                                    .count()
+                            })
+                            .unwrap_or(0);
+                        unit_counts.insert(unit.to_owned(), serde_json::json!(count));
+                    }
+                    Some(mind_core::io::json::objectives::MapObjective::DestroyBlocks(
+                        objective,
+                    )) => {
+                        let block = objective.block.as_deref().unwrap_or("");
+                        let block_id = self
+                            .registry
+                            .as_ref()
+                            .and_then(|registry| registry.block_id(block))
+                            .map(|id| i64::from(id.raw()));
+                        // `progress()`: a position counts when its building is
+                        // gone or belongs to another team/block.
+                        let progress = self
+                            .host()
+                            .map(|mut host| {
+                                let mut progress = 0i64;
+                                for pos in &objective.positions {
+                                    let dict = host
+                                        .call(
+                                            "building_debug",
+                                            &[pos.x.to_variant(), pos.y.to_variant()],
+                                        )
+                                        .try_to::<VarDictionary>()
+                                        .ok();
+                                    let read = |key: &str| {
+                                        dict.as_ref().and_then(|dict| {
+                                            dict.get(&GString::from(key).to_variant())
+                                                .and_then(|value| value.try_to::<i64>().ok())
+                                        })
+                                    };
+                                    let intact = read("block").is_some()
+                                        && read("block") == block_id
+                                        && read("team") == Some(i64::from(objective.team));
+                                    if !intact {
+                                        progress += 1;
+                                    }
+                                }
+                                progress
+                            })
+                            .unwrap_or(0);
+                        blocks_progress.insert(index.to_string(), serde_json::json!(progress));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(runtime) = taken
+            && let Some(mut host) = self.host()
+        {
+            host.bind_mut().put_campaign_runtime(runtime);
+        }
+        out.insert(
+            "unitCounts".to_owned(),
+            serde_json::Value::Object(unit_counts),
+        );
+        out.insert(
+            "timerCountup".to_owned(),
+            serde_json::Value::Object(timer_countup),
+        );
+        out.insert(
+            "destroyBlocksProgress".to_owned(),
+            serde_json::Value::Object(blocks_progress),
+        );
+        GString::from(serde_json::Value::Object(out).to_string().as_str())
+    }
+
     /// `MapObjectives` world-marker draw list for the running objectives
     /// (view-only; `MindObjectiveMarkers` projects the positions through the
-    /// camera). `ShapeText` markers with the `world` flag off are omitted.
+    /// camera).
+    ///
+    /// Every marker class `Renderer.java:352-360` feeds to
+    /// `ObjectiveMarker.draw` is forwarded — `ShapeText`, `Shape`, `Text`,
+    /// `Point`, `Line`, `Texture` and `Quad` — behind the `world != -1` gate
+    /// (`Renderer.java:356`). `Light` markers only implement `drawLight`
+    /// (`MapObjectives.java:1416-1430`; the base `draw` is empty), so they
+    /// contribute no world geometry. Text-bearing classes carry their
+    /// localized text (`ObjectiveMarker.fetchText`).
     #[func]
     pub fn objective_markers_json(&self) -> GString {
+        use mind_core::game::map_markers::{MarkerKind, marker_index};
+        use mind_core::io::json::objectives::{ObjectiveMarker as M, TextureHolder};
+
+        fn color_json(color: mind_core::content::Rgba) -> serde_json::Value {
+            serde_json::json!([color.r, color.g, color.b, color.a])
+        }
+        fn holder_json(holder: &TextureHolder) -> serde_json::Value {
+            serde_json::json!({
+                "string": holder.string,
+                "content": holder.content,
+                "building": holder.building,
+            })
+        }
+
         let mut rows: Vec<serde_json::Value> = Vec::new();
         for index in self.session.objectives.running_indices() {
             let Some(objective) = self.session.objectives.get(index) else {
                 continue;
             };
             for marker in &objective.common().markers {
-                let mind_core::io::json::objectives::ObjectiveMarker::ShapeText(marker) = marker
-                else {
-                    continue;
-                };
-                if marker.world == 0 {
+                // `marker.world != -1`: `@IndexBool` is 1/-1, so only -1 hides.
+                if marker_index(marker, MarkerKind::World) == -1 {
                     continue;
                 }
-                rows.push(serde_json::json!({
-                    "class": "ShapeText",
-                    "x": marker.pos.x,
-                    "y": marker.pos.y,
-                    "text": self.localized_marker_text(&marker.text),
-                    "radius": marker.radius,
-                    "rotation": marker.rotation,
-                    "sides": marker.sides,
-                    "color": [
-                        marker.color.0.r,
-                        marker.color.0.g,
-                        marker.color.0.b,
-                        marker.color.0.a,
-                    ],
-                    "textHeight": marker.text_height,
-                    "fontSize": marker.font_size,
-                }));
+                let row = match marker {
+                    M::Point(m) => serde_json::json!({
+                        "class": "Point",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "radius": m.radius,
+                        "stroke": m.stroke,
+                        "color": color_json(m.color.0),
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::ShapeText(m) => serde_json::json!({
+                        "class": "ShapeText",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "text": self.localized_marker_text(&m.text),
+                        "radius": m.radius,
+                        "rotation": m.rotation,
+                        "sides": m.sides,
+                        "color": color_json(m.color.0),
+                        "textHeight": m.text_height,
+                        "fontSize": m.font_size,
+                        "flags": m.flags,
+                        "textAlign": m.text_align,
+                        "lineAlign": m.line_align,
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::Shape(m) => serde_json::json!({
+                        "class": "Shape",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "radius": m.radius,
+                        "rotation": m.rotation,
+                        "stroke": m.stroke,
+                        "startAngle": m.start_angle,
+                        "endAngle": m.end_angle,
+                        "fill": m.fill,
+                        "outline": m.outline,
+                        "sides": m.sides,
+                        "color": color_json(m.color.0),
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::Text(m) => serde_json::json!({
+                        "class": "Text",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "text": self.localized_marker_text(&m.text),
+                        "fontSize": m.font_size,
+                        "flags": m.flags,
+                        "textAlign": m.text_align,
+                        "lineAlign": m.line_align,
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::Line(m) => serde_json::json!({
+                        "class": "Line",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "endX": m.end_pos.x,
+                        "endY": m.end_pos.y,
+                        "stroke": m.stroke,
+                        "outline": m.outline,
+                        "color1": color_json(m.color1.0),
+                        "color2": color_json(m.color2.0),
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::Texture(m) => serde_json::json!({
+                        "class": "Texture",
+                        "x": m.pos.x,
+                        "y": m.pos.y,
+                        "rotation": m.rotation,
+                        "width": m.width,
+                        "height": m.height,
+                        "texture": holder_json(&m.texture),
+                        "color": color_json(m.color.0),
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    M::Quad(m) => serde_json::json!({
+                        "class": "Quad",
+                        "vertices": m.vertices,
+                        "texture": holder_json(&m.texture),
+                        "autoscale": m.autoscale,
+                        "drawLayer": m.draw_layer,
+                    }),
+                    // `LightMarker`: no world geometry (see the doc comment).
+                    M::Light(_) => continue,
+                };
+                rows.push(row);
             }
         }
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
@@ -3907,6 +4151,15 @@ impl MindCampaign {
         } else {
             log::warn!("load_slot: `{path}` meta unavailable; session rules not applied");
         }
+        // `SaveSlot.load` (`Saves.java:319-324`): `current = this`. Without it
+        // the loaded save is never the current slot, so the autosave cadence,
+        // the playtime accrual and the exit save all stay inert and the pause
+        // menu keeps `@quit` (CG-SAVE-02).
+        let file = self.paths.saves().join(format!("{slot}.{SAVE_EXTENSION}"));
+        let time_played = self.saves.total_playtime;
+        settings_hub::with_settings(|settings| {
+            adopt_loaded_slot(&mut self.saves, settings, &file, time_played);
+        });
         host.bind_mut().request_load(GString::from(path.as_str()));
         true
     }
@@ -3925,6 +4178,51 @@ impl MindCampaign {
         self.saves
             .get_current()
             .is_some_and(|slot| settings_hub::with_settings(|store| slot.is_autosave(store)))
+    }
+
+    /// `Control.playSector`'s pre-launch save (`Control.java:437-441`): when a
+    /// match is live and a slot is current, the outgoing sector is written
+    /// before the launch replaces the world, so the player's construction since
+    /// the last autosave survives the switch (CG-SECTOR-02). The destination
+    /// launch re-points `Saves.current` afterwards (`prepare_sector_slot` on a
+    /// fresh launch, `set_current_by_file` on a resume), so Java's
+    /// `resetSave()` has no observable equivalent here.
+    ///
+    /// MUST run while the host still holds the OUTGOING world: the planet
+    /// dialog pre-loads the destination (`MindSimHost.load_sector`) before
+    /// `start_sector`, so the UI calls this first
+    /// ([`Self::save_outgoing_sector`], `PlanetDialog.playSelected`'s
+    /// "save before launch"); the accelerator path calls it from
+    /// `pump_accelerator_launch` before its own load. Returns whether a save
+    /// was queued.
+    fn save_outgoing_slot(&mut self) -> bool {
+        if !self.session.phase.is_game() {
+            return false;
+        }
+        let Some(file) = self.saves.get_current().map(|slot| slot.file.clone()) else {
+            return false;
+        };
+        // `SaveVersion.writeMeta` (`SaveVersion.java:117-118`): prepare/save the
+        // sector record as part of the save, like every other save path.
+        self.persist_sector_record();
+        self.write_live_slot_preview(&file);
+        let Some(mut host) = self.host() else {
+            return false;
+        };
+        host.bind_mut()
+            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+        host.bind_mut().flush_io();
+        log::info!("saved outgoing sector before launch (`{}`)", file.display());
+        true
+    }
+
+    /// Rust-only seam for the planet dialog's "save before launch"
+    /// (`PlanetDialog.playSelected`, `PlanetDialog.java:1380-1386`): writes the
+    /// live sector before `MindSimHost.load_sector` replaces the world
+    /// (CG-SECTOR-02). Returns whether a save was queued.
+    #[func]
+    pub fn save_outgoing_sector(&mut self) -> bool {
+        self.save_outgoing_slot()
     }
 
     /// `PausedDialog.runExitSave` / `Control.dispose`: writes the current
@@ -4313,6 +4611,10 @@ impl MindCampaign {
             campaign.universe.update_loadout(settings, &core, None);
         });
         self.persist();
+        // `Control.playSector` (`Control.java:437-441`): write the sector being
+        // left before its world is replaced by the destination load
+        // (CG-SECTOR-02).
+        self.save_outgoing_slot();
         // `control.playSector(sector)` = the planet dialog's `_launch` order:
         // prime the generator, stage the loadout, load the world, then start.
         self.prime_sector_load(GString::from(pending.planet.as_str()), pending.sector);
@@ -6129,6 +6431,21 @@ fn sanitize_slot_name(name: &str) -> String {
         .collect()
 }
 
+/// `SaveSlot.load`'s policy half (`Saves.java:319-324`): the loaded slot
+/// becomes `Saves.current` and its saved playtime seeds the accumulator, so the
+/// autosave cadence, the playtime accrual and the exit save all key on the slot
+/// the player loaded (`MindCampaign.load_slot`, CG-SAVE-02). Returns the slot
+/// index — the entry is created when the file is not listed yet.
+fn adopt_loaded_slot(
+    saves: &mut Saves,
+    settings: &mut SettingsStore,
+    file: &std::path::Path,
+    time_played: i64,
+) -> usize {
+    saves.total_playtime = time_played;
+    saves.set_current_by_file(settings, file)
+}
+
 /// `new SimpleDateFormat("MMM dd h:mm")` (`Control.playMap`'s `savecreate`
 /// slot name, `Control.java:419`): short month, zero-padded day, 12-hour clock.
 fn save_date_stamp() -> String {
@@ -6367,5 +6684,50 @@ mod tests {
         // The serpulo ruleSetter re-applied after the wholesale copy.
         assert_eq!(session.rules.wave_team, 2);
         assert!(session.rules.core_destroy_clear);
+    }
+
+    /// CG-SAVE-02: `SaveSlot.load` (`Saves.java:319-324`) makes the loaded slot
+    /// `Saves.current` and seeds the playtime from its meta, so the autosave
+    /// cadence, the exit save and the pause label key on the slot the player
+    /// loaded. Before the fix `load_slot` left `current` at `None`, so this
+    /// policy was inert for the whole session.
+    #[test]
+    fn loaded_slot_becomes_current_and_autosaves() {
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let file = std::path::PathBuf::from("/data/saves/t5-load.msav");
+        assert!(saves.get_current().is_none(), "no slot is current at boot");
+
+        let index = adopt_loaded_slot(&mut saves, &mut settings, &file, 12_345);
+        assert_eq!(saves.current, Some(index), "the loaded slot is current");
+        assert_eq!(saves.get_total_playtime(), 12_345);
+        assert_eq!(
+            saves.get_current().map(|slot| slot.file.clone()),
+            Some(file)
+        );
+        // `save-<stem>-autosave` defaults to true (`SaveSlot.isAutosave`), so a
+        // loaded slot takes part in the autosave cadence like Java's.
+        assert!(
+            saves
+                .get_current()
+                .is_some_and(|slot| slot.is_autosave(&settings))
+        );
+        let update = SavesUpdate {
+            delta_ticks: 61 * 60,
+            is_game: true,
+            paused_with_dialog: false,
+            game_over: false,
+            is_campaign: false,
+        };
+        // 61 s crosses the default 60 s interval; the same call seeds the
+        // playtime timestamp, so the next one accrues on the loaded slot.
+        assert!(
+            saves
+                .update_policy(update, &settings, DEFAULT_SAVE_INTERVAL_SECONDS)
+                .autosaved
+        );
+        let accrued = saves.update_policy(update, &settings, DEFAULT_SAVE_INTERVAL_SECONDS);
+        assert_eq!(accrued.playtime_added, 61_000);
+        assert!(saves.get_total_playtime() > 12_345);
     }
 }
