@@ -27,9 +27,10 @@ use godot::classes::base_material_3d::{
 };
 use godot::classes::mesh::{ArrayCustomFormat, ArrayFormat, ArrayType, PrimitiveType};
 use godot::classes::{
-    ArrayMesh, Camera3D, Control, Font, IControl, Label3D, Mesh, MeshInstance3D, Node, Node3D,
-    QuadMesh, ResourceLoader, RichTextLabel, Shader, ShaderMaterial, SphereMesh, Sprite3D,
-    StandardMaterial3D, SubViewport, Texture2D, TextureRect, Time,
+    ArrayMesh, BoxMesh, Camera3D, Control, Cubemap, FileAccess, Font, IControl, Image, Label3D,
+    Mesh, MeshInstance3D, Node, Node3D, QuadMesh, ResourceLoader, RichTextLabel, Shader,
+    ShaderMaterial, SphereMesh, Sprite3D, StandardMaterial3D, SubViewport, Texture2D, TextureRect,
+    Time,
 };
 use godot::prelude::*;
 
@@ -78,6 +79,16 @@ const PLANET_SHADER: &str = "res://shaders/planet.gdshader";
 const CLOUDS_SHADER: &str = "res://shaders/clouds.gdshader";
 const GRID_SHADER: &str = "res://shaders/planetgrid.gdshader";
 const ATMOSPHERE_SHADER: &str = "res://shaders/atmosphere.gdshader";
+/// `Shaders.unlit` (`unlit.vert/.frag`) — `SunMesh`'s material
+/// (`SunMesh.java:23`), ported as `unlit.gdshader`.
+const UNLIT_SHADER: &str = "res://shaders/unlit.gdshader";
+/// `CubemapMesh`'s `shaders/cubemap.vert`/`.frag` (`CubemapMesh.java:64`).
+const CUBEMAP_SHADER: &str = "res://shaders/cubemap.gdshader";
+/// Arc `Cubemap(String base)` face order (`Cubemap.java:29-38`), which is also
+/// Godot's `Cubemap.create_from_images` order (+X, -X, +Y, -Y, +Z, -Z).
+const STAR_FACES: [&str; 6] = ["right", "left", "top", "bottom", "front", "back"];
+/// `CubemapMesh`'s `Cubemap("cubemaps/stars/")` (`PlanetRenderer.java:36`).
+const STAR_CUBEMAP_DIR: &str = "cubemaps/stars";
 
 const SUBVIEWPORT_PATH: &str = "ViewportContainer/SubViewport";
 const CAMERA_PATH: &str = "ViewportContainer/SubViewport/Camera";
@@ -119,6 +130,11 @@ pub struct MindPlanetView {
     sector_label: Option<Gd<RichTextLabel>>,
     camera: Option<Gd<Camera3D>>,
     background: Option<Gd<MeshInstance3D>>,
+    /// `PlanetRenderer.skybox` (`CubemapMesh`, `PlanetRenderer.java:36,107-121`):
+    /// the star cubemap cube parented to the camera (Java zeroes `cam.position`
+    /// for the skybox draw). `None` when the cubemap assets or shader are
+    /// missing — the 2D `$Space` billboard stays as the fallback.
+    skybox: Option<Gd<MeshInstance3D>>,
     body: Option<Gd<MeshInstance3D>>,
     atmosphere: Option<Gd<MeshInstance3D>>,
     grid: Option<Gd<MeshInstance3D>>,
@@ -216,6 +232,7 @@ impl IControl for MindPlanetView {
             sector_label: None,
             camera: None,
             background: None,
+            skybox: None,
             body: None,
             atmosphere: None,
             grid: None,
@@ -279,6 +296,7 @@ impl IControl for MindPlanetView {
             }
         }
         self.build_background(space_texture);
+        self.build_skybox();
     }
 
     /// `PlanetRenderer.java:64-66`: the camera sits at
@@ -384,6 +402,7 @@ impl MindPlanetView {
         self.build_grid();
         self.build_atmosphere();
         self.build_orbits();
+        self.build_universe();
         self.clear_highlight();
         true
     }
@@ -665,6 +684,194 @@ impl MindPlanetView {
         ));
         background.set_material_override(&backdrop);
         background.set_visible(true);
+    }
+
+    /// `PlanetRenderer`'s skybox (`PlanetRenderer.java:107-121`): when
+    /// `params.drawSkybox` Java renders `CubemapMesh` — a unit cube scaled by
+    /// `SCALE = 50` (`cubemap.vert`) whose vertex position is the cube-map
+    /// direction, with `cam.position` temporarily zeroed so the cube is centred
+    /// on the eye (`CubemapMesh.java:16-77`).
+    ///
+    /// The cube is parented to the `Camera3D` (the port's way of centring it on
+    /// the eye each frame) and drawn with the ported `cubemap.gdshader`; the 2D
+    /// `$Space` billboard and the 3D backdrop quad are hidden while it is live
+    /// (`drawSkybox` replaces both). Asset/shader failures leave the billboard,
+    /// so the view still renders (`Cubemap` faces are the same six star PNGs).
+    fn build_skybox(&mut self) {
+        let Some(shader) = load_shader(CUBEMAP_SHADER) else {
+            return;
+        };
+        let Some(cubemap) = Self::load_star_cubemap() else {
+            return;
+        };
+        let Some(mut camera) = self.camera.clone() else {
+            return;
+        };
+        let mut material = ShaderMaterial::new_gd();
+        material.set_shader(&shader);
+        // `shader.setUniformi("u_cubemap", 0)` (`CubemapMesh.java:73`): the
+        // samplerCube parameter; Godot binds it directly (no texture unit).
+        set_uniform(&mut material, "u_cubemap", &cubemap.to_variant());
+        // code-instantiated: one skybox cube for the whole planet layer
+        // (Java `CubemapMesh` owns a fixed 36-vertex cube).
+        let mut node = MeshInstance3D::new_alloc();
+        node.clone().set_name("Skybox");
+        let mut cube = BoxMesh::new_gd();
+        // `CubemapMesh`'s vertices are the unit cube (`±1`); the shader applies
+        // `SCALE`. Godot's `BoxMesh` is `size`-sized, so `size = 2` matches.
+        cube.set_size(Vector3::new(2.0, 2.0, 2.0));
+        node.clone().set_mesh(&cube);
+        node.clone().set_material_override(&material);
+        // The cube surrounds the eye; both faces are visible from inside via
+        // the shader's `cull_disabled`.
+        node.set_position(Vector3::ZERO);
+        camera.add_child(&node);
+        // Java draws the skybox before the planets and with the depth mask off
+        // (`Gl.depthMask(false)`), so nothing occludes it and it writes no
+        // depth; the shader's `depth_draw_never` is the same.
+        self.skybox = Some(node);
+        self.apply_skybox_visibility();
+    }
+
+    /// Hides the billboard backdrop while the cubemap skybox renders
+    /// (`params.drawSkybox` off would restore it; the port always draws the
+    /// skybox when the assets exist).
+    fn apply_skybox_visibility(&mut self) {
+        let live = self.skybox.is_some();
+        let has_backdrop = self
+            .background
+            .as_ref()
+            .map(|background| background.get_mesh().is_some())
+            .unwrap_or(false);
+        if let Some(mut background) = self.background.clone() {
+            background.set_visible(!live && has_backdrop);
+        }
+        if let Some(mut space) = self.space.clone() {
+            space.set_visible(!live);
+        }
+    }
+
+    /// `Cubemap("cubemaps/stars/")` (`PlanetRenderer.java:36`): the six star
+    /// faces, converted to one RGBA8 format (Godot requires every layer to
+    /// match) and uploaded as a `Cubemap`.
+    fn load_star_cubemap() -> Option<Gd<Cubemap>> {
+        let dir = crate::assets::loader::resolve_assets_dir();
+        let mut images = Array::<Gd<Image>>::new();
+        for face in STAR_FACES {
+            let path = format!("{dir}/{STAR_CUBEMAP_DIR}/{face}.png");
+            if !FileAccess::file_exists(&path) {
+                return None;
+            }
+            let bytes = FileAccess::get_file_as_bytes(&path);
+            let mut image = Image::new_gd();
+            if image.load_png_from_buffer(&bytes) != godot::global::Error::OK {
+                return None;
+            }
+            // The star faces ship as RGB8; the conversion also keeps a stray
+            // RGBA face from breaking `create_from_images`.
+            image.convert(godot::classes::image::Format::RGBA8);
+            images.push(&image);
+        }
+        let mut cubemap = Cubemap::new_gd();
+        if cubemap.create_from_images(&images) != godot::global::Error::OK {
+            return None;
+        }
+        Some(cubemap)
+    }
+
+    /// `PlanetRenderer.renderPlanet`/`renderTransparent`
+    /// (`PlanetRenderer.java:127-168`): the solar system is drawn by recursing
+    /// from `params.planet.solarSystem` over its children, so the **sun** and
+    /// every other planet/moon in the system appear behind the viewed globe.
+    ///
+    /// The port needs the body list from the campaign facade: `planet_view`
+    /// only carries the viewed planet plus its orbit rows (a radius and an
+    /// orbit centre per body but no identity), so the port reads
+    /// `planet_bodies(planet) -> Array[VarDictionary]` when the facade has it
+    /// (see the report: `campaign.rs` must add it). Row shape:
+    ///
+    /// ```text
+    /// { "name": "sun", "kind": "sun"|"planet",
+    ///   "position": Vector3,   // body centre in the viewed planet's mesh frame
+    ///   "radius": 4.0,
+    ///   "rotation": 0.0 }      // Planet.getRotation() in degrees
+    /// ```
+    ///
+    /// The sun gets its `SunMesh` (`SunMesh.java:9-25`: a `HexMesh` at
+    /// divisions 4 with the unlit shader and a simplex-noise colour ramp);
+    /// every other body uses the vendored `planets/<name>` art as a
+    /// camera-facing billboard, the same fallback `build_body` uses for planets
+    /// without a hex generator. Bodies are placed once per planet load: vanilla
+    /// orbit periods are hundreds of thousands of seconds
+    /// (`Planet.orbitTime = pow(radius, 1.5) * 1000`), so the Java per-frame
+    /// transform update is visually static here.
+    fn build_universe(&mut self) {
+        let Some(mut campaign) = kit::campaign() else {
+            return;
+        };
+        if !campaign.has_method("planet_bodies") {
+            return;
+        }
+        let payload = campaign.call("planet_bodies", &[self.planet.to_variant()]);
+        let Ok(bodies) = payload.try_to::<VarArray>() else {
+            return;
+        };
+        let Some(mut parent) = self.subviewport() else {
+            return;
+        };
+        for index in 0..bodies.len() {
+            let Some(row) = bodies
+                .get(index)
+                .and_then(|value| value.try_to::<VarDictionary>().ok())
+            else {
+                continue;
+            };
+            let name = row_str(&row, "name");
+            let radius = row_f32(&row, "radius", 1.0);
+            let position = row_vec3(&row, "position", Vector3::ZERO);
+            let kind = row_str(&row, "kind");
+            let node = MeshInstance3D::new_alloc();
+            node.clone().set_name(&format!("SystemBody{index}"));
+            if kind == "sun" || name == "sun" {
+                // `SunMesh`: `HexMesh(planet, 4, Shaders.unlit)` with the
+                // noise-ramp mesher (`SunMesh.java:9-25`).
+                let mesh_data = sun_mesh_data(radius);
+                let Some(mesh) = upload_mesh(&mesh_data) else {
+                    continue;
+                };
+                node.clone().set_mesh(&mesh);
+                let mut material = ShaderMaterial::new_gd();
+                if let Some(shader) = load_shader(UNLIT_SHADER) {
+                    material.set_shader(&shader);
+                }
+                // Vertex colours already carry the ramp; `Shaders.unlit`
+                // (`unlit.gdshader`) ignores light and ambient.
+                node.clone().set_material_override(&material);
+            } else {
+                // Other planets/moons: vendored art billboard (the port's
+                // stand-in for `HexMesh`, same as `build_body`'s fallback).
+                let texture = self.load_loose(&format!("planets/{name}"), true);
+                let Some(texture) = texture else {
+                    continue;
+                };
+                let mut quad = QuadMesh::new_gd();
+                // `BODY_SIZE` is the art quad for a radius-1 planet.
+                quad.set_size(Vector2::new(BODY_SIZE * radius, BODY_SIZE * radius));
+                node.clone().set_mesh(&quad);
+                let mut billboard = StandardMaterial3D::new_gd();
+                billboard.set_shading_mode(ShadingMode::UNSHADED);
+                billboard.set_transparency(Transparency::ALPHA);
+                billboard.set_texture(TextureParam::ALBEDO, &texture);
+                billboard.set_texture_filter(TextureFilter::LINEAR);
+                billboard
+                    .set_billboard_mode(godot::classes::base_material_3d::BillboardMode::ENABLED);
+                billboard.set_depth_draw_mode(DepthDrawMode::DISABLED);
+                billboard.set_render_priority(-9);
+                node.clone().set_material_override(&billboard);
+            }
+            node.clone().set_position(position);
+            parent.add_child(&node);
+        }
     }
 
     /// `HexMesh(planet, 6)`: the shaded hex mesh (`MeshBuilder.buildHex` with
@@ -2008,6 +2215,111 @@ impl MindPlanetView {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+/// `SunMesh.java:9-25`: a `HexMesh` whose mesher keeps a flat sphere
+/// (`getHeight` 0) and colours each tile from a simplex-noise ramp
+/// (`Math.pow(Simplex.noise3d(0, 5, 0.3, 1.7, x, y, z), 1.2) * 1`, indexed
+/// into the six Java colours and scaled by `colorScale` 1.1).
+pub struct SunMesher {
+    /// `SunMesh`'s six ramp colours (`Planets.java:29-43`).
+    colors: [[f32; 4]; 6],
+    /// `SunMesh`'s `colorScale` (`Planets.java:37`).
+    color_scale: f32,
+}
+
+impl Default for SunMesher {
+    fn default() -> Self {
+        Self {
+            colors: [
+                color_hex(0xff7a38),
+                color_hex(0xff9638),
+                color_hex(0xffc64c),
+                color_hex(0xffc64c),
+                color_hex(0xffe371),
+                color_hex(0xf4ee8e),
+            ],
+            color_scale: 1.1,
+        }
+    }
+}
+
+impl mind_core::maps::generators::planet::HexMesher for SunMesher {
+    /// `getColor`: `height = pow(Simplex.noise3d(0, 5, 0.3, 1.7, pos), 1.2)`,
+    /// then `colors[clamp((int)(height * len), 0, len - 1)] * colorScale`.
+    fn get_color(&self, position: [f32; 3]) -> [f32; 4] {
+        let noise = mind_core::math::noise::noise3d(
+            0,
+            5,
+            0.3,
+            1.7,
+            position[0] as f64,
+            position[1] as f64,
+            position[2] as f64,
+        );
+        let height = (f64::from(noise).powf(1.2) * 1.0) as f32;
+        let index = ((height * self.colors.len() as f32) as i32)
+            .clamp(0, self.colors.len() as i32 - 1) as usize;
+        let color = self.colors[index];
+        [
+            (color[0] * self.color_scale).min(1.0),
+            (color[1] * self.color_scale).min(1.0),
+            (color[2] * self.color_scale).min(1.0),
+            1.0,
+        ]
+    }
+}
+
+/// Builds the `SunMesh` geometry: `MeshBuilder.buildHex(SunMesh's mesher, 4,
+/// radius, 1)` (`HexMesh` divisions 4, `SunMesh` constructor).
+pub fn sun_mesh_data(radius: f32) -> mind_core::render::g3d::MeshData {
+    let mut mesher = SunMesher::default();
+    mind_core::render::g3d::mesh_data::build_hex(&mut mesher, 4, radius, 1.0)
+}
+
+/// Uploads a `MeshData` (`MeshBuilder` arrays) as an `ArrayMesh`.
+fn upload_mesh(mesh_data: &mind_core::render::g3d::MeshData) -> Option<Gd<ArrayMesh>> {
+    let mut arrays = new_arrays();
+    let mut vertices = PackedVector3Array::new();
+    for vertex in &mesh_data.vertices {
+        vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
+    }
+    let mut normals = PackedVector3Array::new();
+    for normal in &mesh_data.normals {
+        normals.push(Vector3::new(normal[0], normal[1], normal[2]));
+    }
+    let mut colors = PackedColorArray::new();
+    for packed in &mesh_data.colors {
+        colors.push(Color::from_rgba8(
+            (packed >> 24) as u8,
+            (packed >> 16) as u8,
+            (packed >> 8) as u8,
+            *packed as u8,
+        ));
+    }
+    arrays.set(ArrayType::VERTEX.ord() as usize, &vertices.to_variant());
+    arrays.set(ArrayType::NORMAL.ord() as usize, &normals.to_variant());
+    arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
+    if mesh_data.indexed && !mesh_data.indices.is_empty() {
+        let mut indices = PackedInt32Array::new();
+        for index in &mesh_data.indices {
+            indices.push(*index as i32);
+        }
+        arrays.set(ArrayType::INDEX.ord() as usize, &indices.to_variant());
+    }
+    let mut mesh = ArrayMesh::new_gd();
+    mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
+    Some(mesh)
+}
+
+/// `Color.valueOf(hex)` (Arc `Color.valueOf`), opaque.
+fn color_hex(hex: u32) -> [f32; 4] {
+    [
+        ((hex >> 16) & 0xff) as f32 / 255.0,
+        ((hex >> 8) & 0xff) as f32 / 255.0,
+        (hex & 0xff) as f32 / 255.0,
+        1.0,
+    ]
+}
+
 /// Allocates a `Mesh.ARRAY_MAX`-sized mesh-array list.
 fn new_arrays() -> VarArray {
     let mut arrays = VarArray::new();
@@ -2335,7 +2647,8 @@ fn faded_alpha(base: f32, ui_alpha: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ARC_POINTS, arc_ribbon, faded_alpha};
+    use super::{ARC_POINTS, STAR_FACES, SunMesher, arc_ribbon, faded_alpha, sun_mesh_data};
+    use mind_core::maps::generators::planet::HexMesher;
 
     /// Java's overlay alphas: `hoverColor = Pal.accent.a(0.5f)` and
     /// `borderColor = Pal.accent.a(0.3f)` (`PlanetRenderer.java:19`), the
@@ -2415,6 +2728,63 @@ mod tests {
             antipodal
                 .iter()
                 .all(|vertex| vertex.iter().all(|value| value.is_finite()))
+        );
+    }
+
+    /// `SunMesh` (`SunMesh.java:9-25`): a `HexMesh` at divisions 4 — a flat
+    /// sphere with the noise-ramp colours from `Planets.java:29-43`.
+    #[test]
+    fn sun_mesh_is_a_flat_noise_coloured_sphere() {
+        let mesh = sun_mesh_data(4.0);
+        assert!(!mesh.vertices.is_empty(), "sun mesh vertices");
+        assert!(!mesh.indices.is_empty(), "sun mesh indices");
+        assert!(mesh.indexed);
+        assert!(mesh.emissive.is_empty(), "SunMesh is not emissive");
+        assert_eq!(mesh.vertices.len(), mesh.colors.len());
+        // `getHeight` is 0, so every vertex sits exactly on the radius-4
+        // sphere.
+        for vertex in &mesh.vertices {
+            let length =
+                (vertex[0] * vertex[0] + vertex[1] * vertex[1] + vertex[2] * vertex[2]).sqrt();
+            assert!((length - 4.0).abs() < 1e-3, "{vertex:?} off the sphere");
+        }
+        // Every colour is one of the six ramp colours scaled by `colorScale`
+        // 1.1 (clamped at 1) — never black and never out of range.
+        for packed in &mesh.colors {
+            let r = (packed >> 24) as u8;
+            let g = (packed >> 16) as u8;
+            assert!(r > 100 && g > 50, "warm ramp colour {packed:08x}");
+        }
+    }
+
+    /// `SunMesh`'s mesher: `getColor` indexes the ramp by
+    /// `pow(noise, 1.2) * colors.length` and multiplies by `colorScale`.
+    #[test]
+    fn sun_mesher_colors_stay_on_the_ramp() {
+        let mesher = SunMesher::default();
+        for position in [
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.577, 0.577, 0.577],
+        ] {
+            let color = mesher.get_color(position);
+            for channel in &color[0..3] {
+                assert!((0.0..=1.0).contains(channel), "{color:?}");
+            }
+            assert_eq!(color[3], 1.0);
+        }
+    }
+
+    /// `Cubemap(String base)` loads `right, left, top, bottom, front, back`
+    /// (`Cubemap.java:29-38`), which is Godot's
+    /// `Cubemap.create_from_images` order (+X, -X, +Y, -Y, +Z, -Z) — the
+    /// skybox face order must not be reordered accidentally.
+    #[test]
+    fn star_cubemap_faces_are_in_arc_order() {
+        assert_eq!(
+            STAR_FACES,
+            ["right", "left", "top", "bottom", "front", "back"]
         );
     }
 }

@@ -452,6 +452,17 @@ fn building_center(
     (anchor_x, anchor_y)
 }
 
+/// `HudFragment.setPlayerTeamEditor(player, team)` gate
+/// (`HudFragment.java:714-718`): only in editor mode (`state.isEditor()`) and
+/// only for a real `Team` id; `player != null` is the caller's live-player
+/// check. Pure so the headless tests can cover the gate without a Godot node.
+fn editor_team_choice(editor: bool, team: i64, teams: usize) -> Option<u8> {
+    if !editor || team < 0 || team as usize >= teams {
+        return None;
+    }
+    Some(team as u8)
+}
+
 /// `Block.drawEnvironmentLight` (`Block.java:493-495`):
 /// `Drawf.light(tile.worldx(), tile.worldy(), lightRadius, lightColor,
 /// lightColor.a)` — the per-block environment light from the `BlockDef`
@@ -4739,6 +4750,63 @@ impl MindSimHost {
                     .map(|rules| rules.default_team)
             })
             .unwrap_or(mind_core::ecs::TeamId::SHARDED.0)
+    }
+
+    /// `HudFragment.setPlayerTeamEditor(player, team)`
+    /// (`HudFragment.java:714-718`): `state.isEditor() && player != null` ->
+    /// `player.team(team)`. That is `PlayerComp.team(team)`
+    /// (`PlayerComp.java:266-271`): the player's team and the possessed unit's
+    /// team. The port's local read model is [`Self::player_team`], so the
+    /// editor's rules `defaultTeam` moves with it (placement/ownership checks
+    /// all read `player.team()` upstream). No-op outside editor mode.
+    #[func]
+    pub fn set_player_team(&mut self, team: i64) -> bool {
+        let editor = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BuildRules>()
+            .is_some_and(|rules| rules.editor)
+            || self.live_rules().is_some_and(|rules| rules.editor);
+        if !editor {
+            return false;
+        }
+        let teams = mind_core::game::team::Team::all().len();
+        let Some(team) = editor_team_choice(editor, team, teams) else {
+            return false;
+        };
+        // `PlayerComp.team(team)`: `if(unit != null) unit.team(team)`.
+        if let Some(unit) = self.sim.player_unit()
+            && let Some(mut comp) = self
+                .sim
+                .ecs
+                .0
+                .get_mut::<mind_core::entities::comp::TeamComp>(unit)
+        {
+            comp.team = team;
+        }
+        // The reselect/retry-spawn team (`PlayerComp.team` field).
+        self.sim.set_player_team(team);
+        // `player_team()` reads the live rules' `defaultTeam`; keep the editor's
+        // selected team authoritative for placement and unit ownership.
+        if let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
+        {
+            runtime.session.rules.default_team = team;
+        }
+        if let Some(mut rules) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::world::limits::BuildRules>()
+        {
+            rules.default_team = team;
+        }
+        log::info!("set_player_team: editor player team {team}");
+        true
     }
 
     /// `InputHandler.canMine` for the player unit (world-input seam).
@@ -11907,6 +11975,25 @@ mod tests {
             }
             Err(error) => panic!("content boot failed: {error}"),
         }
+    }
+
+    /// PAR-0556: `HudFragment.setPlayerTeamEditor` only acts in editor mode and
+    /// only for a real team id (`HudFragment.java:714-718`).
+    #[test]
+    fn editor_team_change_requires_editor_mode_and_a_valid_team() {
+        use mind_core::game::team::Team;
+        let teams = Team::all().len();
+        assert_eq!(editor_team_choice(true, 1, teams), Some(1));
+        assert_eq!(editor_team_choice(true, 0, teams), Some(0));
+        assert_eq!(
+            editor_team_choice(true, teams as i64 - 1, teams),
+            Some((teams - 1) as u8)
+        );
+        // Outside the editor the call is a no-op (`state.isEditor()`).
+        assert_eq!(editor_team_choice(false, 1, teams), None);
+        // Out-of-range ids are rejected instead of panicking.
+        assert_eq!(editor_team_choice(true, -1, teams), None);
+        assert_eq!(editor_team_choice(true, teams as i64, teams), None);
     }
 
     /// PAR-0467: the host's light source reads `BlockDef.light_radius` /

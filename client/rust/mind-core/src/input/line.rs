@@ -349,6 +349,17 @@ pub struct PlanBlockInfo {
     pub invert_flip: bool,
 }
 
+/// [`PlanBlockInfo`] from a content definition (`Block.size/offset/rotate`,
+/// `Block.invertFlip` — `electrolyzer` only, `Blocks.java:1363`).
+pub fn plan_block_info_from_def(def: &crate::content::BlockDef) -> PlanBlockInfo {
+    PlanBlockInfo {
+        size: def.size,
+        offset: def.offset,
+        rotate: def.rotate,
+        invert_flip: def.name == "electrolyzer",
+    }
+}
+
 /// `Block.planRotation`: `!rotate && lockRotation ? 0 : rot`; `lockRotation`
 /// defaults true and no ported block flips it (`Block.java:1653-1655`).
 fn plan_rotation(rotation: u8, info: &PlanBlockInfo) -> u8 {

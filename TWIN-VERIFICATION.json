@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T16:36:07Z",
+  "updated": "2026-11-06T21:27:06Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -27744,7 +27744,9 @@
           "by": "hx-wiring",
           "text": "Handoff refresh (hx-wiring): the runtime seam is smaller than first thought. (1) Units.canCreate already exists as entities/comp/unit/queries.rs::can_create_unit (used by UnitFactory update_tile:396) — reuse it in UnitPayload.dump instead of writing it. (2) dump_unit_payload (world/blocks/payloads/payload_block.rs:294) can despawn the CarriedUnit's PayloadCarried/PayloadCarried/CarriedUnit markers and push it into UnitRuntime.units + units_created (see UnitFactory's adopt_output_unit); solidity gate = world grid tile at WorldGrid::to_tile(unit pos + trns(rotation,1)) solid when the unit is grounded; overlap gate = count grounded units with the same allow_leg_step within physicSize*1.05 (UnitPayload.java:114-128). (3) Unit payload write/read in payload_block.rs::payload_read needs unit entity IO (Unit.write/read) which does not exist anywhere in mind-core and would live in mc/io/** — OUT of this packet's ownership; it is the blocker for the IO sub-item. (4) UnitFactory (world/blocks/units/behavior.rs::update_tile) should build a UnitPayload in PayloadHolder + call moveOutPayload instead of spawn_output_unit_with_command; Java UnitFactory.java:428-445. (5) PayloadSource (world/blocks/payloads/payload_source.rs) needs the carried spawn seam + commandPos (PayloadSource.java:142-158). Items 3+4+5 remain unimplemented."
         }
-      ]
+      ],
+      "claimed_by": "hx-payload",
+      "claimed_at": "2026-11-06T21:27:06Z"
     },
     "PAR-0519": {
       "title": "GAPS #53: DebugCollisionRenderer had no unit hitboxes",
@@ -28707,6 +28709,11 @@
           "at": "2026-11-06T14:36:44Z",
           "by": "hx-moddata",
           "text": "Headless-only: new test builds a synthetic mod BlockDef per family and asserts the Java class defaults. Per-block recipe/knob values that Blocks.java sets on vanilla instances remain in the name overlay until BlockDef grows family content fields (needs content/registries/blocks/mod.rs, owned elsewhere); class-level defaults now apply to mod blocks."
+        },
+        {
+          "at": "2026-11-06T21:15:17Z",
+          "by": "hx-blockdef",
+          "text": "GAPS #56 follow-up: the family fields this note asked for now exist on BlockSpec/BlockDef (content/registries/blocks/mod.rs) and BlockKindData::from_def copies them, falling back to the class defaults: output_items/output_liquids/liquid_output_directions/ignore_liquid_fullness, drill_time/drill_tier/hardness_drill_multiplier/blocked_items/liquid_boost_intensity/warmup_speed/inverted_time/beam_range, pump_amount/item_use_time/pump_liquid/base_efficiency/attribute/output_item/item_boost_intensity/boost_item_use_time, boost_scale/min_efficiency/max_boost/output_scale/scale_liquid_consumption/display_efficiency/display_scaled_output, variants/max_size/wobble_* (PAR-0572). apply_vanilla_knobs is now the migration-era fallback for the remaining Blocks.java per-block values; moving those onto the vanilla waves is follow-up work."
         }
       ]
     },
@@ -29343,23 +29350,39 @@
     },
     "PAR-0554": {
       "title": "GAPS #46: minimap ping (Binding.ping + Call.pingLocation world marker) is not wired",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "Java twin leg not run in this headless fix pass."
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending."
             }
           }
         ]
       },
       "action": {
-        "godot": [
+        "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see runs/PAR-0554"
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29374,28 +29397,57 @@
           "at": "2026-11-06T15:18:32Z",
           "by": "hx-ui2",
           "text": "Routing note (outside hx-ui2 ownership): the ping binding already exists (mind-core input/binding.rs, id 18). The remaining change is input/desktop.rs (key_tap(ping) -> RemoteAction::Ping at mouse world; Java DesktopInput.java:491), a ping state/relay sink (PlayerComp.pingX/Y/time/text), and a renderer or HUD overlay for the world marker (Java PlayerComp.drawPing / MinimapRenderer.java:173). ui/fragments/minimap.rs can then forward its key/double-tap to the same action."
+        },
+        {
+          "at": "2026-11-06T21:02:15Z",
+          "by": "hx-input",
+          "text": "Headless fix: binding->RemoteAction::Ping->HUD marker wired and unit-tested (ping_marker curve, ping_at truncation). Remaining routed work: fullscreen-minimap ping marker needs gx/ui/kit/widgets/minimap.rs or a gx/render hook (PlayerComp/MininapRenderer.java:173); live relay of the Ping action for multiplayer needs gx/net (command_emit already classifies Ping as a local 21 event, no SimCommand)."
         }
+      ],
+      "fix": "P (Binding.ping, id 18) now emits RemoteAction::Ping at input.mouseWorldX/Y from input/desktop.rs dispatch_action plus a HUD world marker (MindPingOverlay in ui/fragments/hud.rs): 20 s PlayerComp.pingDuration, Java pow5Out fade / pow5In pop curve, team colour, player name + @ping.text label. Ctrl opens the @ping.text prompt (MindUi.show_text_input -> text_input_result) and truncates to Vars.maxPingTextLength=40; settings showpings gates the marker.",
+      "evidence": [
+        "cargo check -p mind-gdext exit 0",
+        "cargo test -p mind-gdext --lib input::desktop::tests: 23 passed",
+        "cargo test -p mind-gdext --lib ui::fragments::hud::tests: 5 passed",
+        "godot --headless dialog_sweep_check: failed=0",
+        "godot --headless boot exit 0 (no errors)"
       ]
     },
     "PAR-0555": {
       "title": "GAPS #46: PlanConfigFragment has no caller",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "Java twin leg not run in this headless fix pass."
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending."
             }
           }
         ]
       },
       "action": {
-        "godot": [
+        "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see runs/PAR-0555"
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29410,28 +29462,56 @@
           "at": "2026-11-06T15:18:32Z",
           "by": "hx-ui2",
           "text": "Routing note (outside hx-ui2 ownership): opening PlanConfigFragment needs input/desktop.rs plan-move state (Java splan + ctrl release, DesktopInput.java:800-812), a source for Block.getPlanConfigs options (item/liquid lists) and a call to MindPlanConfigFragment.configure from that path. The fragment itself (ui/fragments/plan_config.rs) and its HUD scene node are already in place."
+        },
+        {
+          "at": "2026-11-06T21:02:20Z",
+          "by": "hx-input",
+          "text": "Headless fix: splan drag + ctrl-release -> HUD plan_config -> applied re-queue, with default Item/Liquid/UnitFactory option source. Remaining routed work: (1) mc/world/block.rs needs Block.getPlanConfigs overrides - Constructor.canProduce (visible, minBlockSize<=size<=maxBlockSize, !CoreBlock, !rules.isBanned, environmentBuildable, filter), PayloadSource/PayloadRouter canProduce/canSort (blocks + units), and their call sites in input/desktop.rs plan_config_spec; (2) popup anchors at HudGroup origin instead of the plan's screen point (Java table.setPosition at plan.drawx/drawy); (3) no per-frame hide when the plan completes/is removed (PlanConfigFragment table.update)."
         }
+      ],
+      "fix": "PlanConfigFragment now has a caller: input/desktop.rs tracks DesktopInput.splan (queued, unstarted player plan grab on select tap, pointer-following drag, wheel rotation) and on select release with Ctrl held pushes Effect::OpenPlanConfig after inv/config hide (DesktopInput.java:800-812); non-Ctrl releases hide the popup. ui/fragments/hud.rs open_plan_config localizes and configures the existing HudGroup/plan_config node (typed MindPlanConfigFragment::configure, no #[func] needed), and MindInput connects its plan_config_applied signal to re-queue the plan with the chosen content (selected.config = content) and record Block.lastConfig. Option source: default Block.getPlanConfigs item/liquid declared kinds + UnitFactory.unit_plans (banned units filtered).",
+      "evidence": [
+        "cargo check -p mind-gdext exit 0",
+        "cargo test -p mind-gdext --lib plan_: 3 passed (kind rule, Java Math.round drag tile, apply guard)",
+        "godot --headless boot exit 0",
+        "godot --headless dialog_sweep_check failed=0"
       ]
     },
     "PAR-0556": {
       "title": "GAPS #42: in-game editor-mode HUD panel (team selector + block palette + setPlayerTeamEditor) missing",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "Java twin leg not run in this headless fix pass."
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending."
             }
           }
         ]
       },
       "action": {
-        "godot": [
+        "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see runs/PAR-0556"
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29446,7 +29526,20 @@
           "at": "2026-11-06T15:18:32Z",
           "by": "hx-ui2",
           "text": "Routing note (outside hx-ui2 ownership): needs a #[func] set_player_team on MindSimHost (sim.set_player_team exists but is only used by spawn_player_unit), editor-mode gating in hud.rs, a base-team row, and favorites in the placement catalogue. The placement palette already has search (ui/fragments/placement.rs); setPlayerTeamEditor (HudFragment.java:714-718) has no native equivalent yet."
+        },
+        {
+          "at": "2026-11-06T21:02:27Z",
+          "by": "hx-input",
+          "text": "Headless fix: editor panel + setPlayerTeamEditor ported and boot-checked. Simplifications vs HudFragment.java: rebuildBlockSelection comparator ported as removeWall/removeOre -> favourites -> content order (Java also sorts synthetic/overlay floors before id); Core.atlas.isFound(region) icon-existence filter skipped; mobile editorMain spacer not ported; favourite sounds use the shared uiFavorite name with no pitch variation."
         }
+      ],
+      "fix": "Editor-mode HUD panel in ui/fragments/hud.rs: HudGroup/EditorPanel (built lazily) with a 6-button Team.baseTeams selector calling the new MindSimHost::set_player_team #[func] (editor-gated, mirrors PlayerComp.team(team): unit TeamComp + respawn team + rules defaultTeam) and a collapsible block palette (settings editor-blocks-shown) with editor/search LineEdit, favourites persisted to settings editor-block-favorites (right-click toggles), inEditor + removeWall/removeOre filter, debugOnly/other-planet exclusion, favourites-first ordering, and checked-state sync with the live selected block. Panel visible only when Rules.editor and HUD menus are shown (HudFragment.editorMain visible rule).",
+      "evidence": [
+        "cargo check -p mind-gdext exit 0",
+        "cargo test -p mind-gdext --lib sim_host::tests::editor_team_change: 1 passed (editor gate + team range)",
+        "cargo test -p mind-gdext --lib input::desktop::tests: 23 passed",
+        "godot --headless boot exit 0 (MindHudFragment builds EditorPanel + PingOverlay)",
+        "godot --headless dialog_sweep_check failed=0"
       ]
     },
     "PAR-0557": {
@@ -29837,6 +29930,433 @@
           "at": "2026-11-06T16:10:19Z",
           "by": "hx-stats",
           "text": "Verified headlessly at HEAD 01d18ac6 + this worktree: achievement predicate/unlock persistence and idempotent unlock (6 tests), stat accumulation from representative events/waves/captures/polls and max semantics (8 service tests), CampaignRuntime wiring (wave, attack-mode capture, GameStats poll; 24 runtime tests) and the full mind-core lib suite (3009 passed). Platform/Steam (#69) and gdext settings plumbing remain out of scope; the LocalGameService implements the existing crate::service::GameService seam so gx can inject it without ABI changes."
+        }
+      ]
+    },
+    "PAR-0567": {
+      "title": "GAPS #39: PlayerListFragment renders no rows and its Ban/Kick/Trace/Team/Admin + votekick actions never reach the relay; TraceDialog has no roster data",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "core/src/mindustry/ui/fragments/PlayerListFragment.java v146:129-247 (rows, Ban/Kick/Trace/Team/Admin menu, votekick row), TraceDialog.java:31-63"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "client/rust/mind-gdext/src/ui/fragments/player_list.rs, ui/ui_host.rs (player_* seam), ui/dialogs/misc.rs (trace mapping)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "Java server + 2 clients; Tab opens the player list; row menu Ban/Kick/Trace/Team/Admin; Trace opens TraceDialog from the traceInfo reply"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-playerlist",
+      "claimed_at": "2026-11-06T20:59:28Z",
+      "severity": "P1",
+      "gap": "PlayerListFragment was a shell: ui/ui_host.rs player_list_json() returned hard-coded \"[]\", player_action() logged and returned false, and admin_action() only forwarded a signal; fragments/player_list.rs built no header/rows/menu/votekick row and opened unregistered keys (`server.bans`/`server.admins`); dialogs/misc.rs TraceDialog only read a Java `info` dictionary nothing produced. The merged MindNet data path (players_json/player_count/player_action(_with)/player_trace_json) was never reached from the UI.",
+      "source": "GAPS.md#39",
+      "fix": "gx/ui UI half of PAR-0122: MindUi.player_list_json()/player_count()/player_trace_json() now read MindNet; MindUi.player_action() forwards to MindNet.player_action (2-arg) and new MindUi.player_action_with() to MindNet.player_action_with (team:<id> also accepted through the old 2-arg signal ABI). fragments/player_list.rs rebuilt to PlayerListFragment.java v146: players/players.single count header, search filter (stripColors), team+admin sorted scroll rows with team-coloured avatar/admin glyph, per-row menu overlay with Ban/Kick/Trace/Team/Admin buttons (confirm prompts for ban/kick/admin/unadmin via MindUi.show_confirm), inline team chooser -> player_action_with(team), votekick hammer row -> show_text_input(VOTE_MIN_PLAYERS=3) -> chat_send(/votekick <name> <reason>), footer now opens the registered bans/admins dialogs (was server.bans/server.admins), @players.notfound empty state, toggle gated on MindNet.session_state in_game/snapshot_sync. Trace: the row Trace button reads player_trace_json and opens traces with {player, trace}; dialogs/misc.rs TraceDialog maps the roster trace (identity->@trace.id, names, sessions->timesJoined, kicks.len->timesKicked; relay has no IP/locale/modded/mobile columns) and still accepts a Java PlayerInfo info dictionary.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player -> 17 passed, 0 failed (runs/PAR-0567/mind-gdext-tests.log: all 23 player_list/ui_host/misc tests ok; the full suite still has 17 pre-existing engine-dependent failures unrelated to these files)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0 (runs/PAR-0567/cargo-check.log)",
+        "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (runs/PAR-0567/dialog-sweep.log)",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0, no SCRIPT ERROR/panic (runs/PAR-0567/headless-boot.log)",
+        "cargo clippy -p mind-gdext --all-targets --no-deps -- -D warnings: no findings in the changed files (remaining findings are pre-existing in batch_a/batch_e/sim_host/batch_b/render + misc.rs dispatch default)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T20:59:44Z",
+          "by": "hx-playerlist",
+          "text": "Headless fix pass (no Java leg): UI wiring, row/menu/votekick/trace paths and pure mapping tests verified by cargo test/check plus the manifest dialog sweep and a clean headless boot. Live relay data (real roster rows from a SpacetimeDB match, reducer round-trip, admin/kick/ban effects) still needs the server twin pass; the row menu's self-only clauses and allowTeamSwitch rules gate are documented deviations (relay roster exposes no local identity/colour and the UI has no rules read model — the server enforces authority)."
+        }
+      ]
+    },
+    "PAR-0568": {
+      "title": "GAPS #48: mobile line placement hooks (junction/bridge/node) + footprint-aware get_plan",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib input"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mobile",
+      "claimed_at": "2026-11-06T21:01:24Z",
+      "severity": "P1",
+      "gap": "mc/input/mobile.rs drag_to passed NoLineHooks and no LineRules, so mobile drags had no junction replacement, bridge auto-link or node spacing; get_plan matched the exact tile instead of the block footprint (GAPS.md#48).",
+      "source": "GAPS.md#48",
+      "fix": "mobile.rs: drag_to_with/handle_gesture_with run LineRules+NodeHooks through InputState::update_line_with (junction getReplacement, bridge DP/auto-link, node chaining) gated by blockreplace; block/swap_diagonal/diagonal settings mirror IH:1952/2433; footprint-aware get_plan/check_overlap_placement via PlacementWorld::block_size/block_offset; MobileInput.schemOrigin schem_origin_with + accurate rotate/flip of select plans; rotate_button + toggle_swap_diagonal.",
+      "evidence": [
+        "cargo test -p mind-core --lib input (158 passed, includes 12 new mobile tests)",
+        "cargo check -p mind-gdext (ok)",
+        "cargo fmt (ok)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:01:25Z",
+          "by": "hx-mobile",
+          "text": "Verified headlessly: mobile junction replacement, conveyor bridge-over-wall DP + Point2 auto-link, power-node chaining, bridge Chebyshev spacing+links, even/odd footprint get_plan, breaking-plan world footprint, overlap with unit-plan mirror, rotate button gating, swapdiagonal line direction, offset-aware rotate/flip selection. Needed host hooks outside ownership: gdext HostWorld must override PlacementWorld::block_size/block_offset from content (default 1/0 until then), and mobile gdext should pass line_rules_for(...) into handle_gesture_with/drag_to_with (gestures are not yet folded into the controller)."
+        }
+      ]
+    },
+    "PAR-0569": {
+      "title": "GAPS #49: LightRenderer region/line/custom lights + continuous-beam line lights",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending. Per-block lightRadius/lightColor overrides remain PAR-0467 (content/host owners)."
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-render2",
+      "claimed_at": "2026-11-06T21:02:03Z",
+      "severity": "P1",
+      "gap": "gx/render/light.rs drew circle lights only; LightRenderer.line (band quads + circle-end caps), the add(region,rotation,color,opacity) overload and the add(Runnable) overload were missing, and continuous-beam lasers (meltdown/lancer/foreshadow/sap) emitted no light at all.",
+      "source": "GAPS.md#49",
+      "fix": "Ported the full LightRenderer primitive set into render/light.rs: LightBuffer (pooled circles + LineLight/RegionLight/CustomLight), Gl.max stamping for capsules/region quads/arbitrary quads, and bullet_line_light() feeding line lights from LaserBulletType/ContinuousLaser/ContinuousFlame/Sap draws (Java geometry: 1.1x beam, width*1.4*fout stroke, lightStroke 40, lightColor/lightOpacity); LightStats gains lines/regions/customs.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib render -> 64 passed (12 new light tests)",
+        "cargo check -p mind-gdext",
+        "headless boot: tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:02:19Z",
+          "by": "hx-render2",
+          "text": "Verified headlessly: 12 light tests (capsule/region/quad rasterizers, Java beam geometry, buffer pooling) + 64 render tests green; cargo check clean; headless boot exit 0."
+        }
+      ]
+    },
+    "PAR-0570": {
+      "title": "GAPS #50: planet-view cubemap skybox + SunMesh/other-body draws",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending. Sun/moons need MindCampaign.planet_bodies(planet) rows {name, kind, position, radius, rotation} in campaign.rs (out of this packet); planet bloom is the existing scene WorldEnvironment glow."
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib planet"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-render2",
+      "claimed_at": "2026-11-06T21:02:06Z",
+      "severity": "P1",
+      "gap": "gx/ui/planet.rs drew no sun, planets or moons, used a 2D star billboard instead of PlanetRenderer skybox CubemapMesh, and the cubemap/unlit shaders were dead.",
+      "source": "GAPS.md#50",
+      "fix": "planet.rs now builds PlanetRenderer.skybox as a real cubemap: the six Arc-order star faces (cubemaps/stars right/left/top/bottom/front/back) are uploaded as a Godot Cubemap and drawn with the previously dead cubemap.gdshader on a camera-parented unit cube (CubemapMesh.java, SCALE 50), hiding the 2D/3D star billboards; added the SunMesh port (HexMesher with the Java simplex ramp, divisions 4, unlit shader) plus a planet_bodies() consumer that places the sun and other bodies from campaign rows. Skybox/sun-mesh covered by 3 new unit tests.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib planet -> 6 passed (3 new)",
+        "cargo test -p mind-gdext --lib render -> 64 passed",
+        "headless boot -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:02:19Z",
+          "by": "hx-render2",
+          "text": "Verified headlessly: cubemap face order, SunMesh sphere/noise-ramp tests green; skybox code path is built at planet-view ready() (scene consumer exists in game.tscn); face PNGs present under assets/cubemaps/stars."
+        }
+      ]
+    },
+    "PAR-0571": {
+      "title": "GAPS #51: LoadRenderer data port (bars, layout, asset log, progress matrix)",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending. The immediate-mode draw (stencil panes, matrix, frametime chart) still needs a boot/loading scene consumer owned by the ui pass."
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::load"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-render2",
+      "claimed_at": "2026-11-06T21:02:06Z",
+      "severity": "P2",
+      "gap": "gx/render/load.rs was a 58-line data stub against Java LoadRenderer 524: no bar array, no bar layout, no asset log markup, no fitted viewport/progress matrix.",
+      "source": "GAPS.md#51",
+      "fix": "render/load.rs expanded from the 58-line stub to the Godot-free LoadRenderer data half: the ten Java diagnostic bars with exact formulas/valid/red flags, the stencil-pane bar layout (8 px pad, 1.4*lineHeight rows), Scaling.fit viewport fitting (aspect 1.94 + portrait), square-matrix and progress-matrix extents, the WindowedMean(20) frametime window, and the Arc asset-log markup (mod/preview red tint, host masking, / -> ::, current asset key). 11 unit tests.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib render::load -> 11 passed",
+        "cargo test -p mind-gdext --lib render -> 64 passed",
+        "headless boot -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:02:19Z",
+          "by": "hx-render2",
+          "text": "Verified headlessly: 11 LoadRenderer data tests (bars, layout, fit, matrix, asset log) green; draw consumer still needs a ui pass owner."
+        }
+      ]
+    },
+    "PAR-0572": {
+      "title": "GAPS #56 follow-up: BlockDef production/environment family fields + TiledFloor/TiledWall/WobbleProp BlockKind variants",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-blockdef",
+      "claimed_at": "2026-11-06T21:10:01Z",
+      "severity": "P1",
+      "gap": "BlockDef carried no family scalars for the production classes: GenericCrafter.outputItems/outputLiquids/liquidOutputDirections/ignoreLiquidFullness, Drill drillTime/tier/hardnessDrillMultiplier/blockedItems/liquidBoostIntensity/warmupSpeed, BurstDrill.invertedTime, BeamDrill.range, Pump/SolidPump/Fracker pumpAmount/itemUseTime/result/attribute/baseEfficiency, WallCrafter output/itemBoostIntensity/boostItemUseTime, AttributeCrafter boostScale/minEfficiency/maxBoost/outputScale/display* were reachable only through the name-keyed BlockKindData::apply_vanilla_knobs overlay, so JSON mods/patches could not set them and every mod block of these classes inherited class defaults only. TiledFloor/TiledWall/WobbleProp (ClassMap.java:287-290) had no BlockKind at all and were aliased to Floor/StaticWall/Prop in classmap_gen.",
+      "source": "GAPS.md#56",
+      "fix": "content/registries/blocks/mod.rs: BlockKind += TiledFloor(137)/TiledWall(138)/WobbleProp(139) with ALL/name()/is_floor_kind(TiledFloor); BlockSpec/BlockDef += append-only family knobs (crafter output_items/output_liquids/liquid_output_directions/ignore_liquid_fullness, separator_results, drill_time/drill_tier/hardness_drill_multiplier/blocked_items/liquid_boost_intensity/warmup_speed/inverted_time/beam_range (+ existing drill_multipliers), pump_amount/item_use_time/pump_liquid/base_efficiency/attribute/output_item/item_boost_intensity/boost_item_use_time, boost_scale/min_efficiency/max_boost/output_scale/scale_liquid_consumption/display_efficiency/display_scaled_output, variants/max_size/wobble_scale/wobble_magnitude/wobble_time_scale/wobble_magnitude2); from_spec resolves item/liquid names (ContentError::UnknownName on miss). world/block_kind_data.rs: from_def copies content values and only falls back to the Java class defaults (Tiled maxSize 3, WobbleProp 25/0.4/1/1, Drill 300/50/1.6/0.015, BurstDrill hardness 0/inverted 200, BeamDrill 5/200/1, Pump 0.2, Fracker itemUseTime 100/result water, SolidPump 0.2/1/water, WallCrafter 150/sand/1.6/1.6/120, AttributeCrafter 1/1/-1/1, Separator results); FloorDef/StaticWallDef gain max_size, PropDef gains the 4 wobble terms, SolidPumpDef gains result; apply_vanilla_knobs is now documented as the migration-era Blocks.java fallback and never matches mod names. mods/json/classmap_gen.rs drops the TiledFloor/TiledWall/WobbleProp concrete-kind fallbacks so the runtime BlockKind::ALL aliases resolve them; parity/mod_classmap.json regenerated and its golden sha256 updated.",
+      "evidence": [
+        "cargo test -p mind-core --lib content::: 83 passed (runs/PAR-0572/content-tests.log)",
+        "cargo test -p mind-core --lib block_kind_data: 6 passed (runs/PAR-0572/block-kind-data-tests.log)",
+        "cargo test -p mind-core --lib: 3029 passed, 0 failed, 4 ignored (runs/PAR-0572/full-lib-tests.log)",
+        "cargo check -p mind-gdext: ok (runs/PAR-0572/gdext-check.log)",
+        "cargo fmt --all: clean (runs/PAR-0572/fmt.log)",
+        "mind-tools mods classmap --check: 342 entries, 0 issues (runs/PAR-0572/classmap-check.log)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:15:17Z",
+          "by": "hx-blockdef",
+          "text": "Headless verification only (no Java leg): spec->BlockDef round trip for every new field, unknown-name rejection, content->BlockKindData propagation per family, Java class-default fallbacks, TiledFloor/TiledWall/WobbleProp classmap + family classification, dense BlockKind ABI (140 kinds). JSON *key* parsing (outputItems/outputLiquids/liquidOutputDirections/ignoreLiquidFullness/drillTime/tier/hardnessDrillMultiplier/blockedItems/drillMultipliers/liquidBoostIntensity/warmupSpeed/invertedTime/range/pumpAmount/itemUseTime/result/attribute/baseEfficiency/output/itemBoostIntensity/boostItemUseTime/boostScale/minEfficiency/maxBoost/outputScale/scaleLiquidConsumption/displayEfficiency/displayScaledOutput/variants/maxSize/wobble*) still needs mods/json/mod.rs parse_block wiring (file not in this packet's ownership): BlockSpec fields are public and ready."
+        }
+      ]
+    },
+    "PAR-0573": {
+      "title": "GAPS #56 follow-up: TiledFloor/TiledWall/WobbleProp BlockKind variants + classmap registration (mod JSON type resolution)",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (mod fixture with a TiledFloor/TiledWall/WobbleProp JSON block)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib content::"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-blockdef",
+      "claimed_at": "2026-11-06T21:15:37Z",
+      "severity": "P1",
+      "gap": "TiledFloor/TiledWall/WobbleProp are concrete block classes in ClassMap.java:287-290 and usable from mod JSON, but the port had no BlockKind for them: classmap_gen.rs aliased them to Floor/StaticWall/Prop, so a mod \"type\":\"TiledFloor\" silently lost the maxSize/variants/tiled-draw metadata and WobbleProp lost its wscl/wmag/wtscl/wmag2 knobs.",
+      "source": "GAPS.md#56",
+      "fix": "content/registries/blocks/mod.rs: BlockKind += TiledFloor=137 / TiledWall=138 / WobbleProp=139 (appended to ALL, name(), is_floor_kind covers TiledFloor because TiledFloor extends Floor) and the BlockDef head fields variants/max_size/wobble_scale/wobble_magnitude/wobble_time_scale/wobble_magnitude2. world/block_kind_data.rs: from_def maps TiledFloor to BlockKindData::Floor (FloorDef.max_size, class default 3), TiledWall to StaticWall (StaticWallDef.max_size, default 3) and WobbleProp to Prop (PropDef wobble terms, class defaults 25/0.4/1/1). mods/json/classmap_gen.rs: the concrete-kind fallback entries are removed so the runtime BlockKind::ALL block aliases resolve TiledFloor/TiledWall/WobbleProp to their own tags (short and FQCN forms); parity/mod_classmap.json regenerated (3 tags Floor/StaticWall/Prop -> TiledFloor/TiledWall/WobbleProp) with the golden sha256 updated in parity/golden_manifest.json.",
+      "evidence": [
+        "cargo test -p mind-core --lib content::: 83 passed, includes tiled_and_wobble_kinds_classify (runs/PAR-0572/content-tests.log)",
+        "cargo test -p mind-core --lib block_kind_data: 6 passed, includes tiled_and_wobble_kinds_get_class_defaults (runs/PAR-0572/block-kind-data-tests.log)",
+        "cargo test -p mind-core --lib: 3029 passed, 0 failed (runs/PAR-0572/full-lib-tests.log)",
+        "mind-tools mods classmap --check: 342 entries, 0 issues (runs/PAR-0572/classmap-check.log)",
+        "cargo check -p mind-gdext: ok (runs/PAR-0572/gdext-check.log)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:15:44Z",
+          "by": "hx-blockdef",
+          "text": "Headless evidence: every kind ordinal is dense (BlockKind::ALL.len() == 140; 137/138/139 for the three new kinds), ClassTagMap::committed().audit() is clean and both short and mindustry.world.blocks.environment.* names resolve to the new kinds; TiledFloor classifies as a floor and its BlockKindData is Floor family with maxSize 3, TiledWall/WobbleProp as StaticWall/Prop. Remaining runtime work for the mod-parity agent: the tiled draw path (packed sizedRegions) and the WobbleProp wobble draw are render-side, out of this packet."
+        }
+      ]
+    },
+    "PAR-0574": {
+      "title": "GAPS #41: SchematicsDialog missing tag editor, per-schematic tags, edit description and .msch file import/export",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java visual twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib batch_campaign2::tests::schematic"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-schem",
+      "claimed_at": "2026-11-06T21:20:59Z",
+      "severity": "P1",
+      "source": "GAPS.md#41",
+      "gap": "HEAD 4a7b6d5f: batch_campaign2.rs has no tag editor (only a text prompt that appends a tag), no per-schematic tag assignment, no icon tags, no description in the edit view (rename-only prompt) and clipboard-only import/export (no export dialog, no .msch file I/O). Java SchematicsDialog.java:118-224,367-698 (tagEditor/addTag/removeTag/checkTags), 329-365 (showEdit name+description+tags), 225-327 (showImport/showExport file halves).",
+      "affected": "gx/ui/dialogs/batch_campaign2.rs",
+      "fix": "batch_campaign2.rs ports the missing SchematicsDialog pieces. (1) Tag editor (Java showAllTags, 488-615): @schematic.edittags overlay with per-tag move up/down (tags.swap), schematic.tagged count whose label selects the tag filter, rename (@schematic.renametag with @schematic.tagexists duplicate check, rewriting every schematic label + selectedTags), delete (@schematic.tagdelconfirm, strips the label from every .msch), plus new text tag (@schematic.addtag) and icon tag (@schematic.icontag) creators. The global list still persists to settings `schematic-tags` (schematics_save_tags). (2) Per-schematic tags (Java buildTags, 617-698): the edit view owns a chip row (label + remove X + add button); the add panel lists the global tags the schematic lacks and can also create text/icon tags and assign them. Per-schematic labels persist in the .msch labels array (Java s.save() -> Schematics.saveChanges), so the read model + filter see them after a rebuild. (3) Icon tags: Vars.accessibleIcons (31 fontello glyphs via kit::icons) + content icons from icons.properties (MindAssets.icon_names/unicode_str/icon_texture), each stored as the single PUA char Java stores; existing tags are skipped and icon tags render as an atlas texture / icon-font glyph in the filter row, chips and panels. (4) Edit view (Java showEdit, 329-365): @schematic.edit overlay with the tag chips, @name field (400x55), @editor.description TextEdit (400x140), @ok disabled on an empty name and @cancel; OK writes tags.name + tags.description into the .msch (Schematic.save) and Enter in the name field submits. The description shows in SchematicInfoDialog because schematic_views reads tags.description. (5) .msch file I/O: showImport (@editor.import: @load.clipboard with the Java bXNjaAB gate via readBase64, @import.file through a runtime FileDialog *.msch multi-select) and showExport (@editor.export: @copy.clipboard via writeBase64, @export.file save dialog with a sanitized default name); imports go through Schematics.findFile naming + Schematics.add (steam id stripped), then @schematic.saved, new labels join the global list and the info dialog opens. Delete removes the .msch; renaming moved into the edit view. Mod schematics are read-only. Persistence backend: MindCampaign has no schematic mutators, so the dialog rewrites the .msch with mind_core::game::schematics::{read,write} + MindSimHost.content_registry; campaign_call(delete_schematic/export_schematic) is still attempted first so a future facade takes over.",
+      "evidence": [
+        "cargo check -p mind-gdext -> exit 0 (no warnings from batch_campaign2.rs)",
+        "cargo test -p mind-gdext --lib batch_campaign2::tests::schematic -> 8 passed, 0 failed (free_path sanitize/suffix, label add/remove/replace, tag swap bounds, available-tags order, icon-tag PUA detection, clipboard bXNjaAB gate, empty-name gate, schematic.tagged count)",
+        "dialog sweep: tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: ok schematics: button row exists / shows / hides (fade completes) / reshows; failed=0",
+        "headless boot: tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0",
+        "rustfmt --edition 2024 --check client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs -> clean",
+        "Java twin (screenshot pair for the tag editor/edit/import/export sub-dialogs) not captured: headless fix pass"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:21:15Z",
+          "by": "hx-schem",
+          "text": "Headless fix pass (no Java leg): tag editor rename/delete/reorder/text+icon tags, per-schematic tag chips with .msch persistence, edit-view description field, and .msch import/export dialogs are implemented in batch_campaign2.rs; cargo check + 8 unit tests + dialog sweep (failed=0) + headless boot pass. Java visual twin (tag editor/edit/import/export sub-dialog frames) still to be captured."
+        }
+      ]
+    },
+    "PAR-0575": {
+      "title": "GAPS #21: core items are not shared across a team's cores",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (CoreBlock.java:764-780 aliasing, onRemoved :861-880)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_items"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib core_snapshot_sums_the_team_pool"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_has_item_reads"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-core",
+      "claimed_at": "2026-11-06T21:23:53Z",
+      "severity": "P1",
+      "gap": "GAPS.md#21: Core items are not shared across a team's cores. Java CoreBlock.java:764-770 does this.items = other.items; the port only summed capacity (core_block.rs:236 R2 NEEDS USER DECISION) and PAR-0484 only routed linked storages through their owning core.",
+      "source": "GAPS.md#21",
+      "fix": "GAPS #21 / CoreBlock.java:764-780: Java aliases one ItemModule across every core of a team. ECS cannot alias, so CoreBuild.items_holder stores the team's canonical core (lowest EntitySeq, matching Team.cores().first() and the existing HUD/AI readers) and every core read/write resolves through it (new storage/team_items.rs: core_holder/link_team_cores/core_item_count/add_to_core/remove_from_core/team_item_count/team_item_stacks/on_core_removed). core_block.rs routes accept_item/handle_item/handle_stack/remove_stack through the holder and ports CoreBuild.onRemoved (pool migration to the surviving core, owner-storage relink, Java proportional share when the last core dies, survivor storageCapacity recompute). storage_block.rs item_holder/linked_core_is_full/accept_stack/handle_stack resolve the owning core through the alias (PAR-0484 path). game/sector.rs core_snapshot_of sums team_item_stacks and game/runtime.rs ObjectiveEnv::team_has_item uses team_item_count, so the sector record and ItemObjective agree. Single-core teams keep the old module path. ECS deviation documented: non-canonical cores keep an inert ItemModule mirror (mc/logic/access.rs sensor/setitem and the gx building_items_json panel on a secondary core still read it).",
+      "evidence": [
+        "cargo test -p mind-core --lib core (97 passed)",
+        "cargo test -p mind-core --lib storage (22 passed)",
+        "cargo test -p mind-core --lib sector (67 passed)",
+        "cargo test -p mind-core --lib (3034 passed, 0 failed, 4 ignored)",
+        "cargo check -p mind-gdext",
+        "cargo test -p mind-gdext --lib core_items (2 passed)",
+        "tests: two_cores_of_a_team_share_one_pool, placing_a_second_core_keeps_the_existing_pool, non_canonical_module_is_inert_and_not_summed, enemy_and_derelict_cores_are_not_pooled, destroying_the_canonical_core_keeps_the_pool, last_core_shares_its_pool_with_linked_storages, linked_storage_of_a_second_core_reads_the_team_pool, single_core_path_is_unchanged, core_snapshot_sums_the_team_pool, team_has_item_reads_the_shared_team_pool"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T21:23:58Z",
+          "by": "hx-core",
+          "text": "Headless: pool verified through real Sim placements (two Command::Place cores) and BuildHarness transfer/destroy paths; focused core=97/storage=22/sector=67, full mind-core lib=3034 passed; cargo check -p mind-gdext ok; gdext core_items tests pass; clippy adds no lint in the touched files; fmt clean. No Java leg (brief forbids running Java)."
         }
       ]
     }

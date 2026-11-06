@@ -38,6 +38,10 @@ const UNIT_TAP_RADIUS: f32 = 11.0;
 /// Double-tap window for `selectTypedUnits` (`Time.timeSinceMillis < 300`).
 const UNIT_TAP_INTERVAL_MS: u64 = 300;
 
+/// `Vars.maxPingTextLength` (`Vars.java:111`): the `ping.text` prompt limit
+/// and the `InputHandler.pingLocation` truncation length.
+const MAX_PING_TEXT: usize = 40;
+
 /// `Units.closest` search radius for `selectedUnit()` (`InputHandler.java:2152`).
 const CONTROL_RADIUS: f32 = 40.0;
 /// `selectedUnit()`'s hitbox grow per side (`InputHandler.java:2156`).
@@ -87,6 +91,23 @@ struct Drag {
     kind: DragKind,
     start: (i32, i32),
     last: (i32, i32),
+    moved: bool,
+}
+
+/// `DesktopInput.splan` (`DesktopInput.java:43/657-665/710-717/800-813`): the
+/// player's queued, still-unstarted build plan being dragged to a new tile.
+#[derive(Debug, Clone)]
+struct PlanDrag {
+    /// Snapshot of the queued plan (`splan`; `x/y/rotation/config` mutate
+    /// during the drag).
+    plan: ClientPlan,
+    /// Grab tile (`splan.x/splan.y` at the press).
+    origin: (i32, i32),
+    /// Mouse world point at the press (`buildPlanMouseOffsetX/Y` baseline).
+    grab_world: (f32, f32),
+    /// Live drag tile (`splan.x/splan.y`).
+    tile: (i32, i32),
+    /// `movedPlan`: the pointer changed the tile.
     moved: bool,
 }
 
@@ -168,6 +189,33 @@ pub enum Effect {
     /// (`HudFragment.java:461-467`): `MindInput` calls `MindCampaign.run_wave`,
     /// the same facade path as the HUD skip button (`_on_skip_wave`).
     SkipWave,
+    /// `Call.pingLocation(player, x, y, text)` (`DesktopInput.java:491-497`):
+    /// show the ping marker at the world point (`PlayerComp.drawPing`,
+    /// `MinimapRenderer.java:173`) for its 20 s lifetime.
+    Ping {
+        /// World x (pixels).
+        x: f32,
+        /// World y (pixels).
+        y: f32,
+        /// Optional ping label (`pingText`, stripped of markup).
+        text: String,
+    },
+    /// Ctrl+`ping`: `ui.showTextInput("", "@ping.text", maxPingTextLength,
+    /// "", result -> Call.pingLocation(...))` (`DesktopInput.java:492-493`).
+    PingPrompt {
+        /// World x (pixels).
+        x: f32,
+        /// World y (pixels).
+        y: f32,
+    },
+    /// `planConfig.showConfig(splan)` (`DesktopInput.java:800-812`): the
+    /// `{title, options:[{name,label}], value}` spec for the plan-point popup.
+    OpenPlanConfig {
+        /// Fragment spec JSON (`MindPlanConfigFragment.configure`).
+        spec: String,
+    },
+    /// `planConfig.hide()` (`DesktopInput.java:809`/`812`).
+    HidePlanConfig,
     /// The RTS selection changed; payload is a JSON id array.
     SelectionChanged(String),
 }
@@ -280,6 +328,39 @@ impl PlacementWorld for HostWorld<'_> {
         };
         matches_front.then_some((nx, ny))
     }
+}
+
+/// `Math.round(float)` (`floor(x + 0.5)`; Java rounds halves toward +inf).
+fn java_round(value: f32) -> i32 {
+    (value + 0.5).floor() as i32
+}
+
+/// `pollInputPlayer` L657-665 plan-drag tile: Java keeps
+/// `buildPlanMouseOffsetX = splan.x * tilesize - mouseWorld.x` and each frame
+/// sets `x = Math.round((mouseWorld.x + offset) / tilesize)`, which reduces to
+/// `origin + round((mouseWorld - grabWorld) / tilesize)`.
+fn plan_drag_tile(origin: (i32, i32), grab_world: (f32, f32), world: (f32, f32)) -> (i32, i32) {
+    let dx = java_round((world.0 - grab_world.0) / 8.0);
+    let dy = java_round((world.1 - grab_world.1) / 8.0);
+    (origin.0 + dx, origin.1 + dy)
+}
+
+/// `Block.getPlanConfigs` default (`Block.java:1664-1673`):
+/// `configurations.containsKey(Item.class)` -> item options,
+/// `configurations.containsKey(Liquid.class)` -> liquid options. The declared
+/// kinds come from the runtime block table; an undeclared block falls back to
+/// the item/liquid-container flags (`Block.hasItems`/`hasLiquids`, the same
+/// fallback `config_spec` uses).
+fn plan_config_kinds(
+    declared: &[mind_core::world::ConfigKind],
+    has_items: bool,
+    has_liquids: bool,
+) -> (bool, bool) {
+    let items = declared.contains(&mind_core::world::ConfigKind::Item)
+        || (declared.is_empty() && has_items);
+    let liquids = declared.contains(&mind_core::world::ConfigKind::Liquid)
+        || (declared.is_empty() && has_liquids);
+    (items, liquids)
 }
 
 /// How close a cursor must be to the carrying player unit to start a drop
@@ -465,6 +546,11 @@ pub struct DesktopBridge {
     /// (`HudFragment.java:461-467/1234-1236`), refreshed by `MindInput` from
     /// `/root/MindHud`.
     pub wave_gate: WaveGate,
+    /// `splan` (`DesktopInput.java:43`): the queued plan under a select drag.
+    splan: Option<PlanDrag>,
+    /// `planConfig.selected` (`PlanConfigFragment.selected`): the plan whose
+    /// point-config popup is open, waiting for `plan_config_applied`.
+    plan_config_plan: Option<ClientPlan>,
 }
 
 impl Default for DesktopBridge {
@@ -516,6 +602,8 @@ impl DesktopBridge {
             build_was_auto_paused: false,
             config_scroll: HashMap::new(),
             wave_gate: WaveGate::default(),
+            splan: None,
+            plan_config_plan: None,
         }
     }
 
@@ -674,6 +762,9 @@ impl DesktopBridge {
             RawEvent::MouseMove { x, y } => {
                 self.mouse = (x, y);
                 self.mouse_move(bindings);
+                // `pollInputPlayer` L657-665: the grabbed `splan` follows the
+                // pointer (`x = round((mouseWorld + offset) / tilesize)`).
+                self.update_splan();
             }
             RawEvent::MouseButton { button, down, x, y } => {
                 self.mouse = (x, y);
@@ -760,7 +851,7 @@ impl DesktopBridge {
             }
         } else {
             match name {
-                "select" => self.left_release(),
+                "select" => self.left_release(bindings),
                 "break_block" | "deselect" => self.right_release(bindings),
                 _ => {}
             }
@@ -1064,6 +1155,21 @@ impl DesktopBridge {
             "minimap" => {
                 self.effects
                     .push(Effect::ToggleFragment(String::from("minimap")));
+                self.fire_hotkey(name);
+            }
+            "ping" => {
+                // `DesktopInput.java:491-497`: `input.keyTap(Binding.ping)` at
+                // `input.mouseWorldX/Y`; Ctrl asks for the label first
+                // (`ui.showTextInput("", "@ping.text", maxPingTextLength, "",
+                // result -> Call.pingLocation(..., UI.formatIcons(result)))`),
+                // which `MindInput` drives through `Effect::PingPrompt`.
+                if let Some((wx, wy)) = self.aim_world() {
+                    if self.key_down(bindings, ids::CONTROL) {
+                        self.effects.push(Effect::PingPrompt { x: wx, y: wy });
+                    } else {
+                        self.ping_at(wx, wy, None);
+                    }
+                }
                 self.fire_hotkey(name);
             }
             "console" => {
@@ -1569,6 +1675,12 @@ impl DesktopBridge {
         }
         self.controller.state.rotation =
             (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
+        // `DesktopInput.java:836-849`: `splan.rotation` steps with the placement
+        // rotation while a queued plan is grabbed.
+        if let Some(drag) = self.splan.as_mut() {
+            drag.plan.rotation = (drag.plan.rotation as i32 + step).rem_euclid(4) as u8;
+            drag.moved = true;
+        }
         if let Some(drag) = self.drag
             && drag.kind == DragKind::Place
         {
@@ -1833,6 +1945,31 @@ impl DesktopBridge {
         }
     }
 
+    /// `InputHandler.pingLocation(player, x, y, text)`
+    /// (`InputHandler.java:286-302`): both transport forms of the ping. The
+    /// controller records the `RemoteAction::Ping` (no `SimCommand`; a live net
+    /// client forwards it in `input/command_emit.rs`) and the HUD shows the
+    /// marker (`PlayerComp.drawPing` / `MinimapRenderer`).
+    pub fn ping_at(&mut self, x: f32, y: f32, text: Option<&str>) {
+        // `InputHandler.java:298`: an empty label is `null`; a longer one is
+        // truncated to `Vars.maxPingTextLength` plus an ellipsis.
+        let label = text
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| {
+                if text.chars().count() > MAX_PING_TEXT {
+                    let mut truncated: String = text.chars().take(MAX_PING_TEXT).collect();
+                    truncated.push_str("...");
+                    truncated
+                } else {
+                    text.to_owned()
+                }
+            })
+            .unwrap_or_default();
+        self.emit_action(RemoteAction::Ping { x, y });
+        self.effects.push(Effect::Ping { x, y, text: label });
+    }
+
     // ---- pointer path ----
 
     /// Cursor tile from the camera transform.
@@ -2012,7 +2149,7 @@ impl DesktopBridge {
         // handlers (`select` -> left release, `break_block`/`deselect` ->
         // right release).
         if bindings.name(ids::SELECT) == Some(code) {
-            self.left_release();
+            self.left_release(bindings);
         }
         if bindings.name(ids::BREAK_BLOCK) == Some(code)
             || bindings.name(ids::DESELECT) == Some(code)
@@ -2259,7 +2396,7 @@ impl DesktopBridge {
             }
         } else {
             if select {
-                self.left_release();
+                self.left_release(bindings);
             }
             if right {
                 self.right_release(bindings);
@@ -2370,6 +2507,13 @@ impl DesktopBridge {
             if self.try_mine_at(x, y) {
                 return;
             }
+            // `DesktopInput.java:710-717`: tapping one of the player's own
+            // unstarted queued plans grabs it (`splan = plan`) instead of
+            // shooting; the release drops it at the dragged tile and Ctrl opens
+            // its point config (`planConfig.showConfig`).
+            if self.grab_plan() {
+                return;
+            }
             // `shouldShoot = !scene.hasMouse() && !locked && !state.isEditor()`;
             // the UI gates ran in `MindInput::input`.
             self.shooting = !self.locked;
@@ -2399,11 +2543,16 @@ impl DesktopBridge {
         self.update_place_line(bindings, (x, y), (x, y));
     }
 
-    fn left_release(&mut self) {
+    fn left_release(&mut self, bindings: &BindingState) {
         // `DesktopInput.java:507-509`: releasing select stops shooting; the
         // release also resolves a pending tap-unit gesture (`tryDropItems`).
         self.shooting = false;
         self.try_drop_items();
+        // `DesktopInput.java:800-813`: a grabbed `splan` is committed before
+        // the normal drag-release branches.
+        if self.release_splan(bindings) {
+            return;
+        }
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -2412,6 +2561,293 @@ impl DesktopBridge {
             DragKind::SelectRect => self.commit_select(drag),
             DragKind::Break => {}
         }
+    }
+
+    // ---- queued plan drag + point config (GAPS #46, PAR-0555) -------------
+
+    /// `getPlan(cursorX, cursorY)` over the player's own queue: a non-breaking,
+    /// not-yet-started plan whose `Block.bounds` contain the world point
+    /// (`DesktopInput.java:656/710`). The config is carried from
+    /// [`MindSimHost::player_plan_at_world`].
+    fn queued_plan_at(&self, wx: f32, wy: f32) -> Option<ClientPlan> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        let content = guard.content_registry()?;
+        let json = guard.player_build_plans_json();
+        let plans: Vec<serde_json::Value> = serde_json::from_str(&json.to_string()).ok()?;
+        for entry in &plans {
+            // `!plan.breaking && !plan.initialized && plan.progress <= 0f`.
+            if entry.get("breaking").and_then(serde_json::Value::as_bool) != Some(false) {
+                continue;
+            }
+            if entry
+                .get("progress")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0)
+                > 0.0
+            {
+                continue;
+            }
+            let Some(block_name) = entry.get("block").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let Some(block) = content.block_id(block_name) else {
+                continue;
+            };
+            let Some(def) = content.block(block) else {
+                continue;
+            };
+            let (Some(x), Some(y), Some(rotation)) = (
+                entry.get("x").and_then(serde_json::Value::as_i64),
+                entry.get("y").and_then(serde_json::Value::as_i64),
+                entry.get("rotation").and_then(serde_json::Value::as_i64),
+            ) else {
+                continue;
+            };
+            // `Block.bounds` (`Block.java:1591-1594`; same derivation as
+            // `player_plan_at_world`): even-size blocks centre on the cursor.
+            let offset = ((def.size + 1) % 2) as f32 * 4.0;
+            let half = def.size as f32 * 4.0;
+            let cx = x as f32 * 8.0 + offset;
+            let cy = y as f32 * 8.0 + offset;
+            if wx < cx - half || wx >= cx + half || wy < cy - half || wy >= cy + half {
+                continue;
+            }
+            let (_, config) = guard.player_plan_at_world(wx, wy)?;
+            return Some(ClientPlan {
+                x: x as i32,
+                y: y as i32,
+                rotation: rotation as u8,
+                block,
+                config,
+                breaking: false,
+                anim_scale: 1.0,
+            });
+        }
+        None
+    }
+
+    /// `DesktopInput.java:710-717`: latch a queued plan under the cursor
+    /// (`splan = plan; movedPlan = false; buildPlanMouseOffset...`).
+    fn grab_plan(&mut self) -> bool {
+        let Some((wx, wy)) = self.aim_world() else {
+            return false;
+        };
+        let Some(plan) = self.queued_plan_at(wx, wy) else {
+            return false;
+        };
+        self.splan = Some(PlanDrag {
+            origin: (plan.x, plan.y),
+            grab_world: (wx, wy),
+            tile: (plan.x, plan.y),
+            plan,
+            moved: false,
+        });
+        true
+    }
+
+    /// `pollInputPlayer` L657-665: `splan.x/y = round((mouseWorld + offset) /
+    /// tilesize)`; `movedPlan` latches when the tile changes.
+    fn update_splan(&mut self) {
+        let Some((wx, wy)) = self.aim_world() else {
+            return;
+        };
+        let Some(drag) = self.splan.as_mut() else {
+            return;
+        };
+        let tile = plan_drag_tile(drag.origin, drag.grab_world, (wx, wy));
+        if tile != drag.tile {
+            drag.tile = tile;
+            drag.plan.x = tile.0;
+            drag.plan.y = tile.1;
+            drag.moved = true;
+        }
+    }
+
+    /// `DesktopInput.java:800-813`: commit the dragged plan (if moved), then
+    /// Ctrl -> `planConfig.showConfig(splan)`, else `planConfig.hide()`.
+    fn release_splan(&mut self, bindings: &BindingState) -> bool {
+        let Some(drag) = self.splan.take() else {
+            return false;
+        };
+        let mut plan = drag.plan.clone();
+        plan.x = drag.tile.0;
+        plan.y = drag.tile.1;
+        if drag.moved {
+            self.move_queued_plan(&plan, drag.origin);
+        }
+        if self.key_down(bindings, ids::CONTROL) {
+            // `inv.hide(); config.hideConfig(); planConfig.showConfig(splan);`
+            self.effects.push(Effect::HidePanels);
+            if let Some(spec) = self.plan_config_spec(&plan) {
+                self.plan_config_plan = Some(plan);
+                self.effects.push(Effect::OpenPlanConfig { spec });
+            }
+        } else {
+            // `planConfig.hide()`.
+            self.effects.push(Effect::HidePlanConfig);
+            self.plan_config_plan = None;
+        }
+        true
+    }
+
+    /// Moves a queued plan to the released tile. The port's queue has no
+    /// in-place move, so the origin plan is dropped from its rect and re-queued
+    /// at the new tile (queue position moves to the tail; Java keeps it).
+    fn move_queued_plan(&mut self, plan: &ClientPlan, from: (i32, i32)) {
+        let Some(mut host) = self.host.clone() else {
+            return;
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(plan.x), i16::try_from(plan.y)) else {
+            return;
+        };
+        let config = plan.config.clone();
+        host.bind_mut()
+            .remove_plans_in(from.0, from.1, from.0, from.1, 1);
+        host.bind_mut()
+            .queue_player_place_config(x, y, plan.block, plan.rotation, config);
+    }
+
+    /// `PlanConfigFragment.showConfig`'s option source. The default
+    /// `Block.getPlanConfigs` (`Block.java:1664-1673`) is the declared
+    /// item/liquid config kinds; `UnitFactory.getPlanConfigs`
+    /// (`UnitFactory.java:203-209`) lists its unit plans (banned units
+    /// dropped). The block-list overrides (`Constructor.java:50`,
+    /// `PayloadSource.java:71`, `PayloadRouter.java:49`) need the missing
+    /// `Block.getPlanConfigs` hook in `mc/world/block.rs` (reported).
+    fn plan_config_spec(&self, plan: &ClientPlan) -> Option<String> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        let content = guard.content_registry()?;
+        let def = content.block(plan.block)?;
+        // `PlanConfigFragment.showConfig`: `if(!block.configurable) return;`.
+        if !def.configurable {
+            return None;
+        }
+        let rules = guard.live_rules();
+        let banned = |name: &str| {
+            rules
+                .as_ref()
+                .is_some_and(|rules| rules.is_banned_unit(name))
+        };
+        let mut options: Vec<serde_json::Value> = Vec::new();
+        if def.kind == BlockKind::UnitFactory {
+            let push_unit = |options: &mut Vec<serde_json::Value>, name: &str| {
+                if banned(name) {
+                    return;
+                }
+                options.push(serde_json::json!({
+                    "name": name,
+                    "label": format!("unit.{name}.name"),
+                }));
+            };
+            if def.unit_plans.is_empty() {
+                for entry in content.entries(ContentType::Unit) {
+                    if let Some(name) = entry.name {
+                        push_unit(&mut options, name);
+                    }
+                }
+            } else {
+                for unit_plan in &def.unit_plans {
+                    if let Some(unit) = content.unit(unit_plan.unit) {
+                        let name = unit.name.clone();
+                        push_unit(&mut options, &name);
+                    }
+                }
+            }
+        } else {
+            // `configurations.containsKey(Item.class)` / `(Liquid.class)`.
+            let declared = guard.block_config_kinds(plan.block);
+            let (items, liquids) = plan_config_kinds(declared, def.has_items, def.has_liquids);
+            if items {
+                for entry in content.entries(ContentType::Item) {
+                    if let Some(name) = entry.name {
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("item.{name}.name"),
+                        }));
+                    }
+                }
+            }
+            if liquids {
+                for entry in content.entries(ContentType::Liquid) {
+                    if let Some(name) = entry.name {
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("liquid.{name}.name"),
+                        }));
+                    }
+                }
+            }
+        }
+        // `if(options.isEmpty()) return;`
+        if options.is_empty() {
+            return None;
+        }
+        // `ItemSelection` checked entry (`selected.config`).
+        let current = match &plan.config {
+            mind_core::world::config::ConfigValue::Item(id) => {
+                content.item(*id).map(|item| item.name.clone())
+            }
+            mind_core::world::config::ConfigValue::Liquid(id) => {
+                content.liquid(*id).map(|liquid| liquid.name.clone())
+            }
+            mind_core::world::config::ConfigValue::Unit(id) => {
+                content.unit(*id).map(|unit| unit.name.clone())
+            }
+            mind_core::world::config::ConfigValue::Block(id) => {
+                content.block(*id).map(|block| block.name.clone())
+            }
+            _ => None,
+        };
+        let mut spec = serde_json::json!({
+            "title": format!("block.{}.name", def.name),
+            "options": options,
+        });
+        if let Some(current) = current {
+            spec["value"] = serde_json::Value::from(current);
+        }
+        Some(spec.to_string())
+    }
+
+    /// `PlanConfigFragment`'s `selected.config = content` then
+    /// `planConfig.hide()`: resolves the chosen content name and re-queues the
+    /// plan with it (the queue has no in-place config setter), recording
+    /// `Block.lastConfig` like the placed-config path.
+    pub fn apply_plan_config(&mut self, value: &str) -> bool {
+        let Some(plan) = self.plan_config_plan.take() else {
+            return false;
+        };
+        let Some(mut host) = self.host.clone() else {
+            return false;
+        };
+        let config = {
+            let guard = host.bind();
+            let Some(content) = guard.content_registry() else {
+                return false;
+            };
+            if value.is_empty() {
+                mind_core::world::config::ConfigValue::None
+            } else if let Some(id) = content.item_id(value) {
+                mind_core::world::config::ConfigValue::Item(id)
+            } else if let Some(id) = content.liquid_id(value) {
+                mind_core::world::config::ConfigValue::Liquid(id)
+            } else if let Some(id) = content.unit_id(value) {
+                mind_core::world::config::ConfigValue::Unit(id)
+            } else if let Some(id) = content.block_id(value) {
+                mind_core::world::config::ConfigValue::Block(id)
+            } else {
+                return false;
+            }
+        };
+        self.last_config.insert(plan.block.raw(), config.clone());
+        let (Ok(x), Ok(y)) = (i16::try_from(plan.x), i16::try_from(plan.y)) else {
+            return false;
+        };
+        host.bind_mut()
+            .remove_plans_in(plan.x, plan.y, plan.x, plan.y, 1);
+        host.bind_mut()
+            .queue_player_place_config(x, y, plan.block, plan.rotation, config)
     }
 
     /// `InputHandler.canTapPlayer` (`InputHandler.java:2032-2043`): no block
@@ -4086,6 +4522,104 @@ mod tests {
         bridge.text_focus = true;
         bridge.handle(&bindings, RawEvent::key_down("k"));
         assert!(!bridge.effects.contains(&Effect::SkipWave));
+    }
+
+    #[test]
+    fn ping_binding_emits_the_location_effect() {
+        // GAPS #46/PAR-0554: `DesktopInput.java:491-497`. Before the fix the
+        // `ping` binding fell through `dispatch_action`'s `_ => {}` arm, so no
+        // `RemoteAction::Ping`/marker ever existed.
+        assert_eq!(BindingState::new().name(ids::PING), Some("p"));
+        let mut bridge = DesktopBridge::new();
+        bridge.ping_at(120.0, -8.0, None);
+        assert_eq!(
+            bridge.take_effects(),
+            vec![Effect::Ping {
+                x: 120.0,
+                y: -8.0,
+                text: String::new()
+            }]
+        );
+        // `InputHandler.pingLocation`: an empty label stays `null`, a long one
+        // truncates to `maxPingTextLength` + "...".
+        bridge.ping_at(1.0, 2.0, Some("  "));
+        assert_eq!(
+            bridge.take_effects(),
+            vec![Effect::Ping {
+                x: 1.0,
+                y: 2.0,
+                text: String::new()
+            }]
+        );
+        let long = "x".repeat(MAX_PING_TEXT + 5);
+        bridge.ping_at(3.0, 4.0, Some(&long));
+        let effects = bridge.take_effects();
+        let Effect::Ping { text, .. } = &effects[0] else {
+            panic!("expected a ping effect, got {effects:?}");
+        };
+        assert_eq!(text.chars().filter(|ch| *ch == 'x').count(), MAX_PING_TEXT);
+        assert!(text.ends_with("..."));
+    }
+
+    #[test]
+    fn plan_config_options_follow_the_declared_config_kinds() {
+        // `Block.getPlanConfigs` default (`Block.java:1664-1673`).
+        use mind_core::world::ConfigKind;
+        assert_eq!(
+            plan_config_kinds(&[ConfigKind::Item], false, false),
+            (true, false)
+        );
+        assert_eq!(
+            plan_config_kinds(&[ConfigKind::Liquid], false, false),
+            (false, true)
+        );
+        assert_eq!(
+            plan_config_kinds(&[ConfigKind::Item, ConfigKind::Liquid], false, false),
+            (true, true)
+        );
+        // Undeclared container fallback (`config_spec`'s rule).
+        assert_eq!(plan_config_kinds(&[], true, false), (true, false));
+        assert_eq!(plan_config_kinds(&[], false, true), (false, true));
+        assert_eq!(plan_config_kinds(&[], false, false), (false, false));
+        // A non-item/non-liquid config kind lists nothing.
+        assert_eq!(
+            plan_config_kinds(&[ConfigKind::Number], true, true),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn plan_drag_tile_rounds_like_desktop_input() {
+        // Grab at tile (10, 20), world (84, 164): a +20 px x move is +2.5 tiles
+        // and `Math.round` rounds halves toward +inf.
+        assert_eq!(
+            plan_drag_tile((10, 20), (84.0, 164.0), (104.0, 164.0)),
+            (13, 20)
+        );
+        assert_eq!(
+            plan_drag_tile((10, 20), (84.0, 164.0), (64.0, 164.0)),
+            (8, 20)
+        );
+        // Small moves keep the grabbed tile.
+        assert_eq!(
+            plan_drag_tile((10, 20), (84.0, 164.0), (87.0, 161.0)),
+            (10, 20)
+        );
+        assert_eq!(
+            plan_drag_tile((10, 20), (84.0, 164.0), (84.0, 164.0)),
+            (10, 20)
+        );
+    }
+
+    #[test]
+    fn plan_config_requires_an_open_plan() {
+        // `PlanConfigFragment.plan_config_applied` without a `showConfig` target
+        // is a no-op, and a select release without `splan` emits nothing.
+        let mut bridge = DesktopBridge::new();
+        assert!(!bridge.apply_plan_config("copper"));
+        let bindings = BindingState::new();
+        assert!(!bridge.release_splan(&bindings));
+        assert!(bridge.take_effects().is_empty());
     }
 
     #[test]

@@ -31,6 +31,9 @@ const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
 /// Path to the campaign facade that owns the live sector/tech/rules state.
 const CAMPAIGN_PATH: &str = "/root/Spine/MindCampaign";
 
+/// Path to the net facade that owns the relay roster (`MindNet`).
+const NET_PATH: &str = "/root/Spine/MindNet";
+
 /// `MindUi` — the UI registry/prompt singleton (`/root/MindUi`).
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -586,23 +589,82 @@ impl MindUi {
         true
     }
 
-    /// Documents the player-list relay seam; always false until plan 21 lands
-    /// (the shell never fakes a server action).
+    /// Forwards a player-list row action to the relay (`MindNet.player_action`):
+    /// `PlayerListFragment`'s Ban/Kick/Trace/Team/Admin buttons. Returns false
+    /// when the net facade is absent (single-player) or the reducer was not
+    /// sent; the shell never fakes a server action.
+    ///
+    /// The 2-arg signal ABI cannot carry the team id, so `team:<id>` is also
+    /// accepted here (`team` alone dispatches `MindNet.player_action`).
     #[func]
     pub fn player_action(&mut self, player: GString, action: GString) -> bool {
-        log::info!(
-            "[ui] player_action {} on {} gated on plan 21 relay",
-            action,
-            player
-        );
-        false
+        self.dispatch_player_action(player, action, 0)
     }
 
-    /// Player-list rows JSON. The shell reads rows from this endpoint; until
-    /// plan 21 supplies live views it returns an empty list (never faked).
+    /// [`Self::player_action`] with the target team id for the `team` action
+    /// (`PlayerListFragment`'s team chooser; `MindNet.player_action_with`).
+    #[func]
+    pub fn player_action_with(&mut self, player: GString, action: GString, value: i64) -> bool {
+        self.dispatch_player_action(player, action, value)
+    }
+
+    /// Player-list rows JSON (`MindNet.players_json`): the relay roster
+    /// aggregation from `mind-stdb`'s `Roster` (PAR-0122). Empty when the net
+    /// facade is absent (menu/tool scenes) or no roster rows are subscribed —
+    /// never faked.
     #[func]
     pub fn player_list_json(&self) -> GString {
-        GString::from("[]")
+        self.net_call("players_json", &[])
+            .and_then(|payload| payload.try_to::<GString>().ok())
+            .unwrap_or_else(|| GString::from("[]"))
+    }
+
+    /// Connected player count for the player-list header (`Groups.player.size()`
+    /// in `PlayerListFragment.build`; `MindNet.player_count`).
+    #[func]
+    pub fn player_count(&self) -> i64 {
+        self.net_call("player_count", &[])
+            .and_then(|payload| payload.try_to::<i64>().ok())
+            .unwrap_or(0)
+    }
+
+    /// Admin-action/session trace for `target` (name or identity) as JSON
+    /// (`MindNet.player_trace_json`; `TraceDialog` rows, PAR-0122).
+    #[func]
+    pub fn player_trace_json(&self, target: GString) -> GString {
+        self.net_call("player_trace_json", &[target.to_variant()])
+            .and_then(|payload| payload.try_to::<GString>().ok())
+            .unwrap_or_else(|| GString::from("{}"))
+    }
+
+    /// Dispatches one player-list verb to `MindNet`: the 2-arg
+    /// `player_action` unless a value is needed (`team` uses
+    /// `player_action_with`). Both return `true` when the reducer was sent.
+    fn dispatch_player_action(&mut self, player: GString, action: GString, value: i64) -> bool {
+        let (verb, value) = parse_player_action(action.to_string().as_str(), value);
+        let player_text = player.to_string();
+        let Some(mut net) = self.base().get_node_or_null(NET_PATH) else {
+            log::info!("[ui] player_action {verb} on {player_text}: no MindNet facade");
+            return false;
+        };
+        let with_value = verb == "team" || value != 0;
+        let method = if with_value {
+            "player_action_with"
+        } else {
+            "player_action"
+        };
+        if !net.has_method(method) {
+            log::warn!("[ui] player_action: MindNet.{method} missing");
+            return false;
+        }
+        let mut args = vec![
+            GString::from(verb.as_str()).to_variant(),
+            player.to_variant(),
+        ];
+        if with_value {
+            args.push(value.to_variant());
+        }
+        net.call(method, &args).try_to::<bool>().unwrap_or(false)
     }
 
     /// Forwards a ban/admin roster action (`BansDialog`'s `unbanPlayerID`,
@@ -1182,6 +1244,20 @@ impl MindUi {
         Some(text)
     }
 
+    /// Calls a method on the net facade (`MindNet`), if it is up.
+    ///
+    /// The facade is declared by `game.tscn`'s Spine; menu/tool scenes have
+    /// none and the roster is empty while the session is offline, so every UI
+    /// read answers its documented empty payload rather than faking relay
+    /// state.
+    fn net_call(&self, name: &str, args: &[Variant]) -> Option<Variant> {
+        let mut net = self.base().get_node_or_null(NET_PATH)?;
+        if !net.has_method(name) {
+            return None;
+        }
+        Some(net.call(name, args))
+    }
+
     /// Applies one settings row change (`SettingsMenuDialog` `checkPref`/
     /// `sliderPref` listeners live in the dialog upstream; the port applies the
     /// window rows here and leaves the per-frame readers to their owners).
@@ -1355,5 +1431,47 @@ fn format_tag(format: settings::SettingFormat) -> &'static str {
         settings::SettingFormat::BloomPercent => "bloomPercent",
         settings::SettingFormat::Pixels => "pixels",
         settings::SettingFormat::FpsCap => "fpsCap",
+    }
+}
+
+/// Splits a player-list verb, accepting `team:<id>` so a 2-arg caller (the
+/// `MindUi.player_action` signal ABI) can still target a team. Anything else
+/// keeps its verb and `fallback` value.
+fn parse_player_action(action: &str, fallback: i64) -> (String, i64) {
+    let trimmed = action.trim();
+    if let Some(rest) = trimmed.strip_prefix("team:") {
+        return (
+            String::from("team"),
+            rest.parse::<i64>().unwrap_or(fallback),
+        );
+    }
+    (trimmed.to_owned(), fallback)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn player_verbs_pass_through_unchanged() {
+        assert_eq!(parse_player_action("kick", 0), (String::from("kick"), 0));
+        assert_eq!(parse_player_action(" ban ", 0), (String::from("ban"), 0));
+        assert_eq!(parse_player_action("admin", 0), (String::from("admin"), 0));
+    }
+
+    #[test]
+    fn team_verb_carries_the_team_id() {
+        assert_eq!(parse_player_action("team:2", 0), (String::from("team"), 2));
+        // A bare `team` keeps the caller's value (0 = the relay's derelict clamp).
+        assert_eq!(parse_player_action("team", 0), (String::from("team"), 0));
+        assert_eq!(parse_player_action("team:7", 0), (String::from("team"), 7));
+    }
+
+    #[test]
+    fn malformed_team_verb_keeps_the_fallback() {
+        assert_eq!(
+            parse_player_action("team:not-a-number", 3),
+            (String::from("team"), 3)
+        );
     }
 }

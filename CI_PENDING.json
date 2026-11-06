@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T16:27:31Z",
+  "updated": "2026-11-06T20:53:21Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1271,6 +1271,36 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib achievement; ... -p mind-stdb --lib",
       "expected": "achievement 6, service 8, stdb 65; full lib passes",
       "risk": "CampaignRuntime new field; clock polls; STDB header CLI 2.10.1 pin",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-205321",
+      "created_at": "2026-11-06T20:53:21Z",
+      "agent": "hx-mod2",
+      "branch": "main",
+      "head": "37a5e8d5",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/world",
+      "summary": "GAPS #55/#57/#58/#61/#62: class dispatch, consumer runtime, draw-desc, abilities, block traits",
+      "files": [
+        "client/rust/mind-core/src/world/behavior/mod.rs",
+        "client/rust/mind-core/src/world/consumers.rs",
+        "client/rust/mind-core/src/world/update.rs",
+        "client/rust/mind-core/src/render/draw_desc.rs",
+        "client/rust/mind-core/src/world/block.rs",
+        "client/rust/mind-core/src/combat/abilities.rs",
+        "client/rust/mind-core/src/entities/comp/unit/mod.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib behavior; ... consumers; ... render::draw_desc; ... abilities",
+      "expected": "full lib 3044 pass; behavior 116; consumers 7; draw_desc 16; abilities 18",
+      "risk": "BehaviorRegistry kind fallback for every block; consumer dispatch rewrite; DrawDesc chain counts; AbilityKind enum append; trait signature changes",
       "status": "pending"
     }
   ]

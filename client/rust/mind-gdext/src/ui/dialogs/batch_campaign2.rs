@@ -23,19 +23,27 @@
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use godot::builtin::{Side, VarArray, VarDictionary, VariantType};
+use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::{GrowDirection, LayoutPreset, MouseFilter, SizeFlags};
+use godot::classes::file_dialog::{Access, FileMode};
 use godot::classes::scroll_container::ScrollMode;
+use godot::classes::text_edit::LineWrappingMode;
 use godot::classes::text_server::{AutowrapMode, OverrunBehavior};
 use godot::classes::{
-    Button, CanvasItem, ColorRect, Control, DisplayServer, Font, FontVariation, HBoxContainer,
-    Json, Label, LineEdit, MarginContainer, Node, PanelContainer, RichTextLabel, StyleBox,
-    StyleBoxEmpty, StyleBoxFlat, StyleBoxTexture, Texture2D, TextureRect, VBoxContainer,
+    Button, CanvasItem, CenterContainer, ColorRect, Control, DisplayServer, FileDialog, Font,
+    FontVariation, HBoxContainer, Json, Label, LineEdit, MarginContainer, Node, PanelContainer,
+    RichTextLabel, StyleBox, StyleBoxEmpty, StyleBoxFlat, StyleBoxTexture, TextEdit, Texture2D,
+    TextureRect, VBoxContainer,
 };
 use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
+use mind_core::game::schematic::Schematic;
+use mind_core::game::schematics;
+use mind_core::io::{FileSystem, NativeFs, Paths};
 
 use super::super::dialog::{DialogController, MindDialog};
 use super::super::kit::widgets::factory;
@@ -43,6 +51,7 @@ use super::super::kit::widgets::research_items_display::MindResearchItemsDisplay
 use super::super::kit::widgets::research_view::MindResearchView;
 use super::super::kit::widgets::schematic_image::MindSchematicImage;
 use super::super::kit::{self, MindLabel, MindScroll, MindTable, styles};
+use crate::MindSimHost;
 use crate::editor::MindPreview;
 
 /// The dialog controllers in this batch.
@@ -1611,6 +1620,88 @@ const SCHEMATIC_ACTIONS: [(&str, &str, &str); 4] = [
     ("trash", "@save.delete", "delete"),
 ];
 
+/// The `.msch` base64 prefix (`Vars.schematicBaseStart`; every
+/// `Schematics.writeBase64` result starts with it).
+const SCHEMATIC_BASE_START: &str = "bXNjaAB";
+/// `Vars.accessibleIcons`: the icon-font names the tag picker offers
+/// (`Iconc` field names, resolved through `kit::icons`).
+const SCHEMATIC_ACCESSIBLE_ICONS: [&str; 31] = [
+    "effect",
+    "power",
+    "logic",
+    "units",
+    "liquid",
+    "production",
+    "defense",
+    "turret",
+    "distribution",
+    "crafting",
+    "settings",
+    "cancel",
+    "zoom",
+    "ok",
+    "star",
+    "home",
+    "pencil",
+    "up",
+    "down",
+    "left",
+    "right",
+    "hammer",
+    "warning",
+    "tree",
+    "admin",
+    "map",
+    "modePvp",
+    "terrain",
+    "modeSurvival",
+    "commandRally",
+    "commandAttack",
+];
+
+/// The transient sub-dialog a Java `BaseDialog` opens over `SchematicsDialog`
+/// (`showAllTags`, `showEdit`, `showImport`, `showExport`, the icon picker and
+/// the per-schematic add-tag panel).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum SchematicOverlay {
+    #[default]
+    None,
+    /// `showAllTags` (`@schematic.edittags`).
+    Tags,
+    /// `showEdit` (`@schematic.edit`): name, description and the tag chips.
+    Edit,
+    /// `buildTags` add button: the tags the schematic does not carry yet.
+    AddTag,
+    /// `showNewIconTag`: the accessible + content icon grid.
+    IconTag,
+    /// `showImport` (`@editor.import`).
+    Import,
+    /// `showExport` (`@editor.export`).
+    Export,
+}
+
+/// The pending `ui.showConfirm` action (`SchematicsDialog.java:166-174,566-580`).
+#[derive(Clone, Default, PartialEq, Eq)]
+enum SchematicConfirm {
+    #[default]
+    None,
+    /// `@schematic.delete.confirm` for the card action.
+    DeleteSchematic(i64),
+    /// `@schematic.tagdelconfirm` for the tag editor.
+    DeleteTag(String),
+}
+
+/// The pending `ui.showTextInput` action (`showNewTag`/tag rename).
+#[derive(Clone, Default, PartialEq, Eq)]
+enum SchematicTextPrompt {
+    #[default]
+    None,
+    /// `showNewTag`: a new text tag for the global list.
+    NewTag,
+    /// `@schematic.renametag`: rename `old` in the list and every schematic.
+    RenameTag(String),
+}
+
 /// Controller state for the reused schematics dialog node.
 #[derive(Default)]
 struct SchematicState {
@@ -1621,20 +1712,35 @@ struct SchematicState {
     selected_tags: Vec<String>,
     /// First visible schematic's view index (`firstSchematic`; Enter uses it).
     first_index: i64,
-    pending_delete: i64,
-    pending_rename: i64,
-    pending_icon: i64,
-    /// True while the tag text prompt is open (`showAllTags` pencil half).
-    pending_tag: bool,
+    /// The open sub-dialog (Java `BaseDialog`s are transient, code-built).
+    overlay_root: Option<Gd<Control>>,
+    overlay_body: Option<Gd<MindTable>>,
+    overlay_kind: SchematicOverlay,
+    /// `showEdit` target and its uncommitted fields. Kept across the add-tag
+    /// and icon-tag sub-flows so a round trip never drops typed text.
+    edit_index: i64,
+    edit_name: String,
+    edit_description: String,
+    edit_name_field: Option<Gd<LineEdit>>,
+    edit_description_field: Option<Gd<TextEdit>>,
+    edit_tags_row: Option<Gd<HBoxContainer>>,
+    /// True while the add-tag/icon-tag sub-flow will return to `showEdit`
+    /// (`schematics_show_edit` then keeps the uncommitted fields).
+    edit_pending_return: bool,
+    /// The schematic a new tag is assigned to (`-1` = global list only).
+    tag_target: i64,
+    /// The live `.msch` file dialog (`FileChooser`; a transient window).
+    file_chooser: Option<Gd<FileDialog>>,
+    pending_confirm: SchematicConfirm,
+    pending_text: SchematicTextPrompt,
 }
 
 impl SchematicState {
     fn new() -> Self {
         Self {
             first_index: -1,
-            pending_delete: -1,
-            pending_rename: -1,
-            pending_icon: -1,
+            edit_index: -1,
+            tag_target: -1,
             ..Self::default()
         }
     }
@@ -1660,6 +1766,35 @@ impl DialogController for SchematicsDialog {
 
     fn shown(&mut self, dialog: &mut MindDialog) {
         schematics_shown(dialog, &self.state);
+    }
+
+    fn hidden(&mut self, dialog: &mut MindDialog) {
+        // `BaseDialog.hide` closes the transient sub-dialogs; the Java ones are
+        // separate windows that outlive the parent, the port's overlay does not.
+        let _ = dialog;
+        schematic_overlay_close(&self.state);
+        state_reset_prompts(&self.state);
+    }
+}
+
+/// Drops any pending confirm/text-prompt latch (a cancelled or superseded
+/// prompt must never fire on the next unrelated signal).
+fn state_reset_prompts(state: &Rc<RefCell<SchematicState>>) {
+    schematic_file_chooser_close(state);
+    let mut st = state.borrow_mut();
+    st.pending_confirm = SchematicConfirm::None;
+    st.pending_text = SchematicTextPrompt::None;
+    st.tag_target = -1;
+}
+
+/// Frees the live `.msch` file dialog (it is a `Window`, not a `Control` child,
+/// so hiding the schematics dialog does not dismiss it).
+fn schematic_file_chooser_close(state: &Rc<RefCell<SchematicState>>) {
+    let chooser = state.borrow_mut().file_chooser.take();
+    if let Some(mut chooser) = chooser
+        && chooser.is_instance_valid()
+    {
+        chooser.queue_free();
     }
 }
 
@@ -1788,6 +1923,10 @@ fn schematics_build(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>
 }
 
 fn schematics_shown(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    // A re-show starts from the library top level (`shown` in Java rebuilds
+    // `setup`, which has no sub-dialog state).
+    schematic_overlay_close(state);
+    state_reset_prompts(state);
     schematics_load_tags(dialog, state);
     // `shown(() -> { searchField.setText(search = ""); setup(); })`.
     if let Some(mut field) = state.borrow().field.clone() {
@@ -1880,7 +2019,21 @@ fn schematics_rebuild_tags(dialog: &mut MindDialog, state: &Rc<RefCell<Schematic
     pane.add_child(&toggles);
     row.add_child(&pane);
     for tag in &tags {
-        let mut button = factory::button(&schematics_tag_plain(tag));
+        // Icon tags store a single PUA character (`showNewIconTag`); a plain
+        // `Button` label would render tofu, so the toggle carries the icon
+        // texture/glyph instead (Java registers the glyph on `Fonts.def`).
+        let icon_tag = schematic_icon_tag_char(tag).is_some();
+        let mut button = if icon_tag {
+            factory::button("")
+        } else {
+            factory::button(&schematics_tag_plain(tag))
+        };
+        if icon_tag {
+            let mut visual = schematic_tag_visual(tag, TAG_HEIGHT - 14.0);
+            visual.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+            visual.set_mouse_filter(MouseFilter::IGNORE);
+            button.add_child(&visual);
+        }
         // Tag labels carry Arc color markup (`[magenta]advanced-logic`): tint
         // the button text with that color.
         if let Some(tint) = schematics_tag_color(tag) {
@@ -1973,21 +2126,9 @@ fn schematics_toggle_tag(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSt
     schematics_rebuild_list(dialog, state);
 }
 
-/// `showAllTags` pencil: the port adds a tag through the shared text prompt.
+/// `showAllTags` pencil: the global tag editor (`@schematic.edittags`).
 fn schematics_edit_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
-    let _ = dialog;
-    state.borrow_mut().pending_tag = true;
-    let _ = ui_call(
-        "show_text_input",
-        &[
-            kit::t("@schematic.edittags").to_variant(),
-            kit::t("@schematic.tags").to_variant(),
-            24i64.to_variant(),
-            GString::new().to_variant(),
-            false.to_variant(),
-            false.to_variant(),
-        ],
-    );
+    schematics_show_all_tags(dialog, state);
 }
 
 /// `rebuildPane` (`SchematicsDialog.java:118-224`).
@@ -2193,7 +2334,7 @@ fn schematics_on_card_action(
 ) {
     match action {
         "info" => schematics_open_info(index),
-        "export" => schematics_export(dialog, index),
+        "export" => schematics_export(dialog, state, index),
         "edit" => schematics_edit(dialog, state, index),
         "delete" => schematics_delete(dialog, state, index),
         _ => {}
@@ -2225,6 +2366,18 @@ fn schematics_search_submit(dialog: &mut MindDialog, state: &Rc<RefCell<Schemati
     close_dialog("schematics");
 }
 
+/// Runs a schematic mutation through the campaign facade when it exposes one
+/// (Java mutates `schematics`, owned by `MindCampaign`). The port's facade has
+/// no schematic mutators yet, so the caller falls back to rewriting the `.msch`
+/// file itself (`Schematic.save`).
+fn campaign_schematic_mutation(
+    dialog: &mut MindDialog,
+    method: &str,
+    args: &[Variant],
+) -> Option<Variant> {
+    dialog.campaign_call(method, args)
+}
+
 /// `showInfo(schematic)` -> the `schematic_info` dialog.
 fn schematics_open_info(index: i64) {
     let mut context = VarDictionary::new();
@@ -2232,128 +2385,37 @@ fn schematics_open_info(index: i64) {
     open_dialog("schematic_info", &context);
 }
 
-/// `SchematicsDialog.showExport` -> `@copy.clipboard` half.
-fn schematics_export(dialog: &mut MindDialog, index: i64) {
-    let result = dialog.campaign_call("export_schematic", &[index.to_variant()]);
-    let text = result
-        .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| text_of(&value))
-        .unwrap_or_default();
-    if text.is_empty() {
-        let none = kit::t("@none").to_string();
-        dialog.show_toast(&none);
-        return;
-    }
-    DisplayServer::singleton().clipboard_set(&gs(text.as_str()));
-    let copied = kit::t("@copied").to_string();
-    dialog.show_toast(&copied);
+/// `SchematicsDialog.showExport`: the `@editor.export` panel.
+fn schematics_export(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, index: i64) {
+    schematics_show_export(dialog, state, index);
 }
 
-/// `SchematicsDialog.showImport` clipboard half.
+/// `SchematicsDialog.showImport`: the `@editor.import` panel.
 fn schematics_import(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
-    let text = DisplayServer::singleton().clipboard_get();
-    if text.is_empty() {
-        let none = kit::t("@none").to_string();
-        dialog.show_toast(&none);
-        return;
-    }
-    let result = dialog.campaign_call("import_schematic", &[text.to_variant()]);
-    let imported = result.map(|value| int_of(&value)).unwrap_or(-1);
-    if imported < 0 {
-        let none = kit::t("@none").to_string();
-        dialog.show_toast(&none);
-        return;
-    }
-    // The read models are live (`campaign_views_json`), so `refresh_campaign_views`
-    // needs no cache update here.
-    schematics_rebuild_list(dialog, state);
+    schematics_show_import(dialog, state);
 }
 
 /// `@schematic.delete.confirm`; mod-provided schematics show the removal note
 /// (`mod.item.remove`) instead of the confirm.
 fn schematics_delete(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, index: i64) {
-    let schematics = dialog.campaign_section("schematics");
-    let mut mod_name = String::new();
-    for row_variant in schematics.iter_shared() {
-        let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_i64_or(&row, "index", -1) == index {
-            mod_name = row_str(&row, "mod_name");
-            break;
-        }
-    }
-    if !mod_name.is_empty() {
-        let text = kit::tm_format("@mod.item.remove", &[mod_name.as_str()]).to_string();
-        dialog.show_toast(&text);
+    let Some(row) = schematic_row(dialog, index) else {
+        return;
+    };
+    if schematic_is_mod(&row) {
+        let text = kit::tm_format("@mod.item.remove", &[row_str(&row, "mod_name").as_str()]);
+        dialog.show_toast(&text.to_string());
         return;
     }
-    state.borrow_mut().pending_delete = index;
+    state.borrow_mut().pending_confirm = SchematicConfirm::DeleteSchematic(index);
     let _ = ui_call(
         "show_confirm",
         &[kit::t("@schematic.delete.confirm").to_variant()],
     );
 }
 
+/// `showEdit(s)`: the edit sub-dialog (name, description, tag chips).
 fn schematics_edit(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, index: i64) {
-    state.borrow_mut().pending_rename = index;
-    let mut schematic_name = String::new();
-    let schematics = dialog.campaign_section("schematics");
-    for row_variant in schematics.iter_shared() {
-        let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_i64_or(&row, "index", -1) == index {
-            schematic_name = row_str(&row, "name");
-            break;
-        }
-    }
-    let _ = ui_call(
-        "show_text_input",
-        &[
-            kit::t("@schematic.edit").to_variant(),
-            kit::t("@name").to_variant(),
-            64i64.to_variant(),
-            gs(schematic_name.as_str()).to_variant(),
-            false.to_variant(),
-            false.to_variant(),
-        ],
-    );
-}
-
-/// `SchematicsDialog` icon tag picker (`IconSelectDialog`).
-#[allow(dead_code)]
-fn schematics_open_icon_select(
-    dialog: &mut MindDialog,
-    state: &Rc<RefCell<SchematicState>>,
-    index: i64,
-) {
-    state.borrow_mut().pending_icon = index;
-    if let Some(selector) = dialog_node("icon_select")
-        && selector.has_signal("icon_selected")
-    {
-        let target = dialog.to_gd();
-        let state_for_pick = state.clone();
-        let callable = Callable::from_fn("schematic_icon_selected", move |args: &[&Variant]| {
-            let region = args
-                .first()
-                .map(|value| (*value).to::<GString>().to_string())
-                .unwrap_or_default();
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            schematics_on_icon_selected(&mut bound, &state_for_pick, &region);
-        });
-        connect_once(
-            dialog,
-            "schematic_icon_selected",
-            &selector,
-            "icon_selected",
-            &callable,
-        );
-    }
-    let mut context = VarDictionary::new();
-    context.set("index", &index.to_variant());
-    open_dialog("icon_select", &context);
+    schematics_show_edit(dialog, state, index);
 }
 
 fn schematics_on_confirm(
@@ -2361,21 +2423,63 @@ fn schematics_on_confirm(
     state: &Rc<RefCell<SchematicState>>,
     confirmed: bool,
 ) {
-    let pending = {
-        let st = state.borrow();
-        st.pending_delete
-    };
-    if !confirmed || pending < 0 {
-        state.borrow_mut().pending_delete = -1;
+    let pending = std::mem::take(&mut state.borrow_mut().pending_confirm);
+    if !confirmed {
         return;
     }
-    state.borrow_mut().pending_delete = -1;
-    let deleted = dialog
-        .campaign_call("delete_schematic", &[pending.to_variant()])
-        .map(|value| value.try_to::<bool>().unwrap_or(false))
-        .unwrap_or(false);
-    if deleted {
-        schematics_rebuild_list(dialog, state);
+    match pending {
+        // `schematics.remove(s)`: drop the `.msch` (the read model reloads).
+        SchematicConfirm::DeleteSchematic(index) => {
+            if campaign_schematic_mutation(dialog, "delete_schematic", &[index.to_variant()])
+                .and_then(|value| value.try_to::<bool>().ok())
+                .unwrap_or(false)
+            {
+                schematics_rebuild_list(dialog, state);
+                return;
+            }
+            let Some(path) = schematic_file_of(dialog, index) else {
+                return;
+            };
+            if NativeFs.delete(&path).is_ok() {
+                schematics_rebuild_list(dialog, state);
+            }
+        }
+        SchematicConfirm::DeleteTag(tag) => schematics_delete_tag(dialog, state, &tag),
+        SchematicConfirm::None => {}
+    }
+}
+
+/// `@schematic.tagdelconfirm`: strip the tag from every schematic, the filter
+/// and the global list, then rebuild (`SchematicsDialog.java:566-580`).
+fn schematics_delete_tag(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, tag: &str) {
+    for row in schematic_rows(dialog) {
+        if schematic_is_mod(&row) {
+            continue;
+        }
+        let carries = row_arr(&row, "labels")
+            .iter_shared()
+            .any(|label| text_of(&label) == tag);
+        if !carries {
+            continue;
+        }
+        let file = row_str(&row, "file");
+        if file.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(file);
+        let _ = schematic_save_file(&path, |schematic| {
+            schematic_labels_remove(&mut schematic.labels, tag);
+        });
+    }
+    {
+        let mut st = state.borrow_mut();
+        st.selected_tags.retain(|value| value != tag);
+        st.tags.retain(|value| value != tag);
+    }
+    schematics_tags_changed(dialog, state);
+    schematics_rebuild_list(dialog, state);
+    if state.borrow().overlay_kind == SchematicOverlay::Tags {
+        schematics_show_all_tags(dialog, state);
     }
 }
 
@@ -2384,75 +2488,88 @@ fn schematics_on_text_input(
     state: &Rc<RefCell<SchematicState>>,
     text: &str,
 ) {
-    let tag_pending = {
-        let st = state.borrow();
-        st.pending_tag
-    };
-    if tag_pending {
-        let added = {
-            let mut st = state.borrow_mut();
-            st.pending_tag = false;
-            if !text.is_empty() && !st.tags.iter().any(|tag| tag == text) {
-                st.tags.push(text.to_string());
-                true
-            } else {
-                false
-            }
-        };
-        if added {
-            schematics_save_tags(state);
-            schematics_rebuild_tags(dialog, state);
-            schematics_rebuild_list(dialog, state);
+    let pending = std::mem::take(&mut state.borrow_mut().pending_text);
+    match pending {
+        SchematicTextPrompt::NewTag => schematics_new_tag_result(dialog, state, text),
+        SchematicTextPrompt::RenameTag(old) => {
+            schematics_rename_tag_result(dialog, state, &old, text)
         }
-        return;
-    }
-    let pending = {
-        let st = state.borrow();
-        st.pending_rename
-    };
-    if pending < 0 {
-        return;
-    }
-    if text.is_empty() {
-        state.borrow_mut().pending_rename = -1;
-        return;
-    }
-    state.borrow_mut().pending_rename = -1;
-    let renamed = dialog
-        .campaign_call(
-            "rename_schematic",
-            &[pending.to_variant(), gs(text).to_variant()],
-        )
-        .map(|value| value.try_to::<bool>().unwrap_or(false))
-        .unwrap_or(false);
-    if renamed {
-        schematics_rebuild_list(dialog, state);
+        SchematicTextPrompt::None => {}
     }
 }
 
-fn schematics_on_icon_selected(
+/// `showNewTag` result: `tags.add(out); tagsChanged(); result.get(out)`.
+fn schematics_new_tag_result(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<SchematicState>>,
-    region_name: &str,
+    text: &str,
 ) {
-    let pending = {
-        let st = state.borrow();
-        st.pending_icon
-    };
-    if pending < 0 {
+    // An empty result is a cancelled prompt (the port's `showTextInput`).
+    if text.is_empty() {
         return;
     }
-    state.borrow_mut().pending_icon = -1;
-    close_dialog("icon_select");
-    let applied = dialog
-        .campaign_call(
-            "set_schematic_icon",
-            &[pending.to_variant(), gs(region_name).to_variant()],
-        )
-        .map(|value| value.try_to::<bool>().unwrap_or(false))
-        .unwrap_or(false);
-    if applied {
-        schematics_rebuild_list(dialog, state);
+    let target = state.borrow().tag_target;
+    if !schematics_add_global_tag(dialog, state, text) {
+        let exists = kit::t("@schematic.tagexists").to_string();
+        dialog.show_toast(&exists);
+        return;
+    }
+    if target >= 0 {
+        schematic_set_tag(dialog, state, target, text, true);
+        schematics_show_edit(dialog, state, target);
+    } else if state.borrow().overlay_kind == SchematicOverlay::Tags {
+        schematics_show_all_tags(dialog, state);
+    }
+}
+
+/// Tag rename result: `s.labels.replace(tag, result)` on every schematic,
+/// `selectedTags.replace`, `tags.replace` (`SchematicsDialog.java:544-564`).
+fn schematics_rename_tag_result(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    old: &str,
+    new: &str,
+) {
+    if new.is_empty() || new == old {
+        return;
+    }
+    if state.borrow().tags.iter().any(|tag| tag == new) {
+        let exists = kit::t("@schematic.tagexists").to_string();
+        dialog.show_toast(&exists);
+        return;
+    }
+    for row in schematic_rows(dialog) {
+        if schematic_is_mod(&row) {
+            continue;
+        }
+        let carries = row_arr(&row, "labels")
+            .iter_shared()
+            .any(|label| text_of(&label) == old);
+        if !carries {
+            continue;
+        }
+        let file = row_str(&row, "file");
+        if file.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(file);
+        let _ = schematic_save_file(&path, |schematic| {
+            schematic_labels_replace(&mut schematic.labels, old, new);
+        });
+    }
+    {
+        let mut st = state.borrow_mut();
+        if let Some(position) = st.tags.iter().position(|tag| tag == old) {
+            st.tags[position] = new.to_owned();
+        }
+        if let Some(value) = st.selected_tags.iter_mut().find(|tag| *tag == old) {
+            *value = new.to_owned();
+        }
+    }
+    schematics_tags_changed(dialog, state);
+    schematics_rebuild_list(dialog, state);
+    if state.borrow().overlay_kind == SchematicOverlay::Tags {
+        schematics_show_all_tags(dialog, state);
     }
 }
 
@@ -2462,6 +2579,1710 @@ fn schematics_strip_symbols(value: &str) -> String {
         .chars()
         .filter(|character| !IGNORE_SYMBOLS.contains(*character))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// SchematicsDialog: `.msch` persistence
+// (`Schematic.save` / `Schematics.saveChanges` / `Schematics.add` / `readBase64`)
+// ---------------------------------------------------------------------------
+
+/// Runs `f` against the live content registry (`Vars.content`). `None` when the
+/// spine (and therefore the sim host) is absent, e.g. the dialog sweep scene.
+fn with_content_registry<T>(
+    f: impl FnOnce(&mind_core::content::ContentRegistry) -> T,
+) -> Option<T> {
+    let node = kit::sim_host()?;
+    let host = node.try_cast::<MindSimHost>().ok()?;
+    let bound = host.bind();
+    let registry = bound.content_registry()?;
+    Some(f(registry))
+}
+
+/// `Vars.schematicDirectory` (`dataDirectory/schematics`): `MindCampaign` loads
+/// the same root (`mind_core::config::set_default_data_dir` pins it to
+/// `user://` at extension init).
+fn schematic_directory() -> PathBuf {
+    Paths::resolve(None).root().join("schematics")
+}
+
+/// `Schematics.findFile`: `sanitizeFilename(name)[_N].msch`, first free.
+fn schematic_free_path(dir: &Path, name: &str, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    let base = mind_core::util::strings::sanitize_filename(name);
+    // `Strings.sanitizeFilename("")` is empty; Java substitutes "empty".
+    let base = if base.is_empty() {
+        String::from("empty")
+    } else {
+        base
+    };
+    let extension = mind_core::game::rules::SCHEMATIC_EXTENSION;
+    let mut index = 0usize;
+    loop {
+        let stem = if index == 0 {
+            base.clone()
+        } else {
+            format!("{base}_{index}")
+        };
+        let path = dir.join(format!("{stem}.{extension}"));
+        // `while(result == null || result.exists())`: bound the walk so a
+        // broken filesystem cannot spin forever.
+        if !exists(&path) || index > 1000 {
+            return path;
+        }
+        index += 1;
+    }
+}
+
+/// Reads a `.msch` (`Schematics.read`).
+fn schematic_read_file(path: &Path) -> Option<Schematic> {
+    let bytes = NativeFs.read(path).ok()?;
+    with_content_registry(|registry| schematics::read(&bytes, registry).ok())?
+}
+
+/// `Schematic.save` + `Schematics.saveChanges`: decode, mutate, re-encode,
+/// write back. `false` on a decode/encode/IO failure (Java shows an exception).
+fn schematic_save_file(path: &Path, mutate: impl FnOnce(&mut Schematic)) -> bool {
+    let Ok(bytes) = NativeFs.read(path) else {
+        return false;
+    };
+    let encoded = with_content_registry(|registry| {
+        let Ok(mut schematic) = schematics::read(&bytes, registry) else {
+            return None;
+        };
+        mutate(&mut schematic);
+        schematics::write(&schematic, registry).ok()
+    })
+    .flatten();
+    let Some(encoded) = encoded else {
+        return false;
+    };
+    NativeFs.write(path, &encoded).is_ok()
+}
+
+/// `Schematics.writeBase64` for a stored schematic (always `bXNjaAB...`).
+fn schematic_base64_file(path: &Path) -> Option<String> {
+    let bytes = NativeFs.read(path).ok()?;
+    with_content_registry(|registry| {
+        schematics::read(&bytes, registry)
+            .ok()
+            .and_then(|schematic| schematics::write_base64(&schematic, registry).ok())
+    })
+    .flatten()
+}
+
+/// `Schematics.add`: decode, `removeSteamID`, write a fresh `.msch`.
+fn schematic_import_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    let mut schematic = with_content_registry(|registry| schematics::read(bytes, registry).ok())??;
+    schematic.remove_steam_id();
+    let dir = schematic_directory();
+    let path = schematic_free_path(&dir, &schematic.name(), |candidate| {
+        NativeFs.exists(candidate)
+    });
+    let encoded = with_content_registry(|registry| schematics::write(&schematic, registry).ok())??;
+    NativeFs.write(&path, &encoded).ok()?;
+    Some(path)
+}
+
+/// The view row for `index` (fresh read model; `None` when it disappeared).
+fn schematic_row(dialog: &MindDialog, index: i64) -> Option<VarDictionary> {
+    for row in dialog.campaign_section("schematics").iter_shared() {
+        let Ok(row) = row.try_to::<VarDictionary>() else {
+            continue;
+        };
+        if row_i64_or(&row, "index", -1) == index {
+            return Some(row);
+        }
+    }
+    None
+}
+
+/// The row list (`campaign_views_json.schematics`).
+fn schematic_rows(dialog: &MindDialog) -> Vec<VarDictionary> {
+    dialog
+        .campaign_section("schematics")
+        .iter_shared()
+        .filter_map(|value| value.try_to::<VarDictionary>().ok())
+        .collect()
+}
+
+/// The absolute `.msch` path backing a schematic (`Schematic.file`).
+fn schematic_file_of(dialog: &MindDialog, index: i64) -> Option<PathBuf> {
+    let row = schematic_row(dialog, index)?;
+    let file = row_str(&row, "file");
+    if file.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(file))
+    }
+}
+
+/// `s.mod != null`: mod schematics live in the mod's read-only data dir.
+fn schematic_is_mod(row: &VarDictionary) -> bool {
+    !row_str(row, "mod_name").is_empty()
+}
+
+/// The index of the schematic stored at `path` (used after an import).
+fn schematic_index_by_file(dialog: &MindDialog, path: &Path) -> i64 {
+    let wanted = path.to_string_lossy().to_string();
+    for row in schematic_rows(dialog) {
+        if row_str(&row, "file") == wanted {
+            return row_i64_or(&row, "index", -1);
+        }
+    }
+    -1
+}
+
+/// `s.labels.add(tag)` (`Seq.add`; false when already present or empty).
+fn schematic_labels_add(labels: &mut Vec<String>, tag: &str) -> bool {
+    if tag.is_empty() || labels.iter().any(|existing| existing == tag) {
+        return false;
+    }
+    labels.push(tag.to_owned());
+    true
+}
+
+/// `s.labels.remove(tag)`.
+fn schematic_labels_remove(labels: &mut Vec<String>, tag: &str) -> bool {
+    let before = labels.len();
+    labels.retain(|existing| existing != tag);
+    labels.len() != before
+}
+
+/// `s.labels.replace(tag, result)` (`Seq.replace`: first occurrence).
+fn schematic_labels_replace(labels: &mut [String], from: &str, to: &str) -> bool {
+    let Some(position) = labels.iter().position(|existing| existing == from) else {
+        return false;
+    };
+    labels[position] = to.to_owned();
+    true
+}
+
+/// `tags.swap(idx, idx ± 1)` for the `@editor.moveup`/`@editor.movedown` cells.
+fn schematics_tag_swap(tags: &mut Vec<String>, index: usize, delta: isize) -> bool {
+    let Some(target) = index.checked_add_signed(delta) else {
+        return false;
+    };
+    if index >= tags.len() || target >= tags.len() {
+        return false;
+    }
+    tags.swap(index, target);
+    true
+}
+
+/// The global tags the schematic does not carry yet (`buildTags` add panel;
+/// order follows the global list).
+fn schematics_available_tags(tags: &[String], labels: &[String]) -> Vec<String> {
+    tags.iter()
+        .filter(|tag| !labels.iter().any(|label| label == *tag))
+        .cloned()
+        .collect()
+}
+
+/// `schematic.tagged`: how many schematics carry `tag`.
+fn schematics_tag_count(labels: &[Vec<String>], tag: &str) -> i64 {
+    labels
+        .iter()
+        .filter(|row| row.iter().any(|label| label == tag))
+        .count() as i64
+}
+
+/// The label lists of the library rows (`s.labels` for every schematic).
+fn schematic_label_lists(dialog: &MindDialog) -> Vec<Vec<String>> {
+    schematic_rows(dialog)
+        .iter()
+        .map(|row| {
+            row_arr(row, "labels")
+                .iter_shared()
+                .map(|value| text_of(&value))
+                .collect()
+        })
+        .collect()
+}
+
+/// `Core.app.getClipboardText().startsWith(schematicBaseStart)`.
+fn schematic_clipboard_importable(text: &str) -> bool {
+    text.trim_start().starts_with(SCHEMATIC_BASE_START)
+}
+
+/// A single-character tag in the icon PUA range (`showNewIconTag` stores
+/// `(char)Iconc.codes.get(icon) + ""`).
+fn schematic_icon_tag_char(tag: &str) -> Option<char> {
+    let plain = schematics_tag_plain(tag);
+    let mut characters = plain.chars();
+    let character = characters.next()?;
+    if characters.next().is_some() || (character as u32) < 0xE000 {
+        return None;
+    }
+    Some(character)
+}
+
+/// `buttons.button("@ok", ...).disabled(b -> nameField.getText().isEmpty())`.
+fn schematic_edit_name_valid(name: &str) -> bool {
+    !name.is_empty()
+}
+
+/// Adds `tag` to the global list, persists `schematic-tags` and rebuilds the
+/// tag row (`showNewTag`/`showNewIconTag` + `tagsChanged`). `false` when the
+/// tag already exists (Java `@schematic.tagexists`).
+fn schematics_add_global_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    tag: &str,
+) -> bool {
+    if tag.is_empty() {
+        return false;
+    }
+    let exists = state.borrow().tags.iter().any(|existing| existing == tag);
+    if exists {
+        return false;
+    }
+    state.borrow_mut().tags.push(tag.to_owned());
+    schematics_save_tags(state);
+    schematics_rebuild_tags(dialog, state);
+    true
+}
+
+/// `tagsChanged()`: rebuild the tag row, re-filter the pane when a tag filter is
+/// active and persist the list.
+fn schematics_tags_changed(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let has_filter = !state.borrow().selected_tags.is_empty();
+    schematics_save_tags(state);
+    schematics_rebuild_tags(dialog, state);
+    if has_filter {
+        schematics_rebuild_list(dialog, state);
+    }
+}
+
+/// `addTag(s, tag)` / `removeTag(s, tag)`: rewrite the schematic's labels.
+fn schematic_set_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+    tag: &str,
+    add: bool,
+) -> bool {
+    let Some(path) = schematic_file_of(dialog, index) else {
+        return false;
+    };
+    let saved = schematic_save_file(&path, |schematic| {
+        if add {
+            schematic_labels_add(&mut schematic.labels, tag);
+        } else {
+            schematic_labels_remove(&mut schematic.labels, tag);
+        }
+    });
+    if saved {
+        schematics_rebuild_list(dialog, state);
+    }
+    saved
+}
+
+// ---------------------------------------------------------------------------
+// SchematicsDialog: transient sub-dialogs
+// ---------------------------------------------------------------------------
+
+/// Opens a code-instantiated sub-dialog (`BaseDialog` in Java; the port's
+/// dialogs are scene-rooted, so sub-dialogs are transient overlays).
+fn schematic_overlay_open(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    kind: SchematicOverlay,
+    title: &str,
+    width: f32,
+) -> Gd<MindTable> {
+    schematic_overlay_close(state);
+    // code-instantiated: per-action sub-dialogs have no static scene.
+    let mut root = ColorRect::new_alloc();
+    // Deterministic handle for the headless sweep and the twin walk.
+    root.set_name("schematic_overlay");
+    root.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.8));
+    root.set_anchors_preset(LayoutPreset::FULL_RECT);
+    root.set_mouse_filter(MouseFilter::STOP);
+    let mut center = CenterContainer::new_alloc();
+    center.set_anchors_preset(LayoutPreset::FULL_RECT);
+    center.set_mouse_filter(MouseFilter::IGNORE);
+    let mut panel = PanelContainer::new_alloc();
+    panel.set_theme_type_variation("defaultDialog");
+    panel.set_custom_minimum_size(Vector2::new(width, 0.0));
+    let mut layout = VBoxContainer::new_alloc();
+    layout.add_theme_constant_override("separation", 6);
+    let title_label = factory::styled_label(
+        &kit::markup_text(&kit::t(title).to_string()).to_string(),
+        "techLabel",
+    );
+    layout.add_child(&title_label);
+    let mut body = factory::table();
+    body.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    layout.add_child(&body);
+    // `BaseDialog.addCloseButton`/`addCloseListener` on every sub-dialog.
+    let mut close = factory::button(&kit::t("@back").to_string());
+    close.set_custom_minimum_size(Vector2::new(200.0, 50.0));
+    {
+        let state_for_close = state.clone();
+        let callable = Callable::from_fn("schematic_overlay_close", move |_args: &[&Variant]| {
+            schematic_overlay_close(&state_for_close);
+        });
+        close.connect("pressed", &callable);
+    }
+    layout.add_child(&close);
+    panel.add_child(&layout);
+    center.add_child(&panel);
+    root.add_child(&center);
+    let root_control: Gd<Control> = root.upcast();
+    dialog.base_mut().add_child(&root_control);
+    {
+        let mut st = state.borrow_mut();
+        st.overlay_root = Some(root_control);
+        st.overlay_body = Some(body.clone());
+        st.overlay_kind = kind;
+    }
+    body
+}
+
+/// Frees the transient sub-dialog and clears its widget handles.
+fn schematic_overlay_close(state: &Rc<RefCell<SchematicState>>) {
+    let root = {
+        let mut st = state.borrow_mut();
+        st.overlay_body = None;
+        st.overlay_kind = SchematicOverlay::None;
+        st.edit_name_field = None;
+        st.edit_description_field = None;
+        st.edit_tags_row = None;
+        st.edit_pending_return = false;
+        st.overlay_root.take()
+    };
+    if let Some(mut root) = root
+        && root.is_instance_valid()
+    {
+        root.queue_free();
+    }
+}
+
+/// Places a freshly built overlay's cells immediately (a new table is not
+/// sorted until the next layout pass).
+fn schematic_overlay_finish(panel: &mut Gd<MindTable>) {
+    panel.bind_mut().sort_now();
+    if let Some(parent) = panel.get_parent()
+        && let Ok(mut container) = parent.try_cast::<godot::classes::Container>()
+    {
+        container.queue_sort();
+    }
+}
+
+/// A scrollable body for the overlay's tall lists (Java `cont.pane`).
+fn schematic_overlay_scroll(width: f32, height: f32) -> (Gd<MindScroll>, Gd<MindTable>) {
+    let mut pane = MindScroll::new_alloc();
+    pane.bind_mut().set_scrolling_disabled(true, false);
+    let mut control: Gd<Control> = pane.clone().upcast();
+    control.set_custom_minimum_size(Vector2::new(width, height));
+    control.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    let content = pane.bind_mut().content();
+    (pane, content)
+}
+
+/// A tag's display control: icon tags render as an atlas texture (content
+/// icons) or an `icon.ttf` glyph (the fontello `Icon` set); text tags as a
+/// label with the tag's Arc color applied.
+fn schematic_tag_visual(tag: &str, extent: f32) -> Gd<Control> {
+    if let Some(character) = schematic_icon_tag_char(tag)
+        && let Some(control) = schematic_icon_visual(character, extent)
+    {
+        return control;
+    }
+    let label = factory::label(&schematics_tag_plain(tag));
+    if let Some(tint) = schematics_tag_color(tag) {
+        rich(&label).add_theme_color_override("default_color", tint);
+    }
+    let mut rich_label = rich(&label);
+    rich_label.set_vertical_alignment(godot::global::VerticalAlignment::CENTER);
+    rich_label.set_custom_minimum_size(Vector2::new(0.0, extent));
+    label.upcast()
+}
+
+/// The visual for one PUA icon code: a content icon texture when
+/// `icons.properties` has the code, else the `icon.ttf` glyph.
+fn schematic_icon_visual(character: char, extent: f32) -> Option<Gd<Control>> {
+    if let Some(assets) = kit::assets() {
+        let name = assets
+            .bind()
+            .icon_name_for_code(character as i32)
+            .to_string();
+        if !name.is_empty() {
+            let region = assets.bind().icon_texture(gs(&name)).to_string();
+            if !region.is_empty()
+                && let Some(texture) = kit::icon_texture(&region)
+            {
+                let mut icon = icon_rect(&texture, extent);
+                icon.set_h_size_flags(SizeFlags::SHRINK_CENTER);
+                return Some(icon.upcast());
+            }
+        }
+    }
+    let glyph = char::from_u32(character as u32)?;
+    let mut label = Label::new_alloc();
+    let mut buffer = [0u8; 4];
+    label.set_text(&gs(glyph.encode_utf8(&mut buffer)));
+    let mut control: Gd<Control> = label.clone().upcast();
+    kit::icons::apply_icon_font(&mut control);
+    label.set_horizontal_alignment(godot::global::HorizontalAlignment::CENTER);
+    label.set_vertical_alignment(godot::global::VerticalAlignment::CENTER);
+    label.set_custom_minimum_size(Vector2::new(extent, extent));
+    label.add_theme_font_size_override("font_size", extent as i32);
+    Some(control)
+}
+
+/// The content icons of `icons.properties` (`Iconc`): name, char and atlas
+/// texture. Used by the `@schematic.icontag` grid.
+fn schematic_content_icons() -> Vec<(String, char, Option<Gd<Texture2D>>)> {
+    let Some(assets) = kit::assets() else {
+        return Vec::new();
+    };
+    let listed: Vec<(String, char, String)> = {
+        let bound = assets.bind();
+        let mut out = Vec::new();
+        for name in bound.icon_names().as_slice() {
+            let text = bound.unicode_str(name.clone()).to_string();
+            let mut characters = text.chars();
+            let Some(character) = characters.next() else {
+                continue;
+            };
+            if characters.next().is_some() {
+                continue;
+            }
+            out.push((
+                name.to_string(),
+                character,
+                bound.icon_texture(name.clone()).to_string(),
+            ));
+        }
+        out
+    };
+    listed
+        .into_iter()
+        .map(|(name, character, region)| {
+            let texture = if region.is_empty() {
+                None
+            } else {
+                kit::icon_texture(&region)
+            };
+            (name, character, texture)
+        })
+        .collect()
+}
+
+/// `showAllTags`: the global tag editor (reorder/rename/delete/count/select).
+fn schematics_show_all_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::Tags,
+        "@schematic.edittags",
+        680.0,
+    );
+    let tags = state.borrow().tags.clone();
+    let labels = schematic_label_lists(dialog);
+    let (pane, mut list) = schematic_overlay_scroll(640.0, 360.0);
+    for tag in &tags {
+        // code-instantiated: one tag row per entry of `schematic-tags`.
+        let mut row = HBoxContainer::new_alloc();
+        row.add_theme_constant_override("separation", 3);
+        // move up/down (`Icon.upOpen`/`Icon.downOpen`).
+        let mut up = factory::glyph_button("upOpen", "@editor.moveup", "emptyi");
+        up.set_custom_minimum_size(Vector2::new(38.0, TAG_HEIGHT));
+        up.set_tooltip_text(&kit::t("@editor.moveup"));
+        {
+            let target = dialog.to_gd();
+            let state_for_move = state.clone();
+            let tag_name = tag.clone();
+            let callable = Callable::from_fn("schematic_tag_up", move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_move_tag(&mut bound, &state_for_move, &tag_name, -1);
+            });
+            up.connect("pressed", &callable);
+        }
+        row.add_child(&up);
+        let mut down = factory::glyph_button("downOpen", "@editor.movedown", "emptyi");
+        down.set_custom_minimum_size(Vector2::new(38.0, TAG_HEIGHT));
+        down.set_tooltip_text(&kit::t("@editor.movedown"));
+        {
+            let target = dialog.to_gd();
+            let state_for_move = state.clone();
+            let tag_name = tag.clone();
+            let callable = Callable::from_fn("schematic_tag_down", move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_move_tag(&mut bound, &state_for_move, &tag_name, 1);
+            });
+            down.connect("pressed", &callable);
+        }
+        row.add_child(&down);
+        row.add_child(&schematic_tag_visual(tag, 32.0));
+        // `Core.bundle.format("schematic.tagged", count)`: clicking selects the
+        // tag in the main filter (`selectedTags.clear().add(tag)`).
+        let count = schematics_tag_count(&labels, tag);
+        let count_text = kit::tm_format("@schematic.tagged", &[count.to_string().as_str()]);
+        let mut count_button = factory::button(&count_text.to_string());
+        count_button.set_theme_type_variation("flatt");
+        {
+            let target = dialog.to_gd();
+            let state_for_select = state.clone();
+            let tag_name = tag.clone();
+            let callable =
+                Callable::from_fn("schematic_tag_select", move |_args: &[&Variant]| {
+                    let mut node = target.clone();
+                    let mut bound = node.bind_mut();
+                    schematics_select_tag(&mut bound, &state_for_select, &tag_name);
+                });
+            count_button.connect("pressed", &callable);
+        }
+        row.add_child(&count_button);
+        row.add_child(&factory::space(4.0, 0.0));
+        // rename tag (`Icon.pencil` -> `@schematic.renametag`).
+        let mut rename = factory::glyph_button("pencil", "@schematic.renametag", "emptyi");
+        rename.set_custom_minimum_size(Vector2::new(38.0, TAG_HEIGHT));
+        rename.set_tooltip_text(&kit::t("@schematic.renametag"));
+        {
+            let target = dialog.to_gd();
+            let state_for_rename = state.clone();
+            let tag_name = tag.clone();
+            let callable =
+                Callable::from_fn("schematic_tag_rename", move |_args: &[&Variant]| {
+                    let mut node = target.clone();
+                    let mut bound = node.bind_mut();
+                    schematics_prompt_rename_tag(&mut bound, &state_for_rename, &tag_name);
+                });
+            rename.connect("pressed", &callable);
+        }
+        row.add_child(&rename);
+        // delete tag (`Icon.trash` -> `@schematic.tagdelconfirm`).
+        let mut delete = factory::glyph_button("trash", "@save.delete", "emptyi");
+        delete.set_custom_minimum_size(Vector2::new(38.0, TAG_HEIGHT));
+        delete.set_tooltip_text(&kit::t("@save.delete"));
+        {
+            let target = dialog.to_gd();
+            let state_for_delete = state.clone();
+            let tag_name = tag.clone();
+            let callable =
+                Callable::from_fn("schematic_tag_delete", move |_args: &[&Variant]| {
+                    let mut node = target.clone();
+                    let mut bound = node.bind_mut();
+                    schematics_prompt_delete_tag(&mut bound, &state_for_delete, &tag_name);
+                });
+            delete.connect("pressed", &callable);
+        }
+        row.add_child(&delete);
+        list.bind_mut().add(&row).grow_x().pad(3.0);
+        list.bind_mut().row();
+    }
+    body.bind_mut().add(&pane).grow_x();
+    body.bind_mut().row();
+    // `t.button("@schematic.texttag", Icon.add, () -> showNewTag(...))` and the
+    // icon variant.
+    let mut text_tag = factory::icon_button(
+        "add",
+        &kit::t("@schematic.texttag").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    text_tag.set_custom_minimum_size(Vector2::new(300.0, TAG_HEIGHT));
+    {
+        let target = dialog.to_gd();
+        let state_for_new = state.clone();
+        let callable = Callable::from_fn("schematic_new_text_tag", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_prompt_new_tag(&mut bound, &state_for_new, -1);
+        });
+        text_tag.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&text_tag).left().pad(2.0);
+    body.bind_mut().row();
+    let mut icon_tag = factory::icon_button(
+        "add",
+        &kit::t("@schematic.icontag").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    icon_tag.set_custom_minimum_size(Vector2::new(300.0, TAG_HEIGHT));
+    {
+        let target = dialog.to_gd();
+        let state_for_icon = state.clone();
+        let callable = Callable::from_fn("schematic_new_icon_tag", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            state_for_icon.borrow_mut().tag_target = -1;
+            schematics_show_icon_tags(&mut bound, &state_for_icon);
+        });
+        icon_tag.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&icon_tag).left().pad(2.0);
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// `@editor.moveup`/`@editor.movedown` (`tags.swap` + `tagsChanged`).
+fn schematics_move_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    tag: &str,
+    delta: isize,
+) {
+    let moved = {
+        let mut st = state.borrow_mut();
+        st.tags
+            .iter()
+            .position(|value| value == tag)
+            .map(|index| schematics_tag_swap(&mut st.tags, index, delta))
+            .unwrap_or(false)
+    };
+    if !moved {
+        return;
+    }
+    schematics_tags_changed(dialog, state);
+    schematics_show_all_tags(dialog, state);
+}
+
+/// The `schematic.tagged` count button: `selectedTags.clear().add(tag)`, then
+/// the filter and the pane rebuild (`showAllTags` click handler).
+fn schematics_select_tag(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, tag: &str) {
+    {
+        let mut st = state.borrow_mut();
+        st.selected_tags.clear();
+        st.selected_tags.push(tag.to_owned());
+    }
+    schematic_overlay_close(state);
+    schematics_rebuild_tags(dialog, state);
+    schematics_rebuild_list(dialog, state);
+}
+
+/// `showNewTag` (`@schematic.addtag` prompt): a new text tag.
+fn schematics_prompt_new_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    target_index: i64,
+) {
+    let _ = dialog;
+    state.borrow_mut().tag_target = target_index;
+    state.borrow_mut().pending_text = SchematicTextPrompt::NewTag;
+    let _ = ui_call(
+        "show_text_input",
+        &[
+            kit::t("@schematic.addtag").to_variant(),
+            GString::new().to_variant(),
+            64i64.to_variant(),
+            GString::new().to_variant(),
+            false.to_variant(),
+            false.to_variant(),
+        ],
+    );
+}
+
+/// `showTextInput("@schematic.renametag", "@name", tag, ...)`.
+fn schematics_prompt_rename_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    tag: &str,
+) {
+    let _ = dialog;
+    state.borrow_mut().pending_text = SchematicTextPrompt::RenameTag(tag.to_owned());
+    let _ = ui_call(
+        "show_text_input",
+        &[
+            kit::t("@schematic.renametag").to_variant(),
+            kit::t("@name").to_variant(),
+            64i64.to_variant(),
+            gs(tag).to_variant(),
+            false.to_variant(),
+            false.to_variant(),
+        ],
+    );
+}
+
+/// `ui.showConfirm("@schematic.tagdelconfirm", ...)`.
+fn schematics_prompt_delete_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    tag: &str,
+) {
+    let _ = dialog;
+    state.borrow_mut().pending_confirm = SchematicConfirm::DeleteTag(tag.to_owned());
+    let _ = ui_call(
+        "show_confirm",
+        &[kit::t("@schematic.tagdelconfirm").to_variant()],
+    );
+}
+
+/// `showNewIconTag`: the accessible + content icon grid.
+fn schematics_show_icon_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::IconTag,
+        "@schematic.icontag",
+        700.0,
+    );
+    let existing = state.borrow().tags.clone();
+    let (pane, mut grid) = schematic_overlay_scroll(660.0, 420.0);
+    // `cols = min(20, width / 52)`.
+    let cols = 12usize;
+    let mut count = 0usize;
+    for name in SCHEMATIC_ACCESSIBLE_ICONS {
+        let glyph = kit::icons::glyph(name);
+        if glyph.is_empty() {
+            continue;
+        }
+        let tag = glyph.to_string();
+        if existing.iter().any(|value| value == &tag) {
+            continue;
+        }
+        let mut button = factory::button("");
+        button.set_theme_type_variation("emptyi");
+        button.set_custom_minimum_size(Vector2::new(48.0, 48.0));
+        button.set_tooltip_text(&gs(name));
+        let mut icon = glyph_control(name, 30.0, Color::WHITE);
+        icon.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+        icon.set_mouse_filter(MouseFilter::IGNORE);
+        button.add_child(&icon);
+        schematics_wire_icon_tag(dialog, state, &mut button, &tag);
+        grid.bind_mut().add(&button).pad(2.0);
+        count += 1;
+        if count.is_multiple_of(cols) {
+            grid.bind_mut().row();
+        }
+    }
+    for (name, character, texture) in schematic_content_icons() {
+        let tag = character.to_string();
+        if existing.iter().any(|value| value == &tag) {
+            continue;
+        }
+        let mut button = factory::button("");
+        button.set_theme_type_variation("emptyi");
+        button.set_custom_minimum_size(Vector2::new(48.0, 48.0));
+        button.set_tooltip_text(&gs(&name));
+        match texture {
+            Some(texture) => {
+                let mut icon = icon_rect(&texture, 40.0);
+                icon.set_anchors_and_offsets_preset(LayoutPreset::CENTER);
+                icon.set_mouse_filter(MouseFilter::IGNORE);
+                icon.set_custom_minimum_size(Vector2::new(40.0, 40.0));
+                button.add_child(&icon);
+            }
+            None => button.set_text(&kit::icons::glyph("star")),
+        }
+        schematics_wire_icon_tag(dialog, state, &mut button, &tag);
+        grid.bind_mut().add(&button).pad(2.0);
+        count += 1;
+        if count.is_multiple_of(cols) {
+            grid.bind_mut().row();
+        }
+    }
+    if count.is_multiple_of(cols) && count > 0 {
+        grid.bind_mut().row();
+    }
+    if count == 0 {
+        grid.bind_mut()
+            .add(&factory::label(&kit::t("@none").to_string()));
+        grid.bind_mut().row();
+    }
+    body.bind_mut().add(&pane).grow();
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// Wires an icon-grid cell: add the char to `schematic-tags`, then assign it to
+/// the pending schematic (if any) and return to the right overlay.
+fn schematics_wire_icon_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    button: &mut Gd<Button>,
+    tag: &str,
+) {
+    let target = dialog.to_gd();
+    let state_for_pick = state.clone();
+    let tag_name = tag.to_owned();
+    let callable = Callable::from_fn("schematic_icon_pick", move |_args: &[&Variant]| {
+        let mut node = target.clone();
+        let mut bound = node.bind_mut();
+        schematics_pick_icon_tag(&mut bound, &state_for_pick, &tag_name);
+    });
+    button.connect("pressed", &callable);
+}
+
+/// `showNewIconTag` result: `tags.add(out); tagsChanged(); cons.get(out)`.
+fn schematics_pick_icon_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    tag: &str,
+) {
+    let target = {
+        let st = state.borrow();
+        st.tag_target
+    };
+    if !schematics_add_global_tag(dialog, state, tag) {
+        return;
+    }
+    if target >= 0 {
+        schematic_set_tag(dialog, state, target, tag, true);
+        schematics_show_edit(dialog, state, target);
+    } else {
+        schematics_show_all_tags(dialog, state);
+    }
+}
+
+/// `showEdit`: name, description and the per-schematic tag chips.
+fn schematics_show_edit(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>, index: i64) {
+    let Some(row) = schematic_row(dialog, index) else {
+        return;
+    };
+    if schematic_is_mod(&row) {
+        // Mod schematics live under the mod's data dir (`s.mod != null`); the
+        // Java edit writes only when `s.file != null`, a mod file is read-only.
+        let text = kit::tm_format("@mod.item.remove", &[row_str(&row, "mod_name").as_str()]);
+        dialog.show_toast(&text.to_string());
+        return;
+    }
+    // Coming back from the add-tag/icon-tag flows: keep the uncommitted text.
+    let returning = {
+        let st = state.borrow();
+        st.edit_pending_return && st.edit_index == index
+    };
+    let (name, description) = {
+        let st = state.borrow();
+        if returning {
+            (st.edit_name.clone(), st.edit_description.clone())
+        } else {
+            (row_str(&row, "name"), row_str(&row, "description"))
+        }
+    };
+    {
+        let mut st = state.borrow_mut();
+        st.edit_index = index;
+        st.edit_name = name.clone();
+        st.edit_description = description.clone();
+        st.tag_target = index;
+        st.edit_pending_return = false;
+    }
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::Edit,
+        "@schematic.edit",
+        460.0,
+    );
+    // `cont.add("@schematic.tags").padRight(6f)` + `buildTags(s, tags, false)`.
+    // code-instantiated: one chip row per label of the edited schematic.
+    let mut tags_row = HBoxContainer::new_alloc();
+    tags_row.add_theme_constant_override("separation", 4);
+    body.bind_mut().add(&tags_row).grow_x().pad(2.0);
+    body.bind_mut().row();
+    {
+        let mut st = state.borrow_mut();
+        st.edit_tags_row = Some(tags_row);
+    }
+    schematics_edit_rebuild_tags(dialog, state, index);
+    // `cont.add("@name").padRight(6f); cont.field(s.name(), null).size(400, 55)`.
+    let mut name_row = HBoxContainer::new_alloc();
+    name_row.add_theme_constant_override("separation", 6);
+    name_row.add_child(&factory::label(&kit::t("@name").to_string()));
+    let mut name_field = factory::field("");
+    name_field.set_text(&gs(name.as_str()));
+    name_field.set_custom_minimum_size(Vector2::new(400.0, 55.0));
+    {
+        let target = dialog.to_gd();
+        let state_for_name = state.clone();
+        let callable = Callable::from_fn(
+            "schematic_edit_name_changed",
+            move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_edit_name_changed(&mut bound, &state_for_name);
+            },
+        );
+        name_field.connect("text_changed", &callable);
+        // `keyDown(KeyCode.enter, accept)` for the name field (`accept` is gated
+        // on a non-empty name and on the description not having focus).
+        let target = dialog.to_gd();
+        let state_for_submit = state.clone();
+        let callable = Callable::from_fn("schematic_edit_accept", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_edit_accept(&mut bound, &state_for_submit);
+        });
+        name_field.connect("text_submitted", &callable);
+    }
+    name_row.add_child(&name_field);
+    body.bind_mut().add(&name_row).grow_x().pad(2.0);
+    body.bind_mut().row();
+    {
+        let mut st = state.borrow_mut();
+        st.edit_name_field = Some(name_field.clone());
+    }
+    // `cont.add("@editor.description").padRight(6f)` + `cont.area(...)`.
+    let mut description_row = HBoxContainer::new_alloc();
+    description_row.add_theme_constant_override("separation", 6);
+    description_row.add_child(&factory::label(&kit::t("@editor.description").to_string()));
+    let mut area = TextEdit::new_alloc();
+    area.set_text(&gs(description.as_str()));
+    area.set_custom_minimum_size(Vector2::new(400.0, 140.0));
+    area.set_line_wrapping_mode(LineWrappingMode::BOUNDARY);
+    {
+        let target = dialog.to_gd();
+        let state_for_text = state.clone();
+        let callable = Callable::from_fn("schematic_edit_desc", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            let mut st = state_for_text.borrow_mut();
+            if let Some(area) = st.edit_description_field.clone() {
+                st.edit_description = area.get_text().to_string();
+            }
+            let _ = &mut bound;
+        });
+        area.connect("text_changed", &callable);
+    }
+    description_row.add_child(&area);
+    body.bind_mut().add(&description_row).grow_x().pad(2.0);
+    body.bind_mut().row();
+    {
+        let mut st = state.borrow_mut();
+        st.edit_description_field = Some(area);
+    }
+    // `buttons.button("@ok", Icon.ok, accept).disabled(nameField empty)` /
+    // `@cancel` -> hide.
+    let mut buttons = HBoxContainer::new_alloc();
+    buttons.set_alignment(AlignmentMode::CENTER);
+    buttons.add_theme_constant_override("separation", 6);
+    buttons.set_meta("schematic_edit_buttons", &true.to_variant());
+    let name_now = state
+        .borrow()
+        .edit_name_field
+        .clone()
+        .map(|field| field.get_text().to_string())
+        .unwrap_or_default();
+    let mut ok = factory::icon_button(
+        "ok",
+        &kit::t("@ok").to_string(),
+        "defaultt",
+        AlignmentMode::CENTER,
+    );
+    ok.set_custom_minimum_size(Vector2::new(210.0, 64.0));
+    ok.set_disabled(!schematic_edit_name_valid(&name_now));
+    ok.set_meta("schematic_edit_ok", &true.to_variant());
+    {
+        let target = dialog.to_gd();
+        let state_for_ok = state.clone();
+        let callable = Callable::from_fn("schematic_edit_accept", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_edit_accept(&mut bound, &state_for_ok);
+        });
+        ok.connect("pressed", &callable);
+    }
+    buttons.add_child(&ok);
+    let mut cancel = factory::icon_button(
+        "cancel",
+        &kit::t("@cancel").to_string(),
+        "defaultt",
+        AlignmentMode::CENTER,
+    );
+    cancel.set_custom_minimum_size(Vector2::new(210.0, 64.0));
+    {
+        let state_for_cancel = state.clone();
+        let callable = Callable::from_fn("schematic_edit_cancel", move |_args: &[&Variant]| {
+            schematic_overlay_close(&state_for_cancel);
+        });
+        cancel.connect("pressed", &callable);
+    }
+    buttons.add_child(&cancel);
+    body.bind_mut().add(&buttons).grow_x().pad(4.0);
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// `buildTags(schem, t, false)`: the chip row of the schematic's labels plus
+/// the add button (`Icon.addSmall` -> `@schematic.addtag`).
+fn schematics_edit_rebuild_tags(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+) {
+    let Some(row) = state.borrow().edit_tags_row.clone() else {
+        return;
+    };
+    let mut row = row;
+    for child in row.get_children().iter_shared() {
+        let mut child = child;
+        row.remove_child(&child);
+        child.queue_free();
+    }
+    // `schem.labels.sort(s -> tags.indexOf(s))`: the chip order follows the
+    // global tag list.
+    let (mut labels, tags) = {
+        let st = state.borrow();
+        let labels = schematic_row(dialog, index)
+            .map(|schematic| {
+                row_arr(&schematic, "labels")
+                    .iter_shared()
+                    .map(|value| text_of(&value))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+        (labels, st.tags.clone())
+    };
+    labels.sort_by_key(|label| {
+        tags.iter()
+            .position(|tag| tag == label)
+            .unwrap_or(usize::MAX)
+    });
+    for label in &labels {
+        // code-instantiated: one chip per label (`s.table(Tex.button, ...)`).
+        let mut chip = HBoxContainer::new_alloc();
+        chip.add_theme_constant_override("separation", 2);
+        chip.add_child(&schematic_tag_visual(label, TAG_HEIGHT));
+        let mut remove = factory::glyph_button("cancel", "@save.delete", "emptyi");
+        remove.set_custom_minimum_size(Vector2::new(TAG_HEIGHT, TAG_HEIGHT));
+        remove.set_tooltip_text(&kit::t("@save.delete"));
+        {
+            let target = dialog.to_gd();
+            let state_for_remove = state.clone();
+            let tag_name = label.clone();
+            let callable =
+                Callable::from_fn("schematic_chip_remove", move |_args: &[&Variant]| {
+                    let mut node = target.clone();
+                    let mut bound = node.bind_mut();
+                    schematics_remove_schematic_tag(
+                        &mut bound,
+                        &state_for_remove,
+                        index,
+                        &tag_name,
+                    );
+                });
+            remove.connect("pressed", &callable);
+        }
+        chip.add_child(&remove);
+        row.add_child(&chip);
+    }
+    let mut add = factory::glyph_button("add", "@schematic.addtag", "emptyi");
+    add.set_custom_minimum_size(Vector2::new(TAG_HEIGHT, TAG_HEIGHT));
+    add.set_tooltip_text(&kit::t("@schematic.addtag"));
+    {
+        let target = dialog.to_gd();
+        let state_for_add = state.clone();
+        let callable = Callable::from_fn("schematic_chip_add", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_show_add_tag(&mut bound, &state_for_add, index);
+        });
+        add.connect("pressed", &callable);
+    }
+    row.add_child(&add);
+}
+
+/// `removeTag(s, tag)` from a chip's `Icon.cancelSmall`.
+fn schematics_remove_schematic_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+    tag: &str,
+) {
+    if !schematic_set_tag(dialog, state, index, tag, false) {
+        return;
+    }
+    schematics_edit_rebuild_tags(dialog, state, index);
+}
+
+/// `@name` `text_changed`: keep the draft and gate `@ok` on a non-empty name.
+fn schematics_edit_name_changed(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let _ = dialog;
+    let name = {
+        let st = state.borrow();
+        st.edit_name_field
+            .clone()
+            .map(|field| field.get_text().to_string())
+            .unwrap_or_default()
+    };
+    state.borrow_mut().edit_name = name.clone();
+    // `disabled(b -> nameField.getText().isEmpty())`: find the `@ok` button in
+    // the overlay body (`schematic_ok_buttons` tag it at build time).
+    if let Some(body) = state.borrow().overlay_body.clone() {
+        for child in body.get_children().iter_shared() {
+            let Ok(container) = child.try_cast::<HBoxContainer>() else {
+                continue;
+            };
+            if !container.has_meta("schematic_edit_buttons") {
+                continue;
+            }
+            for button in container.get_children().iter_shared() {
+                if let Ok(mut button) = button.try_cast::<Button>()
+                    && button.has_meta("schematic_edit_ok")
+                {
+                    button.set_disabled(!schematic_edit_name_valid(&name));
+                }
+            }
+        }
+    }
+}
+
+/// `accept`: `s.tags.put("name"/"description", ...); s.save(); hide; rebuild`.
+fn schematics_edit_accept(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let (index, name, description) = {
+        let st = state.borrow();
+        let name = st
+            .edit_name_field
+            .clone()
+            .map(|field| field.get_text().to_string())
+            .unwrap_or_else(|| st.edit_name.clone());
+        let description = st
+            .edit_description_field
+            .clone()
+            .map(|area| area.get_text().to_string())
+            .unwrap_or_else(|| st.edit_description.clone());
+        (st.edit_index, name, description)
+    };
+    if !schematic_edit_name_valid(&name) {
+        return;
+    }
+    let Some(path) = schematic_file_of(dialog, index) else {
+        return;
+    };
+    let saved = schematic_save_file(&path, |schematic| {
+        schematic.tags.insert("name".to_owned(), name.clone());
+        schematic
+            .tags
+            .insert("description".to_owned(), description.clone());
+    });
+    if !saved {
+        let text = kit::t("@error.title").to_string();
+        dialog.show_toast(&text);
+        return;
+    }
+    schematic_overlay_close(state);
+    schematics_rebuild_list(dialog, state);
+}
+
+/// `buildTags` add button: the `@schematic.addtag` panel with the tags the
+/// schematic does not carry, plus the text/icon tag creators.
+fn schematics_show_add_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+) {
+    // Stash the edit fields so the round trip back to `showEdit` keeps them.
+    schematics_edit_stash(state);
+    state.borrow_mut().edit_pending_return = true;
+    let labels = schematic_row(dialog, index)
+        .map(|schematic| {
+            row_arr(&schematic, "labels")
+                .iter_shared()
+                .map(|value| text_of(&value))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    let tags = state.borrow().tags.clone();
+    let available = schematics_available_tags(&tags, &labels);
+    {
+        let mut st = state.borrow_mut();
+        st.tag_target = index;
+    }
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::AddTag,
+        "@schematic.addtag",
+        620.0,
+    );
+    let (pane, mut list) = schematic_overlay_scroll(580.0, 300.0);
+    if available.is_empty() {
+        list.bind_mut()
+            .add(&factory::label(&kit::t("@none").to_string()));
+        list.bind_mut().row();
+    }
+    for tag in &available {
+        // code-instantiated: one available-tag button per global tag.
+        let mut button = factory::button("");
+        button.set_theme_type_variation("defaultt");
+        button.set_custom_minimum_size(Vector2::new(180.0, TAG_HEIGHT));
+        button.set_autowrap_mode(AutowrapMode::OFF);
+        button.add_child(&{
+            let mut visual = schematic_tag_visual(tag, TAG_HEIGHT - 10.0);
+            visual.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+            visual.set_mouse_filter(MouseFilter::IGNORE);
+            visual
+        });
+        {
+            let target = dialog.to_gd();
+            let state_for_add = state.clone();
+            let tag_name = tag.clone();
+            let callable = Callable::from_fn("schematic_add_tag", move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_add_schematic_tag(&mut bound, &state_for_add, index, &tag_name);
+            });
+            button.connect("pressed", &callable);
+        }
+        list.bind_mut().add(&button).pad(2.0);
+    }
+    if !available.is_empty() {
+        list.bind_mut().row();
+    }
+    body.bind_mut().add(&pane).grow_x();
+    body.bind_mut().row();
+    let mut text_tag = factory::icon_button(
+        "add",
+        &kit::t("@schematic.texttag").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    text_tag.set_custom_minimum_size(Vector2::new(300.0, TAG_HEIGHT));
+    {
+        let target = dialog.to_gd();
+        let state_for_new = state.clone();
+        let callable = Callable::from_fn("schematic_add_text_tag", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_prompt_new_tag(&mut bound, &state_for_new, index);
+        });
+        text_tag.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&text_tag).left().pad(2.0);
+    body.bind_mut().row();
+    let mut icon_tag = factory::icon_button(
+        "add",
+        &kit::t("@schematic.icontag").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    icon_tag.set_custom_minimum_size(Vector2::new(300.0, TAG_HEIGHT));
+    {
+        let target = dialog.to_gd();
+        let state_for_icon = state.clone();
+        let callable = Callable::from_fn("schematic_add_icon_tag", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            state_for_icon.borrow_mut().tag_target = index;
+            schematics_show_icon_tags(&mut bound, &state_for_icon);
+            // The overlay swap cleared the flag; keep the draft for the
+            // `showEdit` round trip after the pick.
+            state_for_icon.borrow_mut().edit_pending_return = true;
+        });
+        icon_tag.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&icon_tag).left().pad(2.0);
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// Copies the live edit fields into the draft (`schematics_show_add_tag`).
+fn schematics_edit_stash(state: &Rc<RefCell<SchematicState>>) {
+    let mut st = state.borrow_mut();
+    if let Some(field) = st.edit_name_field.clone() {
+        st.edit_name = field.get_text().to_string();
+    }
+    if let Some(area) = st.edit_description_field.clone() {
+        st.edit_description = area.get_text().to_string();
+    }
+}
+
+/// `addTag(s, tag)` from the add panel: append, save, return to `showEdit`.
+fn schematics_add_schematic_tag(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+    tag: &str,
+) {
+    if !schematic_set_tag(dialog, state, index, tag, true) {
+        return;
+    }
+    schematics_show_edit(dialog, state, index);
+}
+
+// ---------------------------------------------------------------------------
+// SchematicsDialog: import/export sub-dialogs (`showImport`/`showExport`)
+// ---------------------------------------------------------------------------
+
+/// `showImport`: the `@editor.import` panel (clipboard + `.msch` file).
+fn schematics_show_import(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::Import,
+        "@editor.import",
+        360.0,
+    );
+    let clipboard = DisplayServer::singleton().clipboard_get().to_string();
+    // `disabled(b -> clipboard == null || !startsWith(schematicBaseStart))`.
+    let mut load_clipboard = factory::icon_button(
+        "copy",
+        &kit::t("@load.clipboard").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    load_clipboard.set_custom_minimum_size(Vector2::new(280.0, 60.0));
+    load_clipboard.set_disabled(!schematic_clipboard_importable(&clipboard));
+    {
+        let target = dialog.to_gd();
+        let state_for = state.clone();
+        let callable =
+            Callable::from_fn("schematic_load_clipboard", move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_import_clipboard(&mut bound, &state_for);
+            });
+        load_clipboard.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&load_clipboard).left().pad(4.0);
+    body.bind_mut().row();
+    let mut import_file = factory::icon_button(
+        "download",
+        &kit::t("@import.file").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    import_file.set_custom_minimum_size(Vector2::new(280.0, 60.0));
+    {
+        let target = dialog.to_gd();
+        let state_for = state.clone();
+        let callable = Callable::from_fn("schematic_import_file", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_pick_import_files(&mut bound, &state_for);
+        });
+        import_file.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&import_file).left().pad(4.0);
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// `showExport(s)`: the `@editor.export` panel (clipboard + `.msch` file).
+fn schematics_show_export(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+) {
+    let Some(row) = schematic_row(dialog, index) else {
+        return;
+    };
+    let mut body = schematic_overlay_open(
+        dialog,
+        state,
+        SchematicOverlay::Export,
+        "@editor.export",
+        360.0,
+    );
+    let mut copy_clipboard = factory::icon_button(
+        "copy",
+        &kit::t("@copy.clipboard").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    copy_clipboard.set_custom_minimum_size(Vector2::new(280.0, 60.0));
+    {
+        let target = dialog.to_gd();
+        let state_for = state.clone();
+        let callable =
+            Callable::from_fn("schematic_copy_clipboard", move |_args: &[&Variant]| {
+                let mut node = target.clone();
+                let mut bound = node.bind_mut();
+                schematics_export_clipboard(&mut bound, &state_for, index);
+            });
+        copy_clipboard.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&copy_clipboard).left().pad(4.0);
+    body.bind_mut().row();
+    let mut export_file = factory::icon_button(
+        "export",
+        &kit::t("@export.file").to_string(),
+        "flatt",
+        AlignmentMode::BEGIN,
+    );
+    export_file.set_custom_minimum_size(Vector2::new(280.0, 60.0));
+    {
+        let target = dialog.to_gd();
+        let state_for = state.clone();
+        let name = row_str(&row, "name");
+        let callable = Callable::from_fn("schematic_export_file", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_pick_export_file(&mut bound, &state_for, index, &name);
+        });
+        export_file.connect("pressed", &callable);
+    }
+    body.bind_mut().add(&export_file).left().pad(4.0);
+    body.bind_mut().row();
+    schematic_overlay_finish(&mut body);
+}
+
+/// `Schematics.readBase64(Core.app.getClipboardText())` + `add` + `showInfo`.
+fn schematics_import_clipboard(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let text = DisplayServer::singleton().clipboard_get().to_string();
+    if !schematic_clipboard_importable(&text) {
+        let none = kit::t("@none").to_string();
+        dialog.show_toast(&none);
+        return;
+    }
+    let decoded =
+        with_content_registry(|registry| schematics::read_base64(&text, registry).ok()).flatten();
+    let Some(mut schematic) = decoded else {
+        let text = kit::t("@error.title").to_string();
+        dialog.show_toast(&text);
+        return;
+    };
+    schematic.remove_steam_id();
+    let dir = schematic_directory();
+    let path = schematic_free_path(&dir, &schematic.name(), |candidate| {
+        NativeFs.exists(candidate)
+    });
+    let encoded =
+        with_content_registry(|registry| schematics::write(&schematic, registry).ok()).flatten();
+    let Some(encoded) = encoded else {
+        return;
+    };
+    if NativeFs.write(&path, &encoded).is_err() {
+        return;
+    }
+    schematics_finish_import(dialog, state, &path);
+}
+
+/// `Schematics.read(file)` per selected `.msch` (`submitMulti`), then show the
+/// last one (`showImport` file half).
+fn schematics_import_files(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    files: &[String],
+) {
+    let mut last = None;
+    for file in files {
+        let path = Path::new(file);
+        let Ok(bytes) = NativeFs.read(path) else {
+            continue;
+        };
+        if let Some(imported) = schematic_import_bytes(&bytes) {
+            last = Some(imported);
+        }
+    }
+    if let Some(path) = last {
+        schematics_finish_import(dialog, state, &path);
+    } else {
+        let none = kit::t("@none").to_string();
+        dialog.show_toast(&none);
+    }
+}
+
+/// `setup(); ui.showInfoFade("@schematic.saved"); checkTags(s); showInfo(s)`.
+fn schematics_finish_import(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    path: &Path,
+) {
+    schematic_overlay_close(state);
+    // `checkTags(s)`: every new label joins the global tag list.
+    let mut added = false;
+    if let Some(schematic) = schematic_read_file(path) {
+        let mut st = state.borrow_mut();
+        for label in &schematic.labels {
+            if !st.tags.iter().any(|tag| tag == label) {
+                st.tags.push(label.clone());
+                added = true;
+            }
+        }
+    }
+    if added {
+        schematics_save_tags(state);
+    }
+    schematics_rebuild_tags(dialog, state);
+    schematics_rebuild_list(dialog, state);
+    let saved = kit::t("@schematic.saved").to_string();
+    let _ = ui_call("show_info_fade", &[gs(saved.as_str()).to_variant()]);
+    let index = schematic_index_by_file(dialog, path);
+    if index >= 0 {
+        schematics_open_info(index);
+    }
+}
+
+/// `showExport` clipboard half: `ui.showInfoFade("@copied")` +
+/// `Core.app.setClipboardText(schematics.writeBase64(s))`.
+fn schematics_export_clipboard(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+) {
+    let facade = campaign_schematic_mutation(dialog, "export_schematic", &[index.to_variant()])
+        .filter(|value| value.get_type() != VariantType::NIL)
+        .map(|value| text_of(&value))
+        .unwrap_or_default();
+    let text = if !facade.is_empty() {
+        facade
+    } else {
+        let Some(path) = schematic_file_of(dialog, index) else {
+            let none = kit::t("@none").to_string();
+            dialog.show_toast(&none);
+            return;
+        };
+        let Some(text) = schematic_base64_file(&path) else {
+            let none = kit::t("@none").to_string();
+            dialog.show_toast(&none);
+            return;
+        };
+        text
+    };
+    DisplayServer::singleton().clipboard_set(&gs(text.as_str()));
+    let copied = kit::t("@copied").to_string();
+    let _ = ui_call("show_info_fade", &[gs(copied.as_str()).to_variant()]);
+    schematic_overlay_close(state);
+}
+
+/// `showExport` file half: `FileChooser.export(s.name(), schematicExtension,
+/// file -> Schematics.write(s, file))`.
+fn schematics_export_file(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+    path: &Path,
+) {
+    let Some(source) = schematic_file_of(dialog, index) else {
+        return;
+    };
+    let written = match NativeFs.read(&source) {
+        Ok(bytes) => NativeFs.write(path, &bytes).is_ok(),
+        Err(_) => false,
+    };
+    if !written {
+        let text = kit::t("@error.title").to_string();
+        dialog.show_toast(&text);
+        return;
+    }
+    schematic_overlay_close(state);
+}
+
+/// `FileChooser.open(schematicExtension).submitMulti(...)`.
+fn schematics_pick_import_files(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
+    let target = dialog.to_gd();
+    let state_for = state.clone();
+    schematic_file_dialog(
+        dialog,
+        state,
+        "@import.file",
+        FileMode::OPEN_FILES,
+        "",
+        move |files| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_import_files(&mut bound, &state_for, &files);
+        },
+    );
+}
+
+/// `FileChooser.export(s.name(), schematicExtension, ...)`.
+fn schematics_pick_export_file(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    index: i64,
+    name: &str,
+) {
+    let target = dialog.to_gd();
+    let state_for = state.clone();
+    let default_name = format!(
+        "{}.{}",
+        mind_core::util::strings::sanitize_filename(name),
+        mind_core::game::rules::SCHEMATIC_EXTENSION
+    );
+    schematic_file_dialog(
+        dialog,
+        state,
+        "@export.file",
+        FileMode::SAVE_FILE,
+        &default_name,
+        move |files| {
+            let Some(path) = files.first().cloned() else {
+                return;
+            };
+            let mut path = PathBuf::from(path);
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| !extension.eq_ignore_ascii_case("msch"))
+                .unwrap_or(true)
+            {
+                path.set_extension(mind_core::game::rules::SCHEMATIC_EXTENSION);
+            }
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            schematics_export_file(&mut bound, &state_for, index, &path);
+        },
+    );
+}
+
+/// The native `.msch` file dialog (`FileChooser`; a runtime `FileDialog`).
+fn schematic_file_dialog(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<SchematicState>>,
+    title_key: &str,
+    mode: FileMode,
+    default_name: &str,
+    on_files: impl Fn(Vec<String>) + 'static,
+) {
+    schematic_file_chooser_close(state);
+    // code-instantiated: `FileChooser` is a runtime native dialog.
+    let mut chooser = FileDialog::new_alloc();
+    chooser.set_title(&kit::t(title_key));
+    chooser.set_file_mode(mode);
+    chooser.set_access(Access::FILESYSTEM);
+    chooser.add_filter(&gs(format!(
+        "*.{}",
+        mind_core::game::rules::SCHEMATIC_EXTENSION
+    )));
+    if !default_name.is_empty() {
+        chooser.set_current_file(&gs(default_name));
+    }
+    let handler = Rc::new(on_files);
+    let state_for_selected = state.clone();
+    let single_chooser = chooser.clone();
+    let single = handler.clone();
+    let callable = Callable::from_fn("schematic_file_selected", move |args: &[&Variant]| {
+        state_for_selected.borrow_mut().file_chooser = None;
+        let mut chooser = single_chooser.clone();
+        chooser.queue_free();
+        let path = args
+            .first()
+            .map(|value| (*value).to::<GString>().to_string())
+            .unwrap_or_default();
+        if !path.is_empty() {
+            single(vec![path]);
+        }
+    });
+    chooser.connect("file_selected", &callable);
+    let state_for_selected_multi = state.clone();
+    let state_for_cancel = state.clone();
+    let multi_chooser = chooser.clone();
+    let multi = handler.clone();
+    let callable = Callable::from_fn("schematic_files_selected", move |args: &[&Variant]| {
+        state_for_selected_multi.borrow_mut().file_chooser = None;
+        let mut chooser = multi_chooser.clone();
+        chooser.queue_free();
+        let paths = args
+            .first()
+            .and_then(|value| (*value).try_to::<PackedStringArray>().ok())
+            .unwrap_or_default();
+        multi(
+            paths
+                .as_slice()
+                .iter()
+                .map(|path| path.to_string())
+                .collect(),
+        );
+    });
+    chooser.connect("files_selected", &callable);
+    let cancel_chooser = chooser.clone();
+    let callable = Callable::from_fn("schematic_file_canceled", move |_args: &[&Variant]| {
+        state_for_cancel.borrow_mut().file_chooser = None;
+        let mut chooser = cancel_chooser.clone();
+        chooser.queue_free();
+    });
+    chooser.connect("canceled", &callable);
+    state.borrow_mut().file_chooser = Some(chooser.clone());
+    let mut node: Gd<Node> = dialog.to_gd().upcast();
+    node.add_child(&chooser);
+    chooser.popup_centered_ratio_ex().ratio(0.6).done();
 }
 
 // ---------------------------------------------------------------------------
@@ -5425,6 +7246,126 @@ mod tests {
         assert_eq!(schematics_strip_symbols("Copper Wall!"), "Copper Wall");
         assert_eq!(schematics_strip_symbols("a-b_c"), "abc");
         assert_eq!(schematics_strip_symbols("keep spaces"), "keep spaces");
+    }
+
+    #[test]
+    fn schematic_free_path_sanitizes_and_suffixes() {
+        let dir = Path::new("/tmp/schematics");
+        let taken = ["/tmp/schematics/a_b.msch", "/tmp/schematics/a_b_1.msch"];
+        let exists = |path: &Path| taken.contains(&path.to_string_lossy().as_ref());
+        // `sanitizeFilename("a/b")` -> `a_b`; `findFile` then adds `_N`.
+        assert_eq!(
+            schematic_free_path(dir, "a/b", exists),
+            PathBuf::from("/tmp/schematics/a_b_2.msch")
+        );
+        // Spaces are legal in a file name (`Strings.sanitizeFilename` keeps them).
+        assert_eq!(
+            schematic_free_path(dir, "a b", |_path| false),
+            PathBuf::from("/tmp/schematics/a b.msch")
+        );
+        // An empty name falls back to `empty` (`findFile`).
+        assert_eq!(
+            schematic_free_path(dir, "", |_path| false),
+            PathBuf::from("/tmp/schematics/empty.msch")
+        );
+        // Reserved DOS names are prefixed (`sanitizeFilename`).
+        assert_eq!(
+            schematic_free_path(dir, "con", |_path| false),
+            PathBuf::from("/tmp/schematics/_con.msch")
+        );
+    }
+
+    #[test]
+    fn schematic_label_list_operations_follow_seq_semantics() {
+        let mut labels: Vec<String> = Vec::new();
+        assert!(schematic_labels_add(&mut labels, "Power"));
+        assert!(
+            !schematic_labels_add(&mut labels, "Power"),
+            "duplicate ignored"
+        );
+        assert!(!schematic_labels_add(&mut labels, ""), "empty ignored");
+        assert!(schematic_labels_add(&mut labels, "[magenta]advanced-logic"));
+        assert_eq!(labels.len(), 2);
+        // `s.labels.replace(tag, result)` rewrites the first occurrence.
+        assert!(schematic_labels_replace(
+            &mut labels,
+            "[magenta]advanced-logic",
+            "logic"
+        ));
+        assert!(!schematic_labels_replace(&mut labels, "missing", "x"));
+        assert_eq!(labels, vec!["Power", "logic"]);
+        assert!(schematic_labels_remove(&mut labels, "Power"));
+        assert!(!schematic_labels_remove(&mut labels, "Power"));
+        assert_eq!(labels, vec!["logic"]);
+    }
+
+    #[test]
+    fn schematic_tag_reorder_swaps_only_in_range() {
+        let mut tags = vec![String::from("a"), String::from("b"), String::from("c")];
+        // `idx > 0` / `idx < size - 1` guards from `showAllTags`.
+        assert!(!schematics_tag_swap(&mut tags, 0, -1));
+        assert!(schematics_tag_swap(&mut tags, 0, 1));
+        assert_eq!(tags, vec!["b", "a", "c"]);
+        assert!(schematics_tag_swap(&mut tags, 2, -1));
+        assert_eq!(tags, vec!["b", "c", "a"]);
+        assert!(!schematics_tag_swap(&mut tags, 2, 1));
+        assert!(!schematics_tag_swap(&mut tags, 9, -1));
+    }
+
+    #[test]
+    fn schematic_available_tags_keep_global_order() {
+        let tags = vec![
+            String::from("Power"),
+            String::from("logic"),
+            String::from("defense"),
+        ];
+        let labels = vec![String::from("logic")];
+        assert_eq!(
+            schematics_available_tags(&tags, &labels),
+            vec!["Power", "defense"]
+        );
+        assert_eq!(schematics_available_tags(&tags, &[]).len(), 3);
+    }
+
+    #[test]
+    fn schematic_icon_tags_are_single_pua_characters() {
+        // Accessible icons sit in the private-use area (`Iconc.power` = 59408).
+        let power = char::from_u32(59408).expect("PUA scalar");
+        assert_eq!(schematic_icon_tag_char(&power.to_string()), Some(power));
+        // Plain text tags are not icon tags.
+        assert_eq!(schematic_icon_tag_char("Power"), None);
+        assert_eq!(schematic_icon_tag_char(""), None);
+        // Two characters never qualify.
+        assert_eq!(schematic_icon_tag_char("ab"), None);
+        // Arc color markup is stripped before the test (`[magenta]x` -> `x`).
+        assert_eq!(schematic_icon_tag_char("[magenta]x"), None);
+    }
+
+    #[test]
+    fn schematic_clipboard_import_gate_matches_prefix() {
+        assert!(schematic_clipboard_importable("bXNjaAB4nGNg"));
+        assert!(schematic_clipboard_importable("  bXNjaAB"));
+        assert!(!schematic_clipboard_importable(""));
+        // `FileChooser` output / arbitrary text is rejected.
+        assert!(!schematic_clipboard_importable("hello"));
+        assert!(!schematic_clipboard_importable("bXNjaA"));
+    }
+
+    #[test]
+    fn schematic_edit_accept_requires_a_name() {
+        assert!(schematic_edit_name_valid("Wall"));
+        assert!(!schematic_edit_name_valid(""));
+    }
+
+    #[test]
+    fn schematic_tagged_count_counts_rows() {
+        let rows: Vec<Vec<String>> = vec![
+            vec![String::from("Power"), String::from("logic")],
+            vec![String::from("Power")],
+        ];
+        assert_eq!(schematics_tag_count(&rows, "Power"), 2);
+        assert_eq!(schematics_tag_count(&rows, "logic"), 1);
+        assert_eq!(schematics_tag_count(&rows, "missing"), 0);
     }
 
     #[test]

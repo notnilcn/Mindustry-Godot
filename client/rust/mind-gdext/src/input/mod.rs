@@ -86,6 +86,9 @@ pub struct MindInput {
     /// (`input.config.getSelected()` mirror; H03 T3/T5). The node's
     /// `visible` flag decides whether it is still shown.
     config_tile: Option<(i32, i32)>,
+    /// World point of a Ctrl+`ping` waiting for its `@ping.text` prompt answer
+    /// (`DesktopInput.java:492-493`); `None` when no prompt is in flight.
+    ping_pending: Option<(f32, f32)>,
 }
 
 #[godot_api]
@@ -111,6 +114,7 @@ impl INode for MindInput {
             bridge: DesktopBridge::new(),
             ui_pointers: HashSet::new(),
             config_tile: None,
+            ping_pending: None,
         }
     }
 
@@ -332,6 +336,28 @@ impl MindInput {
         self.bridge.host = self.sim_host.clone();
         self.bridge.camera = self.camera.clone();
         self.bridge.campaign = self.campaign.clone();
+        // `DesktopInput.java:492-493`: the Ctrl+ping `@ping.text` prompt
+        // answers through the shared `MindUi.text_input_result` signal.
+        if let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") {
+            let callable = self.base().callable("_on_text_input_result");
+            if ui.has_signal("text_input_result")
+                && !ui.is_connected("text_input_result", &callable)
+            {
+                let _ = ui.connect("text_input_result", &callable);
+            }
+        }
+        // `planConfig.showConfig(splan)` (`DesktopInput.java:808`): the popup's
+        // choice is applied to the queued plan (`selected.config = content`).
+        if let Some(ui_root) = self.ui_root.clone()
+            && let Some(mut node) = ui_root.bind().hud_fragment("plan_config")
+        {
+            let callable = self.base().callable("_on_plan_config_applied");
+            if node.has_signal("plan_config_applied")
+                && !node.is_connected("plan_config_applied", &callable)
+            {
+                let _ = node.connect("plan_config_applied", &callable);
+            }
+        }
         self.bridge.refresh_items();
         self.sync_selected_block();
         self.load_catalog();
@@ -825,6 +851,9 @@ impl MindInput {
                         if let Some(mut node) = config {
                             node.set("visible", &false.to_variant());
                         }
+                        if let Some(mut node) = ui_root.bind().hud_fragment("plan_config") {
+                            node.set("visible", &false.to_variant());
+                        }
                     }
                     // The tap dispatch only reacts while a panel is open (H02 T6).
                     self.config_tile = None;
@@ -850,6 +879,70 @@ impl MindInput {
                         let _ = campaign.bind_mut().run_wave();
                     }
                 }
+                Effect::Ping { x, y, text } => {
+                    // `Call.pingLocation` -> `PlayerComp.pingX/Y/time/text`;
+                    // the HUD fragment owns the world marker overlay
+                    // (`PlayerComp.drawPing`, `MinimapRenderer.java:173`).
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    let hud = ui_root.bind().hud_fragment("hud");
+                    let Some(mut node) = hud else {
+                        continue;
+                    };
+                    let _ = node.call(
+                        "show_ping",
+                        &[
+                            x.to_variant(),
+                            y.to_variant(),
+                            GString::from(text.as_str()).to_variant(),
+                        ],
+                    );
+                }
+                Effect::PingPrompt { x, y } => {
+                    // `DesktopInput.java:492-493`: Ctrl asks for the label
+                    // first; `MindInput` answers through `text_input_result`
+                    // (the same prompt round-trip the dialogs use).
+                    self.ping_pending = Some((x, y));
+                    if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
+                        let _ = ui.call(
+                            "show_text_input",
+                            &[
+                                GString::new().to_variant(),
+                                crate::ui::kit::t("ping.text").to_variant(),
+                                40i64.to_variant(),
+                                GString::new().to_variant(),
+                                false.to_variant(),
+                                false.to_variant(),
+                            ],
+                        );
+                    }
+                }
+                Effect::OpenPlanConfig { spec } => {
+                    // `planConfig.showConfig(splan)` (`DesktopInput.java:808`):
+                    // the HUD owns the sibling `HudGroup/plan_config` node (the
+                    // fragment class is not `#[func]`-exposed itself).
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    let hud = ui_root.bind().hud_fragment("hud");
+                    let Some(mut node) = hud else {
+                        continue;
+                    };
+                    let _ = node.call(
+                        "open_plan_config",
+                        &[GString::from(spec.as_str()).to_variant()],
+                    );
+                }
+                Effect::HidePlanConfig => {
+                    // `planConfig.hide()` (`DesktopInput.java:809/812`).
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    if let Some(mut node) = ui_root.bind().hud_fragment("plan_config") {
+                        node.set("visible", &false.to_variant());
+                    }
+                }
                 Effect::SelectionChanged(json) => {
                     let _ = self.base_mut().emit_signal(
                         "selection_changed",
@@ -858,6 +951,32 @@ impl MindInput {
                 }
             }
         }
+    }
+
+    /// Ctrl+`ping` label answer (`DesktopInput.java:492-493`); `""` is the
+    /// prompt's cancel (`UI.showTextInput`). Other prompts also emit this
+    /// signal, so it only acts while a ping prompt is in flight.
+    #[func]
+    fn _on_text_input_result(&mut self, text: GString) {
+        let Some((x, y)) = self.ping_pending.take() else {
+            return;
+        };
+        let text = text.to_string();
+        if text.is_empty() {
+            return;
+        }
+        self.bridge.ping_at(x, y, Some(text.trim()));
+    }
+
+    /// `PlanConfigFragment.plan_config_applied`: the chosen plan-point config
+    /// (`selected.config = content`, `DesktopInput.java:808`).
+    #[func]
+    fn _on_plan_config_applied(&mut self, config: VarDictionary) {
+        let value = config
+            .get("value")
+            .and_then(|value| value.try_to::<GString>().ok())
+            .unwrap_or_default();
+        self.bridge.apply_plan_config(value.to_string().as_str());
     }
 
     /// Frames pumped.

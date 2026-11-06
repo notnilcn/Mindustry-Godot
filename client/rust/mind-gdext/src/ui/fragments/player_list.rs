@@ -2,25 +2,93 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // Source: core/src/mindustry/ui/fragments/PlayerListFragment.java (plan 14 M7).
 //
-// Player-list shell: search field + row host + bans/admins/close actions. Rows
-// come from `MindUi.player_list_json()` (empty until plan 21 supplies live
-// views); row actions go through `MindUi.player_action`, which is the documented
-// plan-21 relay seam and never fakes a server action (task rule).
+// `PlayerListFragment` (v146): count header, search field, the team-sorted peer
+// rows (`iconTable` + coloured name + admin flag + row menu), the Ban/Kick/
+// Trace/Team/Admin menu, the votekick hammer row and the
+// bans/admins/close footer. Rows come from the relay roster
+// (`MindUi.player_list_json` -> `MindNet.players_json`, PAR-0122); every row
+// action goes through `MindUi.player_action`/`player_action_with`, and Trace
+// opens `TraceDialog` with `MindUi.player_trace_json` context.
+//
+// Deviations (documented): the relay roster has no per-player colour, icon or
+// local-identity column (`mind-stdb` roster D2), so the avatar/name use the
+// team colour, the self-only menu clauses cannot be evaluated and the
+// allowTeamSwitch rules gate is left to the relay (the server enforces
+// admin/host authority). With no relay the list renders Java's empty state.
 
 //! Player-list overlay (`PlayerListFragment`).
 
+use godot::builtin::Side;
+use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::{LayoutPreset, SizeFlags};
+use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
-    CenterContainer, Control, HBoxContainer, IControl, Json, PanelContainer, VBoxContainer,
+    Button, CenterContainer, Control, GridContainer, HBoxContainer, IControl, LineEdit,
+    PanelContainer, ScrollContainer, StyleBox, StyleBoxFlat, VBoxContainer,
 };
-use godot::obj::NewAlloc;
+use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
+use crate::ui::dialogs::misc::trace_context_json;
 use crate::ui::kit;
+use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
 /// `PlayerListFragment` bottom action row, in order.
 const MENU_ACTIONS: [&str; 3] = ["server.bans", "server.admins", "close"];
+/// `float h = 50f` row/inline icon size (`PlayerListFragment.rebuild`).
+const ROW_HEIGHT: f32 = 50.0;
+/// `Vars.maxNameLength` (the search field's `maxTextLength`).
+const SEARCH_MAX_LENGTH: i32 = 40;
+/// `Groups.player.size() >= 3` (the votekick row).
+const VOTE_MIN_PLAYERS: usize = 3;
+/// `panel.minWidth(360f)`.
+const PANEL_MIN_WIDTH: f32 = 360.0;
+/// `BaseDialog` menu button size (`t.defaults().size(220f, 55f)`).
+const MENU_BUTTON_WIDTH: f32 = 220.0;
+const MENU_BUTTON_HEIGHT: f32 = 55.0;
+/// `teamSelect.cont.add(b).size(50f)`.
+const TEAM_BUTTON_SIZE: f32 = 50.0;
+/// `Vars.maxTextLength` (votekick reason prompt).
+const VOTE_REASON_MAX: i64 = 200;
+
+/// One row from `MindUi.player_list_json()` (`MindNet.players_json`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PlayerRow {
+    /// Identity hex (`Player.uuid`).
+    identity: String,
+    /// Last-known username (`Player.name`; may be empty before the `player`
+    /// row arrives).
+    name: String,
+    /// Assigned team (`Player.team`; `None` when unassigned).
+    team: Option<u8>,
+    /// Admin flag (`Player.admin`).
+    admin: bool,
+    /// Live connection (`Groups.player` only holds connected peers).
+    connected: bool,
+    /// Membership role (`player`/`spectator`).
+    role: String,
+    /// Whether a kick reason is recorded on the member row.
+    kicked: bool,
+}
+
+impl PlayerRow {
+    /// `Player.name`, falling back to the identity prefix like the console
+    /// `players` listing so an unresolved roster row is still addressable.
+    fn display_name(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
+        self.identity.chars().take(8).collect()
+    }
+}
+
+/// A row verb waiting for the `MindUi.confirm_result` answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingAction {
+    player: String,
+    action: String,
+}
 
 /// `MindPlayerListFragment` — the multiplayer player list.
 #[derive(GodotClass)]
@@ -28,7 +96,15 @@ const MENU_ACTIONS: [&str; 3] = ["server.bans", "server.admins", "close"];
 pub struct MindPlayerListFragment {
     base: Base<Control>,
     content: Option<Gd<VBoxContainer>>,
+    header: Option<Gd<kit::MindLabel>>,
+    search_field: Option<Gd<LineEdit>>,
     search: String,
+    rows: Vec<PlayerRow>,
+    /// The floating per-player menu (`new BaseDialog(user.coloredName())`).
+    menu: Option<Gd<Control>>,
+    menu_body: Option<Gd<VBoxContainer>>,
+    pending: Option<PendingAction>,
+    pending_votekick: Option<String>,
 }
 
 #[godot_api]
@@ -37,6 +113,7 @@ impl IControl for MindPlayerListFragment {
         self.base_mut().set_anchors_preset(LayoutPreset::FULL_RECT);
         self.base_mut().set_visible(false);
         self.build();
+        self.connect_prompts();
     }
 }
 
@@ -46,61 +123,58 @@ impl MindPlayerListFragment {
     #[signal]
     fn close_requested();
 
-    /// Rebuilds the row host from `MindUi.player_list_json()`.
+    /// Rebuilds the rows from `MindUi.player_list_json()` and the header from
+    /// `MindUi.player_count()` (`PlayerListFragment.rebuild`).
     #[func]
     pub fn rebuild(&mut self) {
+        let mut rows = parse_rows(&self.player_list_payload());
+        sort_rows(&mut rows);
+        let connected = rows.iter().filter(|row| row.connected).count();
+        let count = self
+            .live_player_count()
+            .map(|count| count.max(0) as usize)
+            .unwrap_or(connected);
+        self.rows = rows;
+        self.update_header(count);
         let Some(mut content) = self.content.clone() else {
             return;
         };
-        for child in content.get_children().iter_shared() {
-            let mut child = child.clone();
-            child.queue_free();
+        clear_children(&content);
+        let visible: Vec<PlayerRow> = self
+            .rows
+            .iter()
+            .filter(|row| row.connected && matches_search(&row.display_name(), &self.search))
+            .cloned()
+            .collect();
+        if visible.is_empty() {
+            // `if(!found)` (`PlayerListFragment.rebuild`): no live relay rows
+            // (single-player/boot) render the same empty state as a filtered
+            // list with no matches.
+            let label = factory::label(&kit::t("@players.notfound").to_string());
+            content.add_child(&label);
+            return;
         }
-        let mut rows: Vec<VarDictionary> = Vec::new();
-        if let Some(mut ui) = kit::ui()
-            && ui.has_method("player_list_json")
-        {
-            let payload = ui.call("player_list_json", &[]);
-            if let Ok(text) = payload.try_to::<GString>() {
-                let parsed = Json::parse_string(&text);
-                if let Ok(array) = parsed.try_to::<VarArray>() {
-                    for row in array.iter_shared() {
-                        if let Ok(row) = row.try_to::<VarDictionary>() {
-                            rows.push(row);
-                        }
-                    }
-                }
-            }
-        }
-        for row in rows {
-            let name = row
-                .get("name")
-                .and_then(|value| value.try_to::<GString>().ok())
-                .unwrap_or_default()
-                .to_string();
-            if !matches_search(&name, &self.search) {
-                continue;
-            }
-            // code-instantiated: player rows are server-driven (plan 21 relay
-            // views).
-            let mut button = factory::button(&name);
-            let mut target = self.to_gd();
-            let player_name = GString::from(name.as_str());
-            let callable = Callable::from_fn("player_row", move |_args: &[&Variant]| {
-                let _ = target.call("player_selected", &[player_name.to_variant()]);
-            });
-            button.connect("pressed", &callable);
-            content.add_child(&button);
+        for row in &visible {
+            let control = self.player_row(row, count);
+            content.add_child(&control);
         }
     }
 
-    /// Shows/hides the overlay, rebuilding the rows when it opens.
+    /// Shows/hides the overlay, rebuilding the rows when it opens. Java's
+    /// `cont.update` hides it whenever the relay is not in a running match
+    /// (`net.active() && state.isGame()`), so `toggle` is a no-op then.
     #[func]
     pub fn toggle(&mut self) {
         let visible = !self.base().is_visible();
+        if visible && !relay_in_game() {
+            return;
+        }
         self.base_mut().set_visible(visible);
         if visible {
             self.rebuild();
+        } else {
+            self.close_menu();
+            self.reset_search();
         }
     }
 
@@ -110,29 +184,112 @@ impl MindPlayerListFragment {
         self.base().is_visible()
     }
 
-    /// Search field filter (`text_changed`).
+    /// Search field filter (`text_changed`): `Strings.stripColors(name)`
+    /// lowercased contains the query (`PlayerListFragment.rebuild`).
     #[func]
     fn search_changed(&mut self, text: GString) {
         self.search = text.to_string().to_lowercase();
         self.rebuild();
     }
 
-    /// A player row was activated: `PlayerListFragment` opens spectate.
+    /// Opens the row menu (`new BaseDialog(user.coloredName())`).
     #[func]
-    fn player_selected(&mut self, player_name: GString) {
-        self.player_action(&player_name.to_string(), "spectate");
+    fn open_player_menu(&mut self, player: GString) {
+        let player = player.to_string();
+        let Some(row) = self
+            .rows
+            .iter()
+            .find(|row| row.display_name() == player)
+            .cloned()
+        else {
+            return;
+        };
+        self.fill_player_menu(&row);
+        self.set_menu_visible(true);
+    }
+
+    /// One menu button (`t.button("@player.ban", ...)` etc.).
+    #[func]
+    fn menu_pressed(&mut self, player: GString, action: GString) {
+        let player = player.to_string();
+        let action = action.to_string();
+        match action.as_str() {
+            "team" => self.fill_team_menu(&player),
+            "trace" => {
+                self.close_menu();
+                self.open_trace(&player);
+            }
+            "votekick" => {
+                self.close_menu();
+                self.open_votekick(&player);
+            }
+            verb => {
+                self.close_menu();
+                self.request_confirm(&player, verb);
+            }
+        }
+    }
+
+    /// The team chooser answer (`Call.adminRequest(user, switchTeam, team)`).
+    #[func]
+    fn choose_team(&mut self, player: GString, team: i64) {
+        self.close_menu();
+        self.dispatch_player_action(&player.to_string(), "team", team);
+    }
+
+    /// Hides the floating menu (`dialog.hide()`).
+    #[func]
+    fn close_menu(&mut self) {
+        self.set_menu_visible(false);
     }
 
     /// Bottom action row (`server.bans` / `server.admins` / `close`).
     #[func]
     fn menu_action(&mut self, action: GString) {
         match action.to_string().as_str() {
-            "server.bans" => self.open_dialog("@server.bans"),
-            "server.admins" => self.open_dialog("@server.admins"),
+            "server.bans" => self.open_dialog("bans"),
+            "server.admins" => self.open_dialog("admins"),
             _ => {
+                self.close_menu();
                 self.base_mut().set_visible(false);
+                self.reset_search();
                 self.base_mut().emit_signal("close_requested", &[]);
             }
+        }
+    }
+
+    /// `MindUi.confirm_result` answer for a pending Ban/Kick/Admin verb.
+    #[func]
+    fn apply_confirm(&mut self, confirmed: bool) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        if confirmed {
+            self.dispatch_player_action(&pending.player, &pending.action, 0);
+        }
+    }
+
+    /// `MindUi.text_input_result` answer for the votekick reason prompt.
+    #[func]
+    fn apply_votekick_reason(&mut self, reason: GString) {
+        let Some(player) = self.pending_votekick.take() else {
+            return;
+        };
+        let reason = reason.to_string();
+        if reason.trim().is_empty() {
+            return;
+        }
+        let command = votekick_command(&player, &reason);
+        if let Some(mut ui) = kit::ui()
+            && ui.has_method("chat_send")
+        {
+            let _ = ui.call(
+                "chat_send",
+                &[
+                    GString::from(command.as_str()).to_variant(),
+                    GString::from("normal").to_variant(),
+                ],
+            );
         }
     }
 }
@@ -148,20 +305,36 @@ impl MindPlayerListFragment {
 
         let mut panel = PanelContainer::new_alloc();
         panel.set_theme_type_variation("defaultDialog");
-        panel.set_custom_minimum_size(Vector2::new(360.0, 420.0));
+        panel.set_custom_minimum_size(Vector2::new(PANEL_MIN_WIDTH, 420.0));
         center.add_child(&panel);
 
         let mut column = VBoxContainer::new_alloc();
         panel.add_child(&column);
 
+        // `pane.label(() -> Core.bundle.format(players...))`.
+        let header = factory::label("");
+        column.add_child(&header);
+        self.header = Some(header);
+
         let mut field = factory::field(&kit::t("@players.search").to_string());
+        field.set_max_length(SEARCH_MAX_LENGTH);
         let callable = self.base().callable("search_changed");
         field.connect("text_changed", &callable);
         column.add_child(&field);
+        self.search_field = Some(field);
 
+        // `pane.pane(content).grow().scrollX(false)`.
+        let mut scroll = ScrollContainer::new_alloc();
+        scroll.set_h_size_flags(SizeFlags::EXPAND_FILL);
+        scroll.set_v_size_flags(SizeFlags::EXPAND_FILL);
+        scroll.set_horizontal_scroll_mode(ScrollMode::DISABLED);
+        scroll.set_custom_minimum_size(Vector2::new(0.0, 260.0));
         let mut content = VBoxContainer::new_alloc();
+        content.set_h_size_flags(SizeFlags::EXPAND_FILL);
         content.set_v_size_flags(SizeFlags::EXPAND_FILL);
-        column.add_child(&content);
+        scroll.add_child(&content);
+        column.add_child(&scroll);
+        self.content = Some(content);
 
         let mut menu = HBoxContainer::new_alloc();
         for action in MENU_ACTIONS {
@@ -176,58 +349,731 @@ impl MindPlayerListFragment {
         }
         column.add_child(&menu);
 
-        self.content = Some(content);
+        self.build_menu_overlay();
         self.rebuild();
     }
 
-    /// Documents the relay seam: per-player actions go through `MindUi`.
-    fn player_action(&mut self, player_name: &str, action: &str) {
+    /// The floating player menu: `BaseDialog`'s fill-parent overlay with a
+    /// centred `defaultDialog` panel rebuilt per selected player.
+    fn build_menu_overlay(&mut self) {
+        // code-instantiated: the row menu is a runtime overlay over the list.
+        let mut overlay = Control::new_alloc();
+        overlay.set_anchors_preset(LayoutPreset::FULL_RECT);
+        overlay.set_visible(false);
+        let mut center = CenterContainer::new_alloc();
+        center.set_anchors_preset(LayoutPreset::FULL_RECT);
+        let mut panel = PanelContainer::new_alloc();
+        panel.set_theme_type_variation("defaultDialog");
+        panel.set_custom_minimum_size(Vector2::new(280.0, 0.0));
+        let mut body = VBoxContainer::new_alloc();
+        body.set_custom_minimum_size(Vector2::new(MENU_BUTTON_WIDTH + 20.0, 0.0));
+        panel.add_child(&body);
+        center.add_child(&panel);
+        overlay.add_child(&center);
+        self.base_mut().add_child(&overlay);
+        self.menu = Some(overlay);
+        self.menu_body = Some(body);
+    }
+
+    /// Builds the Ban/Kick/Trace/Team/Admin menu for one row.
+    fn fill_player_menu(&mut self, row: &PlayerRow) {
+        let Some(mut body) = self.menu_body.clone() else {
+            return;
+        };
+        clear_children(&body);
+        let title = factory::label(&row.display_name());
+        body.add_child(&title);
+        body.add_child(&accent_divider());
+        let mut list = VBoxContainer::new_alloc();
+        list.add_theme_constant_override("separation", 3);
+        // The roster carries no local identity, so the Java `user != player`
+        // clauses cannot be evaluated; the relay enforces authority (team and
+        // admin verbs are admin/host reducers) server-side.
+        for action in menu_actions_for(row, false, true, true) {
+            let button = menu_button(action, self.to_gd(), &row.display_name());
+            list.add_child(&button);
+        }
+        body.add_child(&list);
+        let mut back = factory::icon_button(
+            "left",
+            &kit::t("@back").to_string(),
+            "defaultt",
+            AlignmentMode::BEGIN,
+        );
+        back.set_custom_minimum_size(Vector2::new(MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT));
+        let callable = self.base().callable("close_menu");
+        back.connect("pressed", &callable);
+        body.add_child(&back);
+    }
+
+    /// The `teamSelect` body: one colour swatch per `Team.baseTeams` entry.
+    fn fill_team_menu(&mut self, player: &str) {
+        let Some(mut body) = self.menu_body.clone() else {
+            return;
+        };
+        clear_children(&body);
+        // `new BaseDialog(Core.bundle.get("player.team") + ": " + user.name)`.
+        let title = format!("{}: {player}", kit::t("@player.team"));
+        body.add_child(&factory::label(&title));
+        body.add_child(&accent_divider());
+        let mut grid = GridContainer::new_alloc();
+        grid.set_columns(3);
+        for team in mind_core::game::team::Team::base_teams() {
+            let mut button = factory::image_button("whiteui", "clearNoneTogglei");
+            button.set_custom_minimum_size(Vector2::new(TEAM_BUTTON_SIZE, TEAM_BUTTON_SIZE));
+            button.set_tooltip_text(&team.localized());
+            button.set_modulate(godot_color(team.color.to_rgba8888()));
+            let mut target = self.to_gd();
+            let player = GString::from(player);
+            let id = i64::from(team.id);
+            let callable = Callable::from_fn("player_team", move |_args: &[&Variant]| {
+                let _ = target.call("choose_team", &[player.to_variant(), id.to_variant()]);
+            });
+            button.connect("pressed", &callable);
+            grid.add_child(&button);
+        }
+        body.add_child(&grid);
+        let mut back = factory::icon_button(
+            "left",
+            &kit::t("@back").to_string(),
+            "defaultt",
+            AlignmentMode::BEGIN,
+        );
+        back.set_custom_minimum_size(Vector2::new(MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT));
+        let callable = self.base().callable("close_menu");
+        back.connect("pressed", &callable);
+        body.add_child(&back);
+    }
+
+    /// One `PlayerListFragment` row.
+    fn player_row(&mut self, row: &PlayerRow, total: usize) -> Gd<PanelContainer> {
+        // code-instantiated: `rebuild` builds one row per live relay player.
+        let mut panel = PanelContainer::new_alloc();
+        panel.add_theme_stylebox_override("panel", &row_style());
+        panel.set_custom_minimum_size(Vector2::new(0.0, ROW_HEIGHT + 14.0));
+        let mut line = HBoxContainer::new_alloc();
+        line.add_theme_constant_override("separation", 8);
+        panel.add_child(&line);
+
+        // `iconTable`: `Lines.rect` in the team colour around the player icon.
+        let mut avatar = PanelContainer::new_alloc();
+        avatar.add_theme_stylebox_override("panel", &avatar_style(team_color(row.team)));
+        avatar.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
+        let glyph = factory::glyph_label("players", 26, team_color(row.team));
+        avatar.add_child(&glyph);
+        line.add_child(&avatar);
+
+        // `labelWrap("[#" + user.color() + "]" + user.name())` — the roster has
+        // no player colour, so the name keeps the default text colour.
+        let mut name = factory::label(&row.display_name());
+        name.set_h_size_flags(SizeFlags::EXPAND_FILL);
+        line.add_child(&name);
+
+        // `button.image(Icon.admin)`.
+        if row.admin {
+            line.add_child(&factory::glyph_label("admin", 20, styles::ACCENT));
+        }
+
+        let mut menu = factory::glyph_button("menu", "menu", "emptyi");
+        menu.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
+        let mut target = self.to_gd();
+        let player = GString::from(row.display_name().as_str());
+        let callable = Callable::from_fn("player_row_menu", move |_args: &[&Variant]| {
+            let _ = target.call("open_player_menu", &[player.to_variant()]);
+        });
+        menu.connect("pressed", &callable);
+        line.add_child(&menu);
+
+        // `else if(!user.isLocal() && !user.admin && net.client() && ...)`.
+        if votekick_eligible(row, total) {
+            let mut hammer = factory::glyph_button("hammer", "kick", "emptyi");
+            hammer.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
+            let mut target = self.to_gd();
+            let player = GString::from(row.display_name().as_str());
+            let callable = Callable::from_fn("player_row_votekick", move |_args: &[&Variant]| {
+                let _ = target.call(
+                    "menu_pressed",
+                    &[player.to_variant(), GString::from("votekick").to_variant()],
+                );
+            });
+            hammer.connect("pressed", &callable);
+            line.add_child(&hammer);
+        }
+        panel
+    }
+
+    /// Asks `MindUi.show_confirm` for a Ban/Kick/Admin verb.
+    fn request_confirm(&mut self, player: &str, action: &str) {
+        let Some(key) = confirm_key(action) else {
+            return;
+        };
+        let text = kit::tm_format(key, &[player]).to_string();
+        self.pending = Some(PendingAction {
+            player: player.to_owned(),
+            action: action.to_owned(),
+        });
+        if let Some(mut ui) = kit::ui() {
+            let _ = ui.call("show_confirm", &[GString::from(text.as_str()).to_variant()]);
+        }
+    }
+
+    /// `Trace` row button: read the roster trace and open `TraceDialog` with it
+    /// as context (Java receives the same info from `AdminAction.trace`).
+    fn open_trace(&self, player: &str) {
         let Some(mut ui) = kit::ui() else {
             return;
         };
-        if !ui.has_method("player_action") {
+        let trace = if ui.has_method("player_trace_json") {
+            ui.call("player_trace_json", &[GString::from(player).to_variant()])
+                .try_to::<GString>()
+                .map(|text| text.to_string())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let context = trace_context_json(player, &trace);
+        if ui.has_method("open_dialog") {
+            let _ = ui.call(
+                "open_dialog",
+                &[
+                    GString::from("traces").to_variant(),
+                    GString::from(context.as_str()).to_variant(),
+                ],
+            );
+        }
+    }
+
+    /// `ui.showTextInput("@votekick.reason", ...)` (`Icon.hammer` row).
+    fn open_votekick(&mut self, player: &str) {
+        self.pending_votekick = Some(player.to_owned());
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        if !ui.has_method("show_text_input") {
             return;
         }
+        let message = kit::tm_format("@votekick.reason.message", &[player]).to_string();
         let _ = ui.call(
-            "player_action",
+            "show_text_input",
             &[
-                GString::from(player_name).to_variant(),
-                GString::from(action).to_variant(),
+                kit::t("@votekick.reason").to_variant(),
+                GString::from(message.as_str()).to_variant(),
+                VOTE_REASON_MAX.to_variant(),
+                GString::new().to_variant(),
+                false.to_variant(),
+                false.to_variant(),
             ],
         );
     }
 
-    /// `MindUi.open_dialog(name, "")` with the bundle-style `@` trimmed.
-    fn open_dialog(&self, dialog: &str) {
+    /// Forwards one row verb to `MindUi.player_action`/`player_action_with`.
+    fn dispatch_player_action(&self, player: &str, action: &str, value: i64) -> bool {
+        let Some(mut ui) = kit::ui() else {
+            return false;
+        };
+        let with_value = action == "team" || value != 0;
+        let method = if with_value {
+            "player_action_with"
+        } else {
+            "player_action"
+        };
+        if !ui.has_method(method) {
+            return false;
+        }
+        let mut args = vec![
+            GString::from(player).to_variant(),
+            GString::from(action).to_variant(),
+        ];
+        if with_value {
+            args.push(value.to_variant());
+        }
+        ui.call(method, &args).try_to::<bool>().unwrap_or(false)
+    }
+
+    /// `MindUi.player_list_json()` text (`[]` when the facade is absent).
+    fn player_list_payload(&self) -> String {
+        let Some(mut ui) = kit::ui() else {
+            return String::from("[]");
+        };
+        if !ui.has_method("player_list_json") {
+            return String::from("[]");
+        }
+        ui.call("player_list_json", &[])
+            .try_to::<GString>()
+            .map(|text| text.to_string())
+            .unwrap_or_else(|_| String::from("[]"))
+    }
+
+    /// `MindUi.player_count()` (`Groups.player.size()`), when exposed.
+    fn live_player_count(&self) -> Option<i64> {
+        let mut ui = kit::ui()?;
+        if !ui.has_method("player_count") {
+            return None;
+        }
+        ui.call("player_count", &[]).try_to::<i64>().ok()
+    }
+
+    /// `pane.label(... "players.single" : "players" ...)`.
+    fn update_header(&mut self, count: usize) {
+        let Some(mut header) = self.header.clone() else {
+            return;
+        };
+        let count_text = count.to_string();
+        let text = kit::tm_format(header_key(count), &[count_text.as_str()]).to_string();
+        header.set_text(&text);
+    }
+
+    fn set_menu_visible(&mut self, visible: bool) {
+        if let Some(mut menu) = self.menu.clone() {
+            menu.set_visible(visible);
+        }
+    }
+
+    /// Clears the search field like `toggle`'s `search.clearText()`.
+    fn reset_search(&mut self) {
+        self.search.clear();
+        if let Some(mut field) = self.search_field.clone() {
+            field.clear();
+        }
+    }
+
+    /// `MindUi.open_dialog(name, "")` with the menu row's bundle key mapped to
+    /// the manifest registry name (`@server.bans` -> `bans`).
+    fn open_dialog(&self, key: &str) {
         let Some(mut ui) = kit::ui() else {
             return;
         };
-        let key = dialog.strip_prefix('@').unwrap_or(dialog);
         let _ = ui.call(
             "open_dialog",
             &[GString::from(key).to_variant(), GString::new().to_variant()],
         );
     }
+
+    /// `confirm_result`/`text_input_result` hooks (once per fragment).
+    fn connect_prompts(&mut self) {
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        if ui.has_signal("confirm_result") {
+            let target = self.to_gd();
+            let callable = Callable::from_fn("player_list_confirm", move |args: &[&Variant]| {
+                let confirmed = args
+                    .first()
+                    .and_then(|value| value.try_to::<bool>().ok())
+                    .unwrap_or(false);
+                let target = target.clone();
+                // The answer is emitted from inside a `MindUi` mutable borrow.
+                defer_action("player_list_confirm_apply", move || {
+                    if !target.is_instance_valid() {
+                        return;
+                    }
+                    let mut node = target.clone();
+                    let _ = node.call("apply_confirm", &[confirmed.to_variant()]);
+                });
+                Variant::nil()
+            });
+            ui.connect("confirm_result", &callable);
+        }
+        if ui.has_signal("text_input_result") {
+            let target = self.to_gd();
+            let callable =
+                Callable::from_fn("player_list_text_input", move |args: &[&Variant]| {
+                    let text = args
+                        .first()
+                        .and_then(|value| value.try_to::<GString>().ok())
+                        .unwrap_or_default();
+                    let target = target.clone();
+                    defer_action("player_list_text_input_apply", move || {
+                        if !target.is_instance_valid() {
+                            return;
+                        }
+                        let mut node = target.clone();
+                        let _ = node.call("apply_votekick_reason", &[text.to_variant()]);
+                    });
+                    Variant::nil()
+                });
+            ui.connect("text_input_result", &callable);
+        }
+    }
 }
 
-/// The search filter (`PlayerListFragment.matches`): empty shows every row.
+/// One queued one-shot action (`Callable.call_deferred` payload).
+type DeferredAction = std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>;
+
+/// Queues `action` for the idle phase (`call_deferred`).
+fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
+    let slot: DeferredAction = std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(action))));
+    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
+        let queued = slot.borrow_mut().take();
+        if let Some(action) = queued {
+            action();
+        }
+        Variant::nil()
+    });
+    callable.call_deferred(&[]);
+}
+
+/// Removes every child of a container at the end of the frame.
+fn clear_children(node: &Gd<VBoxContainer>) {
+    for child in node.get_children().iter_shared() {
+        let mut child = child.clone();
+        child.queue_free();
+    }
+}
+
+/// Parses `MindNet.players_json()` (`[]` on malformed/absent payloads).
+fn parse_rows(json: &str) -> Vec<PlayerRow> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let Some(array) = value.as_array() else {
+        return Vec::new();
+    };
+    array.iter().filter_map(row_from_json).collect()
+}
+
+/// One `PlayerEntry::to_json` row (`mind-stdb` roster).
+fn row_from_json(value: &serde_json::Value) -> Option<PlayerRow> {
+    let identity = value
+        .get("identity")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let name = value
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if identity.is_empty() && name.is_empty() {
+        return None;
+    }
+    Some(PlayerRow {
+        identity,
+        name,
+        team: value
+            .get("team")
+            .and_then(serde_json::Value::as_u64)
+            .map(|team| team.min(u64::from(u8::MAX)) as u8),
+        admin: value
+            .get("admin")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        connected: value
+            .get("connected")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        role: value
+            .get("role")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("player")
+            .to_owned(),
+        kicked: value
+            .get("kicked")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// `players.sort(comps(comparing(Player::team), comparingBool(p -> !p.admin)))`:
+/// team first, admin rows before regular rows, then the roster's name order.
+fn sort_rows(rows: &mut [PlayerRow]) {
+    rows.sort_by(|left, right| {
+        left.team
+            .unwrap_or(u8::MAX)
+            .cmp(&right.team.unwrap_or(u8::MAX))
+            .then_with(|| right.admin.cmp(&left.admin))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+}
+
+/// `Groups.player.size() == 1 ? "players.single" : "players"`.
+fn header_key(count: usize) -> &'static str {
+    if count == 1 {
+        "players.single"
+    } else {
+        "players"
+    }
+}
+
+/// The row menu verbs in Java order (`PlayerListFragment.rebuild`). `is_self`
+/// hides the peer-only verbs; the relay roster cannot identify the local row,
+/// so callers pass `false`.
+fn menu_actions_for(
+    row: &PlayerRow,
+    is_self: bool,
+    allow_team_switch: bool,
+    can_admin: bool,
+) -> Vec<&'static str> {
+    let mut actions = Vec::new();
+    if !is_self {
+        actions.extend(["ban", "kick", "trace"]);
+    }
+    if allow_team_switch || !is_self {
+        actions.push("team");
+    }
+    if can_admin && !is_self {
+        actions.push(if row.admin { "unadmin" } else { "admin" });
+    }
+    actions
+}
+
+/// The icon + bundle key for one menu verb (Java `@player.*` buttons).
+fn menu_verb(action: &str) -> (&'static str, &'static str) {
+    match action {
+        "ban" => ("hammer", "@player.ban"),
+        "kick" => ("cancel", "@player.kick"),
+        "trace" => ("zoom", "@player.trace"),
+        "team" => ("redo", "@player.team"),
+        "admin" | "unadmin" => ("admin", "@player.admin"),
+        _ => ("none", "@none"),
+    }
+}
+
+/// Builds one `t.button(text, Icon.x, bstyle, runnable)` menu row.
+fn menu_button(action: &str, mut target: Gd<MindPlayerListFragment>, player: &str) -> Gd<Button> {
+    let (icon, key) = menu_verb(action);
+    let mut button = factory::icon_button(
+        icon,
+        &kit::t(key).to_string(),
+        "defaultt",
+        AlignmentMode::BEGIN,
+    );
+    button.set_custom_minimum_size(Vector2::new(MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT));
+    let player = GString::from(player);
+    let verb = GString::from(action);
+    let callable = Callable::from_fn("player_menu_press", move |_args: &[&Variant]| {
+        let _ = target.call("menu_pressed", &[player.to_variant(), verb.to_variant()]);
+    });
+    button.connect("pressed", &callable);
+    button
+}
+
+/// `ui.showConfirm` bundle key for a row verb.
+fn confirm_key(action: &str) -> Option<&'static str> {
+    match action {
+        "ban" => Some("@confirmban"),
+        "kick" => Some("@confirmkick"),
+        "admin" => Some("@confirmadmin"),
+        "unadmin" => Some("@confirmunadmin"),
+        _ => None,
+    }
+}
+
+/// Java votekick row condition: a connected, non-admin peer when at least
+/// three players are online. The local/team clauses rely on the local player
+/// identity the relay roster does not expose (see the module note).
+fn votekick_eligible(row: &PlayerRow, connected: usize) -> bool {
+    row.connected && !row.admin && connected >= VOTE_MIN_PLAYERS
+}
+
+/// `Call.sendChatMessage("/votekick #" + user.id + " " + reason)`; the relay
+/// resolves the target name (`server/.../chat/mod.rs`).
+fn votekick_command(name: &str, reason: &str) -> String {
+    format!("/votekick {} {}", name.trim(), reason.trim())
+}
+
+/// `Team.get(id).color` packed `0xRRGGBBAA`.
+fn team_color(team: Option<u8>) -> Color {
+    godot_color(
+        mind_core::game::team::Team::get(team.unwrap_or_default())
+            .color
+            .to_rgba8888(),
+    )
+}
+
+/// Godot colour from a packed `0xRRGGBBAA` value.
+fn godot_color(packed: u32) -> Color {
+    Color::from_rgba8(
+        ((packed >> 24) & 0xff) as u8,
+        ((packed >> 16) & 0xff) as u8,
+        ((packed >> 8) & 0xff) as u8,
+        (packed & 0xff) as u8,
+    )
+}
+
+/// `Tex.underline`: translucent black row with a hairline bottom rule.
+fn row_style() -> Gd<StyleBox> {
+    let mut style = StyleBoxFlat::new_gd();
+    style.set_bg_color(Color::from_rgba(0.0, 0.0, 0.0, 0.25));
+    style.set_border_width(Side::BOTTOM, 1);
+    style.set_border_color(Color::from_rgba(1.0, 1.0, 1.0, 0.12));
+    style.set_content_margin_all(5.0);
+    style.upcast()
+}
+
+/// `iconTable` border: the team colour around the avatar.
+fn avatar_style(team: Color) -> Gd<StyleBox> {
+    let mut style = StyleBoxFlat::new_gd();
+    style.set_bg_color(Color::from_rgba(0.0, 0.0, 0.0, 0.35));
+    style.set_border_width(Side::LEFT, 2);
+    style.set_border_width(Side::TOP, 2);
+    style.set_border_width(Side::RIGHT, 2);
+    style.set_border_width(Side::BOTTOM, 2);
+    style.set_border_color(team);
+    style.set_content_margin_all(4.0);
+    style.upcast()
+}
+
+/// `dialog.cont.image(Tex.whiteui, Pal.accent).fillX().height(3f)`.
+fn accent_divider() -> Gd<PanelContainer> {
+    let mut style = StyleBoxFlat::new_gd();
+    style.set_bg_color(styles::ACCENT);
+    let style: Gd<StyleBox> = style.upcast();
+    let mut panel = PanelContainer::new_alloc();
+    panel.add_theme_stylebox_override("panel", &style);
+    panel.set_custom_minimum_size(Vector2::new(0.0, 3.0));
+    panel
+}
+
+/// The search filter (`PlayerListFragment.rebuild`): `stripColors(name)`
+/// lowercased contains the lowercased query.
 fn matches_search(player_name: &str, search: &str) -> bool {
-    search.is_empty() || player_name.to_lowercase().contains(search)
+    search.is_empty()
+        || mind_core::ui::player_list::strip_colors(&player_name.to_lowercase()).contains(search)
+}
+
+/// Whether `MindNet` is in a running match (`net.active() && state.isGame()`).
+fn relay_in_game() -> bool {
+    let Some(mut net) = kit::net() else {
+        return false;
+    };
+    if !net.has_method("session_state") {
+        return false;
+    }
+    net.call("session_state", &[])
+        .try_to::<GString>()
+        .map(|state| matches!(state.to_string().as_str(), "in_game" | "snapshot_sync"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn row(name: &str, team: Option<u8>, admin: bool, connected: bool) -> PlayerRow {
+        PlayerRow {
+            identity: name.to_owned(),
+            name: name.to_owned(),
+            team,
+            admin,
+            connected,
+            role: String::from("player"),
+            kicked: false,
+        }
+    }
+
     #[test]
     fn search_filter_is_case_insensitive() {
         assert!(matches_search("Alice", "ali"));
         assert!(matches_search("Alice", ""));
         assert!(!matches_search("Alice", "bob"));
+        // `Strings.stripColors`: tags never take part in the match.
+        assert!(matches_search("[red]Bob[]", "bob"));
     }
 
     #[test]
     fn menu_actions_match_the_upstream_row() {
         assert_eq!(MENU_ACTIONS, ["server.bans", "server.admins", "close"]);
+        let peer = row("Bob", Some(1), false, true);
+        assert_eq!(
+            menu_actions_for(&peer, false, true, true),
+            ["ban", "kick", "trace", "team", "admin"]
+        );
+        assert_eq!(
+            menu_actions_for(&peer, false, false, true),
+            ["ban", "kick", "trace", "team", "admin"]
+        );
+        assert_eq!(
+            menu_actions_for(&peer, true, false, true),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn menu_admin_verb_toggles_with_the_flag() {
+        let admin = row("Admin", Some(1), true, true);
+        let actions = menu_actions_for(&admin, false, false, true);
+        assert_eq!(actions.last(), Some(&"unadmin"));
+        // Teammate-switch-only menus (Java `allowTeamSwitch || user != player`)
+        // still expose `admin` when the local player is a server admin.
+        assert!(menu_actions_for(&admin, false, false, false).contains(&"team"));
+    }
+
+    #[test]
+    fn menu_verbs_use_the_java_icons_and_keys() {
+        assert_eq!(menu_verb("ban"), ("hammer", "@player.ban"));
+        assert_eq!(menu_verb("kick"), ("cancel", "@player.kick"));
+        assert_eq!(menu_verb("trace"), ("zoom", "@player.trace"));
+        assert_eq!(menu_verb("team"), ("redo", "@player.team"));
+        assert_eq!(menu_verb("admin"), ("admin", "@player.admin"));
+        assert_eq!(menu_verb("unadmin"), ("admin", "@player.admin"));
+    }
+
+    #[test]
+    fn confirm_keys_match_the_bundle() {
+        assert_eq!(confirm_key("ban"), Some("@confirmban"));
+        assert_eq!(confirm_key("kick"), Some("@confirmkick"));
+        assert_eq!(confirm_key("admin"), Some("@confirmadmin"));
+        assert_eq!(confirm_key("unadmin"), Some("@confirmunadmin"));
+        assert_eq!(confirm_key("trace"), None);
+    }
+
+    #[test]
+    fn header_uses_the_singular_key_for_one_player() {
+        assert_eq!(header_key(0), "players");
+        assert_eq!(header_key(1), "players.single");
+        assert_eq!(header_key(2), "players");
+    }
+
+    #[test]
+    fn rows_parse_the_relay_shape() {
+        let json = r#"[
+            {"identity":"aa","name":"Alice","team":1,"admin":true,"connected":true,
+             "role":"player","kicked":false},
+            {"identity":"bb","name":"","team":null,"admin":false,"connected":false,
+             "role":"spectator","kicked":true}
+        ]"#;
+        let rows = parse_rows(json);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "Alice");
+        assert_eq!(rows[0].team, Some(1));
+        assert!(rows[0].admin);
+        assert!(rows[0].connected);
+        assert_eq!(rows[1].team, None);
+        assert_eq!(rows[1].role, "spectator");
+        assert!(rows[1].kicked);
+        // Unresolved username: the identity prefix keeps the row addressable.
+        assert_eq!(rows[1].display_name(), "bb");
+        assert!(parse_rows("[]").is_empty());
+        assert!(parse_rows("not-json").is_empty());
+        assert!(parse_rows("{}").is_empty());
+    }
+
+    #[test]
+    fn rows_sort_by_team_then_admin() {
+        let mut rows = vec![
+            row("bob", Some(2), false, true),
+            row("alice", Some(1), false, true),
+            row("admin", Some(1), true, true),
+            row("none", None, false, true),
+        ];
+        sort_rows(&mut rows);
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["admin", "alice", "bob", "none"]);
+    }
+
+    #[test]
+    fn votekick_needs_three_live_non_admins() {
+        let peer = row("Bob", Some(1), false, true);
+        let admin = row("Admin", Some(1), true, true);
+        assert!(!votekick_eligible(&peer, 2));
+        assert!(votekick_eligible(&peer, 3));
+        assert!(!votekick_eligible(&admin, 5));
+        let offline = row("Off", Some(1), false, false);
+        assert!(!votekick_eligible(&offline, 5));
+        assert_eq!(
+            votekick_command(" Bob ", " griefing "),
+            "/votekick Bob griefing"
+        );
     }
 }

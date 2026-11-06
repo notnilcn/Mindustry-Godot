@@ -17,7 +17,10 @@ use crate::world::TilePos;
 use super::action::RemoteAction;
 use super::caps::InputCaps;
 use super::client_input::InputState;
-use super::line::{LineBlock, LineParams};
+use super::line::{
+    LineBlock, LineParams, NoLineHooks, PlanBlockInfo, flip_plans_about, rotate_plans_about,
+};
+use super::line_rules::{LineRules, NodeHooks};
 use super::place_mode::{MobileMode, PlaceMode};
 use super::placement::PlacementWorld;
 use super::plan::ClientPlan;
@@ -484,6 +487,45 @@ fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
     ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
 }
 
+/// `World.toTile` = `Math.round(v / tilesize)` (`World.java:174-176`;
+/// `java.lang.Math.round` rounds half up).
+fn world_to_tile(value: f32) -> i32 {
+    (value / TILESIZE as f32 + 0.5).floor() as i32
+}
+
+/// Block footprint rectangle in world pixels, `(min_x, min_y, side)`.
+///
+/// `BuildPlan.hitbox` (`BuildPlan.java:180-186`, `MobileInput.getPlan`
+/// `MobileInput.java:150-172`) centers the rect at
+/// `x * tilesize + Block.offset`; odd-size blocks have `offset = 0`, even-size
+/// blocks `offset = tilesize / 2`.
+fn footprint_rect(x: i32, y: i32, size: i32, offset: f32) -> (f32, f32, f32) {
+    let tile = TILESIZE as f32;
+    let side = size.max(1) as f32 * tile;
+    let center_x = x as f32 * tile + offset;
+    let center_y = y as f32 * tile + offset;
+    (center_x - side / 2.0, center_y - side / 2.0, side)
+}
+
+/// [`footprint_rect`] for a selection plan: a placement plan uses its own
+/// block's footprint, a breaking plan the existing world block's
+/// (`MobileInput.getPlan`, `MobileInput.java:155-167`).
+fn plan_rect(world: &dyn PlacementWorld, plan: &ClientPlan) -> (f32, f32, f32) {
+    let (size, offset) = if plan.breaking {
+        let block = world.block_at(plan.x, plan.y);
+        (world.block_size(block), world.block_offset(block))
+    } else {
+        (world.block_size(plan.block), world.block_offset(plan.block))
+    };
+    footprint_rect(plan.x, plan.y, size, offset)
+}
+
+/// Arc `Rectangle.overlaps`: strict AABB intersection (touching edges do not
+/// overlap).
+fn rects_overlap(a: (f32, f32, f32), b: (f32, f32, f32)) -> bool {
+    a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.2 && a.1 + a.2 > b.1
+}
+
 /// Long-press payload resolution (`MobileInput.longPress`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PayloadTarget {
@@ -555,6 +597,16 @@ pub struct MobileController {
     pub clock_ms: u64,
     /// `settings.getBool("keyboard")`: mobile keyboard mode.
     pub keyboard: bool,
+    /// `settings.getBool("blockreplace")` (default `true`, `SettingsMenuDialog`
+    /// `game.checkPref("blockreplace", true)`): gates the
+    /// `getReplacement`/`handlePlacementLine` half of `updateLine` (`IH:1952`).
+    pub block_replace: bool,
+    /// `settings.getBool("swapdiagonal")`: mobile inverts the diagonal key in
+    /// `iterateLine` (`IH:2433-2435`).
+    pub swap_diagonal: bool,
+    /// `keyDown(Binding.diagonalPlacement)` (`IH:2432`); mobile may carry a
+    /// hardware keyboard, so the state is pushed by the host.
+    pub diagonal: bool,
     /// `lastBlock` (mode-transition tracking, `MobileInput.update`).
     pub last_block: Option<BlockId>,
     /// `lastPlaced` (last selection plan added).
@@ -595,6 +647,9 @@ impl MobileController {
             emitted: SmallVec::new(),
             clock_ms: 0,
             keyboard: false,
+            block_replace: true,
+            swap_diagonal: false,
+            diagonal: false,
             last_block: None,
             last_placed: None,
             removals: Vec::new(),
@@ -645,19 +700,62 @@ impl MobileController {
     }
 
     /// `updateLine` for the active drag.
+    ///
+    /// Compatibility wrapper for callers without content access: no junction
+    /// replacement, bridge linking or node spacing. Hosts that can resolve the
+    /// selected block's [`LineRules`] should call [`Self::drag_to_with`].
     pub fn drag_to(&mut self, world: &dyn PlacementWorld, block: Option<&LineBlock>, end: TilePos) {
+        self.drag_to_with(world, block, None, end);
+    }
+
+    /// `MobileInput.update` line-mode branch -> `InputHandler.updateLine`
+    /// (`IH:1943-1961`): `iterateLine` with the block's `changePlacementPath`
+    /// hook, then — when `rules` is `Some` and `blockreplace` is on — the
+    /// `getReplacement` junction pass and `handlePlacementLine` (bridge DP,
+    /// bridge link configs, node spacing).
+    pub fn drag_to_with(
+        &mut self,
+        world: &dyn PlacementWorld,
+        block: Option<&LineBlock>,
+        rules: Option<&LineRules>,
+        end: TilePos,
+    ) {
         let Some(start) = self.line_start else {
             return;
         };
         self.last_line = (end.x() as i32, end.y() as i32);
         let params = LineParams {
+            diagonal: self.diagonal,
             mobile: true,
-            swap_diagonal: false,
+            swap_diagonal: self.swap_diagonal,
             rotation: self.state.rotation,
             override_line_rotation: self.state.override_line_rotation,
-            ..LineParams::default()
         };
-        self.state.update_line(world, block, start, end, &params);
+        // `changePlacementPath` runs inside `iterateLine` regardless of
+        // `blockreplace`; the rules half is the gated part (IH:1952-1961).
+        let active = rules.filter(|_| self.block_replace);
+        match rules.and_then(|rules| rules.node) {
+            Some(rule) => {
+                let hooks = NodeHooks {
+                    rule,
+                    world,
+                    block: block.map(|block| block.id).unwrap_or(BlockId::AIR),
+                };
+                self.state
+                    .update_line_with(world, block, start, end, &params, &hooks, active);
+            }
+            None => {
+                self.state.update_line_with(
+                    world,
+                    block,
+                    start,
+                    end,
+                    &params,
+                    &NoLineHooks,
+                    active,
+                );
+            }
+        }
         self.update_mode_from_place_mode();
     }
 
@@ -727,8 +825,9 @@ impl MobileController {
 
     /// `MobileInput.schemOriginX/Y`: the centroid of `selectPlans` in tiles.
     ///
-    /// Deviation: uses plan centers (no `drawx`/`drawy` block offset), which is
-    /// exact for the 1x1 fixture set and within a tile otherwise.
+    /// Fast path for 1x1 plans (integer centroid). Block offsets are only
+    /// observable for even-size multiblocks; use [`Self::schem_origin_with`]
+    /// for the exact `drawx`/`drawy` mean (`MobileInput.java:487-497`).
     pub fn schem_origin(&self) -> (i32, i32) {
         if self.state.select_plans.is_empty() {
             return (0, 0);
@@ -737,6 +836,70 @@ impl MobileController {
         let sum_y: i64 = self.state.select_plans.iter().map(|p| p.y as i64).sum();
         let count = self.state.select_plans.len() as i64;
         ((sum_x / count) as i32, (sum_y / count) as i32)
+    }
+
+    /// `MobileInput.schemOriginX/Y` (`MobileInput.java:487-497`): `World.toTile`
+    /// of the mean `BuildPlan.drawx`/`drawy`, so a multiblock's `Block.offset`
+    /// positions the rotation/flip origin exactly.
+    pub fn schem_origin_with(&self, info: &dyn Fn(BlockId) -> PlanBlockInfo) -> (i32, i32) {
+        if self.state.select_plans.is_empty() {
+            return (0, 0);
+        }
+        let tile = TILESIZE as f32;
+        let mut sum_x = 0.0f32;
+        let mut sum_y = 0.0f32;
+        for plan in &self.state.select_plans {
+            let meta = info(plan.block);
+            sum_x += plan.x as f32 * tile + meta.offset;
+            sum_y += plan.y as f32 * tile + meta.offset;
+        }
+        let count = self.state.select_plans.len() as f32;
+        (world_to_tile(sum_x / count), world_to_tile(sum_y / count))
+    }
+
+    /// Mobile schematic `rotate` button (`MobileInput.java:344`):
+    /// `InputHandler.rotatePlans(selectPlans, direction)` about the mobile
+    /// schematic origin, using the real block size/offset/rotation
+    /// (`IH:1558-1587`).
+    pub fn rotate_selection(&mut self, direction: i32, info: &dyn Fn(BlockId) -> PlanBlockInfo) {
+        let (ox, oy) = self.schem_origin_with(info);
+        rotate_plans_about(&mut self.state.select_plans, direction, ox, oy, info);
+    }
+
+    /// Mobile schematic `flipX`/`flipY` buttons (`MobileInput.java:341-342`):
+    /// `InputHandler.flipPlans` about the mobile schematic origin
+    /// (`IH:1596-1620`).
+    pub fn flip_selection(&mut self, flip_x: bool, info: &dyn Fn(BlockId) -> PlanBlockInfo) {
+        let (ox, oy) = self.schem_origin_with(info);
+        flip_plans_about(&mut self.state.select_plans, flip_x, ox, oy, info);
+    }
+
+    /// Mobile `rotate` button (`MobileInput.java:205-219`): a rotatable selected
+    /// block advances `rotation = mod(rotation + 1, 4)` and returns `true`;
+    /// otherwise the button toggles schematic-select mode and returns `false`.
+    pub fn rotate_button(&mut self, block_rotates: bool) -> bool {
+        if self.state.block.is_some() && block_rotates {
+            let rotation = (self.state.rotation as i32 + 1).rem_euclid(4) as u8;
+            self.state.rotation = rotation;
+            self.state.preview.rotation = rotation;
+            true
+        } else {
+            self.mode.schematic_mode = !self.mode.schematic_mode;
+            if self.mode.schematic_mode {
+                self.state.block = None;
+                self.state.place_mode = PlaceMode::None;
+            } else {
+                self.mode.rebuild_mode = false;
+            }
+            false
+        }
+    }
+
+    /// Mobile diagonal-swap button (`MobileInput.java:201-203`): toggles the
+    /// `swapdiagonal` setting; the host persists the returned value.
+    pub fn toggle_swap_diagonal(&mut self) -> bool {
+        self.swap_diagonal = !self.swap_diagonal;
+        self.swap_diagonal
     }
 
     /// `useSchematic`: replace `selectPlans` with a schematic's plans.
@@ -757,20 +920,23 @@ impl MobileController {
         self.state.select_plans.len()
     }
 
-    /// `getPlan`: the selection plan at `tile`.
+    /// `MobileInput.getPlan` (`MobileInput.java:150-172`): the selection plan
+    /// whose block footprint overlaps `tile`.
     ///
-    /// Deviation: exact-tile match; upstream compares block footprints, which
-    /// needs plan 07's `BlockView.size` (not yet threaded into `ClientPlan`).
-    pub fn get_plan(&self, tile: TilePos) -> Option<&ClientPlan> {
+    /// Placement plans use their own block's `size`/`offset`; breaking plans use
+    /// the existing world block's footprint. The query is a 1-tile rect centered
+    /// on `Tile.worldx()/worldy()`, matching the Java `Rectangle.overlaps` test.
+    pub fn get_plan(&self, world: &dyn PlacementWorld, tile: TilePos) -> Option<&ClientPlan> {
+        let query = footprint_rect(tile.x() as i32, tile.y() as i32, 1, 0.0);
         self.state
             .select_plans
             .iter()
-            .find(|plan| plan.x == tile.x() as i32 && plan.y == tile.y() as i32)
+            .find(|plan| rects_overlap(query, plan_rect(world, plan)))
     }
 
     /// `hasPlan`.
-    pub fn has_plan(&self, tile: TilePos) -> bool {
-        self.get_plan(tile).is_some()
+    pub fn has_plan(&self, world: &dyn PlacementWorld, tile: TilePos) -> bool {
+        self.get_plan(world, tile).is_some()
     }
 
     /// `removePlan`: drop the plan and queue a deconstruction fade.
@@ -788,18 +954,22 @@ impl MobileController {
         true
     }
 
-    /// `checkOverlapPlacement`: would a `block_size` footprint at `(x, y)`
-    /// overlap an existing selection plan? Breaking plans block their own tile.
-    pub fn check_overlap_placement(&self, x: i32, y: i32, block_size: i32) -> bool {
-        let half = (block_size - 1) / 2;
-        for plan in &self.state.select_plans {
-            let dx = (plan.x - x).abs();
-            let dy = (plan.y - y).abs();
-            if dx <= half && dy <= half {
-                return true;
-            }
-        }
-        false
+    /// `MobileInput.checkOverlapPlacement` (`MobileInput.java:113-139`): would a
+    /// `block_size`/`block_offset` footprint at `(x, y)` overlap a queued
+    /// placement plan or a mirrored unit plan? Breaking plans are skipped.
+    pub fn check_overlap_placement(
+        &self,
+        world: &dyn PlacementWorld,
+        x: i32,
+        y: i32,
+        block_size: i32,
+        block_offset: f32,
+    ) -> bool {
+        let candidate = footprint_rect(x, y, block_size, block_offset);
+        let overlaps =
+            |plan: &ClientPlan| !plan.breaking && rects_overlap(candidate, plan_rect(world, plan));
+        self.state.select_plans.iter().any(overlaps)
+            || self.state.last_plans.plans().iter().any(overlaps)
     }
 
     /// `checkTargets`: acquire the closest enemy within [`TARGET_RANGE`], else a
@@ -1090,6 +1260,11 @@ impl MobileController {
     }
 
     /// Dispatches one gesture event into the controller (upstream callbacks).
+    ///
+    /// Compatibility wrapper without content access (no line rules); hosts that
+    /// resolve the selected block's [`LineRules`] should call
+    /// [`Self::handle_gesture_with`] so long-press drags get junction
+    /// replacement, bridge linking and node spacing.
     pub fn handle_gesture(
         &mut self,
         event: GestureEvent,
@@ -1097,7 +1272,24 @@ impl MobileController {
         block: Option<&LineBlock>,
         caps: &dyn InputCaps,
     ) -> SmallVec<[RemoteAction; 4]> {
+        self.handle_gesture_with(event, world, block, None, caps)
+    }
+
+    /// [`Self::handle_gesture`] with the active block's line rules.
+    pub fn handle_gesture_with(
+        &mut self,
+        event: GestureEvent,
+        world: &dyn PlacementWorld,
+        block: Option<&LineBlock>,
+        rules: Option<&LineRules>,
+        caps: &dyn InputCaps,
+    ) -> SmallVec<[RemoteAction; 4]> {
         self.emitted.clear();
+        // `updateLine`/`iterateLine` read the live settings each call
+        // (`IH:1952`, `IH:2433-2435`); the caps seam is their platform-neutral
+        // mirror, so a direct `drag_to_with` sees the same values.
+        self.block_replace = caps.block_replace();
+        self.swap_diagonal = caps.swap_diagonal();
         match event {
             GestureEvent::TouchDown { x, y, pointer } => {
                 if caps.is_menu() || caps.focus().is_menu || caps.is_cutscene() {
@@ -1111,7 +1303,7 @@ impl MobileController {
                         (y / TILESIZE as f32).floor() as i16,
                     );
                     // Selecting begins only on an existing plan (`hasPlan`).
-                    self.selecting = self.has_plan(tile) && !self.command_mode_enabled();
+                    self.selecting = self.has_plan(world, tile) && !self.command_mode_enabled();
                     if self.mode.schematic_mode && self.state.block.is_none() {
                         self.state.place_mode = if self.mode.rebuild_mode {
                             PlaceMode::RebuildSelect
@@ -1143,7 +1335,7 @@ impl MobileController {
                     );
                     self.begin_line(tile);
                     if self.state.place_mode.is_placing() {
-                        self.drag_to(world, block, tile);
+                        self.drag_to_with(world, block, rules, tile);
                     }
                 }
             }
@@ -1156,9 +1348,10 @@ impl MobileController {
                     (y / TILESIZE as f32).floor() as i16,
                 );
                 let block_size = block.map(|b| b.size).unwrap_or(1);
+                let block_offset = block.map(|b| b.offset).unwrap_or(0.0);
                 // Remove an existing plan on tap before queueing a new one.
                 let existing = if !self.command_mode_enabled() {
-                    self.get_plan(tile).cloned()
+                    self.get_plan(world, tile).cloned()
                 } else {
                     None
                 };
@@ -1173,9 +1366,11 @@ impl MobileController {
                         tile.y() as i32,
                         self.state.rotation,
                     ) && !self.check_overlap_placement(
+                        world,
                         tile.x() as i32,
                         tile.y() as i32,
                         block_size,
+                        block_offset,
                     ) {
                         self.add_select_plan(ClientPlan::place(
                             tile.x() as i32,
@@ -1186,7 +1381,7 @@ impl MobileController {
                     }
                 } else if self.state.place_mode.is_breaking()
                     && world.block_at(tile.x() as i32, tile.y() as i32) != BlockId::AIR
-                    && !self.has_plan(tile)
+                    && !self.has_plan(world, tile)
                 {
                     self.add_select_plan(ClientPlan::break_plan(tile.x() as i32, tile.y() as i32));
                 } else if count == 2 {
@@ -1390,24 +1585,25 @@ mod tests {
 
     #[test]
     fn plan_remove_and_overlap() {
+        let world = ReplayWorld::new();
         let mut controller = MobileController::new();
         controller.add_select_plan(ClientPlan::place(2, 2, 0, BlockId::STONE_WALL));
-        assert!(controller.has_plan(TilePos::new(2, 2)));
+        assert!(controller.has_plan(&world, TilePos::new(2, 2)));
         assert_eq!(
-            controller.get_plan(TilePos::new(2, 2)).map(|p| p.x),
+            controller.get_plan(&world, TilePos::new(2, 2)).map(|p| p.x),
             Some(2)
         );
         // A 1x1 footprint at the same tile overlaps.
-        assert!(controller.check_overlap_placement(2, 2, 1));
-        assert!(!controller.check_overlap_placement(9, 9, 1));
+        assert!(controller.check_overlap_placement(&world, 2, 2, 1, 0.0));
+        assert!(!controller.check_overlap_placement(&world, 9, 9, 1, 0.0));
         let plan = controller
-            .get_plan(TilePos::new(2, 2))
+            .get_plan(&world, TilePos::new(2, 2))
             .cloned()
             .expect("plan");
         assert!(controller.remove_plan(&plan));
         assert!(!controller.remove_plan(&plan));
         assert_eq!(controller.removals.len(), 1);
-        assert!(!controller.has_plan(TilePos::new(2, 2)));
+        assert!(!controller.has_plan(&world, TilePos::new(2, 2)));
     }
 
     #[test]
@@ -1498,5 +1694,528 @@ mod tests {
         );
         assert!(controller.state.select_plans.is_empty());
         assert_eq!(controller.removals.len(), 1);
+    }
+
+    // --- GAPS #48: mobile placement-line hooks and footprint plans ---------
+
+    use crate::content::{
+        BlockKind, ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content,
+    };
+    use crate::input::line::{line_block_from_def, plan_block_info_from_def};
+    use crate::input::line_rules::line_rules_for;
+    use crate::world::config::ConfigValue;
+    use std::collections::HashMap;
+
+    fn test_content() -> ContentRegistry {
+        // `Block.init` derives size/offset; the base content factory alone
+        // leaves `offset = 0`, which would mask the even-size footprint tests.
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        registry.init().expect("content init");
+        registry
+    }
+
+    /// Grid-backed [`PlacementWorld`] with live content: block kinds, plan
+    /// footprints (`Block.size`/`offset`) and existing-build rotations.
+    struct ContentWorld {
+        content: ContentRegistry,
+        width: i32,
+        height: i32,
+        blocks: Vec<BlockId>,
+        rotations: HashMap<i32, u8>,
+    }
+
+    impl ContentWorld {
+        fn new(content: ContentRegistry, width: i32, height: i32) -> Self {
+            Self {
+                content,
+                width,
+                height,
+                blocks: vec![BlockId::AIR; (width * height) as usize],
+                rotations: HashMap::new(),
+            }
+        }
+
+        fn set(&mut self, x: i32, y: i32, block: BlockId, rotation: u8) {
+            self.blocks[(y * self.width + x) as usize] = block;
+            if block != BlockId::AIR {
+                self.rotations
+                    .insert(TilePos::new(x as i16, y as i16).pack(), rotation);
+            }
+        }
+
+        fn block_id(&self, name: &str) -> BlockId {
+            self.content
+                .block_id(name)
+                .unwrap_or_else(|| panic!("{name}"))
+        }
+
+        fn def(&self, block: BlockId) -> &crate::content::BlockDef {
+            self.content.block(block).expect("block def")
+        }
+
+        fn line_block(&self, block: BlockId) -> LineBlock {
+            line_block_from_def(block, self.def(block))
+        }
+
+        fn plan_info(&self, block: BlockId) -> PlanBlockInfo {
+            plan_block_info_from_def(self.def(block))
+        }
+
+        fn rules(&self, block: BlockId) -> LineRules {
+            line_rules_for(&self.content, block)
+        }
+    }
+
+    impl PlacementWorld for ContentWorld {
+        fn in_bounds(&self, x: i32, y: i32) -> bool {
+            x >= 0 && y >= 0 && x < self.width && y < self.height
+        }
+
+        fn block_at(&self, x: i32, y: i32) -> BlockId {
+            if self.in_bounds(x, y) {
+                self.blocks[(y * self.width + x) as usize]
+            } else {
+                BlockId::AIR
+            }
+        }
+
+        fn floor_deep(&self, _x: i32, _y: i32) -> bool {
+            false
+        }
+
+        fn always_replace(&self, x: i32, y: i32) -> bool {
+            self.block_at(x, y) == BlockId::AIR
+        }
+
+        fn can_replace(&self, _target: BlockId, other: BlockId) -> bool {
+            other == BlockId::AIR
+        }
+
+        fn valid_place(&self, _block: BlockId, x: i32, y: i32, _rotation: u8) -> bool {
+            self.block_at(x, y) == BlockId::AIR
+        }
+
+        fn build_rotation(&self, x: i32, y: i32) -> Option<u8> {
+            self.rotations
+                .get(&TilePos::new(x as i16, y as i16).pack())
+                .copied()
+        }
+
+        fn team(&self) -> u8 {
+            1
+        }
+
+        fn block_kind(&self, block: BlockId) -> Option<BlockKind> {
+            self.content.block(block).map(|def| def.kind)
+        }
+
+        fn block_size(&self, block: BlockId) -> i32 {
+            self.content.block(block).map(|def| def.size).unwrap_or(1)
+        }
+
+        fn block_offset(&self, block: BlockId) -> f32 {
+            self.content
+                .block(block)
+                .map(|def| def.offset)
+                .unwrap_or(0.0)
+        }
+    }
+
+    /// Starts a mobile line drag at `from` and runs it to `to` with the block's
+    /// line rules (or without them when `apply_rules` is false).
+    fn mobile_drag(
+        controller: &mut MobileController,
+        world: &ContentWorld,
+        block: BlockId,
+        from: (i32, i32),
+        to: (i32, i32),
+        apply_rules: bool,
+    ) {
+        let meta = world.line_block(block);
+        let rules = world.rules(block);
+        controller.state.select_block(Some(block));
+        controller.state.begin_place();
+        controller.begin_line(TilePos::new(from.0 as i16, from.1 as i16));
+        controller.drag_to_with(
+            world,
+            Some(&meta),
+            apply_rules.then_some(&rules),
+            TilePos::new(to.0 as i16, to.1 as i16),
+        );
+    }
+
+    fn plan_rows(controller: &MobileController) -> Vec<(i32, i32, BlockId)> {
+        controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| (plan.x, plan.y, plan.block))
+            .collect()
+    }
+
+    #[test]
+    fn mobile_line_crossing_conveyor_becomes_junction() {
+        // `Conveyor.getReplacement` (`Conveyor.java:112-121`) on the mobile
+        // line path: a straight mobile drag crossing a perpendicular conveyor
+        // switches that plan to `junction`.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let junction = world.block_id("junction");
+        world.set(5, 5, conveyor, 1);
+        let mut controller = MobileController::new();
+        mobile_drag(&mut controller, &world, conveyor, (3, 5), (7, 5), true);
+        let line = plan_rows(&controller);
+        assert_eq!(line.len(), 5);
+        assert_eq!(line[2], (5, 5, junction), "crossing becomes a junction");
+        for (index, plan) in line.iter().enumerate() {
+            if index != 2 {
+                assert_eq!(plan.2, conveyor, "plan {index} stays conveyor");
+            }
+        }
+    }
+
+    #[test]
+    fn mobile_blockreplace_setting_gates_replacement() {
+        // `IH:1952`: the rules half runs only with `settings.blockreplace`.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        world.set(5, 5, conveyor, 1);
+        let mut controller = MobileController::new();
+        controller.block_replace = false;
+        mobile_drag(&mut controller, &world, conveyor, (3, 5), (7, 5), true);
+        assert!(
+            plan_rows(&controller).iter().all(|plan| plan.2 == conveyor),
+            "no junction without blockreplace"
+        );
+    }
+
+    #[test]
+    fn mobile_conveyor_line_bridges_over_wall() {
+        // `Conveyor.handlePlacementLine` -> `Placement.calculateBridges`
+        // (`Conveyor.java:94-99`): the mobile drag gets the same bridge DP as
+        // the desktop path (derivation in `line_rules::tests::...`).
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let wall = world.block_id("copper-wall");
+        let bridge = world.block_id("bridge-conveyor");
+        world.set(5, 5, wall, 0);
+        let mut controller = MobileController::new();
+        mobile_drag(&mut controller, &world, conveyor, (3, 5), (8, 5), true);
+        assert_eq!(
+            plan_rows(&controller),
+            vec![
+                (3, 5, conveyor),
+                (4, 5, bridge),
+                (6, 5, bridge),
+                (7, 5, conveyor),
+                (8, 5, conveyor),
+            ]
+        );
+        assert_eq!(
+            controller.state.line_plans[1].config,
+            ConfigValue::Point2(2, 0),
+            "bridge auto-link Point2 config"
+        );
+    }
+
+    #[test]
+    fn mobile_power_node_line_chains_nodes() {
+        // `PowerNode.changePlacementPath` (`PowerNode.java:179-181`): the
+        // NodeHooks spacing runs on the mobile drag before plan creation.
+        let mut world = ContentWorld::new(test_content(), 32, 4);
+        let node = world.block_id("power-node");
+        let mut controller = MobileController::new();
+        mobile_drag(&mut controller, &world, node, (0, 0), (20, 0), true);
+        let xs: Vec<i32> = controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| plan.x)
+            .collect();
+        assert_eq!(xs, vec![0, 6, 12, 18, 20]);
+    }
+
+    #[test]
+    fn mobile_bridge_block_links_consecutive_plans() {
+        // `ItemBridge.changePlacementPath` + `handlePlacementLine`
+        // (`ItemBridge.java:195-208`): Chebyshev node spacing then Point2 link
+        // configs, exactly as the desktop path.
+        let mut world = ContentWorld::new(test_content(), 16, 4);
+        let bridge = world.block_id("bridge-conveyor");
+        let mut controller = MobileController::new();
+        mobile_drag(&mut controller, &world, bridge, (0, 0), (10, 0), true);
+        let xs: Vec<i32> = controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| plan.x)
+            .collect();
+        assert_eq!(xs, vec![0, 4, 8, 10]);
+        let configs: Vec<ConfigValue> = controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| plan.config.clone())
+            .collect();
+        assert_eq!(
+            configs,
+            vec![
+                ConfigValue::Point2(4, 0),
+                ConfigValue::Point2(4, 0),
+                ConfigValue::Point2(2, 0),
+                ConfigValue::None,
+            ]
+        );
+    }
+
+    #[test]
+    fn longpress_mobile_drag_applies_line_rules() {
+        // The gesture decision tree forwards the block rules: long-press starts
+        // the line and the drag gets junction replacement.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let junction = world.block_id("junction");
+        world.set(5, 5, conveyor, 1);
+        let meta = world.line_block(conveyor);
+        let rules = world.rules(conveyor);
+        let mut controller = MobileController::new();
+        controller.state.select_block(Some(conveyor));
+        controller.state.begin_place();
+        controller.handle_gesture_with(
+            GestureEvent::LongPress {
+                x: 3.0 * TILESIZE as f32,
+                y: 5.0 * TILESIZE as f32,
+            },
+            &world,
+            Some(&meta),
+            Some(&rules),
+            &TestCaps::default(),
+        );
+        assert_eq!(controller.line_start, Some(TilePos::new(3, 5)));
+        controller.drag_to_with(&world, Some(&meta), Some(&rules), TilePos::new(7, 5));
+        assert_eq!(controller.state.line_plans[2].block, junction);
+    }
+
+    #[test]
+    fn get_plan_matches_even_size_footprint() {
+        // `MobileInput.getPlan` (`MobileInput.java:150-172`): a 2x2 block at
+        // (5,5) has `offset = 4` and covers all four tiles.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let plasma = world.block_id("plasma-bore");
+        assert_eq!(world.def(plasma).size, 2);
+        assert!(world.def(plasma).rotate, "rotating multiblock");
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(5, 5, 0, plasma));
+        for tile in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+            assert!(
+                controller.has_plan(&world, TilePos::new(tile.0, tile.1)),
+                "{tile:?} is inside the 2x2 footprint"
+            );
+        }
+        for tile in [(4, 5), (7, 5), (5, 7), (7, 6)] {
+            assert!(
+                !controller.has_plan(&world, TilePos::new(tile.0, tile.1)),
+                "{tile:?} is outside the 2x2 footprint"
+            );
+        }
+    }
+
+    #[test]
+    fn get_plan_matches_odd_size_footprint() {
+        // A 3x3 block at (5,5) is centered on its tile and covers 4..=6.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let factory = world.block_id("ground-factory");
+        assert_eq!(world.def(factory).size, 3);
+        assert!(world.def(factory).rotate, "rotating multiblock");
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(5, 5, 0, factory));
+        for x in 4..=6 {
+            for y in 4..=6 {
+                assert!(controller.has_plan(&world, TilePos::new(x, y)), "({x},{y})");
+            }
+        }
+        for tile in [(3, 5), (7, 5), (5, 3), (5, 7)] {
+            assert!(!controller.has_plan(&world, TilePos::new(tile.0, tile.1)));
+        }
+    }
+
+    #[test]
+    fn breaking_plan_uses_world_block_footprint() {
+        // Breaking plans read the *existing* block's size/offset
+        // (`MobileInput.java:161-165`).
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let battery = world.block_id("battery-large");
+        assert_eq!(world.def(battery).size, 3);
+        world.set(4, 4, battery, 0);
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::break_plan(4, 4));
+        assert!(controller.has_plan(&world, TilePos::new(3, 4)));
+        assert!(controller.has_plan(&world, TilePos::new(4, 3)));
+        assert!(!controller.has_plan(&world, TilePos::new(2, 4)));
+        assert!(!controller.has_plan(&world, TilePos::new(4, 2)));
+    }
+
+    #[test]
+    fn overlap_placement_uses_footprints() {
+        // `MobileInput.checkOverlapPlacement` (`MobileInput.java:113-139`).
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let plasma = world.block_id("plasma-bore");
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(5, 5, 0, plasma));
+        // A 1x1 tap on the far corner of the 2x2 plan overlaps.
+        assert!(controller.check_overlap_placement(&world, 6, 6, 1, 0.0));
+        assert!(!controller.check_overlap_placement(&world, 7, 5, 1, 0.0));
+        // A larger candidate footprint reaches a 1x1 plan.
+        controller.state.select_plans.clear();
+        controller.add_select_plan(ClientPlan::place(2, 2, 0, BlockId::STONE_WALL));
+        assert!(controller.check_overlap_placement(&world, 2, 2, 3, 0.0));
+        // `player.unit().plans()` (the plan mirror) blocks too.
+        controller.state.select_plans.clear();
+        controller
+            .state
+            .last_plans
+            .sync(&[ClientPlan::place(2, 2, 0, plasma)]);
+        assert!(controller.check_overlap_placement(&world, 3, 2, 1, 0.0));
+        assert!(!controller.check_overlap_placement(&world, 7, 7, 1, 0.0));
+        // Breaking plans never block a placement.
+        controller.state.last_plans.clear();
+        controller.add_select_plan(ClientPlan::break_plan(8, 8));
+        assert!(!controller.check_overlap_placement(&world, 8, 8, 1, 0.0));
+    }
+
+    #[test]
+    fn mobile_rotate_button_gates_on_block_rotate() {
+        // `MobileInput.java:205-219`: rotate advances a rotatable placement and
+        // otherwise toggles schematic-select mode.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let wall = world.block_id("copper-wall");
+        let mut controller = MobileController::new();
+        controller.state.select_block(Some(conveyor));
+        controller.state.rotation = 1;
+        assert!(controller.rotate_button(world.def(conveyor).rotate));
+        assert_eq!(controller.state.rotation, 2);
+        assert_eq!(controller.state.preview.rotation, 2);
+
+        controller.state.select_block(Some(wall));
+        controller.state.rotation = 2;
+        assert!(!controller.rotate_button(world.def(wall).rotate));
+        assert_eq!(
+            controller.state.rotation, 2,
+            "non-rotating block keeps rotation"
+        );
+        assert!(controller.mode.schematic_mode);
+        assert_eq!(controller.state.block, None);
+        assert_eq!(controller.state.place_mode, PlaceMode::None);
+
+        // Rotating with no block selected also toggles schematic mode off.
+        assert!(!controller.rotate_button(true));
+        assert!(!controller.mode.schematic_mode);
+    }
+
+    #[test]
+    fn swap_diagonal_gesture_switches_mobile_line_direction() {
+        // `IH:2433-2435`: `swapdiagonal && mobile` inverts the diagonal key, so
+        // the mobile diagonal button turns a straight drag into a
+        // Bresenham-no-diagonal line.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let mut controller = MobileController::new();
+        controller.state.begin_place();
+        controller.begin_line(TilePos::new(0, 0));
+        controller.drag_to_with(&world, None, None, TilePos::new(5, 5));
+        let straight: Vec<(i32, i32)> = controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| (plan.x, plan.y))
+            .collect();
+        assert_eq!(
+            straight,
+            vec![(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5)],
+            "normalizeLine goes down the dominant axis"
+        );
+
+        assert!(controller.toggle_swap_diagonal());
+        controller.begin_line(TilePos::new(0, 0));
+        controller.drag_to_with(&world, None, None, TilePos::new(5, 5));
+        let diagonal: Vec<(i32, i32)> = controller
+            .state
+            .line_plans
+            .iter()
+            .map(|plan| (plan.x, plan.y))
+            .collect();
+        assert_eq!(diagonal.len(), 11);
+        assert_eq!((diagonal[0], diagonal[1]), ((0, 0), (1, 0)));
+
+        // The diagonal key itself flips the direction too.
+        controller.swap_diagonal = false;
+        controller.diagonal = true;
+        controller.begin_line(TilePos::new(0, 0));
+        controller.drag_to_with(&world, None, None, TilePos::new(5, 5));
+        assert_eq!(controller.state.line_plans.len(), 11);
+    }
+
+    #[test]
+    fn mobile_rotate_selection_uses_block_offsets() {
+        // `MobileInput.java:344` + `MobileInput.schemOriginX/Y`: the accurate
+        // `InputHandler.rotatePlans` about the `drawx`/`drawy` centroid.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let factory = world.block_id("ground-factory"); // 3x3, offset 0
+        let mut controller = MobileController::new();
+        controller.use_schematic(vec![
+            ClientPlan::place(5, 5, 1, factory),
+            ClientPlan::place(7, 5, 1, factory),
+        ]);
+        let info = |block: BlockId| world.plan_info(block);
+        // Mean drawx = (40 + 56)/2 = 48 -> tile 6; mean drawy = 40 -> tile 5.
+        assert_eq!(controller.schem_origin_with(&info), (6, 5));
+        controller.rotate_selection(1, &info);
+        let plans: Vec<(i32, i32, u8)> = controller
+            .state
+            .select_plans
+            .iter()
+            .map(|plan| (plan.x, plan.y, plan.rotation))
+            .collect();
+        assert_eq!(plans, vec![(6, 4, 2), (6, 6, 2)]);
+
+        // Even-size blocks rotate about their offset center (`drawx`).
+        let plasma = world.block_id("plasma-bore"); // 2x2, offset 4
+        controller.use_schematic(vec![ClientPlan::place(6, 5, 0, plasma)]);
+        assert_eq!(controller.schem_origin_with(&info), (7, 6));
+        controller.rotate_selection(1, &info);
+        assert_eq!(
+            (
+                controller.state.select_plans[0].x,
+                controller.state.select_plans[0].y,
+                controller.state.select_plans[0].rotation,
+            ),
+            (7, 5, 1)
+        );
+    }
+
+    #[test]
+    fn mobile_flip_selection_uses_block_offsets() {
+        // `MobileInput.java:341-342` + `InputHandler.flipPlans`
+        // (`IH:1596-1620`) with the even-size `invertFlip` rotation math.
+        let world = ContentWorld::new(test_content(), 16, 16);
+        let plasma = world.block_id("plasma-bore");
+        let mut controller = MobileController::new();
+        controller.use_schematic(vec![
+            ClientPlan::place(5, 5, 0, plasma),
+            ClientPlan::place(7, 5, 0, plasma),
+        ]);
+        let info = |block: BlockId| world.plan_info(block);
+        // Mean drawx = (44 + 60)/2 = 52 -> tile 7; flip across x = 7*8.
+        assert_eq!(controller.schem_origin_with(&info), (7, 6));
+        controller.flip_selection(true, &info);
+        let plans: Vec<(i32, i32, u8)> = controller
+            .state
+            .select_plans
+            .iter()
+            .map(|plan| (plan.x, plan.y, plan.rotation))
+            .collect();
+        assert_eq!(plans, vec![(8, 5, 2), (6, 5, 2)]);
     }
 }

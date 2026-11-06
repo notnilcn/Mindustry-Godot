@@ -25,7 +25,7 @@
 //! with `get_node_or_null` and cast to their Rust type, matching the former
 //! `@onready` typed references.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use godot::builtin::Side;
 use godot::classes::box_container::AlignmentMode;
@@ -33,17 +33,20 @@ use godot::classes::control::{GrowDirection, LayoutPreset, MouseFilter, SizeFlag
 use godot::classes::texture_rect::{ExpandMode, StretchMode};
 use godot::classes::tween::{EaseType, TransitionType};
 use godot::classes::{
-    Button, Control, GridContainer, HBoxContainer, IControl, InputEvent, InputEventMouseButton,
-    Json, Label, MarginContainer, Node, PanelContainer, RichTextLabel, StyleBoxEmpty, StyleBoxFlat,
-    StyleBoxTexture, TextureRect, Time,
+    Button, ButtonGroup, Control, GridContainer, HBoxContainer, IControl, InputEvent,
+    InputEventMouseButton, Json, Label, LineEdit, MarginContainer, Node, PanelContainer,
+    RichTextLabel, ScrollContainer, StyleBoxEmpty, StyleBoxFlat, StyleBoxTexture, TextureRect,
+    Time, VBoxContainer,
 };
 use godot::global::{MouseButton, VerticalAlignment};
 use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
 use crate::input::desktop::WaveGate;
+use crate::sim_host::MindSimHost;
 use crate::ui::kit;
 use crate::ui::kit::MindRichLabel;
+use crate::ui::kit::icons;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::bar::MindBar;
 use crate::ui::kit::widgets::core_items_display::CoreItemsDisplay;
@@ -128,6 +131,32 @@ pub struct MindHudFragment {
     menus_shown: bool,
     /// Whether `_refresh_loading` raised the overlay (`_io_loading_shown`).
     io_loading_shown: bool,
+    /// `PlayerComp.drawPing` marker overlay (`pingX/pingY/pingTime/pingText`);
+    /// created lazily so the scene stays tscn-first.
+    ping_overlay: Option<Gd<MindPingOverlay>>,
+    /// `HudFragment.editorMain` (`HudFragment.java:505-549`): the editor-only
+    /// team-selector + block-palette panel (created lazily).
+    editor_panel: Option<Gd<PanelContainer>>,
+    /// `editorMain.teams` row with the `Team.baseTeams` buttons.
+    editor_team_row: Option<Gd<HBoxContainer>>,
+    /// The collapsible block-palette box (`t.collapser(this::addBlockSelection,
+    /// () -> settings.getBool("editor-blocks-shown"))`).
+    editor_palette: Option<Gd<VBoxContainer>>,
+    /// `editor/search` field.
+    editor_search: Option<Gd<LineEdit>>,
+    /// `blockSelection` grid (`rebuildBlockSelection`).
+    editor_blocks: Option<Gd<GridContainer>>,
+    /// `favoriteBlocks` (`Core.settings "editor-block-favorites"`).
+    editor_favorites: Vec<String>,
+    /// `settings "editor-blocks-shown"` (the collapser state).
+    editor_blocks_shown: bool,
+    /// Last applied `state.isEditor()` gate (`editorMain.visible`).
+    editor_mode: bool,
+    /// Team/block buttons for the checked-state refresh.
+    editor_team_buttons: Vec<Gd<Button>>,
+    editor_block_buttons: Vec<(String, Gd<Button>)>,
+    /// `editorMain` collapser toggle (`Icon.downOpen`/`upOpen`).
+    editor_toggle: Option<Gd<Button>>,
 }
 
 #[godot_api]
@@ -137,6 +166,8 @@ impl IControl for MindHudFragment {
         self._localize_banners();
         self._build_wave_buttons();
         self._setup_status_style();
+        self._setup_ping_overlay();
+        self._setup_editor_panel();
         if let Some(hud) = self.hud.clone() {
             for (signal, method) in [
                 ("hud_text", "_on_hud_text"),
@@ -185,6 +216,561 @@ impl IControl for MindHudFragment {
 #[godot_api]
 impl MindHudFragment {
     // ---- input + visibility ----------------------------------------------
+
+    /// Creates the `PlayerComp.drawPing` marker overlay when absent (the HUD
+    /// scene stays tscn-first: the overlay is a pure presentation child).
+    fn _setup_ping_overlay(&mut self) {
+        if let Some(current) = &self.ping_overlay
+            && current.is_instance_valid()
+        {
+            return;
+        }
+        let mut overlay = MindPingOverlay::new_alloc();
+        overlay.set_name("PingOverlay");
+        overlay.set_anchors_preset(LayoutPreset::FULL_RECT);
+        overlay.set_mouse_filter(MouseFilter::IGNORE);
+        self.base_mut().add_child(&overlay);
+        self.ping_overlay = Some(overlay);
+    }
+
+    /// `Call.pingLocation` -> `PlayerComp.pingX/pingY/pingTime/pingText`
+    /// (`InputHandler.java:286-302`) and the world marker
+    /// (`PlayerComp.drawPing`). The fullscreen-minimap copy
+    /// (`MinimapRenderer.java:173`) needs the minimap widget/render hook.
+    #[func]
+    pub fn show_ping(&mut self, x: f32, y: f32, text: GString) {
+        self._setup_ping_overlay();
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        // `Renderer.java:176` `showPings = settings.getBool("showpings", true)`.
+        let enabled = ui
+            .call(
+                "settings_get_flag_default",
+                &[GString::from("showpings").to_variant(), true.to_variant()],
+            )
+            .try_to::<bool>()
+            .unwrap_or(true);
+        if !enabled {
+            return;
+        }
+        // `PlayerComp.name` (`Core.settings.getString("name")`); Java's draw
+        // guard skips the marker when the name is null.
+        let name = ui
+            .call(
+                "settings_get_text",
+                &[
+                    GString::from("name").to_variant(),
+                    GString::new().to_variant(),
+                ],
+            )
+            .try_to::<GString>()
+            .unwrap_or_default();
+        // `PlayerComp.color` = the player team's colour.
+        let color = self
+            .host()
+            .and_then(|mut host| host.call("player_team_color", &[]).try_to::<i64>().ok())
+            .map(packed_rgba_color)
+            .unwrap_or(Color::WHITE);
+        let Some(mut overlay) = self.ping_overlay.clone() else {
+            return;
+        };
+        overlay.bind_mut().show_at(
+            Vector2::new(x, y),
+            text.to_string().as_str(),
+            name.to_string().as_str(),
+            color,
+        );
+    }
+
+    /// `planConfig.showConfig(splan)` (`DesktopInput.java:800-812`): opens the
+    /// sibling `HudGroup/plan_config` fragment with a point-config spec. The
+    /// fragment's `configure` is a Rust method (not `#[func]`-exposed), so the
+    /// HUD owns this sibling call.
+    #[func]
+    pub fn open_plan_config(&mut self, spec: GString) -> bool {
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&spec.to_string()) else {
+            return false;
+        };
+        let Some(parent) = self.base().get_parent() else {
+            return false;
+        };
+        let Some(node) = parent.get_node_or_null("plan_config") else {
+            return false;
+        };
+        let Ok(mut fragment) =
+            node.try_cast::<crate::ui::fragments::plan_config::MindPlanConfigFragment>()
+        else {
+            return false;
+        };
+        let mut config = VarDictionary::new();
+        let title = parsed
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        config.set("title", &kit::t(title).to_variant());
+        let mut options = VarArray::new();
+        if let Some(list) = parsed.get("options").and_then(serde_json::Value::as_array) {
+            for option in list {
+                let name = option
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let label_key = option
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(name);
+                let mut row = VarDictionary::new();
+                row.set("name", &GString::from(name).to_variant());
+                row.set("label", &kit::t(label_key).to_variant());
+                options.push(&row.to_variant());
+            }
+        }
+        config.set("options", &options.to_variant());
+        if let Some(value) = parsed.get("value").and_then(serde_json::Value::as_str) {
+            config.set("value", &GString::from(value).to_variant());
+        }
+        fragment.bind_mut().configure(config);
+        true
+    }
+
+    /// `planConfig.hide()` (`DesktopInput.java:809/812`).
+    #[func]
+    pub fn hide_plan_config(&mut self) {
+        let Some(parent) = self.base().get_parent() else {
+            return;
+        };
+        if let Some(mut node) = parent.get_node_or_null("plan_config") {
+            node.set("visible", &false.to_variant());
+        }
+    }
+
+    // ---- editor HUD (GAPS #42, PAR-0556) ---------------------------------
+
+    /// `HudFragment.editorMain.table(Tex.buttonEdge4, ...)`
+    /// (`HudFragment.java:505-549`): the `Team.baseTeams` selector (45 px,
+    /// team-coloured) and the collapsible block palette with `editor/search`
+    /// and right-click favourites. Built in code because the HUD scene is
+    /// tscn-first and the panel is editor-only.
+    fn _setup_editor_panel(&mut self) {
+        if let Some(current) = &self.editor_panel
+            && current.is_instance_valid()
+        {
+            return;
+        }
+        let mut panel = PanelContainer::new_alloc();
+        panel.set_name("EditorPanel");
+        panel.set_theme_type_variation("defaultPane");
+        panel.set_visible(false);
+        panel.set_anchor(Side::LEFT, 1.0);
+        panel.set_anchor(Side::RIGHT, 1.0);
+        panel.set_offset(Side::LEFT, -250.0);
+        panel.set_offset(Side::RIGHT, -10.0);
+        panel.set_offset(Side::TOP, 64.0);
+        let mut column = VBoxContainer::new_alloc();
+        column.set_name("Column");
+        panel.add_child(&column);
+        let mut teams = HBoxContainer::new_alloc();
+        teams.set_name("Teams");
+        column.add_child(&teams);
+        self.editor_team_row = Some(teams);
+        // `teams.button(Icon.downOpen, ..., () -> settings.put(
+        // "editor-blocks-shown", !...))`.
+        let mut toggle = factory::glyph_button("downOpen", "v", "clearTogglei");
+        toggle.set_name("ToggleBlocks");
+        toggle.set_tooltip_text(&kit::t("editor-blocks"));
+        toggle.set_custom_minimum_size(Vector2::new(45.0, 45.0));
+        let callable = self.base().callable("_on_editor_blocks_toggle");
+        let _ = toggle.connect("pressed", &callable);
+        if let Some(mut row) = self.editor_team_row.clone() {
+            row.add_child(&toggle);
+        }
+        self.editor_toggle = Some(toggle);
+        let mut palette = VBoxContainer::new_alloc();
+        palette.set_name("Palette");
+        column.add_child(&palette);
+        let mut search = LineEdit::new_alloc();
+        search.set_name("Search");
+        search.set_placeholder(&kit::t("players.search"));
+        let callable = self.base().callable("_on_editor_search_changed");
+        let _ = search.connect("text_changed", &callable);
+        palette.add_child(&search);
+        let mut scroll = ScrollContainer::new_alloc();
+        scroll.set_name("Scroll");
+        scroll.set_custom_minimum_size(Vector2::new(0.0, 320.0));
+        palette.add_child(&scroll);
+        let mut blocks = GridContainer::new_alloc();
+        blocks.set_name("Blocks");
+        blocks.set_columns(5);
+        scroll.add_child(&blocks);
+        self.editor_palette = Some(palette);
+        self.editor_search = Some(search);
+        self.editor_blocks = Some(blocks);
+        self.base_mut().add_child(&panel);
+        self.editor_panel = Some(panel);
+        self._build_editor_teams();
+        self.load_editor_favorites();
+        self.editor_blocks_shown = self._editor_setting_bool("editor-blocks-shown", false);
+        self._apply_editor_collapse();
+    }
+
+    /// `Team.baseTeams` buttons: `Call.setPlayerTeamEditor(player, team)` on
+    /// press, checked while `player.team() == team`.
+    fn _build_editor_teams(&mut self) {
+        let Some(mut row) = self.editor_team_row.clone() else {
+            return;
+        };
+        let group = ButtonGroup::new_gd();
+        for team in mind_core::game::team::Team::base_teams() {
+            let mut button = Button::new_alloc();
+            button.set_name(&format!("team-{}", team.name));
+            button.set_toggle_mode(true);
+            button.set_button_group(&group);
+            button.set_custom_minimum_size(Vector2::new(45.0, 45.0));
+            // `button.getStyle().imageUpColor = team.color` (`Tex.whiteui`
+            // tinted by the team colour).
+            button.set_self_modulate(Color::from_rgba(
+                team.color.r,
+                team.color.g,
+                team.color.b,
+                1.0,
+            ));
+            button.set_tooltip_text(&kit::t(&team.bundle_key()));
+            let mut arguments = Array::<Variant>::new();
+            arguments.push(&i64::from(team.id).to_variant());
+            let callable = self.base().callable("_on_editor_team").bindv(&arguments);
+            let _ = button.connect("pressed", &callable);
+            row.add_child(&button);
+            self.editor_team_buttons.push(button);
+        }
+    }
+
+    /// `editorMain` visibility (`shown() && state.isEditor()`) plus the team
+    /// and block checked states (`button.update(() -> setChecked(...))`).
+    fn _refresh_editor_panel(&mut self) {
+        let editor = self._editor_mode();
+        if editor != self.editor_mode {
+            self.editor_mode = editor;
+            if editor {
+                self.load_editor_favorites();
+                self.editor_blocks_shown = self._editor_setting_bool("editor-blocks-shown", false);
+                self._apply_editor_collapse();
+                self._rebuild_editor_blocks();
+            }
+        }
+        let Some(mut panel) = self.editor_panel.clone() else {
+            return;
+        };
+        panel.set_visible(editor && self.menus_shown);
+        if !editor {
+            return;
+        }
+        self._refresh_editor_teams();
+        let selected = kit::sim_host()
+            .and_then(|node| node.try_cast::<MindSimHost>().ok())
+            .map(|host| host.bind().selected_block().to_string())
+            .unwrap_or_default();
+        for (name, button) in self.editor_block_buttons.iter_mut() {
+            let pressed = *name == selected;
+            if button.is_pressed() != pressed {
+                button.set_pressed(pressed);
+            }
+        }
+    }
+
+    /// Checked team button (`button.update` in `HudFragment.java:511-517`).
+    fn _refresh_editor_teams(&mut self) {
+        let current = kit::sim_host()
+            .and_then(|node| node.try_cast::<MindSimHost>().ok())
+            .map(|host| host.bind().player_team());
+        let Some(current) = current else {
+            return;
+        };
+        for (index, button) in self.editor_team_buttons.iter_mut().enumerate() {
+            let pressed = mind_core::game::team::Team::base_teams()
+                .get(index)
+                .is_some_and(|team| team.id == current);
+            if button.is_pressed() != pressed {
+                button.set_pressed(pressed);
+            }
+        }
+    }
+
+    /// `Call.setPlayerTeamEditor(player, team)` (`HudFragment.java:714-718`);
+    /// `MindSimHost::set_player_team` re-checks `state.isEditor()`.
+    #[func]
+    fn _on_editor_team(&mut self, team: i64) {
+        if let Some(mut host) = kit::sim_host().and_then(|node| node.try_cast::<MindSimHost>().ok())
+            && host.bind_mut().set_player_team(team)
+        {
+            self._refresh_editor_teams();
+        }
+    }
+
+    /// `Core.settings.put("editor-blocks-shown", ...)` collapser toggle.
+    #[func]
+    fn _on_editor_blocks_toggle(&mut self) {
+        self.editor_blocks_shown = !self.editor_blocks_shown;
+        self._editor_set_bool("editor-blocks-shown", self.editor_blocks_shown);
+        self._apply_editor_collapse();
+    }
+
+    /// Applies the collapser state (`t.collapser(...)`).
+    fn _apply_editor_collapse(&mut self) {
+        if let Some(mut palette) = self.editor_palette.clone() {
+            palette.set_visible(self.editor_blocks_shown);
+        }
+        if let Some(mut toggle) = self.editor_toggle.clone() {
+            let icon = if self.editor_blocks_shown {
+                "upOpen"
+            } else {
+                "downOpen"
+            };
+            toggle.set_text(&icons::glyph(icon));
+        }
+    }
+
+    /// `search.field("", text -> rebuildBlockSelection(blockSelection, text))`.
+    #[func]
+    fn _on_editor_search_changed(&mut self, _text: GString) {
+        self._rebuild_editor_blocks();
+    }
+
+    /// Palette cell click: `control.input.block = block`.
+    #[func]
+    fn _on_editor_block(&mut self, name: GString) {
+        if let Some(mut input) = kit::node("/root/Spine/Input") {
+            let _ = input.call("select_block_by_name", &[name.to_variant()]);
+        }
+    }
+
+    /// `button.clicked(KeyCode.mouseRight, () -> toggleFavorite(block))`
+    /// (`HudFragment.java:666-680`).
+    #[func]
+    fn _on_editor_block_input(&mut self, event: Gd<InputEvent>, name: GString) {
+        let Ok(button) = event.try_cast::<InputEventMouseButton>() else {
+            return;
+        };
+        if !button.is_pressed() || button.get_button_index() != MouseButton::RIGHT {
+            return;
+        }
+        self._toggle_editor_favorite(name.to_string().as_str());
+    }
+
+    /// `HudFragment.toggleFavorite` (`HudFragment.java:686-698`): flip the
+    /// persisted `editor-block-favorites` entry and rebuild the grid.
+    fn _toggle_editor_favorite(&mut self, name: &str) {
+        if let Some(index) = self.editor_favorites.iter().position(|entry| entry == name) {
+            self.editor_favorites.remove(index);
+        } else {
+            self.editor_favorites.push(name.to_owned());
+        }
+        self.save_editor_favorites();
+        self._play_editor_sound();
+        self._rebuild_editor_blocks();
+    }
+
+    /// `Sounds.uiFavorite.play(...)` (`HudFragment.java:691-697`).
+    fn _play_editor_sound(&self) {
+        if let Some(mut ui) = kit::ui() {
+            let _ = ui.call("play_ui_sound", &[GString::from("uiFavorite").to_variant()]);
+        }
+    }
+
+    /// `rebuildBlockSelection` (`HudFragment.java:700-776`): favourites first,
+    /// then `removeOre`/`removeWall`, carrying the search filter.
+    fn _rebuild_editor_blocks(&mut self) {
+        let Some(mut grid) = self.editor_blocks.clone() else {
+            return;
+        };
+        for child in grid.get_children().iter_shared() {
+            let mut child = child.clone();
+            child.queue_free();
+        }
+        self.editor_block_buttons.clear();
+        let query = self
+            .editor_search
+            .as_ref()
+            .map(|search| search.get_text().to_string().to_lowercase())
+            .unwrap_or_default();
+        let selected = kit::sim_host()
+            .and_then(|node| node.try_cast::<MindSimHost>().ok())
+            .map(|host| host.bind().selected_block().to_string())
+            .unwrap_or_default();
+        let group = ButtonGroup::new_gd();
+        for (name, label_key) in self._editor_catalog() {
+            let label = kit::t(&label_key);
+            if !query.is_empty() {
+                let name_lower = name.to_lowercase();
+                let label_lower = label.to_string().to_lowercase();
+                if !name_lower.contains(&query) && !label_lower.contains(&query) {
+                    continue;
+                }
+            }
+            let regions = [
+                format!("block-{name}-ui"),
+                format!("block-{name}-full"),
+                name.clone(),
+            ];
+            let region_refs: Vec<&str> = regions.iter().map(String::as_str).collect();
+            let mut button = factory::image_button_first(&region_refs, "selecti");
+            button.set_name(&format!("editor-block-{name}"));
+            button.set_tooltip_text(&label);
+            button.set_toggle_mode(true);
+            button.set_button_group(&group);
+            button.set_custom_minimum_size(Vector2::new(40.0, 40.0));
+            button.set_pressed(name == selected);
+            button.set_expand_icon(true);
+            button.add_theme_constant_override("icon_max_width", 28);
+            if button.get_button_icon().is_none() {
+                button.set_text(&label);
+            }
+            let mut arguments = Array::<Variant>::new();
+            arguments.push(&GString::from(name.as_str()).to_variant());
+            let callable = self.base().callable("_on_editor_block").bindv(&arguments);
+            let _ = button.connect("pressed", &callable);
+            let mut arguments = Array::<Variant>::new();
+            arguments.push(&GString::from(name.as_str()).to_variant());
+            let callable = self
+                .base()
+                .callable("_on_editor_block_input")
+                .bindv(&arguments);
+            let _ = button.connect("gui_input", &callable);
+            grid.add_child(&button);
+            self.editor_block_buttons.push((name, button));
+        }
+    }
+
+    /// The editor palette list (`HudFragment.rebuildBlockSelection`'s filter):
+    /// `inEditor` content plus `removeWall`/`removeOre`, minus `debugOnly` and
+    /// other-planet blocks, favourites first.
+    fn _editor_catalog(&self) -> Vec<(String, String)> {
+        let Some(host) = kit::sim_host().and_then(|node| node.try_cast::<MindSimHost>().ok())
+        else {
+            return Vec::new();
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return Vec::new();
+        };
+        let rules = guard.live_rules().unwrap_or_default();
+        let planet = content.planet_id(&rules.planet);
+        let favorites: HashSet<&str> = self.editor_favorites.iter().map(String::as_str).collect();
+        let mut rows: Vec<(u8, String, String)> = Vec::new();
+        for def in content.blocks() {
+            // `!block.inEditor && !(block instanceof RemoveWall) && !(RemoveOre)`.
+            let remove = matches!(
+                def.kind,
+                mind_core::content::BlockKind::RemoveWall
+                    | mind_core::content::BlockKind::RemoveOre
+            );
+            if !def.in_editor && !remove {
+                continue;
+            }
+            // `block.buildVisibility == BuildVisibility.debugOnly`.
+            if def.build_visibility == mind_core::content::BuildVisibility::DebugOnly {
+                continue;
+            }
+            // `!block.isOnPlanet(state.rules.planet)`.
+            if let Some(planet) = planet
+                && !def.unlock.shown_planets.is_empty()
+                && !def.unlock.shown_planets.contains(&planet)
+            {
+                continue;
+            }
+            let rank = if remove {
+                0
+            } else if favorites.contains(def.name.as_str()) {
+                1
+            } else {
+                2
+            };
+            rows.push((rank, def.name.clone(), format!("block.{}.name", def.name)));
+        }
+        // Stable sort keeps content order inside each rank.
+        rows.sort_by_key(|(rank, _, _)| *rank);
+        rows.into_iter()
+            .map(|(_, name, label)| (name, label))
+            .collect()
+    }
+
+    /// `state.isEditor()` (`Rules.editor`).
+    fn _editor_mode(&self) -> bool {
+        kit::sim_host()
+            .and_then(|node| node.try_cast::<MindSimHost>().ok())
+            .is_some_and(|host| host.bind().live_rules().is_some_and(|rules| rules.editor))
+    }
+
+    /// `Core.settings.getBool(key)` with a Java-style default.
+    fn _editor_setting_bool(&self, key: &str, default: bool) -> bool {
+        kit::ui()
+            .and_then(|mut ui| {
+                ui.call(
+                    "settings_get_flag_default",
+                    &[GString::from(key).to_variant(), default.to_variant()],
+                )
+                .try_to::<bool>()
+                .ok()
+            })
+            .unwrap_or(default)
+    }
+
+    /// `Core.settings.put(key, value)`.
+    fn _editor_set_bool(&self, key: &str, value: bool) {
+        if let Some(mut ui) = kit::ui() {
+            let _ = ui.call(
+                "settings_put_flag",
+                &[GString::from(key).to_variant(), value.to_variant()],
+            );
+        }
+    }
+
+    /// `HudFragment.loadFavorites` (`HudFragment.java:113-116`):
+    /// `Core.settings.getJson("editor-block-favorites", ObjectSet.class,
+    /// String.class, ObjectSet::new)`.
+    fn load_editor_favorites(&mut self) {
+        self.editor_favorites.clear();
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        let Ok(json) = ui
+            .call(
+                "settings_get_text",
+                &[
+                    GString::from("editor-block-favorites").to_variant(),
+                    GString::new().to_variant(),
+                ],
+            )
+            .try_to::<GString>()
+        else {
+            return;
+        };
+        let Ok(serde_json::Value::Array(entries)) =
+            serde_json::from_str::<serde_json::Value>(&json.to_string())
+        else {
+            return;
+        };
+        for entry in entries {
+            if let Some(name) = entry.as_str() {
+                self.editor_favorites.push(name.to_owned());
+            }
+        }
+    }
+
+    /// `HudFragment.saveFavorites` (`HudFragment.java:118-120`).
+    fn save_editor_favorites(&self) {
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        let json = serde_json::to_string(&self.editor_favorites).unwrap_or_default();
+        let _ = ui.call(
+            "settings_put_text",
+            &[
+                GString::from("editor-block-favorites").to_variant(),
+                GString::from(json.as_str()).to_variant(),
+            ],
+        );
+    }
 
     /// View-toggle hotkeys owned by the HUD fragment (`Renderer.drawStatus`).
     #[func]
@@ -544,6 +1130,7 @@ impl MindHudFragment {
         self._refresh_saving();
         self._refresh_loading();
         self._check_game_over();
+        self._refresh_editor_panel();
     }
 
     /// No `MindHud` (bare test host): clear the state-driven banners.
@@ -1328,6 +1915,18 @@ impl MindHudFragment {
     }
 }
 
+/// Decodes `Color.to_rgba32` (`0xRRGGBBAA`, the packed form `MindSimHost`
+/// returns for team colours).
+fn packed_rgba_color(packed: i64) -> Color {
+    let packed = packed as u32;
+    Color::from_rgba8(
+        ((packed >> 24) & 0xFF) as u8,
+        ((packed >> 16) & 0xFF) as u8,
+        ((packed >> 8) & 0xFF) as u8,
+        (packed & 0xFF) as u8,
+    )
+}
+
 /// Reads a `bool` from a JSON dictionary (`false` when absent).
 fn dict_bool(dict: &VarDictionary, key: &str) -> bool {
     dict.get(key)
@@ -1366,9 +1965,284 @@ fn godot_float_text(value: f64) -> String {
     }
 }
 
+// ---- minimap/world ping marker (GAPS #46, PAR-0554) -----------------------
+
+/// `PlayerComp.pingDuration` (`PlayerComp.java:37`): `20f * 60f` ticks = 20 s.
+const PING_DURATION_SECONDS: f32 = 20.0;
+/// `Drawf.square(pingX, pingY, 2f * scaling * s, 45f, ...)` marker radius at
+/// the settled scale (screen pixels; Java scales by `Scl.scl(4)` and the
+/// display scale, which this HUD overlay approximates with a fixed size).
+const PING_MARKER_RADIUS: f32 = 10.0;
+
+/// `Interp.pow5Out` (`Interp.java`).
+fn pow5_out(t: f32) -> f32 {
+    let inv = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - inv * inv * inv * inv * inv
+}
+
+/// `Interp.pow5In` (`Interp.java`).
+fn pow5_in(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * t * t * t
+}
+
+/// `Mathf.map` (`c + (x - a) / (b - a) * (d - c)`); `Interp.apply` clamps.
+fn map_lerp(x: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
+    if (b - a).abs() < f32::EPSILON {
+        return c;
+    }
+    c + (x - a) / (b - a) * (d - c)
+}
+
+/// `PlayerComp.drawPing` (`PlayerComp.java:363-388`) fade + pop scale for the
+/// remaining lifetime in `1.0` (fresh) ..= `0.0` (expired).
+///
+/// `alpha = min(pow5Out(map(pingTime, 1/20, 0, 1, 0)),
+///              pow5Out(map(pingTime, 1, 0.98, 0, 1)))`;
+/// `scaling = 1 + clamp(pow5In(map(pingTime, 1, 0.96, 1, 0))) * 3`.
+pub fn ping_marker(ping_time: f32) -> (f32, f32) {
+    let ping_time = ping_time.clamp(0.0, 1.0);
+    let alpha = pow5_out(map_lerp(ping_time, 1.0 / 20.0, 0.0, 1.0, 0.0))
+        .min(pow5_out(map_lerp(ping_time, 1.0, 0.98, 0.0, 1.0)));
+    let scaling = 1.0 + pow5_in(map_lerp(ping_time, 1.0, 0.96, 1.0, 0.0)) * 3.0;
+    (alpha, scaling)
+}
+
+/// `PlayerComp.drawPing` world marker overlay: the team-coloured diamond +
+/// pointer + the pinging player's name/label, projected through the camera.
+///
+/// Java draws this in the world renderer (`Layer.playerName`), which this
+/// packet may not edit (`gx/render/**`); the HUD owns the equivalent screen
+/// overlay so the ping is visible without a render-layer change. The fullscreen
+/// minimap copy (`MinimapRenderer.java:173`) still needs the minimap widget /
+/// render hook (reported).
+#[derive(GodotClass)]
+#[class(base=Control)]
+pub struct MindPingOverlay {
+    base: Base<Control>,
+    /// Remaining lifetime (`PlayerComp.pingTime`); `<= 0` hides the marker.
+    ping_time: f32,
+    /// Ping world position (`PlayerComp.pingX/pingY`).
+    world: Vector2,
+    /// Projected screen position, refreshed each frame from the camera.
+    screen: Vector2,
+    /// `PlayerComp.pingText` (empty = no label).
+    ping_text: String,
+    /// `PlayerComp.name`.
+    player_name: String,
+    /// `PlayerComp.color` (team colour).
+    color: Color,
+    /// Seconds since the overlay started (the `hover` bob).
+    elapsed: f32,
+    /// Marker name label.
+    name_label: Option<Gd<Label>>,
+    /// Marker ping-text label.
+    text_label: Option<Gd<Label>>,
+}
+
+#[godot_api]
+impl IControl for MindPingOverlay {
+    fn init(base: Base<Control>) -> Self {
+        Self {
+            base,
+            ping_time: 0.0,
+            world: Vector2::ZERO,
+            screen: Vector2::ZERO,
+            ping_text: String::new(),
+            player_name: String::new(),
+            color: Color::WHITE,
+            elapsed: 0.0,
+            name_label: None,
+            text_label: None,
+        }
+    }
+
+    fn ready(&mut self) {
+        self.base_mut().set_anchors_preset(LayoutPreset::FULL_RECT);
+        self.base_mut().set_mouse_filter(MouseFilter::IGNORE);
+        self.base_mut().set_visible(false);
+        self.base_mut().set_process(true);
+        let mut name = Label::new_alloc();
+        name.set_mouse_filter(MouseFilter::IGNORE);
+        self.base_mut().add_child(&name);
+        self.name_label = Some(name);
+        let mut text = Label::new_alloc();
+        text.set_mouse_filter(MouseFilter::IGNORE);
+        text.add_theme_font_size_override("font_size", 12);
+        self.base_mut().add_child(&text);
+        self.text_label = Some(text);
+    }
+
+    fn process(&mut self, delta: f64) {
+        if self.ping_time <= 0.0 {
+            if self.base().is_visible() {
+                self.base_mut().set_visible(false);
+            }
+            return;
+        }
+        self.elapsed += delta as f32;
+        self.ping_time = (self.ping_time - delta as f32 / PING_DURATION_SECONDS).max(0.0);
+        if self.ping_time <= 0.0 {
+            self.base_mut().set_visible(false);
+            return;
+        }
+        self.project();
+        self.place_labels();
+        self.base_mut().queue_redraw();
+    }
+
+    fn draw(&mut self) {
+        if self.ping_time <= 0.0 {
+            return;
+        }
+        let (alpha, scaling) = ping_marker(self.ping_time);
+        if alpha <= 0.0 {
+            return;
+        }
+        let center = self.screen;
+        let radius = PING_MARKER_RADIUS * scaling;
+        let hover = (self.elapsed * 5.0).sin().abs();
+        let mut fill = self.color;
+        // `Tmp.c3.set(Color.darkGray).mul(color).a(Tmp.c1.a)`.
+        fill = Color::from_rgba(fill.r * 0.3, fill.g * 0.3, fill.b * 0.3, alpha.min(fill.a));
+        let stroke = Color::from_rgba(self.color.r, self.color.g, self.color.b, alpha);
+        let points = vec![
+            center + Vector2::new(0.0, -radius),
+            center + Vector2::new(radius, 0.0),
+            center + Vector2::new(0.0, radius),
+            center + Vector2::new(-radius, 0.0),
+        ];
+        let diamond: PackedVector2Array = points.iter().copied().collect();
+        self.base_mut().draw_colored_polygon(&diamond, fill);
+        let mut outline = points.clone();
+        outline.push(points[0]);
+        let outline: PackedVector2Array = outline.into_iter().collect();
+        self.base_mut()
+            .draw_polyline_ex(&outline, stroke)
+            .width(2.0)
+            .done();
+        // `Drawf.fillPoly(pingX, pingY + 9f * s + hover * s, 3, 3f * s, -90f)`.
+        let tip = center + Vector2::new(0.0, 9.0 + hover);
+        let tri: PackedVector2Array = [
+            tip + Vector2::new(0.0, -7.0),
+            tip + Vector2::new(6.0, 5.0),
+            tip + Vector2::new(-6.0, 5.0),
+        ]
+        .into_iter()
+        .collect();
+        self.base_mut().draw_colored_polygon(&tri, stroke);
+    }
+}
+
+#[godot_api]
+impl MindPingOverlay {
+    /// Shows the marker at a world point (`Call.pingLocation` ->
+    /// `PlayerComp.pingX/pingY/pingTime/pingText`).
+    pub fn show_at(&mut self, world: Vector2, ping_text: &str, name: &str, color: Color) {
+        self.world = world;
+        self.ping_text = ping_text.to_owned();
+        self.player_name = name.to_owned();
+        self.color = color;
+        self.ping_time = 1.0;
+        self.elapsed = 0.0;
+        self.project();
+        self.place_labels();
+        self.base_mut().set_visible(true);
+        self.base_mut().queue_redraw();
+    }
+
+    /// Debug read model (`{time, x, y, text, name, visible}`).
+    #[func]
+    pub fn ping_state(&self) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        out.set(&GString::from("time"), &self.ping_time.to_variant());
+        out.set(&GString::from("x"), &self.world.x.to_variant());
+        out.set(&GString::from("y"), &self.world.y.to_variant());
+        out.set(
+            &GString::from("text"),
+            &GString::from(self.ping_text.as_str()).to_variant(),
+        );
+        out.set(
+            &GString::from("name"),
+            &GString::from(self.player_name.as_str()).to_variant(),
+        );
+        out.set(
+            &GString::from("visible"),
+            &self.base().is_visible().to_variant(),
+        );
+        out
+    }
+
+    /// Projects [`Self::world`] through the camera (`world_to_screen`).
+    fn project(&mut self) {
+        let Some(mut camera) = kit::node("/root/Spine/World/Camera2D") else {
+            return;
+        };
+        if !camera.has_method("world_to_screen") {
+            return;
+        }
+        if let Ok(screen) = camera
+            .call(
+                "world_to_screen",
+                &[
+                    f64::from(self.world.x).to_variant(),
+                    f64::from(self.world.y).to_variant(),
+                ],
+            )
+            .try_to::<Vector2>()
+        {
+            self.screen = screen;
+        }
+    }
+
+    /// Positions the name/text labels under the marker.
+    fn place_labels(&mut self) {
+        let Some(mut name) = self.name_label.clone() else {
+            return;
+        };
+        let width = name.get_minimum_size().x;
+        name.set_position(self.screen + Vector2::new(-width / 2.0, 16.0));
+        name.set_text(self.player_name.as_str());
+        name.set_visible(!self.player_name.is_empty());
+        name.remove_theme_color_override("font_color");
+        name.add_theme_color_override("font_color", self.color);
+        let Some(mut text) = self.text_label.clone() else {
+            return;
+        };
+        let width = text.get_minimum_size().x;
+        text.set_position(self.screen + Vector2::new(-width / 2.0, 34.0));
+        text.set_text(self.ping_text.as_str());
+        text.set_visible(!self.ping_text.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ping_marker_matches_player_comp_curve() {
+        // `PlayerComp.pingDuration` is 20 s (`20f * 60f` ticks).
+        assert!((PING_DURATION_SECONDS - 20.0).abs() < f32::EPSILON);
+        // Fresh ping: transparent, popped to 4x (the marker shrinks in).
+        let (alpha, scaling) = ping_marker(1.0);
+        assert!(alpha < 0.0001, "fresh ping fades in, alpha {alpha}");
+        assert!((scaling - 4.0).abs() < f32::EPSILON, "scale {scaling}");
+        // Settled: fully opaque once the 0.4 s fade and the 0.8 s pop finish.
+        let (alpha, scaling) = ping_marker(0.5);
+        assert!((alpha - 1.0).abs() < f32::EPSILON);
+        assert!(
+            (scaling - 1.0).abs() < f32::EPSILON,
+            "settled scale {scaling}"
+        );
+        // Expiring: fades out over the last second.
+        let (alpha, scaling) = ping_marker(0.0);
+        assert!(alpha < 0.0001);
+        assert!((scaling - 1.0).abs() < f32::EPSILON);
+        // Never NaN outside the range.
+        let (alpha, scaling) = ping_marker(2.5);
+        assert!(alpha.is_finite() && scaling.is_finite());
+    }
 
     #[test]
     fn cadence_and_timings_match_the_fragment() {

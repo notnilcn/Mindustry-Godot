@@ -71,6 +71,21 @@ pub trait PlacementWorld {
         let _ = block;
         None
     }
+    /// `Block.size` of a content block in tiles (`BuildPlan.hitbox`, the
+    /// footprint-aware `MobileInput.getPlan`/`checkOverlapPlacement`).
+    ///
+    /// Defaults to `1` so line/path planning keeps working for views without
+    /// content; the live host overrides it from the content registry.
+    fn block_size(&self, block: BlockId) -> i32 {
+        let _ = block;
+        1
+    }
+    /// `Block.offset` of a content block in world pixels (`4` for even-size
+    /// footprints, `0` otherwise; `BuildPlan.drawx`/`drawy`).
+    fn block_offset(&self, block: BlockId) -> f32 {
+        let _ = block;
+        0.0
+    }
 }
 
 /// Bridge placement callback (`Placement.BridgePlacer`).

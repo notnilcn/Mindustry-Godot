@@ -86,6 +86,9 @@ pub struct MobileReplayHarness {
     pub time: f64,
     /// Actions emitted by the run.
     pub actions: SmallVec<[super::action::RemoteAction; 16]>,
+    /// Active block line rules (`line_rules_for`); `None` replays the plain
+    /// no-hook line path. Set through [`MobileReplayHarness::set_rules`].
+    pub rules: Option<super::line_rules::LineRules>,
 }
 
 impl Default for MobileReplayHarness {
@@ -102,7 +105,14 @@ impl MobileReplayHarness {
             cursor: (0.0, 0.0),
             time: 0.0,
             actions: SmallVec::new(),
+            rules: None,
         }
+    }
+
+    /// Installs the active block's line rules so long-press drags replay the
+    /// junction/bridge/node-hook path (`InputHandler.updateLine`).
+    pub fn set_rules(&mut self, rules: Option<super::line_rules::LineRules>) {
+        self.rules = rules;
     }
 
     /// Applies one raw event at `tick`, returning the emitted actions.
@@ -124,7 +134,13 @@ impl MobileReplayHarness {
                     .detector
                     .touch_down(self.time, *x, *y, *pointer);
                 for gesture in gestures {
-                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                    emitted.extend(self.controller.handle_gesture_with(
+                        gesture,
+                        world,
+                        block,
+                        self.rules.as_ref(),
+                        caps,
+                    ));
                 }
             }
             RawEvent::TouchMove { pointer, x, y } => {
@@ -134,7 +150,13 @@ impl MobileReplayHarness {
                     .detector
                     .touch_dragged(self.time, *x, *y, *pointer);
                 for gesture in gestures {
-                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                    emitted.extend(self.controller.handle_gesture_with(
+                        gesture,
+                        world,
+                        block,
+                        self.rules.as_ref(),
+                        caps,
+                    ));
                 }
                 // While in line mode the mobile update loop re-derives the drag
                 // every frame (`MobileInput.update` lineMode branch).
@@ -143,7 +165,8 @@ impl MobileReplayHarness {
                         (*x / crate::config::TILESIZE as f32).floor() as i16,
                         (*y / crate::config::TILESIZE as f32).floor() as i16,
                     );
-                    self.controller.drag_to(world, block, tile);
+                    self.controller
+                        .drag_to_with(world, block, self.rules.as_ref(), tile);
                 }
             }
             RawEvent::TouchUp { pointer, x, y } => {
@@ -153,7 +176,13 @@ impl MobileReplayHarness {
                     .detector
                     .touch_up(self.time, *x, *y, *pointer);
                 for gesture in gestures {
-                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                    emitted.extend(self.controller.handle_gesture_with(
+                        gesture,
+                        world,
+                        block,
+                        self.rules.as_ref(),
+                        caps,
+                    ));
                 }
                 if self.controller.mode.line_mode {
                     if self.controller.state.place_mode.is_placing() {
@@ -187,7 +216,13 @@ impl MobileReplayHarness {
             RawEvent::Action { action, value } => match action.as_str() {
                 "tick" => {
                     if let Some(long) = self.controller.detector.update(self.time) {
-                        emitted.extend(self.controller.handle_gesture(long, world, block, caps));
+                        emitted.extend(self.controller.handle_gesture_with(
+                            long,
+                            world,
+                            block,
+                            self.rules.as_ref(),
+                            caps,
+                        ));
                     }
                 }
                 "confirm" => {
