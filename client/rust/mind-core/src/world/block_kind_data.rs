@@ -15,9 +15,15 @@
 //! plan-02's `BlockDef`. Plan 02's `BlockSpec`/`BlockDef` now exposes the
 //! floor/environment and placement/crush knob fields (plan 02 §6.1 addendum,
 //! `lane/f27-floor-meta`), so [`BlockKindData::from_def`] copies those real
-//! fields. Crafting/drill/logic numeric knobs are still supplied by the
-//! 07-owned [`BlockKindData::apply_vanilla_knobs`] overlay until plan-02
-//! registration grows the corresponding fields (plan 07 §8 R2, still open).
+//! fields. The production family knobs (crafter outputs, drill time/tier/
+//! hardness/blocked items/boosts, pump amount/item time/result/attribute,
+//! wall-crafter boosts, attribute-crafter scaling) and the
+//! `TiledFloor`/`TiledWall`/`WobbleProp` environment knobs are content fields
+//! too (GAPS #56 follow-up), so [`BlockKindData::from_def`] reads them and only
+//! falls back to the upstream class field initializer when the content left
+//! them unset. The 07-owned [`BlockKindData::apply_vanilla_knobs`] overlay is
+//! now the migration-era fallback for `Blocks.java` per-block recipe values
+//! that the generated vanilla waves have not moved onto `BlockSpec` yet.
 //! The enum shape itself is the frozen interface.
 
 use crate::content::{BlockDef, BlockKind};
@@ -243,6 +249,9 @@ pub struct SolidPumpDef {
     pub attribute: String,
     /// `SolidPump.baseEfficiency`.
     pub base_efficiency: f32,
+    /// `SolidPump.result` (`SolidPump.java:22`, default `Liquids.water`; the
+    /// content `pumpLiquid` field). `None` = the class default.
+    pub result: Option<u16>,
 }
 
 impl Default for SolidPumpDef {
@@ -253,6 +262,7 @@ impl Default for SolidPumpDef {
             pump_amount: 0.2,
             attribute: String::new(),
             base_efficiency: 1.0,
+            result: Some(crate::content::LiquidId::WATER.raw()),
         }
     }
 }
@@ -425,6 +435,11 @@ pub struct FloorDef {
     pub speed_multiplier: f32,
     /// Ticks to drown (`Floor.drownTime`; plan 10/11).
     pub drown_time: f32,
+    /// `TiledFloor.maxSize` (`TiledFloor.java:17`; `0` = not a tiled floor):
+    /// largest packed square the floor renderer may assemble. Tiled floors are
+    /// still `Floor` family data; the `max_size` value selects the packed-tile
+    /// draw path.
+    pub max_size: i32,
 }
 
 /// `OverlayFloor` family knobs.
@@ -448,6 +463,9 @@ pub struct OreDef {
 pub struct StaticWallDef {
     /// Whether the 2×2 large variant applies.
     pub large: bool,
+    /// `TiledWall.maxSize` (`TiledWall.java:16`; `0` = not a tiled wall):
+    /// largest packed square the wall renderer may assemble.
+    pub max_size: i32,
 }
 
 /// `Prop`/`StaticProp` family knobs.
@@ -455,6 +473,14 @@ pub struct StaticWallDef {
 pub struct PropDef {
     /// Draw layer (`Prop.layer`).
     pub layer: f32,
+    /// `WobbleProp.wscl` (`WobbleProp.java:9`, class default 25).
+    pub wobble_scale: f32,
+    /// `WobbleProp.wmag` (class default 0.4).
+    pub wobble_magnitude: f32,
+    /// `WobbleProp.wtscl` (class default 1).
+    pub wobble_time_scale: f32,
+    /// `WobbleProp.wmag2` (class default 1).
+    pub wobble_magnitude2: f32,
 }
 
 /// `Cliff` family knobs.
@@ -847,18 +873,79 @@ pub enum BlockKindData {
     None,
 }
 
+/// Resolves the `GenericCrafter` content knobs onto the class field
+/// initializers (`GenericCrafter.java:22-39`). Content wins; unset stays the
+/// Java default.
+fn crafter_from_def(def: &BlockDef) -> CrafterDef {
+    let defaults = CrafterDef::default();
+    CrafterDef {
+        // A zero `craft_time` means the content did not override it, so the
+        // class default applies (mod blocks/patches inherit it).
+        craft_time: if def.craft_time > 0.0 {
+            def.craft_time
+        } else {
+            defaults.craft_time
+        },
+        output_items: def
+            .output_items
+            .iter()
+            .map(|stack| (stack.item.raw(), stack.amount))
+            .collect(),
+        output_liquids: def
+            .output_liquids
+            .iter()
+            .map(|(liquid, amount)| (liquid.raw(), *amount))
+            .collect(),
+        liquid_output_directions: if def.liquid_output_directions.is_empty() {
+            defaults.liquid_output_directions
+        } else {
+            def.liquid_output_directions.clone()
+        },
+        ignore_liquid_fullness: def.ignore_liquid_fullness,
+    }
+}
+
+/// Resolves the `Drill` content knobs (`Drill.java:26-42`) with the family's
+/// class defaults passed in (a burst drill's constructor zeroes
+/// `hardnessDrillMultiplier`, `BurstDrill.java:35-44`).
+fn drill_from_def(def: &BlockDef, defaults: DrillDef) -> DrillDef {
+    DrillDef {
+        drill_time: def.drill_time.unwrap_or(defaults.drill_time),
+        tier: def.drill_tier.unwrap_or(defaults.tier),
+        hardness_drill_multiplier: def
+            .hardness_drill_multiplier
+            .unwrap_or(defaults.hardness_drill_multiplier),
+        drill_multipliers: def
+            .drill_multipliers
+            .iter()
+            .map(|(item, multiplier)| (item.raw(), *multiplier))
+            .collect(),
+        blocked_items: def.blocked_items.iter().map(|item| item.raw()).collect(),
+        wall_drill: defaults.wall_drill,
+        liquid_boost_intensity: def
+            .liquid_boost_intensity
+            .unwrap_or(defaults.liquid_boost_intensity),
+        warmup_speed: def.warmup_speed.unwrap_or(defaults.warmup_speed),
+    }
+}
+
 impl BlockKindData {
     /// Derives the typed data from an existing metadata record.
     ///
-    /// Plan 02 does not yet expose per-family knob fields (see the module note),
-    /// so family defaults are produced here. Values sourced from `BlockDef`
-    /// (e.g. `item_drop`) are copied where the metadata already carries them.
+    /// Per-family knobs are copied from [`BlockDef`] when the content set them;
+    /// otherwise the upstream class field initializer applies (mod blocks and
+    /// patches inherit it). `apply_vanilla_knobs` remains the fallback for the
+    /// `Blocks.java` per-block recipe values the vanilla waves have not moved
+    /// onto `BlockSpec` yet.
     pub fn from_def(def: &BlockDef) -> Self {
         match def.kind {
             BlockKind::ConstructBlock => BlockKindData::Construct {
                 size: def.size.clamp(1, 16) as u8,
             },
-            BlockKind::Floor | BlockKind::EmptyFloor | BlockKind::ColoredFloor => {
+            BlockKind::Floor
+            | BlockKind::EmptyFloor
+            | BlockKind::ColoredFloor
+            | BlockKind::TiledFloor => {
                 BlockKindData::Floor(FloorDef {
                     blend_group: 0,
                     is_deep: def.is_deep,
@@ -866,6 +953,12 @@ impl BlockKindData {
                     shallow: def.shallow,
                     speed_multiplier: def.speed_multiplier,
                     drown_time: def.drown_time,
+                    // `TiledFloor.maxSize = 3` (`TiledFloor.java:17`).
+                    max_size: if def.kind == BlockKind::TiledFloor {
+                        if def.max_size > 0 { def.max_size } else { 3 }
+                    } else {
+                        def.max_size
+                    },
                 })
             }
             BlockKind::OverlayFloor | BlockKind::CharacterOverlay | BlockKind::RuneOverlay => {
@@ -877,15 +970,31 @@ impl BlockKindData {
                 item_drop: def.item_drop.map(|item| item.raw()),
                 ore_scale: def.ore_scale,
             }),
-            BlockKind::StaticWall | BlockKind::ColoredWall => {
+            BlockKind::StaticWall | BlockKind::ColoredWall | BlockKind::TiledWall => {
                 BlockKindData::StaticWall(StaticWallDef {
                     large: def.size >= 2,
+                    // `TiledWall.maxSize = 3` (`TiledWall.java:16`).
+                    max_size: if def.kind == BlockKind::TiledWall {
+                        if def.max_size > 0 { def.max_size } else { 3 }
+                    } else {
+                        def.max_size
+                    },
                 })
             }
             BlockKind::Prop
             | BlockKind::StaticProp
             | BlockKind::StaticTree
             | BlockKind::TreeBlock => BlockKindData::Prop(PropDef::default()),
+            // `WobbleProp extends Prop` (`WobbleProp.java:8`); the class field
+            // initializers are `wscl = 25f`, `wmag = 0.4f`, `wtscl = 1f`,
+            // `wmag2 = 1f` (`WobbleProp.java:9`).
+            BlockKind::WobbleProp => BlockKindData::Prop(PropDef {
+                layer: 0.0,
+                wobble_scale: def.wobble_scale.unwrap_or(25.0),
+                wobble_magnitude: def.wobble_magnitude.unwrap_or(0.4),
+                wobble_time_scale: def.wobble_time_scale.unwrap_or(1.0),
+                wobble_magnitude2: def.wobble_magnitude2.unwrap_or(1.0),
+            }),
             BlockKind::Cliff | BlockKind::TallBlock => BlockKindData::Cliff(CliffDef::default()),
             BlockKind::ShallowLiquid => BlockKindData::ShallowLiquid(ShallowLiquidDef {
                 shallow: true,
@@ -903,41 +1012,124 @@ impl BlockKindData {
             BlockKind::GenericCrafter | BlockKind::HeatCrafter | BlockKind::HeatProducer => {
                 // `HeatProducer` extends `GenericCrafter` (`HeatProducer.java:1`);
                 // the kind data carries its craft loop exactly like a heat
-                // crafter (T1: oxidation-chamber's oxide output). A zero
-                // `craft_time` means the content did not override it, so the
-                // class default applies (mod blocks/patches inherit it).
-                BlockKindData::Crafter(CrafterDef {
-                    craft_time: if def.craft_time > 0.0 {
-                        def.craft_time
-                    } else {
-                        CrafterDef::default().craft_time
-                    },
-                    ..CrafterDef::default()
+                // crafter (T1: oxidation-chamber's oxide output).
+                BlockKindData::Crafter(crafter_from_def(def))
+            }
+            BlockKind::AttributeCrafter => {
+                let defaults = AttributeCrafterDef::default();
+                // `AttributeCrafter.attribute` is an `Attribute` enum; the
+                // content field is its name (`AttributeCrafter.java:15`).
+                let attribute = def
+                    .attribute
+                    .as_deref()
+                    .and_then(crate::world::attributes::attribute_from_name)
+                    .map_or(defaults.attribute, |attribute| {
+                        crate::world::attributes::attribute_index(attribute) as i16
+                    });
+                BlockKindData::AttributeCrafter(AttributeCrafterDef {
+                    crafter: crafter_from_def(def),
+                    attribute,
+                    base_efficiency: def.base_efficiency.unwrap_or(defaults.base_efficiency),
+                    boost_scale: def.boost_scale.unwrap_or(defaults.boost_scale),
+                    min_efficiency: def.min_efficiency.unwrap_or(defaults.min_efficiency),
+                    max_boost: def.max_boost.unwrap_or(defaults.max_boost),
+                    output_scale: def.output_scale.unwrap_or(defaults.output_scale),
+                    scale_liquid_consumption: def
+                        .scale_liquid_consumption
+                        .unwrap_or(defaults.scale_liquid_consumption),
+                    display_efficiency: def
+                        .display_efficiency
+                        .unwrap_or(defaults.display_efficiency),
+                    display_scaled_output: def
+                        .display_scaled_output
+                        .unwrap_or(defaults.display_scaled_output),
                 })
             }
-            BlockKind::AttributeCrafter => BlockKindData::AttributeCrafter(AttributeCrafterDef {
-                crafter: CrafterDef {
-                    craft_time: if def.craft_time > 0.0 {
-                        def.craft_time
-                    } else {
-                        CrafterDef::default().craft_time
-                    },
-                    ..CrafterDef::default()
-                },
-                ..AttributeCrafterDef::default()
+            BlockKind::Drill => BlockKindData::Drill(drill_from_def(def, DrillDef::default())),
+            BlockKind::BurstDrill => {
+                // `BurstDrill`'s constructor overrides the drill defaults
+                // (`hardnessDrillMultiplier = 0`, `BurstDrill.java:35-44`);
+                // `invertedTime` keeps its own field initializer.
+                let defaults = BurstDrillDef::default();
+                BlockKindData::BurstDrill(BurstDrillDef {
+                    drill: drill_from_def(def, defaults.drill.clone()),
+                    burst_time: defaults.burst_time,
+                    inverted_time: def.inverted_time.unwrap_or(defaults.inverted_time),
+                    drill_multiplier: defaults.drill_multiplier,
+                })
+            }
+            BlockKind::BeamDrill => {
+                let defaults = BeamDrillDef::default();
+                BlockKindData::BeamDrill(BeamDrillDef {
+                    range: def.beam_range.unwrap_or(defaults.range),
+                    drill_time: def.drill_time.unwrap_or(defaults.drill_time),
+                    tier: def.drill_tier.unwrap_or(defaults.tier),
+                    blocked_items: def.blocked_items.iter().map(|item| item.raw()).collect(),
+                })
+            }
+            BlockKind::Pump => BlockKindData::Pump(PumpDef {
+                pump_amount: def
+                    .pump_amount
+                    .unwrap_or_else(|| PumpDef::default().pump_amount),
             }),
-            BlockKind::Drill => BlockKindData::Drill(DrillDef::default()),
-            BlockKind::BurstDrill => BlockKindData::BurstDrill(BurstDrillDef::default()),
-            BlockKind::BeamDrill => BlockKindData::BeamDrill(BeamDrillDef::default()),
-            BlockKind::Pump => BlockKindData::Pump(PumpDef::default()),
-            BlockKind::SolidPump => BlockKindData::SolidPump(SolidPumpDef::default()),
-            BlockKind::Fracker => BlockKindData::Fracker(FrackerDef::default()),
-            BlockKind::WallCrafter => BlockKindData::WallCrafter(WallCrafterDef::default()),
+            BlockKind::SolidPump => {
+                let defaults = SolidPumpDef::default();
+                BlockKindData::SolidPump(SolidPumpDef {
+                    pump_amount: def.pump_amount.unwrap_or(defaults.pump_amount),
+                    attribute: def.attribute.clone().unwrap_or(defaults.attribute),
+                    base_efficiency: def.base_efficiency.unwrap_or(defaults.base_efficiency),
+                    result: def
+                        .pump_liquid
+                        .map(|liquid| liquid.raw())
+                        .or(defaults.result),
+                })
+            }
+            BlockKind::Fracker => {
+                let defaults = FrackerDef::default();
+                BlockKindData::Fracker(FrackerDef {
+                    item_use_time: def.item_use_time.unwrap_or(defaults.item_use_time),
+                    pump_amount: def.pump_amount.unwrap_or(defaults.pump_amount),
+                    result: def
+                        .pump_liquid
+                        .map(|liquid| liquid.raw())
+                        .or(defaults.result),
+                    attribute: def.attribute.clone().unwrap_or(defaults.attribute),
+                    base_efficiency: def.base_efficiency.unwrap_or(defaults.base_efficiency),
+                })
+            }
+            BlockKind::WallCrafter => {
+                let defaults = WallCrafterDef::default();
+                BlockKindData::WallCrafter(WallCrafterDef {
+                    drill_time: def.drill_time.unwrap_or(defaults.drill_time),
+                    attribute: def.attribute.clone().unwrap_or(defaults.attribute),
+                    output: def.output_item.map(|item| item.raw()).or(defaults.output),
+                    liquid_boost_intensity: def
+                        .liquid_boost_intensity
+                        .unwrap_or(defaults.liquid_boost_intensity),
+                    item_boost_intensity: def
+                        .item_boost_intensity
+                        .unwrap_or(defaults.item_boost_intensity),
+                    boost_item_use_time: def
+                        .boost_item_use_time
+                        .unwrap_or(defaults.boost_item_use_time),
+                    has_liquid_booster: defaults.has_liquid_booster,
+                })
+            }
             BlockKind::Separator => BlockKindData::Separator(SeparatorDef {
                 // `Separator extends Block` (not `GenericCrafter`), so its
                 // `craftTime` is content data, not a class default.
                 craft_time: def.craft_time,
-                ..SeparatorDef::default()
+                results: if def.separator_results.is_empty() {
+                    def.output_items
+                        .iter()
+                        .map(|stack| (stack.item.raw(), stack.amount))
+                        .collect()
+                } else {
+                    def.separator_results
+                        .iter()
+                        .map(|stack| (stack.item.raw(), stack.amount))
+                        .collect()
+                },
             }),
             BlockKind::Incinerator | BlockKind::ItemIncinerator => {
                 BlockKindData::Incinerator(IncineratorDef::default())
@@ -1003,14 +1195,14 @@ impl BlockKindData {
         }
     }
 
-    /// Applies 07-owned interim vanilla family knobs.
+    /// Applies the legacy `Blocks.java` per-block vanilla recipe overlay.
     ///
-    /// Plan 02's generated `BlockSpec`/`BlockDef` does not yet carry the
-    /// per-family knob fields (plan 07 §8 R2, orchestrator action). Until it
-    /// does, this table supplies the numeric knobs for the vanilla blocks this
-    /// plan's behaviors and scenarios exercise. It is **07-owned** and does not
-    /// mutate plan-02 metadata; when `BlockDef` grows the fields, this becomes a
-    /// no-op and behavior code is unchanged.
+    /// The family knobs are content fields on [`BlockDef`] now (GAPS #56
+    /// follow-up), and [`Self::from_def`] copies them; this table remains the
+    /// fallback for the `Blocks.java` per-block values the generated vanilla
+    /// waves have not moved onto `BlockSpec` yet. Mod blocks never match a
+    /// vanilla name, so their content values always win. It is **07-owned** and
+    /// does not mutate plan-02 metadata.
     pub fn apply_vanilla_knobs(&mut self, content: &crate::content::ContentRegistry, name: &str) {
         let item = |n: &str| content.item_id(n).map(|id| id.raw()).unwrap_or(0);
         let liquid = |n: &str| content.liquid_id(n).map(|id| id.raw()).unwrap_or(0);
@@ -1855,5 +2047,276 @@ mod tests {
             BlockKindData::from_def(build2),
             BlockKindData::Construct { size: 2 }
         );
+    }
+
+    /// GAPS #56 follow-up: the production family knobs are content fields now
+    /// (`BlockDef`), so a mod block of a vanilla class carries the JSON values
+    /// into `BlockKindData` instead of the class defaults.
+    #[test]
+    fn content_family_knobs_populate_kind_data() {
+        let content = test_registry();
+        let item = |name: &str| content.item_id(name).expect("item");
+        let liquid = |name: &str| content.liquid_id(name).expect("liquid");
+        let base = |name: &str| content.block_by_name(name).expect(name).clone();
+
+        // `GenericCrafter` outputs (`GenericCrafter.java:22-39`).
+        let mut crafter = base("graphite-press");
+        crafter.name = String::from("mod-test-crafter");
+        crafter.craft_time = 0.0;
+        crafter.output_items = vec![crate::content::ItemStack::new(item("graphite"), 7)];
+        crafter.output_liquids = vec![(liquid("water"), 0.5)];
+        crafter.liquid_output_directions = vec![1, 3];
+        crafter.ignore_liquid_fullness = true;
+        let kind = BlockKindData::from_def(&crafter);
+        match &kind {
+            BlockKindData::Crafter(def) => {
+                assert_eq!(def.craft_time, 80.0, "class default craftTime");
+                assert_eq!(def.output_items, vec![(item("graphite").raw(), 7)]);
+                assert_eq!(def.output_liquids, vec![(liquid("water").raw(), 0.5)]);
+                assert_eq!(def.liquid_output_directions, vec![1, 3]);
+                assert!(def.ignore_liquid_fullness);
+            }
+            other => panic!("expected Crafter, got {other:?}"),
+        }
+        // Vanilla names keep the `Blocks.java` overlay values, but a mod name is
+        // untouched by it (content wins).
+        let mut overlaid = kind.clone();
+        overlaid.apply_vanilla_knobs(&content, "mod-test-crafter");
+        assert_eq!(overlaid, kind);
+
+        // `Drill` (`Drill.java:26-42`).
+        let mut drill = base("mechanical-drill");
+        drill.name = String::from("mod-test-drill");
+        drill.drill_time = Some(111.0);
+        drill.drill_tier = Some(4);
+        drill.hardness_drill_multiplier = Some(0.0);
+        drill.blocked_items = vec![item("thorium")];
+        drill.drill_multipliers = vec![(item("beryllium"), 2.0)];
+        drill.liquid_boost_intensity = Some(1.9);
+        drill.warmup_speed = Some(0.02);
+        match BlockKindData::from_def(&drill) {
+            BlockKindData::Drill(def) => {
+                assert_eq!(def.drill_time, 111.0);
+                assert_eq!(def.tier, 4);
+                assert_eq!(def.hardness_drill_multiplier, 0.0);
+                assert_eq!(def.blocked_items, vec![item("thorium").raw()]);
+                assert_eq!(def.drill_multipliers, vec![(item("beryllium").raw(), 2.0)]);
+                assert_eq!(def.liquid_boost_intensity, 1.9);
+                assert_eq!(def.warmup_speed, 0.02);
+            }
+            other => panic!("expected Drill, got {other:?}"),
+        }
+
+        // `BurstDrill` (`BurstDrill.java:26,35-44`).
+        let mut burst = base("impact-drill");
+        burst.name = String::from("mod-test-burst");
+        burst.drill_time = Some(640.0);
+        burst.drill_tier = Some(6);
+        burst.inverted_time = Some(120.0);
+        match BlockKindData::from_def(&burst) {
+            BlockKindData::BurstDrill(def) => {
+                assert_eq!(def.drill.drill_time, 640.0);
+                assert_eq!(def.drill.tier, 6);
+                assert_eq!(def.drill.hardness_drill_multiplier, 0.0);
+                assert_eq!(def.inverted_time, 120.0);
+            }
+            other => panic!("expected BurstDrill, got {other:?}"),
+        }
+
+        // `BeamDrill` (`BeamDrill.java:38-41`).
+        let mut beam = base("plasma-bore");
+        beam.name = String::from("mod-test-beam");
+        beam.beam_range = Some(9);
+        beam.drill_time = Some(90.0);
+        beam.drill_tier = Some(8);
+        beam.blocked_items = vec![item("sand")];
+        match BlockKindData::from_def(&beam) {
+            BlockKindData::BeamDrill(def) => {
+                assert_eq!(def.range, 9);
+                assert_eq!(def.drill_time, 90.0);
+                assert_eq!(def.tier, 8);
+                assert_eq!(def.blocked_items, vec![item("sand").raw()]);
+            }
+            other => panic!("expected BeamDrill, got {other:?}"),
+        }
+
+        // `Pump`/`SolidPump`/`Fracker` (`Pump.java:20`, `SolidPump.java:22-26`,
+        // `Fracker.java:8`).
+        let mut pump = base("rotary-pump");
+        pump.name = String::from("mod-test-pump");
+        pump.pump_amount = Some(0.37);
+        assert_eq!(
+            BlockKindData::from_def(&pump),
+            BlockKindData::Pump(PumpDef { pump_amount: 0.37 })
+        );
+
+        let mut solid = base("water-extractor");
+        solid.name = String::from("mod-test-solid-pump");
+        solid.pump_amount = Some(0.42);
+        solid.attribute = Some(String::from("oil"));
+        solid.base_efficiency = Some(0.25);
+        solid.pump_liquid = Some(liquid("oil"));
+        match BlockKindData::from_def(&solid) {
+            BlockKindData::SolidPump(def) => {
+                assert_eq!(def.pump_amount, 0.42);
+                assert_eq!(def.attribute, "oil");
+                assert_eq!(def.base_efficiency, 0.25);
+                assert_eq!(def.result, Some(liquid("oil").raw()));
+            }
+            other => panic!("expected SolidPump, got {other:?}"),
+        }
+
+        let mut fracker = base("oil-extractor");
+        fracker.name = String::from("mod-test-fracker");
+        fracker.item_use_time = Some(45.0);
+        fracker.pump_liquid = Some(liquid("slag"));
+        match BlockKindData::from_def(&fracker) {
+            BlockKindData::Fracker(def) => {
+                assert_eq!(def.item_use_time, 45.0);
+                assert_eq!(def.result, Some(liquid("slag").raw()));
+            }
+            other => panic!("expected Fracker, got {other:?}"),
+        }
+
+        // `WallCrafter` (`WallCrafter.java:28-49`).
+        let mut wall = base("cliff-crusher");
+        wall.name = String::from("mod-test-wall-crafter");
+        wall.drill_time = Some(80.0);
+        wall.attribute = Some(String::from("sand"));
+        wall.output_item = Some(item("metaglass"));
+        wall.liquid_boost_intensity = Some(1.4);
+        wall.item_boost_intensity = Some(1.3);
+        wall.boost_item_use_time = Some(70.0);
+        match BlockKindData::from_def(&wall) {
+            BlockKindData::WallCrafter(def) => {
+                assert_eq!(def.drill_time, 80.0);
+                assert_eq!(def.attribute, "sand");
+                assert_eq!(def.output, Some(item("metaglass").raw()));
+                assert_eq!(def.liquid_boost_intensity, 1.4);
+                assert_eq!(def.item_boost_intensity, 1.3);
+                assert_eq!(def.boost_item_use_time, 70.0);
+            }
+            other => panic!("expected WallCrafter, got {other:?}"),
+        }
+
+        // `AttributeCrafter` (`AttributeCrafter.java:15-31`).
+        let mut attribute = base("cultivator");
+        attribute.name = String::from("mod-test-attribute");
+        attribute.attribute = Some(String::from("steam"));
+        attribute.base_efficiency = Some(0.3);
+        attribute.boost_scale = Some(0.25);
+        attribute.min_efficiency = Some(-0.5);
+        attribute.max_boost = Some(3.0);
+        attribute.output_scale = Some(0.2);
+        attribute.scale_liquid_consumption = Some(true);
+        attribute.display_efficiency = Some(false);
+        attribute.display_scaled_output = Some(false);
+        match BlockKindData::from_def(&attribute) {
+            BlockKindData::AttributeCrafter(def) => {
+                // `steam` is index 4 in `world::attributes::ATTRIBUTE_NAMES`.
+                assert_eq!(def.attribute, 4);
+                assert_eq!(def.base_efficiency, 0.3);
+                assert_eq!(def.boost_scale, 0.25);
+                assert_eq!(def.min_efficiency, -0.5);
+                assert_eq!(def.max_boost, 3.0);
+                assert_eq!(def.output_scale, 0.2);
+                assert!(def.scale_liquid_consumption);
+                assert!(!def.display_efficiency);
+                assert!(!def.display_scaled_output);
+            }
+            other => panic!("expected AttributeCrafter, got {other:?}"),
+        }
+
+        // `Separator.results` (`Separator.java:20`).
+        let mut separator = base("separator");
+        separator.name = String::from("mod-test-separator");
+        separator.separator_results = vec![crate::content::ItemStack::new(item("metaglass"), 1)];
+        match BlockKindData::from_def(&separator) {
+            BlockKindData::Separator(def) => {
+                assert_eq!(def.results, vec![(item("metaglass").raw(), 1)]);
+            }
+            other => panic!("expected Separator, got {other:?}"),
+        }
+    }
+
+    /// GAPS #56 follow-up: `TiledFloor`/`TiledWall`/`WobbleProp` carry their
+    /// class-specific knobs (`TiledFloor.java:17`, `TiledWall.java:16`,
+    /// `WobbleProp.java:9`) and classify as the environment families they
+    /// extend.
+    #[test]
+    fn tiled_and_wobble_kinds_get_class_defaults() {
+        let content = test_registry();
+        let base = content.block_by_name("router").expect("router").clone();
+        let with_kind = |kind: BlockKind| {
+            let mut def = base.clone();
+            def.name = String::from("mod-env-block");
+            def.kind = kind;
+            def.max_size = 0;
+            def.wobble_scale = None;
+            def.wobble_magnitude = None;
+            def.wobble_time_scale = None;
+            def.wobble_magnitude2 = None;
+            def
+        };
+
+        // `maxSize = 3` class default.
+        match BlockKindData::from_def(&with_kind(BlockKind::TiledFloor)) {
+            BlockKindData::Floor(def) => assert_eq!(def.max_size, 3),
+            other => panic!("expected Floor, got {other:?}"),
+        }
+        match BlockKindData::from_def(&with_kind(BlockKind::TiledWall)) {
+            BlockKindData::StaticWall(def) => assert_eq!(def.max_size, 3),
+            other => panic!("expected StaticWall, got {other:?}"),
+        }
+        match BlockKindData::from_def(&with_kind(BlockKind::WobbleProp)) {
+            BlockKindData::Prop(def) => {
+                assert_eq!(def.wobble_scale, 25.0, "WobbleProp.wscl");
+                assert_eq!(def.wobble_magnitude, 0.4, "WobbleProp.wmag");
+                assert_eq!(def.wobble_time_scale, 1.0, "WobbleProp.wtscl");
+                assert_eq!(def.wobble_magnitude2, 1.0, "WobbleProp.wmag2");
+            }
+            other => panic!("expected Prop, got {other:?}"),
+        }
+
+        // Content values win over the class default.
+        let mut tiled = with_kind(BlockKind::TiledFloor);
+        tiled.max_size = 4;
+        match BlockKindData::from_def(&tiled) {
+            BlockKindData::Floor(def) => assert_eq!(def.max_size, 4),
+            other => panic!("expected Floor, got {other:?}"),
+        }
+        let mut wobble = with_kind(BlockKind::WobbleProp);
+        wobble.wobble_scale = Some(40.0);
+        wobble.wobble_magnitude = Some(0.9);
+        wobble.wobble_time_scale = Some(2.5);
+        wobble.wobble_magnitude2 = Some(0.0);
+        match BlockKindData::from_def(&wobble) {
+            BlockKindData::Prop(def) => {
+                assert_eq!(def.wobble_scale, 40.0);
+                assert_eq!(def.wobble_magnitude, 0.9);
+                assert_eq!(def.wobble_time_scale, 2.5);
+                assert_eq!(def.wobble_magnitude2, 0.0);
+            }
+            other => panic!("expected Prop, got {other:?}"),
+        }
+
+        // Family dispatch stays environment for all three.
+        for kind in [
+            BlockKind::TiledFloor,
+            BlockKind::TiledWall,
+            BlockKind::WobbleProp,
+        ] {
+            assert_eq!(
+                BlockKindData::from_def(&with_kind(kind)).family(),
+                BlockFamily::Environment,
+                "{} family",
+                kind.name()
+            );
+        }
+        // `is_floor_kind` is the renderer/placement gate: only `TiledFloor`
+        // extends `Floor`.
+        assert!(crate::content::is_floor_kind(BlockKind::TiledFloor));
+        assert!(!crate::content::is_floor_kind(BlockKind::TiledWall));
+        assert!(!crate::content::is_floor_kind(BlockKind::WobbleProp));
     }
 }

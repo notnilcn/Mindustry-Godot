@@ -221,6 +221,51 @@ impl UnitFactoryBehavior {
             }
         }
     }
+
+    /// `payload = new UnitPayload(unit); payVector.setZero();` half of
+    /// `UnitFactoryBuild.updateTile` (`UnitFactory.java:424-444`).
+    ///
+    /// The finished unit is a *carried* payload (outside `Groups.unit` until
+    /// `moveOutPayload` dumps it onto the ground/front block), so the
+    /// factory -> payload-block chain matches Java instead of spawning the unit
+    /// into the world directly.
+    fn create_output_payload(
+        &self,
+        world: &mut World,
+        e: Entity,
+        def: &UnitTypeDef,
+        team: u8,
+        command: Option<UnitCommandId>,
+    ) {
+        let Some(pos) = world.get::<Pos>(e).copied() else {
+            return;
+        };
+        let rotation = crate::world::blocks::payloads::payload_block::rot_deg(world, e);
+        let payload =
+            crate::sim::unit_runtime::spawn_unit_payload(world, def, team, pos.x, pos.y, rotation);
+        let Some(entity) = payload.entity else {
+            return;
+        };
+        // `unit.command().command(command == null && type.defaultCommand != null
+        // ? type.defaultCommand : command)` (`UnitFactory.java:433-438`).
+        if let Some(mut slot) = world.get_mut::<crate::ai::controller::ControllerSlot>(entity)
+            && slot.kind == crate::ai::controller::AiKind::Command
+            && let Some(command) = command.or(def.default_command)
+        {
+            slot.command = Some(command);
+        }
+        // `payload = ...; payVector.setZero(); payRotation` follows the block
+        // facing (the factory sets `payRotation = rotdeg()` in `draw`).
+        crate::world::blocks::payloads::handle_payload(world, e, e, payload);
+        if let Some(mut holder) = world.get_mut::<crate::world::blocks::payloads::PayloadHolder>(e)
+        {
+            holder.pay_rotation = rotation;
+        }
+        // `Events.fire(new UnitCreateEvent(payload.unit, this))`
+        // (`UnitFactory.java:442`): fires when the payload is created, before
+        // it is added to the world.
+        crate::game::stats::notify_unit_created(world, entity, Some(&def.name));
+    }
 }
 
 impl BuildingBehavior for UnitFactoryBehavior {
@@ -269,16 +314,29 @@ impl BuildingBehavior for UnitFactoryBehavior {
         // `UnitFactoryBuild.created()`: auto-set to the first plan.
         state.current_plan = self.default_plan;
         world.entity_mut(e).insert(state);
+        // `UnitBlock extends PayloadBlock`: the factory carries its output in
+        // the shared `PayloadHolder` slot (`UnitBlock.java:26`).
+        if world
+            .get::<crate::world::blocks::payloads::PayloadHolder>(e)
+            .is_none()
+        {
+            world
+                .entity_mut(e)
+                .insert(crate::world::blocks::payloads::PayloadHolder::default());
+        }
     }
 
     /// `UnitFactory.shouldConsume` (`UnitFactory.java:453-456`): `currentPlan !=
-    /// -1 && enabled && payload == null`. The port has no payload slot, so the
-    /// payload term is skipped (T1).
+    /// -1 && enabled && payload == null` (`enabled` is gated by
+    /// `update_consumption` before this hook).
     fn should_consume(&self, world: &World, e: Entity) -> bool {
         world
             .get::<UnitFactoryBuild>(e)
             .map(|state| state.current_plan >= 0)
             .unwrap_or(false)
+            && world
+                .get::<crate::world::blocks::payloads::PayloadHolder>(e)
+                .is_none_or(|holder| holder.payload.is_none())
     }
 
     fn config_kinds(&self) -> &'static [ConfigKind] {
@@ -378,62 +436,89 @@ impl BuildingBehavior for UnitFactoryBehavior {
         let Some(mut state) = world.entity_mut(e).take::<UnitFactoryBuild>() else {
             return;
         };
-        // `time += edelta() * speedScl * Vars.state.rules.unitBuildSpeed(team)`
-        // and `progress += edelta() * unitBuildSpeed(team)`: `edelta()` carries
-        // `Building.efficiency`, so the power gate works through it.
+        // `if(currentPlan < 0 || currentPlan >= plans.size) currentPlan = -1`.
+        if state.current_plan >= 0
+            && usize::try_from(state.current_plan)
+                .ok()
+                .is_none_or(|index| index >= self.factory.plans.len())
+        {
+            state.current_plan = -1;
+        }
         let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
-        let delta_progress = crate::world::update::edelta(world, e) * unit_build_speed(world, team);
-        let plan_index = usize::try_from(state.current_plan).ok();
-        let produced = world
-            .get::<ItemModule>(e)
-            .and_then(|items| state.update(&self.factory, delta_progress, items));
-        if let Some(unit) = produced {
-            let def = self.units.get(&unit.raw());
-            // `UnitPayload.dump` refuses when `!Units.canCreate(team, type)`
-            // (UnitPayload.java:104-112; G01 T12): hold the finished payload —
-            // no item consumption and no spawn until the cap frees up.
-            let allowed = def.is_some_and(|def| {
-                crate::entities::comp::unit::queries::can_create_unit(world, team, def)
-            });
-            if !allowed {
-                if let Some(mut st) = world.get_mut::<UnitFactoryBuild>(e) {
-                    st.progress = 1.0;
+        // `if(currentPlan != -1 && payload == null)` (`UnitFactory.java:412`):
+        // a finished payload that could not leave yet keeps the plan idle and
+        // resets progress (`else { progress = 0f }`).
+        let payload_held = world
+            .get::<crate::world::blocks::payloads::PayloadHolder>(e)
+            .is_some_and(|holder| holder.payload.is_some());
+        if payload_held {
+            state.progress = 0.0;
+        } else {
+            // `progress += edelta() * unitBuildSpeed(team)`; `edelta()` carries
+            // `Building.efficiency`, so the power gate works through it.
+            let delta_progress =
+                crate::world::update::edelta(world, e) * unit_build_speed(world, team);
+            let plan_index = usize::try_from(state.current_plan).ok();
+            let produced = world
+                .get::<ItemModule>(e)
+                .and_then(|items| state.update(&self.factory, delta_progress, items));
+            if let Some(unit) = produced {
+                let def = self.units.get(&unit.raw()).cloned();
+                // `consume()` with the `ConsumeItemDynamic` multiplier
+                // (`UnitFactory.java:108`: `c.multiplier = rules.unitCost(team)`).
+                if let Some(index) = plan_index
+                    && let Some(plan) = self.factory.plans.get(index)
+                {
+                    let cost = unit_cost(world, team);
+                    if let Some(mut items) = world.get_mut::<ItemModule>(e) {
+                        for (item, amount) in &plan.requirements {
+                            items.remove(*item, (*amount as f32 * cost).round() as i32);
+                        }
+                    }
                 }
-                world.entity_mut(e).insert(state);
-                return;
-            }
-            // `consume()` with the `ConsumeItemDynamic` multiplier
-            // (`UnitFactory.java:108`: `c.multiplier = rules.unitCost(team)`).
-            if let Some(index) = plan_index
-                && let Some(plan) = self.factory.plans.get(index)
-            {
-                let cost = unit_cost(world, team);
-                if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-                    for (item, amount) in &plan.requirements {
-                        items.remove(*item, (*amount as f32 * cost).round() as i32);
+                if let Some(def) = def {
+                    // `payload = new UnitPayload(unit)` — held, not spawned;
+                    // `moveOutPayload` below ejects it.
+                    self.create_output_payload(world, e, &def, team, state.command);
+                    // `UnitFactory.java:440`: `createSound.at(this, 1 + range(0.06), 1)`.
+                    if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+                        crate::audio::sim::emit_world_sound(
+                            world,
+                            crate::audio::SoundId::UNIT_CREATE,
+                            x,
+                            y,
+                            1.0,
+                            1.0,
+                            0.06,
+                        );
                     }
                 }
             }
-            if let Some(def) = def {
-                // `UnitFactory.java:437`: `unit.command().command(command ==
-                // null && unit.type.defaultCommand != null ? defaultCommand :
-                // command)` — an unset factory command keeps the type default.
-                spawn_output_unit_with_command(world, e, def, state.command);
-                // `UnitFactory.java:440`: `createSound.at(this, 1 + range(0.06), 1)`.
-                if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
-                    crate::audio::sim::emit_world_sound(
-                        world,
-                        crate::audio::SoundId::UNIT_CREATE,
-                        x,
-                        y,
-                        1.0,
-                        1.0,
-                        0.06,
-                    );
-                }
-            }
         }
+        // `moveOutPayload()` runs unconditionally (`UnitFactory.java:410`).
+        crate::world::blocks::payloads::payload_block::move_out_payload(world, e);
         world.entity_mut(e).insert(state);
+    }
+
+    /// `PayloadBlockBuild.onDestroyed` (`PayloadBlock.java:176-180`): the held
+    /// payload is destroyed with the block (build payloads run their own
+    /// destroy hooks; a carried unit payload is dropped/despawned).
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        if let Some(payload) = world
+            .get::<crate::world::blocks::payloads::PayloadHolder>(e)
+            .and_then(|holder| holder.payload)
+        {
+            crate::world::blocks::payloads::payload_destroyed(world, payload);
+        }
+        if let Some(mut holder) = world.get_mut::<crate::world::blocks::payloads::PayloadHolder>(e)
+        {
+            holder.payload = None;
+        }
+    }
+
+    fn on_removed(&self, world: &mut World, e: Entity) {
+        // `PayloadBlockBuild.onRemoved` (`PayloadBlock.java:170-174`).
+        crate::world::blocks::payloads::payload_block::on_removed_dump(world, e);
     }
 
     fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
@@ -2207,6 +2292,7 @@ mod tests {
             content.items().len(),
             content.liquids().len(),
         );
+        install_payload_unit_runtime(&mut world, &content);
         assert!(
             world.get::<UnitFactoryBuild>(entity).is_some(),
             "factory state inserted by create_state"
@@ -2328,6 +2414,17 @@ mod tests {
         crate::game::runtime::CampaignRuntime::new(PlaySession::new(rules), campaign)
     }
 
+    /// Installs the live unit runtime over an all-air grid: factory output is
+    /// carried until `moveOutPayload` dumps it, and the dump gates
+    /// (`Units.canCreate`, terrain solidity) read the runtime.
+    fn install_payload_unit_runtime(world: &mut World, content: &ContentRegistry) {
+        let mut grid = crate::world::WorldGrid::new(32, 32);
+        grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
+        let runtime =
+            crate::sim::unit_runtime::UnitRuntime::new(content.clone(), &grid, world, 0, false);
+        world.insert_non_send(runtime);
+    }
+
     fn feed_factory(world: &mut World, entity: Entity, content: &ContentRegistry) {
         let silicon = content.item_id("silicon").expect("silicon");
         let lead = content.item_id("lead").expect("lead");
@@ -2373,6 +2470,7 @@ mod tests {
             content.items().len(),
             content.liquids().len(),
         );
+        install_payload_unit_runtime(&mut world, &content);
         feed_factory(&mut world, entity, &content);
         for _ in 0..3000 {
             update_buildings(&mut world);

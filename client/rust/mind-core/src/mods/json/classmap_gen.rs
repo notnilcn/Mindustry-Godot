@@ -73,9 +73,10 @@ pub static ENTRIES: &[ClassTag] = &[
     ClassTag::new("DirectionBridge", ClassScope::Block, "DuctBridge"),
     ClassTag::new("HeatBlock", ClassScope::Block, "HeatProducer"),
     ClassTag::new("HeatConsumer", ClassScope::Block, "HeatCrafter"),
-    ClassTag::new("TiledFloor", ClassScope::Block, "Floor"),
-    ClassTag::new("TiledWall", ClassScope::Block, "StaticWall"),
-    ClassTag::new("WobbleProp", ClassScope::Block, "Prop"),
+    // `TiledFloor`/`TiledWall`/`WobbleProp` are concrete block classes
+    // (`ClassMap.java:287-290`) and now have their own `BlockKind` variants, so
+    // they resolve through the runtime `BlockKind::ALL` block aliases instead of
+    // a concrete-kind fallback entry here.
     ClassTag::new("RotBlock", ClassScope::Block, "GenericCrafter"),
     ClassTag::new("ControlBlock", ClassScope::Block, "ControlBlock"),
     ClassTag::new("UnitTetherBlock", ClassScope::Block, "UnitTetherBlock"),

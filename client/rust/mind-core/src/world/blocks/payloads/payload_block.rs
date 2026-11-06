@@ -277,7 +277,8 @@ pub fn dump_payload(world: &mut World, e: Entity) {
     let dumped = if kind_of(payload) == PayloadKind::Build {
         dump_build_payload(world, payload)
     } else {
-        // Unit dumping is plan 11 (`UnitPayload.dump` solidity/overlap gates).
+        // `UnitPayload.dump` (`UnitPayload.java:100-144`): canCreate +
+        // solidity + overlap gates, then `unit.add()`.
         dump_unit_payload(world, entity)
     };
     if dumped {
@@ -290,9 +291,123 @@ pub fn dump_payload(world: &mut World, e: Entity) {
     }
 }
 
-/// `UnitPayload.dump` seam (plan 11 owns solidity/overlap/`add()`).
-fn dump_unit_payload(_world: &mut World, _entity: Entity) -> bool {
-    false
+/// `UnitPayload.dump` (`UnitPayload.java:100-144`): drops the carried markers
+/// and adds the unit to `Groups.unit` through the live runtime. The gates
+/// (`Units.canCreate`, `unit.solidity()`, the grounded-overlap count) live in
+/// [`crate::sim::unit_runtime::unit_payload_can_dump`].
+pub fn dump_unit_payload(world: &mut World, entity: Entity) -> bool {
+    crate::sim::unit_runtime::dump_carried_unit(world, entity)
+}
+
+/// `PayloadBlockBuild.onRemoved` (`PayloadBlock.java:170-174`): a block that is
+/// removed (and not itself carried) dumps its payload instead of dropping it.
+///
+/// A refused dump (solid tile, overlap, unit cap) drops the payload with the
+/// block, exactly like the Java reference going out of scope; the detached
+/// payload entity is despawned so it cannot leak as an orphan.
+pub fn on_removed_dump(world: &mut World, e: Entity) {
+    let Some(holder) = world.get::<PayloadHolder>(e).copied() else {
+        return;
+    };
+    if holder.payload.is_none() || holder.carried {
+        return;
+    }
+    dump_payload(world, e);
+    if let Some(payload) = world
+        .get::<PayloadHolder>(e)
+        .and_then(|holder| holder.payload)
+    {
+        if let Some(entity) = payload.entity {
+            world.entity_mut(entity).despawn();
+        }
+        if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
+            holder.payload = None;
+        }
+    }
+}
+
+/// Native unit-payload body marker. Java writes a one-byte generated unit class
+/// id here (all vanilla ids are < 64), so `0xFF` cannot collide with an upstream
+/// body; it makes the two layouts distinguishable on read.
+pub const NATIVE_UNIT_MARKER: u8 = 0xFF;
+
+/// `UnitPayload.write` (`UnitPayload.java:65-69`) native half: the caller has
+/// already written the `payloadUnit` type tag. Writes the marker, the unit
+/// record revision, the content type id and the shared unit record body
+/// (`Payload.write` itself is the outer `bool exists`/tag prefix).
+pub fn write_unit_payload(
+    world: &World,
+    payload: PayloadRef,
+    w: &mut crate::world::BuildingWriter,
+) {
+    w.ub(NATIVE_UNIT_MARKER);
+    let Some(entity) = payload.entity else {
+        // No entity: revision 0 reads back as "no payload".
+        w.us(0);
+        return;
+    };
+    w.us(crate::io::sim_io::SIM_UNIT_REVISION);
+    w.us(payload.content);
+    if let Err(error) = crate::io::sim_io::write_unit_fields(world, entity, w) {
+        log::warn!("payload_write: unit payload body failed: {error}");
+    }
+}
+
+/// `Payload.read` unit branch (`Payload.java:100-116`): upstream writes a
+/// generated `unit.classId()` byte and the entity IO body; native saves carry
+/// [`NATIVE_UNIT_MARKER`] + the shared unit record instead. An upstream body
+/// still stops the caller (`Unsupported`) exactly as before.
+fn read_unit_payload(world: &mut World, r: &mut crate::world::BuildingReader) -> PayloadRead {
+    let Ok(marker) = r.ub() else {
+        return PayloadRead::Unsupported;
+    };
+    if marker != NATIVE_UNIT_MARKER {
+        log::warn!(
+            "payload_read: upstream unit payload (class id {marker}) not decoded (native format only)"
+        );
+        return PayloadRead::Unsupported;
+    }
+    let Ok(revision) = r.us() else {
+        return PayloadRead::Unsupported;
+    };
+    if revision == 0 {
+        return PayloadRead::None;
+    }
+    if revision > crate::io::sim_io::SIM_UNIT_REVISION {
+        log::warn!("payload_read: unsupported unit-payload revision {revision}");
+        return PayloadRead::Unsupported;
+    }
+    let Ok(type_raw) = r.us() else {
+        return PayloadRead::Unsupported;
+    };
+    let type_id = crate::content::UnitTypeId::new(type_raw);
+    let known = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .is_some_and(|runtime| runtime.content.unit(type_id).is_some());
+    if !known {
+        log::warn!("payload_read: unit payload type {type_raw} is unknown");
+        return PayloadRead::Unsupported;
+    }
+    let Ok(decoded) = crate::io::sim_io::read_unit_fields(r, revision) else {
+        return PayloadRead::Unsupported;
+    };
+    let Some(payload) = crate::sim::unit_runtime::create_unit_payload(
+        world,
+        type_id,
+        decoded.team,
+        decoded.x,
+        decoded.y,
+        decoded.rotation,
+    ) else {
+        return PayloadRead::Unsupported;
+    };
+    if let Some(entity) = payload.entity {
+        crate::io::sim_io::apply_unit_record(world, entity, &decoded);
+    }
+    payload
+        .entity
+        .map(|_| PayloadRead::Unit(payload))
+        .unwrap_or(PayloadRead::None)
 }
 
 /// `BuildPayload.place(tile)` — placement seam. Returns whether the payload
@@ -435,12 +550,15 @@ pub fn write_base(world: &World, e: Entity, w: &mut crate::world::BuildingWriter
 
 /// `Payload.read` outcome (`Payload.java:87-118`): `bool exists`; a block
 /// payload carries `s block`, `b revision` and the nested `readAll` chunk, a
-/// unit payload the generated unit IO (not ported until T6/G01).
+/// unit payload the native [`NATIVE_UNIT_MARKER`] record (upstream class-id
+/// bodies still stop the read as `Unsupported`).
 pub enum PayloadRead {
     /// No payload present.
     None,
     /// A decoded block payload.
     Block(super::PayloadRef),
+    /// A decoded unit payload (native body; the carried unit entity exists).
+    Unit(super::PayloadRef),
     /// A unit payload was present but cannot be decoded yet: the caller must
     /// stop reading its own body (the tile chunk is length-bounded, so the
     /// next building stays aligned).
@@ -453,9 +571,8 @@ pub fn payload_read(world: &mut World, r: &mut crate::world::BuildingReader) -> 
     }
     let kind = r.b().unwrap_or(0);
     if kind == 0 {
-        // Unit payload: generated unit IO is T6/G01; STOP the caller's read.
-        log::warn!("payload_read: unit payload skipped (unit IO not ported yet)");
-        return PayloadRead::Unsupported;
+        // `Payload.read`: `payloadUnit` split.
+        return read_unit_payload(world, r);
     }
     let block_raw = r.s().unwrap_or(-1);
     let block = crate::content::BlockId::new(block_raw.max(0) as u16);
@@ -489,14 +606,14 @@ pub fn payload_read(world: &mut World, r: &mut crate::world::BuildingReader) -> 
     })
 }
 
-/// Base `PayloadBlockBuild.read`; `false` = a unit payload bailed the read
-/// (the caller stops before its own fields).
+/// Base `PayloadBlockBuild.read`; `false` = an undecodable payload bailed the
+/// read (the caller stops before its own fields).
 pub fn read_base(world: &mut World, e: Entity, r: &mut crate::world::BuildingReader) -> bool {
     let mut holder = world.get::<PayloadHolder>(e).copied().unwrap_or_default();
     holder.pay_vector = (r.f().unwrap_or(0.0), r.f().unwrap_or(0.0));
     holder.pay_rotation = r.f().unwrap_or(0.0);
     let result = payload_read(world, r);
-    if let PayloadRead::Block(payload) = result {
+    if let PayloadRead::Block(payload) | PayloadRead::Unit(payload) = result {
         holder.payload = Some(payload);
     }
     world.entity_mut(e).insert(holder);

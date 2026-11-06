@@ -15,7 +15,7 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::{BlockId, ItemId};
+use crate::content::{BlockId, ItemId, UnitTypeId};
 use crate::world::block::TILE_SIZE;
 use crate::world::modules::ModuleDims;
 
@@ -191,8 +191,8 @@ pub fn kind_of(payload: PayloadRef) -> PayloadKind {
     }
 }
 
-/// `Payload.size()` — `block.size * tilesize` for builds; unit hit size for
-/// units (`0.0` until plan 11 supplies unit metadata).
+/// `Payload.size()` — `block.size * tilesize` for builds; the carried unit's
+/// `UnitType.hitSize` for units ([`UnitPayloadSize`], set on carry/read).
 pub fn payload_size(world: &World, payload: PayloadRef) -> f32 {
     let Some(entity) = payload.entity else {
         return 0.0;
@@ -212,7 +212,7 @@ pub fn payload_size(world: &World, payload: PayloadRef) -> f32 {
     }
 }
 
-/// Unit payload hit size in world units (plan 11 sets this from `UnitType`).
+/// Unit payload hit size in world units (`UnitPayload.size()` = `unit.hitSize`).
 #[derive(Debug, Clone, Copy, Component)]
 pub struct UnitPayloadSize(pub f32);
 
@@ -282,7 +282,13 @@ pub fn payload_write(
         w.b(crate::world::building_io::behavior_version(world, entity) as i8);
         let _ = crate::world::building_io::write_all_body(world, entity, w, false);
     } else {
-        w.b(payload.content as i8);
+        // `UnitPayload.write` (`UnitPayload.java:65-69`): the payload tag, a
+        // unit class id and the generated `unit.write` body. The port has no
+        // generated class ids, so native saves store the content id behind
+        // `NATIVE_UNIT_MARKER` followed by the shared unit record
+        // (`io::sim_io::write_unit_fields`; the same field set as the live
+        // `SIM_UNIT_CLASS_ID` chunk).
+        payload_block::write_unit_payload(world, payload, w);
     }
 }
 
@@ -359,6 +365,28 @@ pub fn handle_payload(world: &mut World, holder: Entity, source: Entity, payload
         world
             .entity_mut(entity)
             .insert(PayloadCarried { holder, kind });
+        if kind == PayloadKind::Unit {
+            // `UnitPayload`s stay out of `Groups.unit` until `dump()` calls
+            // `unit.add()`; the `Unit` marker is that membership key, so a
+            // carried unit must not carry it (otherwise every live-unit query,
+            // turret target pass and save unit row would see it).
+            let hit_size = world
+                .get::<UnitPayloadSize>(entity)
+                .map(|size| size.0)
+                .or_else(|| {
+                    world
+                        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+                        .and_then(|runtime| runtime.content.unit(UnitTypeId::new(payload.content)))
+                        .map(|def| def.hit_size)
+                });
+            world
+                .entity_mut(entity)
+                .remove::<crate::entities::comp::Unit>();
+            world.entity_mut(entity).insert(CarriedUnit);
+            if let Some(hit_size) = hit_size {
+                world.entity_mut(entity).insert(UnitPayloadSize(hit_size));
+            }
+        }
     }
     let source_pos = world
         .get::<crate::entities::comp::Pos>(source)
@@ -389,9 +417,9 @@ pub fn take_payload(world: &mut World, holder: Entity) -> Option<PayloadRef> {
 /// `PayloadBlock.updatePayload`: syncs the payload entity transform from the
 /// holder's `pay_vector`/`pay_rotation`.
 pub fn update_payload(world: &mut World, holder: Entity) {
-    let Some((payload, pay_vector)) = world
+    let Some((payload, pay_vector, pay_rotation)) = world
         .get::<PayloadHolder>(holder)
-        .map(|state| (state.payload, state.pay_vector))
+        .map(|state| (state.payload, state.pay_vector, state.pay_rotation))
     else {
         return;
     };
@@ -411,11 +439,110 @@ pub fn update_payload(world: &mut World, holder: Entity) {
         payload_pos.x = pos.0 + pay_vector.0;
         payload_pos.y = pos.1 + pay_vector.1;
     }
+    // `Payload.set(x, y, rotation)` (`PayloadBlock.java:196`): a unit payload
+    // also takes the holder rotation (`UnitPayload.set` sets `unit.rotation`).
+    if !payload.is_block
+        && let Some(mut core) = world.get_mut::<crate::entities::comp::unit::comp::UnitCore>(entity)
+    {
+        core.rotation = pay_rotation;
+    }
 }
 
-/// `PayloadBlock.pushOutput`: pushes nearby grounded units when a payload is
-/// ejected (`progress >= 0.55`). Unit physics is plan 11; this is the seam.
-pub fn push_output(_world: &mut World, _payload: PayloadRef, _progress: f32) {}
+/// `PayloadBlock.pushOutput` (`PayloadBlock.java:80-96`): pushes nearby
+/// grounded units out of the way while a payload is being ejected
+/// (`progress >= 0.55`), matching the payload's leg-step layer.
+pub fn push_output(world: &mut World, payload: PayloadRef, progress: f32) {
+    const THRESH: f32 = 0.55;
+    if progress < THRESH {
+        return;
+    }
+    let Some(entity) = payload.entity else {
+        return;
+    };
+    let Some(payload_pos) = world
+        .get::<crate::entities::comp::Pos>(entity)
+        .map(|pos| (pos.x, pos.y))
+    else {
+        return;
+    };
+    let size = payload_size(world, payload);
+    let radius = size / 2.0;
+    let scl = (((progress - THRESH) / (1.0 - THRESH)) * 1.1).clamp(0.0, 1.0);
+    let leg_step = if payload.is_block {
+        false
+    } else {
+        world
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+            .and_then(|comp| {
+                world
+                    .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+                    .and_then(|runtime| runtime.content.unit(comp.type_id))
+            })
+            .is_some_and(|def| def.allow_leg_step)
+    };
+    // Collect the pushes under the (immutable) runtime borrow, then apply them.
+    let mut pushes: Vec<(Entity, f32, f32)> = Vec::new();
+    {
+        let Some(runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+            return;
+        };
+        for other in runtime.units.iter().copied() {
+            if other == entity || world.get_entity(other).is_err() {
+                continue;
+            }
+            let Some(pos) = world.get::<crate::entities::comp::Pos>(other) else {
+                continue;
+            };
+            let (dx, dy) = (pos.x - payload_pos.0, pos.y - payload_pos.1);
+            let dst = (dx * dx + dy * dy).sqrt();
+            let rs = radius
+                + world
+                    .get::<crate::entities::comp::unit::comp::HitboxComp>(other)
+                    .map_or(0.0, |hitbox| hitbox.hit_size / 2.0);
+            if dst >= rs || !crate::combat::bullet::unit_is_grounded(world, other) {
+                continue;
+            }
+            let other_leg = world
+                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(other)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|def| def.allow_leg_step);
+            if other_leg != leg_step {
+                continue;
+            }
+            // `Tmp.v1.set(dx, dy).setLength(min(rs - dst, 1f)).scl(scl)`.
+            let len = (rs - dst).min(1.0) * scl;
+            let (nx, ny) = if dst > 1.0e-6 {
+                (dx / dst * len, dy / dst * len)
+            } else {
+                (0.0, 0.0)
+            };
+            pushes.push((other, nx, ny));
+        }
+    }
+    for (other, nx, ny) in pushes {
+        if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(other) {
+            vel.x += nx;
+            vel.y += ny;
+        }
+    }
+}
+
+/// The carried unit entity of `holder`, if its payload is a unit
+/// (`PayloadBlockBuild.drawPayload` render seam: the entity's `Pos`/`UnitCore`
+/// rotation are kept in sync by [`update_payload`]).
+pub fn carried_unit(world: &World, holder: Entity) -> Option<Entity> {
+    let payload = world.get::<PayloadHolder>(holder)?.payload?;
+    (!payload.is_block)
+        .then_some(payload.entity?)
+        .filter(|entity| world.get_entity(*entity).is_ok())
+}
+
+/// `Payload.size()` of `holder`'s payload in world units (the carried-unit
+/// draw/hitbox extent).
+pub fn held_payload_size(world: &World, holder: Entity) -> Option<f32> {
+    let payload = world.get::<PayloadHolder>(holder)?.payload?;
+    Some(payload_size(world, payload))
+}
 
 #[cfg(test)]
 mod tests {

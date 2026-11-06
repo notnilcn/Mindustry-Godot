@@ -9,7 +9,7 @@
 //! and the `overwrote` merge. The `linked_core` field is assigned by `CoreBlock`
 //! proximity unification (M5).
 //!
-//! **R2 item-pool deviation (PAR-0484 / CG-ECON-01).** Java aliases the module
+//! **Shared core pool (PAR-0484 / CG-ECON-01).** Java aliases the module
 //! pointer of a core-owned storage (`CoreBlock.java:764-770`: `t.items = items`),
 //! so the storage *is* the core pool: reads, `removeStack`, `canUnload` and the
 //! unloader's provider checks all see the core's items. ECS components cannot be
@@ -17,10 +17,9 @@
 //! accesses through [`StorageBuild::linked_core`] instead (helpers
 //! [`item_holder`]/[`has_items`]/[`item_count`], used by [`super::unloader`]);
 //! the storage's own `ItemModule` stays empty for a linked build. Unlinked
-//! storages keep their own module exactly as before. This is the same
-//! no-component-aliasing deviation documented in
-//! [`super::core_block`]'s R2 note; the `TeamInventory` resource remains the
-//! long-term follow-up.
+//! storages keep their own module exactly as before. The owning core itself
+//! resolves through the team-wide alias of [`super::team_items`], so a storage
+//! linked to a *second* core of a team sees the same pool as every other core.
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
@@ -39,6 +38,7 @@ use crate::world::pos::TilePos;
 
 use super::super::distribution::transfer;
 use super::core_block::CoreBuild;
+use super::team_items;
 
 /// `StorageBlock.StorageBuild` state.
 #[derive(Debug, Clone, Default, Component)]
@@ -157,30 +157,36 @@ fn linked_core(world: &World, e: Entity) -> Option<Entity> {
 
 /// `linkedCore.items.get(item) >= ((CoreBuild)linkedCore).storageCapacity`
 /// (`StorageBlock.java:63`): the linked-core fullness gate of the burn effect.
+/// The count resolves through the team pool (`PAR-0484` + the team alias), so
+/// a storage linked to a non-canonical core burns only when the pool is full.
 fn linked_core_is_full(world: &World, core: Entity, item: ItemId) -> bool {
     let cap = world
         .get::<CoreBuild>(core)
         .map(|core_build| core_build.storage_capacity)
         .unwrap_or(0);
-    world
-        .get::<ItemModule>(core)
-        .map(|module| module.get(item))
-        .unwrap_or(0)
-        >= cap
+    team_items::core_item_count(world, core, item) >= cap
 }
 
 /// Entity whose `ItemModule` backs `e`'s item storage.
 ///
 /// Java aliases a core-owned storage's `items` pointer to the core's module
 /// (`CoreBlock.java:764-770`), so every read/take on the storage observes the
-/// core pool. Because ECS components cannot alias (see the R2 note above),
-/// reads resolve through [`StorageBuild::linked_core`] instead: a linked
-/// storage delegates to its core, everything else keeps its own module. A
-/// stale link (core destroyed before the storage re-proximities) falls back to
-/// the storage itself so reads stay defined.
+/// core pool. Because ECS components cannot alias (see the note above), reads
+/// resolve through [`StorageBuild::linked_core`] instead: a linked storage
+/// delegates to its core, and that core resolves through the team-wide alias
+/// ([`super::team_items::core_holder`]) — a storage owned by a second core of a
+/// team therefore observes the same pool as the canonical core. A core passed
+/// directly resolves through the same alias. Everything else keeps its own
+/// module. A stale link (core destroyed before the storage re-proximities)
+/// falls back to the storage itself so reads stay defined.
 pub fn item_holder(world: &World, e: Entity) -> Entity {
+    if world.get::<CoreBuild>(e).is_some() {
+        return team_items::core_holder(world, e);
+    }
     match linked_core(world, e) {
-        Some(core) if world.get::<ItemModule>(core).is_some() => core,
+        Some(core) if world.get::<ItemModule>(core).is_some() => {
+            team_items::core_holder(world, core)
+        }
         _ => e,
     }
 }
@@ -298,7 +304,7 @@ impl BuildingBehavior for StorageBehavior {
     ) -> i32 {
         match linked_core(world, e) {
             Some(core) => transfer::dispatch_get_maximum_accepted(world, core, item)
-                .saturating_sub(transfer::item_count(world, core, item))
+                .saturating_sub(team_items::core_item_count(world, core, item))
                 .min(amount),
             None => transfer::default_accept_stack(world, e, item, amount, source),
         }
@@ -309,11 +315,9 @@ impl BuildingBehavior for StorageBehavior {
             Some(core) => {
                 let cap = transfer::dispatch_get_maximum_accepted(world, core, item);
                 let accepted = cap
-                    .saturating_sub(transfer::item_count(world, core, item))
+                    .saturating_sub(team_items::core_item_count(world, core, item))
                     .min(amount);
-                if let Some(mut items) = world.get_mut::<ItemModule>(core) {
-                    items.add(item, accepted, cap.max(0));
-                }
+                team_items::add_to_core(world, core, item, accepted, cap.max(0));
             }
             None => transfer::default_handle_stack(world, e, item, amount),
         }

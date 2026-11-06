@@ -40,7 +40,6 @@ use crate::render::g3d::grid::PlanetGrid;
 use crate::sim::runtime::ContentIndex;
 use crate::world::TilePos;
 use crate::world::block::BlockTable;
-use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::limits::{BlockCounter, BuildRules};
 use crate::world::modules::ItemModule;
 
@@ -832,7 +831,13 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         self.rules.researched.iter().any(|name| name == content) || self.unlocked.contains(content)
     }
 
-    /// `Team.items()`: the sum of the team's live cores (`ItemObjective`).
+    /// `Team.items()`: the team's shared core pool (`ItemObjective`).
+    ///
+    /// Java's cores alias one `ItemModule`, so the count is the team pool —
+    /// the canonical core of the team (`mc/world/blocks/storage/team_items`),
+    /// with an unaliased core counting its own module. This is the same
+    /// resolution `core_snapshot_of` sums for `SectorInfo.prepare`, so the
+    /// sector record and the objective agree.
     fn team_has_item(&self, team: u8, item: &str, amount: i32) -> bool {
         if amount <= 0 {
             return true;
@@ -840,20 +845,11 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         let Some(&item_id) = self.index.and_then(|index| index.item_ids.get(item)) else {
             return false;
         };
-        let item = ItemId::new(item_id);
-        let mut count = 0;
-        for entity_ref in self.world.iter_entities() {
-            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
-                continue;
-            }
-            if entity_ref.get::<CoreBuild>().is_none() {
-                continue;
-            }
-            if let Some(module) = entity_ref.get::<ItemModule>() {
-                count += module.get(item);
-            }
-        }
-        count >= amount
+        crate::world::blocks::storage::team_items::team_item_count(
+            self.world,
+            team,
+            ItemId::new(item_id),
+        ) >= amount
     }
 
     fn core_item_count(&self, item: &str) -> i32 {
@@ -3247,5 +3243,87 @@ mod tests {
         let module = world.get::<ItemModule>(entity).expect("core module");
         assert_eq!(module.get(copper), 500);
         assert_eq!(module.get(lead), 0, "fresh launch clears core storage");
+    }
+
+    /// GAPS #21: `ItemObjective` asks `Team.items()` (`MapObjectives.java:470`
+    /// region), which Java answers from the team's one aliased core module
+    /// (`CoreBlock.java:764-770`). Two cores of a team must agree on the pool
+    /// and the count must not double the inert per-core mirror.
+    #[test]
+    fn team_has_item_reads_the_shared_team_pool() {
+        use crate::world::blocks::storage::core_block::CoreBuild;
+
+        let registry = content();
+        let copper = registry.item_id("copper").expect("copper");
+        let lead = registry.item_id("lead").expect("lead");
+        let items = registry.items().len();
+        let mut world = World::new();
+        let core = |world: &mut World, holder: Option<Entity>| {
+            world
+                .spawn((
+                    TeamComp { team: 1 },
+                    CoreBuild {
+                        items_holder: holder,
+                        ..CoreBuild::default()
+                    },
+                    ItemModule::with_items(items),
+                ))
+                .id()
+        };
+        let first = core(&mut world, None);
+        let second = core(&mut world, Some(first));
+        world
+            .get_mut::<ItemModule>(first)
+            .expect("pool")
+            .add(copper, 100, 4000);
+        // A save written by upstream stores the pool on every core; the mirror
+        // must not be summed.
+        world
+            .get_mut::<ItemModule>(second)
+            .expect("mirror")
+            .add(copper, 100, 4000);
+
+        let rules = Rules::default();
+        let teams = Teams::new();
+        let unlocked = std::collections::HashSet::new();
+        let stats = GameStats::default();
+        let index = ContentIndex {
+            item_ids: [
+                ("copper".to_owned(), copper.raw()),
+                ("lead".to_owned(), lead.raw()),
+            ]
+            .into_iter()
+            .collect(),
+            ..ContentIndex::default()
+        };
+        let env = RuntimeObjectiveEnv {
+            rules: &rules,
+            teams: &teams,
+            unlocked: &unlocked,
+            stats: &stats,
+            world: &world,
+            index: Some(&index),
+            command_mode_satisfied: false,
+        };
+        assert!(env.team_has_item(1, "copper", 100), "exactly the pool");
+        assert!(
+            !env.team_has_item(1, "copper", 101),
+            "mirror not double counted"
+        );
+        assert!(!env.team_has_item(1, "lead", 1));
+        assert!(!env.team_has_item(2, "copper", 1), "other teams untouched");
+        // A deposit into the second core reaches the same pool.
+        crate::world::blocks::storage::team_items::add_to_core(&mut world, second, copper, 5, 4000);
+        let env = RuntimeObjectiveEnv {
+            rules: &rules,
+            teams: &teams,
+            unlocked: &unlocked,
+            stats: &stats,
+            world: &world,
+            index: Some(&index),
+            command_mode_satisfied: false,
+        };
+        assert!(env.team_has_item(1, "copper", 105));
+        assert!(!env.team_has_item(1, "copper", 106));
     }
 }

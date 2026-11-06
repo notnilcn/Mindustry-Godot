@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! `PayloadSource` build behavior (`world/blocks/payloads/PayloadSource.java`) —
-//! plan 08 M7 (sandbox source). Unit creation (`new UnitPayload(unit.create)`)
-//! and `commandPos` hand-off belong to plan 11; this port implements the block
-//! path and the config surface.
+//! plan 08 M7 (sandbox source): block and unit payload creation, `commandPos`
+//! hand-off and `moveOutPayload` (`PayloadSource.java:130-182`).
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
@@ -20,7 +19,7 @@ use super::{PayloadHolder, create_build_payload};
 /// `PayloadSource.PayloadSourceBuild` state.
 #[derive(Debug, Clone, Copy, Component, Default)]
 pub struct PayloadSourceBuild {
-    /// Configured unit type (`unit`; consumed by plan 11).
+    /// Configured unit type (`unit`; the carried `UnitPayload` source).
     pub unit: Option<UnitTypeId>,
     /// Configured block (`configBlock`).
     pub config_block: Option<BlockId>,
@@ -87,6 +86,27 @@ impl BuildingBehavior for PayloadSourceBehavior {
         super::take_payload(world, e)
     }
 
+    /// `PayloadBlockBuild.onDestroyed` (`PayloadBlock.java:176-180`): the held
+    /// payload is destroyed with the block (build payloads run their own
+    /// destroy hooks; a carried unit payload is dropped/despawned).
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        if let Some(payload) = world
+            .get::<crate::world::blocks::payloads::PayloadHolder>(e)
+            .and_then(|holder| holder.payload)
+        {
+            crate::world::blocks::payloads::payload_destroyed(world, payload);
+        }
+        if let Some(mut holder) = world.get_mut::<crate::world::blocks::payloads::PayloadHolder>(e)
+        {
+            holder.payload = None;
+        }
+    }
+
+    fn on_removed(&self, world: &mut World, e: Entity) {
+        // `PayloadBlockBuild.onRemoved` (`PayloadBlock.java:170-174`).
+        super::payload_block::on_removed_dump(world, e);
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         payload_block_update(world, e);
         let has_payload = world
@@ -104,7 +124,43 @@ impl BuildingBehavior for PayloadSourceBehavior {
                 .get::<crate::entities::comp::TeamComp>(e)
                 .map(|t| t.team)
                 .unwrap_or(0);
-            if let Some(block) = config.config_block {
+            if let Some(unit) = config.unit {
+                // `payload = new UnitPayload(unit.create(team))`
+                // (`PayloadSource.java:148-158`): the unit is carried, not
+                // spawned, and takes `commandPos` when it is commandable.
+                let rotation = rot_deg(world, e);
+                if let Some(pos) = world.get::<crate::entities::comp::Pos>(e).copied()
+                    && let Some(payload) = crate::sim::unit_runtime::create_unit_payload(
+                        world, unit, team, pos.x, pos.y, rotation,
+                    )
+                {
+                    if let Some(entity) = payload.entity {
+                        if let Some((cx, cy)) = config.command_pos
+                            && let Some(mut slot) =
+                                world.get_mut::<crate::ai::controller::ControllerSlot>(entity)
+                            && slot.kind == crate::ai::controller::AiKind::Command
+                        {
+                            slot.target = Some(crate::world::TilePos::new(
+                                crate::world::WorldGrid::to_tile(cx) as i16,
+                                crate::world::WorldGrid::to_tile(cy) as i16,
+                            ));
+                            world
+                                .entity_mut(entity)
+                                .insert(crate::ai::types::command::AttackTargetComp(None));
+                        }
+                        // `Events.fire(new UnitCreateEvent(p, this))`.
+                        let name = world
+                            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+                            .and_then(|runtime| runtime.content.unit(unit))
+                            .map(|def| def.name.clone());
+                        crate::game::stats::notify_unit_created(world, entity, name.as_deref());
+                    }
+                    crate::world::blocks::payloads::handle_payload(world, e, e, payload);
+                    if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
+                        holder.pay_rotation = rotation;
+                    }
+                }
+            } else if let Some(block) = config.config_block {
                 let rotation = rot_deg(world, e);
                 if let Some(payload_entity) = create_build_payload(world, block, team) {
                     let payload = PayloadRef {
@@ -119,8 +175,6 @@ impl BuildingBehavior for PayloadSourceBehavior {
                     }
                 }
             }
-            // Unit config creation is plan 11 (`UnitType.create` +
-            // `commandPos`); no-op until units land.
         }
         if let Some(mut state) = world.get_mut::<PayloadSourceBuild>(e) {
             state.scl += (1.0 - state.scl) * 0.1;
@@ -230,6 +284,87 @@ impl PayloadSourceBuild {
 mod tests {
     use super::*;
     use crate::world::BuildHarness;
+
+    /// Installs the live unit runtime the carried-unit path needs (content +
+    /// `UnitRuntime.units`); `BuildHarness` only boots the block runtime.
+    fn install_unit_runtime(harness: &mut BuildHarness) {
+        let runtime = crate::sim::unit_runtime::UnitRuntime::new(
+            harness.content.clone(),
+            &harness.grid,
+            &harness.world,
+            0,
+            false,
+        );
+        harness.world.insert_non_send(runtime);
+    }
+
+    /// GAPS #23 / PAR-0518: `PayloadSource.updateTile` creates a *carried* unit
+    /// payload from the configured `UnitType` (`PayloadSource.java:148-158`),
+    /// then `moveOutPayload` hands it to the front conveyor. The unit never
+    /// enters `Groups.unit` while carried.
+    #[test]
+    fn source_spawns_configured_unit_payload() {
+        use crate::world::blocks::payloads::{CarriedUnit, PayloadHolder};
+
+        let mut harness = BuildHarness::new(32, 32, 7);
+        install_unit_runtime(&mut harness);
+        let conveyor = harness
+            .content()
+            .block_id("payload-conveyor")
+            .expect("payload-conveyor");
+        let source = harness
+            .content()
+            .block_id("payload-source")
+            .expect("payload-source");
+        let dagger = harness.content().unit_id("dagger").expect("dagger");
+        // payload-source is size 5; its front edge is 3 tiles from center and
+        // overlaps the size-3 conveyor centred at (10, 6).
+        assert!(harness.place(10, 6, conveyor, 0, true));
+        assert!(harness.place(6, 6, source, 0, true));
+        assert!(harness.configure(6, 6, ConfigValue::Unit(dagger)));
+
+        harness.tick();
+        let source_e = harness.build_at(6, 6).expect("source entity");
+        let payload = harness
+            .world
+            .get::<PayloadHolder>(source_e)
+            .and_then(|holder| holder.payload)
+            .expect("unit payload created");
+        assert!(!payload.is_block, "unit payload");
+        let entity = payload.entity.expect("payload entity");
+        assert_eq!(payload.content, dagger.raw());
+        assert!(
+            harness
+                .world
+                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+                .is_some_and(|comp| comp.type_id == dagger)
+        );
+        assert!(
+            harness.world.get::<CarriedUnit>(entity).is_some(),
+            "payload carries the CarriedUnit marker"
+        );
+        assert!(
+            harness
+                .world
+                .get::<crate::entities::comp::Unit>(entity)
+                .is_none(),
+            "a carried unit is not in Groups.unit"
+        );
+
+        // `moveOutPayload` ejects it onto the front payload conveyor.
+        for _ in 0..300 {
+            harness.tick();
+        }
+        let front = harness.build_at(10, 6).expect("front conveyor");
+        assert!(
+            harness
+                .world
+                .get::<PayloadHolder>(front)
+                .and_then(|holder| holder.payload)
+                .is_some_and(|payload| !payload.is_block && payload.content == dagger.raw()),
+            "source moved its unit payload onto the front conveyor"
+        );
+    }
 
     #[test]
     fn source_spawns_configured_block_payload() {

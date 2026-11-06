@@ -2,15 +2,31 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! `CoreBlock` build behavior (`world/blocks/storage/CoreBlock.java`) — plan 08
-//! M5. Ports the `storageCapacity` unification, linked-storage ownership,
-//! accept/handle incineration and the rev 1 `commandPos` IO.
+//! M5. Ports the `storageCapacity` unification, the team-wide item alias,
+//! linked-storage ownership, accept/handle incineration and the rev 1
+//! `commandPos` IO.
 //!
-//! **R2 (NEEDS USER DECISION).** Java aliases the `items` module pointer across
-//! a team's cores; ECS cannot alias components. This pass implements the
-//! single-core-per-team semantics exactly (each core owns its `ItemModule`) and
-//! computes the shared `storageCapacity` across all team cores. Cross-core item
-//! aliasing via a `TeamInventory` resource (plan 12 `Teams`) remains the R2
-//! default follow-up; the observable API used by 12/14 is unchanged.
+//! **Team-shared inventory (`CoreBlock.CoreBuild.onProximityUpdate`,
+//! `CoreBlock.java:764-780`).** Java aliases one `ItemModule` pointer across
+//! every core of a team (`this.items = other.items`) and every storage those
+//! cores own (`t.items = items`). ECS components cannot alias, so the port
+//! keeps the same pointer shape explicitly: every core carries
+//! [`CoreBuild::items_holder`], the team's canonical core (lowest `EntitySeq`,
+//! matching Java's `Team.cores().first()` and the port's HUD/AI readers), and
+//! every item access resolves through [`super::team_items`]
+//! (`core_holder`/`add_to_core`/`remove_from_core`). Reads, writes and takes on
+//! *any* team core therefore observe one pool, exactly like Java's module.
+//!
+//! Single-core teams are unchanged: [`core_holder`](super::team_items::core_holder)
+//! returns the core itself, so the module it reads/writes is its own. On
+//! destruction the pool migrates to the surviving canonical core (Java's
+//! survivors keep the same module object) and the owned storages are released
+//! ([`super::team_items::on_core_removed`], porting `CoreBuild.onRemoved`).
+//!
+//! **ECS deviation.** The non-canonical cores still carry an inert
+//! `ItemModule` component (their `hasItems`/save shape); direct component reads
+//! on those mirrors do not see the pool. See [`super::team_items`] for the
+//! precise residual and the team-keyed design.
 
 use std::sync::Arc;
 
@@ -26,6 +42,7 @@ use crate::world::config::ConfigValue;
 use crate::world::modules::ItemModule;
 
 use super::storage_block::{StorageBuild, emit_core_burn_at, incinerate_effect};
+use super::team_items;
 
 /// Campaign/core policy hooks owned by plan 12 (`Rules`/`SectorInfo`).
 pub trait CoreCampaignHooks: Send + Sync {
@@ -78,6 +95,12 @@ pub struct CoreBuild {
     pub thruster_time: f32,
     /// Command position (`commandPos`; nullable vec).
     pub command_pos: Option<(f32, f32)>,
+    /// Canonical core owning the team's shared `ItemModule` (`None` = this
+    /// core). The ECS-safe analogue of Java's aliased `items` pointer; set by
+    /// [`super::team_items::link_team_cores`] and read through
+    /// [`super::team_items::core_holder`]. Not serialized: the alias is
+    /// rebuilt by the proximity pass on every world load.
+    pub items_holder: Option<Entity>,
 }
 
 impl Default for CoreBuild {
@@ -88,6 +111,7 @@ impl Default for CoreBuild {
             iframes: -1.0,
             thruster_time: 0.0,
             command_pos: None,
+            items_holder: None,
         }
     }
 }
@@ -225,25 +249,17 @@ impl BuildingBehavior for CoreBehavior {
             }
         }
 
-        // All team cores share the summed capacity (R2 deferred: items not aliased).
-        let cores: Vec<Entity> = world
-            .iter_entities()
-            .filter_map(|entity_ref| {
-                let id = entity_ref.id();
-                if entity_ref.get::<CoreBuild>().is_some()
-                    && team.is_some_and(|t| {
-                        world
-                            .get::<crate::entities::comp::TeamComp>(id)
-                            .map(|c| c.team)
-                            == Some(t)
-                    })
-                {
-                    Some(id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // Java aliases every core of the team onto one `items` module
+        // (`CoreBlock.java:764-770`); the ECS-safe equivalent is the
+        // `items_holder` link, refreshed here for the whole team.
+        let cores: Vec<Entity> = team
+            .map(|team| team_items::team_cores(world, team))
+            .unwrap_or_default();
+        if let Some(team) = team {
+            team_items::link_team_cores(world, team);
+        }
+
+        // All team cores share the summed capacity (`storageCapacity`).
         let mut total = capacity;
         for core in &cores {
             if *core == e {
@@ -260,14 +276,18 @@ impl BuildingBehavior for CoreBehavior {
             }
         }
 
-        // Clamp items to the new capacity (Java `CoreBlock.java:773-778` skips
-        // this while the world is generating, i.e. inside a map/save load, so a
-        // loaded core keeps its saved stacks).
+        // Clamp the pool to the new capacity (Java `CoreBlock.java:773-778`
+        // skips this while the world is generating, i.e. inside a map/save
+        // load, so a loaded core keeps its saved stacks). Only the canonical
+        // module holds the pool; the mirrors of aliased cores are inert.
         if !world
             .get_resource::<crate::world::WorldGenerating>()
             .is_some_and(|flag| flag.0)
         {
             for core in &cores {
+                if team_items::core_holder(world, *core) != *core {
+                    continue;
+                }
                 if let Some(mut module) = world.get_mut::<ItemModule>(*core) {
                     module.items.iter_mut().for_each(|amount| {
                         *amount = (*amount).min(total);
@@ -286,6 +306,16 @@ impl BuildingBehavior for CoreBehavior {
         }
     }
 
+    /// `CoreBuild.onRemoved` (`CoreBlock.java:861-880`): Java's surviving
+    /// cores keep the same aliased module object, so the port migrates the
+    /// canonical pool to the next team core, releases/relinks the owned
+    /// storages and re-runs the survivors' proximity pass (their
+    /// `storageCapacity` must drop the dead core). See
+    /// [`team_items::on_core_removed`].
+    fn on_removed(&self, world: &mut World, e: Entity) {
+        team_items::on_core_removed(world, e);
+    }
+
     fn accept_item(&self, world: &World, e: Entity, _source: Entity, item: ItemId) -> bool {
         let h = hooks(world);
         if h.core_incinerates() {
@@ -295,7 +325,7 @@ impl BuildingBehavior for CoreBehavior {
             .get::<CoreBuild>(e)
             .map(|c| c.storage_capacity)
             .unwrap_or(0);
-        world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0) < cap
+        team_items::core_item_count(world, e, item) < cap
     }
 
     fn get_maximum_accepted(&self, world: &World, e: Entity, _item: ItemId) -> i32 {
@@ -314,7 +344,7 @@ impl BuildingBehavior for CoreBehavior {
             .get::<CoreBuild>(e)
             .map(|c| c.storage_capacity)
             .unwrap_or(0);
-        let current = world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0);
+        let current = team_items::core_item_count(world, e, item);
         let team = world
             .get::<crate::entities::comp::TeamComp>(e)
             .map(|t| t.team);
@@ -350,9 +380,7 @@ impl BuildingBehavior for CoreBehavior {
             }
             return;
         }
-        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-            items.add(item, 1, cap.max(0));
-        }
+        team_items::add_to_core(world, e, item, 1, cap.max(0));
     }
 
     fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
@@ -364,15 +392,13 @@ impl BuildingBehavior for CoreBehavior {
             .get::<CoreBuild>(e)
             .map(|c| c.storage_capacity)
             .unwrap_or(0);
-        let current = world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0);
+        let current = team_items::core_item_count(world, e, item);
         let real = if incinerate {
             0
         } else {
             amount.min((cap - current).max(0))
         };
-        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-            items.add(item, real, cap.max(0));
-        }
+        team_items::add_to_core(world, e, item, real, cap.max(0));
         let team = world
             .get::<crate::entities::comp::TeamComp>(e)
             .map(|t| t.team);
@@ -392,8 +418,9 @@ impl BuildingBehavior for CoreBehavior {
     }
 
     fn remove_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) -> i32 {
-        let result =
-            super::super::distribution::transfer::default_remove_stack(world, e, item, amount);
+        // Java `super.removeStack` takes from the aliased module, i.e. the
+        // team pool, whichever core the transfer targeted.
+        let result = team_items::remove_from_core(world, e, item, amount);
         let team = world
             .get::<crate::entities::comp::TeamComp>(e)
             .map(|t| t.team);

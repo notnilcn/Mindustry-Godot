@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T21:27:06Z",
+  "updated": "2026-11-06T21:36:52Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -27709,13 +27709,13 @@
     },
     "PAR-0518": {
       "title": "GAPS #23: unit payloads are a stub (dump/IO/PayloadSource/UnitFactory)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -27723,9 +27723,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0518"
+              "cmd": "cargo test -p mind-core --lib unit_payload_tests && cargo test -p mind-core --lib unit_factory && cargo test -p mind-core --lib payload"
             }
           }
         ]
@@ -27743,10 +27743,24 @@
           "at": "2026-11-06T15:10:07Z",
           "by": "hx-wiring",
           "text": "Handoff refresh (hx-wiring): the runtime seam is smaller than first thought. (1) Units.canCreate already exists as entities/comp/unit/queries.rs::can_create_unit (used by UnitFactory update_tile:396) — reuse it in UnitPayload.dump instead of writing it. (2) dump_unit_payload (world/blocks/payloads/payload_block.rs:294) can despawn the CarriedUnit's PayloadCarried/PayloadCarried/CarriedUnit markers and push it into UnitRuntime.units + units_created (see UnitFactory's adopt_output_unit); solidity gate = world grid tile at WorldGrid::to_tile(unit pos + trns(rotation,1)) solid when the unit is grounded; overlap gate = count grounded units with the same allow_leg_step within physicSize*1.05 (UnitPayload.java:114-128). (3) Unit payload write/read in payload_block.rs::payload_read needs unit entity IO (Unit.write/read) which does not exist anywhere in mind-core and would live in mc/io/** — OUT of this packet's ownership; it is the blocker for the IO sub-item. (4) UnitFactory (world/blocks/units/behavior.rs::update_tile) should build a UnitPayload in PayloadHolder + call moveOutPayload instead of spawn_output_unit_with_command; Java UnitFactory.java:428-445. (5) PayloadSource (world/blocks/payloads/payload_source.rs) needs the carried spawn seam + commandPos (PayloadSource.java:142-158). Items 3+4+5 remain unimplemented."
+        },
+        {
+          "at": "2026-11-06T21:36:49Z",
+          "by": "hx-payload",
+          "text": "Headless fix pass (worktree p1c @ 37a5e8d5). Verified by unit tests: factory output is a carried UnitPayload (not in Groups.unit) then dumped by moveOutPayload with the planned type/full health; PayloadSource unit config creates+transfers a carried unit; dump refuses on solid tile and on a grounded same-legstep overlap, and succeeds after clearing; native Payload.write unit body round-trips type/pos/rotation/health through a live save (payload-source unit config survives save->load with the unit still carried). Residuals: (a) upstream/Java MSAV unit-payload bodies (b'classId' + generated unit.write) still return PayloadRead::Unsupported — only the native MGRS format round-trips; (b) Reconstructor still spawns its upgrade directly rather than replacing a carried UnitPayload (out of this packet's list); (c) render has no payload draw pass yet, so carried units are not drawn — payloads/mod.rs exposes carried_unit()/held_payload_size() and update_payload syncs pos+rotation as the seam; (d) UnitPayload.dump's unit.unloaded()/UnitUnloadEvent/Units.notifyUnitSpawn have no port hook (fresh EntitySeq + runtime list push used instead)."
         }
       ],
       "claimed_by": "hx-payload",
-      "claimed_at": "2026-11-06T21:27:06Z"
+      "claimed_at": "2026-11-06T21:27:06Z",
+      "fix": "Port UnitPayload/PayloadBlock/PayloadSource/UnitFactory unit-payload flow: factory+source build a carried CarriedUnit payload in PayloadHolder and moveOutPayload ejects it; dump_unit_payload runs Units.canCreate + solidity + grounded-overlap gates then unit.add() into UnitRuntime.units; native nested unit-payload save body (NATIVE_UNIT_MARKER + shared unit record) round-trips type/health/rotation; pushOutput, payload rotation sync, onRemoved/onDestroyed payload cleanup; Units.canCreate now counts Groups.unit only.",
+      "evidence": [
+        "cargo test -p mind-core --lib unit_payload_tests (3 passed)",
+        "cargo test -p mind-core --lib unit_factory (8 passed)",
+        "cargo test -p mind-core --lib payload (39 passed)",
+        "cargo test -p mind-core --lib io:: (280 passed)",
+        "cargo test -p mind-core --lib (3049 passed, 0 failed)",
+        "cargo check -p mind-gdext (ok)"
+      ]
     },
     "PAR-0519": {
       "title": "GAPS #53: DebugCollisionRenderer had no unit hitboxes",

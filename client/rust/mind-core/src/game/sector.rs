@@ -229,14 +229,17 @@ pub fn core_snapshot_of(
         if let Some(core) = world.get::<super::super::world::blocks::storage::CoreBuild>(entity) {
             snapshot.storage_capacity = core.storage_capacity;
         }
-        if let Some(module) = world.get::<crate::world::modules::ItemModule>(entity) {
-            for (index, amount) in module.items.iter().enumerate() {
-                if *amount <= 0 {
-                    continue;
-                }
-                if let Some(item) = content.item(crate::content::ItemId::new(index as u16)) {
-                    snapshot.items.insert(item.name.clone(), *amount);
-                }
+        // `SectorInfo.prepare` reads `defaultTeam.core().items`
+        // (`SectorInfo.java:203-209`). Java's cores alias one module, so the
+        // port sums the *canonical holders* of the default team's cores: every
+        // aliased core (`mc/world/blocks/storage/team_items`) contributes its
+        // team pool exactly once, never the inert per-core mirrors, and an
+        // unaliased core contributes its own module (the old per-core sum).
+        for (item, amount) in
+            crate::world::blocks::storage::team_items::team_item_stacks(world, default_team)
+        {
+            if let Some(content_item) = content.item(item) {
+                snapshot.items.insert(content_item.name.clone(), amount);
             }
         }
         if let Some(pos) = world.get::<crate::entities::comp::Pos>(entity) {
@@ -1253,6 +1256,62 @@ mod tests {
         loaded.load_info(&settings, "serpulo");
         assert_eq!(loaded.info.info.wave, 9);
         assert_eq!(loaded.info.info.items.get("lead"), Some(&50));
+    }
+
+    /// GAPS #21: `SectorInfo.prepare` reads the default team's core module
+    /// (`SectorInfo.java:203-209`). Two cores of one team alias one pool
+    /// (`CoreBlock.java:764-770`), so the snapshot must carry the shared total
+    /// once — not the first core's module and not the sum of duplicate copies.
+    #[test]
+    fn core_snapshot_sums_the_team_pool() {
+        use crate::command::Command;
+        use crate::content::BlockId;
+        use crate::sim::Sim;
+        use crate::world::blocks::storage::team_items;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        let (core, copper) = {
+            let content = sim.block_runtime().expect("runtime").content();
+            (
+                content.block_id("core-shard").expect("core-shard"),
+                content.item_id("copper").expect("copper"),
+            )
+        };
+        for (x, y) in [(6, 6), (26, 26)] {
+            sim.apply(Command::Place { x, y, block: core })
+                .expect("place core");
+        }
+        // `BuildRules.default_team` of the bare runtime.
+        let team = 0u8;
+        let cores = team_items::team_cores(&sim.ecs.0, team);
+        assert_eq!(cores.len(), 2, "two default-team cores");
+        let (first, second) = (cores[0], cores[1]);
+        assert_eq!(team_items::core_holder(&sim.ecs.0, second), first);
+
+        // Deposit through the *second* core: both resolve to one pool.
+        team_items::add_to_core(&mut sim.ecs.0, second, copper, 100, 8000);
+
+        let snapshot = {
+            let content = sim.block_runtime().expect("runtime").content();
+            core_snapshot_of(&sim, content, team)
+        };
+        assert!(snapshot.has_core);
+        assert_eq!(snapshot.best_core_type, "core-shard");
+        assert_eq!(
+            snapshot.items.get("copper"),
+            Some(&100),
+            "one pool, counted once"
+        );
+        assert_eq!(snapshot.storage_capacity, 8000, "two core-shard capacities");
+        assert_eq!(snapshot.spawn_position, pack_position(6, 6));
+
+        // The sector record keeps the total (`SectorInfo.prepare`).
+        let mut state = SectorInfoState::new();
+        state.prepare(&snapshot, false, Some("groundZero"));
+        assert_eq!(state.info.items.get("copper"), Some(&100));
+        assert_eq!(state.info.storage_capacity, 8000);
+        assert_eq!(state.info.best_core_type, "core-shard");
     }
 
     /// PAR-0453: `Sector.displayThreat` (`Sector.java:80-84`) special-cases

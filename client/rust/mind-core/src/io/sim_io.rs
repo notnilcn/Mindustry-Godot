@@ -19,6 +19,7 @@ use std::path::Path;
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
+use bevy_ecs::world::World;
 
 use crate::content::{
     BlockKind, ContentError, ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content,
@@ -206,96 +207,10 @@ impl EntitySink for LiveEntitySink {
                         "unsupported live unit revision {revision}"
                     )));
                 }
-                let mut decoded = DecodedUnit {
-                    revision,
-                    saved_id: id,
-                    name: r.str()?,
-                    team: r.ub()?,
-                    x: r.f()?,
-                    y: r.f()?,
-                    rotation: r.f()?,
-                    health: r.f()?,
-                    payloads: Vec::new(),
-                    spawned_by_core: false,
-                    elevation: 0.0,
-                    shield: 0.0,
-                    stack: None,
-                    statuses: Vec::new(),
-                    command: None,
-                    controller: None,
-                    plans: Vec::new(),
-                    ability_data: Vec::new(),
-                    spawner_unit_id: -1,
-                };
-                if revision >= 2 {
-                    let count = r.us()?;
-                    for _ in 0..count {
-                        let tag = r.ub()?;
-                        let payload = match tag {
-                            0 => crate::entities::comp::unit::comp::CarriedPayload::Unit {
-                                type_id: crate::content::UnitTypeId::new(r.us()?),
-                                team: r.ub()?,
-                                health: r.f()?,
-                                rotation: r.f()?,
-                            },
-                            1 => crate::entities::comp::unit::comp::CarriedPayload::Build {
-                                block: crate::content::BlockId::new(r.us()?),
-                                team: r.ub()?,
-                                rotation: r.ub()?,
-                                health: r.f()?,
-                            },
-                            other => {
-                                return Err(IoError::corrupt(format!(
-                                    "unknown unit payload tag {other}"
-                                )));
-                            }
-                        };
-                        decoded.payloads.push(payload);
-                    }
-                }
-                if revision >= 3 {
-                    // H04 T9: unit-save completeness (pulled from
-                    // `SaveVersion.java:425-448` + the unit manifests).
-                    decoded.spawned_by_core = r.bool()?;
-                    decoded.elevation = r.f()?;
-                    decoded.shield = r.f()?;
-                    let stack_item = r.s()?;
-                    let stack_amount = r.i()?;
-                    if stack_item >= 0 {
-                        decoded.stack =
-                            Some((crate::content::ItemId::new(stack_item as u16), stack_amount));
-                    }
-                    let status_count = r.i()?.clamp(0, 1024) as usize;
-                    for _ in 0..status_count {
-                        let effect = r.s()?;
-                        let duration = r.f()?;
-                        if effect >= 0 {
-                            decoded.statuses.push(
-                                crate::entities::comp::unit::comp::StatusEntry::new(
-                                    crate::content::StatusId::new(effect as u16),
-                                    duration,
-                                ),
-                            );
-                        }
-                    }
-                    let command = r.s()?;
-                    decoded.command = (command >= 0).then_some(command as u16);
-                    decoded.controller = ai_kind_from_code(r.ub()?);
-                    let plan_count = r.i()?.clamp(0, 1024) as usize;
-                    for _ in 0..plan_count {
-                        let plan = crate::io::typeio::codecs::read_plan(r)?;
-                        decoded.plans.push(unit_plan_from_wire(plan));
-                    }
-                }
-                if revision >= 4 {
-                    // `TypeIO.readAbilities` (TypeIO.java:429-444): `b len`
-                    // then one `f data` each.
-                    let len = r.ub()? as usize;
-                    for _ in 0..len {
-                        decoded.ability_data.push(r.f()?);
-                    }
-                    decoded.spawner_unit_id = r.i()?;
-                }
+                let name = r.str()?;
+                let mut decoded = read_unit_fields(r, revision)?;
+                decoded.saved_id = id;
+                decoded.name = name;
                 self.units.push(decoded);
             }
             SIM_FIRE_CLASS_ID => {
@@ -444,12 +359,11 @@ impl EntitySource for LiveEntitySource<'_> {
             return Ok(());
         }
         for (seq, entity, name) in live_unit_rows(self.sim) {
-            let (Some(core), Some(pos)) = (world.get::<UnitCore>(entity), world.get::<Pos>(entity))
-            else {
+            // The row helper already filters these; keep the guard explicit for
+            // the chunk header fields the body writer reads.
+            if world.get::<UnitCore>(entity).is_none() || world.get::<Pos>(entity).is_none() {
                 continue;
-            };
-            let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
-            let health = world.get::<Health>(entity).map(|h| h.health).unwrap_or(0.0);
+            }
             scratch.write_chunk(w, |chunk| {
                 chunk.ub(SIM_UNIT_CLASS_ID);
                 // `SaveVersion.writeEntity`: `out.i(entity.id())` — the entity
@@ -457,106 +371,7 @@ impl EntitySource for LiveEntitySource<'_> {
                 chunk.i(seq as i32);
                 chunk.us(SIM_UNIT_REVISION);
                 chunk.str(&name)?;
-                chunk.ub(team);
-                chunk.f(pos.x);
-                chunk.f(pos.y);
-                chunk.f(core.rotation);
-                chunk.f(health);
-                // Revision 2: carried payload stack (`UnitPayloads.stack`).
-                let payloads = world
-                    .get::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
-                    .map(|payloads| payloads.stack.as_slice())
-                    .unwrap_or(&[]);
-                chunk.us(payloads.len().min(u16::MAX as usize) as u16);
-                for payload in payloads {
-                    match payload {
-                        crate::entities::comp::unit::comp::CarriedPayload::Unit {
-                            type_id,
-                            team,
-                            health,
-                            rotation,
-                        } => {
-                            chunk.ub(0);
-                            chunk.us(type_id.raw());
-                            chunk.ub(*team);
-                            chunk.f(*health);
-                            chunk.f(*rotation);
-                        }
-                        crate::entities::comp::unit::comp::CarriedPayload::Build {
-                            block,
-                            team,
-                            rotation,
-                            health,
-                        } => {
-                            chunk.ub(1);
-                            chunk.us(block.raw());
-                            chunk.ub(*team);
-                            chunk.ub(*rotation);
-                            chunk.f(*health);
-                        }
-                    }
-                }
-                // Revision 3 (H04 T9): unit-save completeness.
-                chunk.bool(core.spawned_by_core);
-                chunk.f(core.elevation);
-                let shield = world
-                    .get::<crate::entities::comp::unit::comp::ShieldComp>(entity)
-                    .map(|shield| shield.shield)
-                    .unwrap_or(0.0);
-                chunk.f(shield);
-                let stack = world
-                    .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
-                    .and_then(|items| items.item);
-                chunk.s(stack.map(|(item, _)| item.raw() as i16).unwrap_or(-1));
-                chunk.i(stack.map(|(_, amount)| amount).unwrap_or(0));
-                let statuses = world
-                    .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
-                    .map(|status| status.statuses.clone())
-                    .unwrap_or_default();
-                chunk.i(statuses.len().min(i32::MAX as usize) as i32);
-                for entry in &statuses {
-                    chunk.s(entry.effect.raw() as i16);
-                    chunk.f(entry.duration);
-                }
-                let command = world
-                    .get::<crate::ai::controller::UnitCommandComp>(entity)
-                    .map(|command| command.0 as i16)
-                    .unwrap_or(-1);
-                chunk.s(command);
-                // Controller kind (`UnitComp.afterRead` -> `createController`;
-                // T13 keeps Logic/Command state and resets the rest).
-                let controller = world
-                    .get::<crate::ai::controller::ControllerSlot>(entity)
-                    .map(|slot| ai_kind_code(slot.kind))
-                    .unwrap_or(255);
-                chunk.ub(controller);
-                let plans: Vec<crate::io::typeio::codecs::BuildPlan> = world
-                    .get::<crate::sim::builder::BuilderPlans>(entity)
-                    .map(|builder| builder.plans.iter().map(unit_plan_to_wire).collect())
-                    .unwrap_or_default();
-                chunk.i(plans.len().min(i32::MAX as usize) as i32);
-                for plan in &plans {
-                    crate::io::typeio::codecs::write_plan(chunk, plan)?;
-                }
-                // Revision 4 (L06 T4): `TypeIO.writeAbilities`
-                // (TypeIO.java:446-451) - `Ability.data` per ability.
-                let abilities: Vec<f32> = world
-                    .get::<crate::combat::abilities::AbilityComp>(entity)
-                    .map(|comp| comp.states.iter().map(|state| state.data).collect())
-                    .unwrap_or_default();
-                chunk.ub(abilities.len().min(u8::MAX as usize) as u8);
-                for data in abilities.iter().take(u8::MAX as usize) {
-                    chunk.f(*data);
-                }
-                // `UnitTetherComp.spawnerUnitId` (UnitTetherComp.java:17,
-                // kept as `spawner.id` by `update`, :34-40): the spawner's id.
-                let spawner = world
-                    .get::<crate::entities::comp::unit::comp::UnitTetherComp>(entity)
-                    .and_then(|tether| tether.spawner)
-                    .and_then(|spawner| world.get::<crate::ecs::EntitySeq>(spawner))
-                    .map_or(-1, |seq| seq.0 as i32);
-                chunk.i(spawner);
-                Ok(())
+                write_unit_fields(world, entity, chunk)
             })?;
         }
         // Fires (`FireComp.write`: tile/time/lifetime) then puddles
@@ -592,6 +407,224 @@ impl EntitySource for LiveEntitySource<'_> {
         }
         Ok(())
     }
+}
+
+/// Writes the shared unit record body: `team, x, y, rotation, health` plus the
+/// revision 2-4 extension fields.
+///
+/// Shared by the entity-region chunk writer
+/// (`SaveVersion.writeWorldEntities`) and the nested unit-payload body
+/// (`UnitPayload.write`/`Payload.write`), so both stay in lockstep as the
+/// revision grows. The caller writes the class/tag and revision header.
+pub(crate) fn write_unit_fields(
+    world: &World,
+    entity: Entity,
+    chunk: &mut WireWriter,
+) -> IoResult<()> {
+    let (Some(core), Some(pos)) = (world.get::<UnitCore>(entity), world.get::<Pos>(entity)) else {
+        return Ok(());
+    };
+    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+    let health = world.get::<Health>(entity).map(|h| h.health).unwrap_or(0.0);
+    chunk.ub(team);
+    chunk.f(pos.x);
+    chunk.f(pos.y);
+    chunk.f(core.rotation);
+    chunk.f(health);
+    // Revision 2: carried payload stack (`UnitPayloads.stack`).
+    let payloads = world
+        .get::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
+        .map(|payloads| payloads.stack.as_slice())
+        .unwrap_or(&[]);
+    chunk.us(payloads.len().min(u16::MAX as usize) as u16);
+    for payload in payloads {
+        match payload {
+            crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                type_id,
+                team,
+                health,
+                rotation,
+            } => {
+                chunk.ub(0);
+                chunk.us(type_id.raw());
+                chunk.ub(*team);
+                chunk.f(*health);
+                chunk.f(*rotation);
+            }
+            crate::entities::comp::unit::comp::CarriedPayload::Build {
+                block,
+                team,
+                rotation,
+                health,
+            } => {
+                chunk.ub(1);
+                chunk.us(block.raw());
+                chunk.ub(*team);
+                chunk.ub(*rotation);
+                chunk.f(*health);
+            }
+        }
+    }
+    // Revision 3 (H04 T9): unit-save completeness.
+    chunk.bool(core.spawned_by_core);
+    chunk.f(core.elevation);
+    let shield = world
+        .get::<crate::entities::comp::unit::comp::ShieldComp>(entity)
+        .map(|shield| shield.shield)
+        .unwrap_or(0.0);
+    chunk.f(shield);
+    let stack = world
+        .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+        .and_then(|items| items.item);
+    chunk.s(stack.map(|(item, _)| item.raw() as i16).unwrap_or(-1));
+    chunk.i(stack.map(|(_, amount)| amount).unwrap_or(0));
+    let statuses = world
+        .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+        .map(|status| status.statuses.clone())
+        .unwrap_or_default();
+    chunk.i(statuses.len().min(i32::MAX as usize) as i32);
+    for entry in &statuses {
+        chunk.s(entry.effect.raw() as i16);
+        chunk.f(entry.duration);
+    }
+    let command = world
+        .get::<crate::ai::controller::UnitCommandComp>(entity)
+        .map(|command| command.0 as i16)
+        .unwrap_or(-1);
+    chunk.s(command);
+    // Controller kind (`UnitComp.afterRead` -> `createController`;
+    // T13 keeps Logic/Command state and resets the rest).
+    let controller = world
+        .get::<crate::ai::controller::ControllerSlot>(entity)
+        .map(|slot| ai_kind_code(slot.kind))
+        .unwrap_or(255);
+    chunk.ub(controller);
+    let plans: Vec<crate::io::typeio::codecs::BuildPlan> = world
+        .get::<crate::sim::builder::BuilderPlans>(entity)
+        .map(|builder| builder.plans.iter().map(unit_plan_to_wire).collect())
+        .unwrap_or_default();
+    chunk.i(plans.len().min(i32::MAX as usize) as i32);
+    for plan in &plans {
+        crate::io::typeio::codecs::write_plan(chunk, plan)?;
+    }
+    // Revision 4 (L06 T4): `TypeIO.writeAbilities`
+    // (TypeIO.java:446-451) - `Ability.data` per ability.
+    let abilities: Vec<f32> = world
+        .get::<crate::combat::abilities::AbilityComp>(entity)
+        .map(|comp| comp.states.iter().map(|state| state.data).collect())
+        .unwrap_or_default();
+    chunk.ub(abilities.len().min(u8::MAX as usize) as u8);
+    for data in abilities.iter().take(u8::MAX as usize) {
+        chunk.f(*data);
+    }
+    // `UnitTetherComp.spawnerUnitId` (UnitTetherComp.java:17,
+    // kept as `spawner.id` by `update`, :34-40): the spawner's id.
+    let spawner = world
+        .get::<crate::entities::comp::unit::comp::UnitTetherComp>(entity)
+        .and_then(|tether| tether.spawner)
+        .and_then(|spawner| world.get::<crate::ecs::EntitySeq>(spawner))
+        .map_or(-1, |seq| seq.0 as i32);
+    chunk.i(spawner);
+    Ok(())
+}
+
+/// Reads the shared unit record body written by [`write_unit_fields`]
+/// (`team, x, y, rotation, health` + the revision 2-4 extensions).
+///
+/// `revision` is the chunk payload revision (`SIM_UNIT_REVISION`); the caller
+/// has already consumed the class/tag header and, for the entity region, the
+/// content name.
+pub(crate) fn read_unit_fields(r: &mut WireReader, revision: u16) -> IoResult<DecodedUnit> {
+    let mut decoded = DecodedUnit {
+        revision,
+        saved_id: -1,
+        name: String::new(),
+        team: r.ub()?,
+        x: r.f()?,
+        y: r.f()?,
+        rotation: r.f()?,
+        health: r.f()?,
+        payloads: Vec::new(),
+        spawned_by_core: false,
+        elevation: 0.0,
+        shield: 0.0,
+        stack: None,
+        statuses: Vec::new(),
+        command: None,
+        controller: None,
+        plans: Vec::new(),
+        ability_data: Vec::new(),
+        spawner_unit_id: -1,
+    };
+    if revision >= 2 {
+        let count = r.us()?;
+        for _ in 0..count {
+            let tag = r.ub()?;
+            let payload = match tag {
+                0 => crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                    type_id: crate::content::UnitTypeId::new(r.us()?),
+                    team: r.ub()?,
+                    health: r.f()?,
+                    rotation: r.f()?,
+                },
+                1 => crate::entities::comp::unit::comp::CarriedPayload::Build {
+                    block: crate::content::BlockId::new(r.us()?),
+                    team: r.ub()?,
+                    rotation: r.ub()?,
+                    health: r.f()?,
+                },
+                other => {
+                    return Err(IoError::corrupt(format!(
+                        "unknown unit payload tag {other}"
+                    )));
+                }
+            };
+            decoded.payloads.push(payload);
+        }
+    }
+    if revision >= 3 {
+        // H04 T9: unit-save completeness (pulled from
+        // `SaveVersion.java:425-448` + the unit manifests).
+        decoded.spawned_by_core = r.bool()?;
+        decoded.elevation = r.f()?;
+        decoded.shield = r.f()?;
+        let stack_item = r.s()?;
+        let stack_amount = r.i()?;
+        if stack_item >= 0 {
+            decoded.stack = Some((crate::content::ItemId::new(stack_item as u16), stack_amount));
+        }
+        let status_count = r.i()?.clamp(0, 1024) as usize;
+        for _ in 0..status_count {
+            let effect = r.s()?;
+            let duration = r.f()?;
+            if effect >= 0 {
+                decoded
+                    .statuses
+                    .push(crate::entities::comp::unit::comp::StatusEntry::new(
+                        crate::content::StatusId::new(effect as u16),
+                        duration,
+                    ));
+            }
+        }
+        let command = r.s()?;
+        decoded.command = (command >= 0).then_some(command as u16);
+        decoded.controller = ai_kind_from_code(r.ub()?);
+        let plan_count = r.i()?.clamp(0, 1024) as usize;
+        for _ in 0..plan_count {
+            let plan = crate::io::typeio::codecs::read_plan(r)?;
+            decoded.plans.push(unit_plan_from_wire(plan));
+        }
+    }
+    if revision >= 4 {
+        // `TypeIO.readAbilities` (TypeIO.java:429-444): `b len`
+        // then one `f data` each.
+        let len = r.ub()? as usize;
+        for _ in 0..len {
+            decoded.ability_data.push(r.f()?);
+        }
+        decoded.spawner_unit_id = r.i()?;
+    }
+    Ok(decoded)
 }
 
 /// Stable save code for [`crate::ai::controller::AiKind`] (revision 3;
@@ -934,129 +967,7 @@ impl Sim {
             {
                 self.loaded_unit_entities.push(entity);
                 spawned.push((entity, unit.saved_id));
-                if unit.health > 0.0
-                    && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
-                {
-                    health.health = unit.health;
-                }
-                // Revision 3: core spawn flag + elevation.
-                if let Some(mut core) = self.ecs.0.get_mut::<UnitCore>(entity) {
-                    core.spawned_by_core = unit.spawned_by_core;
-                    core.elevation = unit.elevation;
-                }
-                if unit.shield > 0.0 {
-                    if let Some(mut shield) =
-                        self.ecs
-                            .0
-                            .get_mut::<crate::entities::comp::unit::comp::ShieldComp>(entity)
-                    {
-                        shield.shield = unit.shield;
-                    } else {
-                        self.ecs.0.entity_mut(entity).insert(
-                            crate::entities::comp::unit::comp::ShieldComp {
-                                shield: unit.shield,
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-                if let Some((item, amount)) = unit.stack {
-                    if let Some(mut items) = self
-                        .ecs
-                        .0
-                        .get_mut::<crate::entities::comp::unit::comp::ItemsComp>(entity)
-                    {
-                        items.item = Some((item, amount));
-                    } else {
-                        self.ecs.0.entity_mut(entity).insert(
-                            crate::entities::comp::unit::comp::ItemsComp {
-                                item: Some((item, amount)),
-                            },
-                        );
-                    }
-                }
-                if !unit.statuses.is_empty() {
-                    if let Some(mut status) =
-                        self.ecs
-                            .0
-                            .get_mut::<crate::entities::comp::unit::comp::StatusComp>(entity)
-                    {
-                        status.statuses = unit.statuses.clone();
-                        status.damage_times.resize(unit.statuses.len(), 0.0);
-                    } else {
-                        let len = unit.statuses.len();
-                        self.ecs.0.entity_mut(entity).insert(
-                            crate::entities::comp::unit::comp::StatusComp {
-                                statuses: unit.statuses.clone(),
-                                damage_times: vec![0.0; len],
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-                if let Some(command) = unit.command {
-                    self.ecs
-                        .0
-                        .entity_mut(entity)
-                        .insert(crate::ai::controller::UnitCommandComp(command));
-                }
-                if let Some(kind) = unit.controller
-                    && let Some(mut slot) = self
-                        .ecs
-                        .0
-                        .get_mut::<crate::ai::controller::ControllerSlot>(entity)
-                {
-                    slot.kind = kind;
-                }
-                if !unit.plans.is_empty() {
-                    let plans: std::collections::VecDeque<crate::sim::builder::UnitBuildPlan> =
-                        unit.plans.iter().cloned().collect();
-                    if let Some(mut builder) = self
-                        .ecs
-                        .0
-                        .get_mut::<crate::sim::builder::BuilderPlans>(entity)
-                    {
-                        builder.plans = plans;
-                    } else {
-                        self.ecs
-                            .0
-                            .entity_mut(entity)
-                            .insert(crate::sim::builder::BuilderPlans {
-                                plans,
-                                ..Default::default()
-                            });
-                    }
-                }
-                // Revision 4: `UnitComp.setType` copies the read `data` into
-                // the type's abilities index-aligned (`EmptyDataAbility`
-                // placeholders when the count differs; UnitComp.java:549-557,
-                // TypeIO.java:429-444).
-                if !unit.ability_data.is_empty()
-                    && let Some(mut comp) = self
-                        .ecs
-                        .0
-                        .get_mut::<crate::combat::abilities::AbilityComp>(entity)
-                {
-                    for (state, data) in comp.states.iter_mut().zip(&unit.ability_data) {
-                        state.data = *data;
-                    }
-                }
-                // Revision 2: restore the carried payload stack.
-                if !unit.payloads.is_empty() {
-                    let stack = unit.payloads.clone();
-                    if let Some(mut payloads) =
-                        self.ecs
-                            .0
-                            .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
-                    {
-                        payloads.stack = stack;
-                    } else {
-                        self.ecs
-                            .0
-                            .entity_mut(entity)
-                            .insert(crate::entities::comp::unit::comp::UnitPayloads { stack });
-                    }
-                }
+                apply_unit_record(&mut self.ecs.0, entity, unit);
             }
         }
         self.restore_unit_ids(&spawned);
@@ -1214,6 +1125,117 @@ impl Sim {
                 continue;
             };
             self.release_unit_to_ai(entity, team);
+        }
+    }
+}
+
+/// Applies a decoded unit record to a spawned unit entity
+/// (`UnitComp.read` field half).
+///
+/// Shared by the entity-region restore (`apply_decoded_entities`) and the
+/// nested unit-payload read (`Payload.read` unit branch), so a unit carried by
+/// a payload block restores the same state as one in `Groups.unit`.
+pub(crate) fn apply_unit_record(world: &mut World, entity: Entity, unit: &DecodedUnit) {
+    if unit.health > 0.0
+        && let Some(mut health) = world.get_mut::<Health>(entity)
+    {
+        health.health = unit.health;
+    }
+    // Revision 3: core spawn flag + elevation.
+    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+        core.spawned_by_core = unit.spawned_by_core;
+        core.elevation = unit.elevation;
+    }
+    if unit.shield > 0.0 {
+        if let Some(mut shield) =
+            world.get_mut::<crate::entities::comp::unit::comp::ShieldComp>(entity)
+        {
+            shield.shield = unit.shield;
+        } else {
+            world
+                .entity_mut(entity)
+                .insert(crate::entities::comp::unit::comp::ShieldComp {
+                    shield: unit.shield,
+                    ..Default::default()
+                });
+        }
+    }
+    if let Some((item, amount)) = unit.stack {
+        if let Some(mut items) =
+            world.get_mut::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+        {
+            items.item = Some((item, amount));
+        } else {
+            world
+                .entity_mut(entity)
+                .insert(crate::entities::comp::unit::comp::ItemsComp {
+                    item: Some((item, amount)),
+                });
+        }
+    }
+    if !unit.statuses.is_empty() {
+        if let Some(mut status) =
+            world.get_mut::<crate::entities::comp::unit::comp::StatusComp>(entity)
+        {
+            status.statuses = unit.statuses.clone();
+            status.damage_times.resize(unit.statuses.len(), 0.0);
+        } else {
+            let len = unit.statuses.len();
+            world
+                .entity_mut(entity)
+                .insert(crate::entities::comp::unit::comp::StatusComp {
+                    statuses: unit.statuses.clone(),
+                    damage_times: vec![0.0; len],
+                    ..Default::default()
+                });
+        }
+    }
+    if let Some(command) = unit.command {
+        world
+            .entity_mut(entity)
+            .insert(crate::ai::controller::UnitCommandComp(command));
+    }
+    if let Some(kind) = unit.controller
+        && let Some(mut slot) = world.get_mut::<crate::ai::controller::ControllerSlot>(entity)
+    {
+        slot.kind = kind;
+    }
+    if !unit.plans.is_empty() {
+        let plans: std::collections::VecDeque<crate::sim::builder::UnitBuildPlan> =
+            unit.plans.iter().cloned().collect();
+        if let Some(mut builder) = world.get_mut::<crate::sim::builder::BuilderPlans>(entity) {
+            builder.plans = plans;
+        } else {
+            world
+                .entity_mut(entity)
+                .insert(crate::sim::builder::BuilderPlans {
+                    plans,
+                    ..Default::default()
+                });
+        }
+    }
+    // Revision 4: `UnitComp.setType` copies the read `data` into
+    // the type's abilities index-aligned (`EmptyDataAbility`
+    // placeholders when the count differs; UnitComp.java:549-557,
+    // TypeIO.java:429-444).
+    if !unit.ability_data.is_empty()
+        && let Some(mut comp) = world.get_mut::<crate::combat::abilities::AbilityComp>(entity)
+    {
+        for (state, data) in comp.states.iter_mut().zip(&unit.ability_data) {
+            state.data = *data;
+        }
+    }
+    // Revision 2: restore the carried payload stack.
+    if !unit.payloads.is_empty() {
+        let stack = unit.payloads.clone();
+        if let Some(mut payloads) =
+            world.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
+        {
+            payloads.stack = stack;
+        } else {
+            world
+                .entity_mut(entity)
+                .insert(crate::entities::comp::unit::comp::UnitPayloads { stack });
         }
     }
 }
@@ -2837,6 +2859,130 @@ mod tests {
                 .map(|payloads| payloads.stack.clone()),
             Some(before),
             "the carried stack survived the round-trip"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// GAPS #23 / PAR-0518: a unit carried by a payload block round-trips a
+    /// live save. The nested `Payload.write` unit body is the only place the
+    /// carried unit exists in the save (it is not a `Groups.unit` row), so
+    /// before this fix the payload block read stopped and the unit was lost.
+    #[test]
+    fn live_save_keeps_block_unit_payload() {
+        use crate::determinism::{ConfigValue, SimCommand};
+        use crate::entities::comp::unit::comp::UnitTypeComp;
+        use crate::entities::comp::{Health, Unit};
+        use crate::world::blocks::payloads::{CarriedUnit, PayloadHolder};
+
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let source = sim
+            .world_block_id("payload-source")
+            .expect("payload-source");
+        sim.command(SimCommand::Place {
+            x: 5,
+            y: 5,
+            block: source,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("place source");
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_id("dagger")
+            .expect("dagger");
+        sim.command(SimCommand::Configure {
+            x: 5,
+            y: 5,
+            value: ConfigValue::Content("dagger".to_owned()),
+        })
+        .expect("configure dagger");
+        // One update creates the carried payload; it takes ~17 ticks to move
+        // out, so the save below captures it still held.
+        sim.tick().expect("tick");
+        let source_e = sim
+            .grid
+            .entity_at(TilePos::new(5, 5))
+            .expect("source entity");
+        let payload = sim.held_payload(source_e).expect("carried payload");
+        assert!(!payload.is_block);
+        let entity = payload.entity.expect("payload entity");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .map(|comp| comp.type_id),
+            Some(dagger)
+        );
+        // Make the restored health distinguishable from a freshly spawned one.
+        sim.ecs
+            .0
+            .get_mut::<Health>(entity)
+            .expect("payload health")
+            .health = 30.0;
+        assert!(
+            sim.ecs.0.get::<Unit>(entity).is_none(),
+            "carried unit is not in Groups.unit before the save"
+        );
+
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+        let path = temp_path("live-block-unit-payload");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load must restore the carried unit.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let source_e = sim
+            .grid
+            .entity_at(TilePos::new(5, 5))
+            .expect("source reloaded");
+        let payload = sim
+            .held_payload(source_e)
+            .expect("the payload block kept its payload");
+        assert!(!payload.is_block, "unit payload restored");
+        assert_eq!(payload.content, dagger.raw());
+        let entity = payload.entity.expect("read entity");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .map(|comp| comp.type_id),
+            Some(dagger),
+            "unit type round-trips"
+        );
+        assert_eq!(
+            sim.ecs.0.get::<Health>(entity).map(|health| health.health),
+            Some(30.0),
+            "unit health round-trips"
+        );
+        assert!(
+            sim.ecs.0.get::<Unit>(entity).is_none(),
+            "a restored carried unit is still outside Groups.unit"
+        );
+        assert!(
+            sim.ecs.0.get::<CarriedUnit>(entity).is_some(),
+            "carried marker restored"
+        );
+        assert!(
+            sim.ecs
+                .0
+                .get::<PayloadHolder>(source_e)
+                .is_some_and(|holder| holder.payload == Some(payload))
         );
 
         let _ = std::fs::remove_file(&path);

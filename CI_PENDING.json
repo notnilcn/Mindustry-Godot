@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T20:53:21Z",
+  "updated": "2026-11-06T21:28:48Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1301,6 +1301,42 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib behavior; ... consumers; ... render::draw_desc; ... abilities",
       "expected": "full lib 3044 pass; behavior 116; consumers 7; draw_desc 16; abilities 18",
       "risk": "BehaviorRegistry kind fallback for every block; consumer dispatch rewrite; DrawDesc chain counts; AbilityKind enum append; trait signature changes",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-212848",
+      "created_at": "2026-11-06T21:28:48Z",
+      "agent": "hx-wave-g",
+      "branch": "main",
+      "head": "5d1c4af4",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-gdext/src,client/rust/mind-core/src/input",
+      "summary": "UI: player list + trace; ping/plan/editor HUD; mobile lines; lights/planet/load; schematics",
+      "files": [
+        "client/rust/mind-gdext/src/ui/fragments/player_list.rs",
+        "client/rust/mind-gdext/src/ui/ui_host.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/misc.rs",
+        "client/rust/mind-gdext/src/input/desktop.rs",
+        "client/rust/mind-gdext/src/ui/fragments/hud.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-core/src/input/mobile.rs",
+        "client/rust/mind-gdext/src/render/light.rs",
+        "client/rust/mind-gdext/src/render/load.rs",
+        "client/rust/mind-gdext/src/ui/planet.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render; ... player; ... planet; ... -p mind-core --lib input",
+      "expected": "render 64, planet 7, player 18, input 158, schematic 8; dialog sweep failed=0",
+      "risk": "lightmap cost with beams; new HUD classes; player list ABI seam; .msch writes re-encode",
       "status": "pending"
     }
   ]

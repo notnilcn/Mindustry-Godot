@@ -341,6 +341,18 @@ pub enum BlockKind {
     LegacyUnitFactory = 135,
     /// `mindustry.world.blocks.campaign.LegacyCommandCenter` (`command-center`).
     LegacyCommandCenter = 136,
+    /// `mindustry.world.blocks.environment.TiledFloor` (`TiledFloor.java:14`):
+    /// a `Floor` drawn in packed square tiles sized by `maxSize` (default 3).
+    /// Mod-only class (`ClassMap.java:287`); no vanilla block instantiates it.
+    TiledFloor = 137,
+    /// `mindustry.world.blocks.environment.TiledWall` (`TiledWall.java:14`):
+    /// a `StaticWall` drawn in packed square tiles sized by `maxSize` (default
+    /// 3). Mod-only class (`ClassMap.java:288`).
+    TiledWall = 138,
+    /// `mindustry.world.blocks.environment.WobbleProp` (`WobbleProp.java:8`):
+    /// a `Prop` whose region vertices wobble (`wscl`/`wmag`/`wtscl`/`wmag2`).
+    /// Mod-only class (`ClassMap.java:290`).
+    WobbleProp = 139,
 }
 
 impl BlockKind {
@@ -483,6 +495,9 @@ impl BlockKind {
         BlockKind::LegacyMechPad,
         BlockKind::LegacyUnitFactory,
         BlockKind::LegacyCommandCenter,
+        BlockKind::TiledFloor,
+        BlockKind::TiledWall,
+        BlockKind::WobbleProp,
     ];
 
     /// Stable ordinal (content/audit ABI).
@@ -630,6 +645,9 @@ impl BlockKind {
             BlockKind::LegacyMechPad => "LegacyMechPad",
             BlockKind::LegacyUnitFactory => "LegacyUnitFactory",
             BlockKind::LegacyCommandCenter => "LegacyCommandCenter",
+            BlockKind::TiledFloor => "TiledFloor",
+            BlockKind::TiledWall => "TiledWall",
+            BlockKind::WobbleProp => "WobbleProp",
         }
     }
 
@@ -1463,6 +1481,108 @@ pub struct BlockSpec {
     pub decorates: Vec<&'static str>,
     /// `Turret.playerControllable` (`Turret.java:103`, default true; mod knob).
     pub player_controllable: Option<bool>,
+
+    // ---- production family knobs (append-only; GAPS #56 follow-up) ----
+    //
+    // The per-family numbers below were previously reachable only through the
+    // name-keyed `BlockKindData::apply_vanilla_knobs` overlay. They are content
+    // data upstream (`Blocks.java` / mod JSON `type` classes), so they live on
+    // the record now: `BlockKindData::from_def` copies them and falls back to
+    // the Java class default ([`crate::world::block_kind_data`]) when `None`.
+    /// `GenericCrafter.outputItems`/`Separator.results`-adjacent item outputs
+    /// (`GenericCrafter.java:22`; the `outputItem(...)`/`outputItems(...)`
+    /// builders). Empty = no item output.
+    pub output_items: Vec<StackSpec>,
+    /// `GenericCrafter.outputLiquids` (`GenericCrafter.java:23`): amounts are
+    /// per tick (Java stores `amount / 60f` in the builder).
+    pub output_liquids: Vec<LiquidStackSpec>,
+    /// `GenericCrafter.liquidOutputDirections` (`GenericCrafter.java:35`): one
+    /// relative direction per liquid output; empty = Java's `{-1}` (all sides).
+    pub liquid_output_directions: Vec<i8>,
+    /// `GenericCrafter.ignoreLiquidFullness` (`GenericCrafter.java:37`).
+    pub ignore_liquid_fullness: Option<bool>,
+    /// `Separator.results` (`Separator.java:20`, an `ItemStack[]`; the class
+    /// derives `hasItems`/`hasLiquids` from it in `init`).
+    pub separator_results: Vec<StackSpec>,
+    /// `Drill.drillTime` (frames per ore; `Drill.java:34`). Also read by
+    /// `BurstDrill` (inherits) and `BeamDrill.drillTime`
+    /// (`BeamDrill.java:38`) and `WallCrafter.drillTime` (`WallCrafter.java:30`).
+    pub drill_time: Option<f32>,
+    /// `Drill.tier` (`Drill.java:30`): maximum ore hardness tier. Also
+    /// `BeamDrill.tier` (`BeamDrill.java:40`).
+    pub drill_tier: Option<i32>,
+    /// `Drill.hardnessDrillMultiplier` (`Drill.java:26`, default 50; `0` for
+    /// `BurstDrill`, `BurstDrill.java:35-44`).
+    pub hardness_drill_multiplier: Option<f32>,
+    /// `Drill.blockedItems` (`Drill.java:42`; the `blockedItem` single-item
+    /// form is folded in by the caller). Also `BeamDrill.blockedItems`.
+    pub blocked_items: Vec<&'static str>,
+    /// `Drill.liquidBoostIntensity` (`Drill.java:36`, default 1.6). Also
+    /// `WallCrafter.liquidBoostIntensity` (`WallCrafter.java:32`).
+    pub liquid_boost_intensity: Option<f32>,
+    /// `Drill.warmupSpeed` (`Drill.java:38`, default 0.015).
+    pub warmup_speed: Option<f32>,
+    /// `BurstDrill.invertedTime` (`BurstDrill.java:26`, default 200).
+    pub inverted_time: Option<f32>,
+    /// `BeamDrill.range` (`BeamDrill.java:39`, default 5): drill reach in tiles.
+    pub beam_range: Option<i32>,
+    /// `Pump.pumpAmount` (`Pump.java:20`, default 0.2): per-tile liquid yield.
+    /// Also `SolidPump`/`Fracker` (inherited).
+    pub pump_amount: Option<f32>,
+    /// `Fracker.itemUseTime` (`Fracker.java:8`, default 100): ticks between
+    /// item consumptions.
+    pub item_use_time: Option<f32>,
+    /// `SolidPump.result` (`SolidPump.java:22`, default `Liquids.water`): the
+    /// liquid the pump produces. `Fracker` inherits it.
+    pub pump_liquid: Option<&'static str>,
+    /// `SolidPump.baseEfficiency` (`SolidPump.java:26`, default 1). Also the
+    /// `AttributeCrafter.baseEfficiency` field (`AttributeCrafter.java:17`).
+    pub base_efficiency: Option<f32>,
+    /// `SolidPump.attribute`/`Fracker`/`WallCrafter.attribute`/
+    /// `AttributeCrafter.attribute` (`Attribute` name, e.g. `water`, `sand`,
+    /// `spores`, `steam`); `None` = Java `null` (no attribute check).
+    pub attribute: Option<&'static str>,
+    /// `WallCrafter.output` (`WallCrafter.java:40`, default `Items.sand`).
+    pub output_item: Option<&'static str>,
+    /// `WallCrafter.itemBoostIntensity` (`WallCrafter.java:46`, default 1.6).
+    pub item_boost_intensity: Option<f32>,
+    /// `WallCrafter.boostItemUseTime` (`WallCrafter.java:44`, default 120):
+    /// ticks between item-booster consumptions.
+    pub boost_item_use_time: Option<f32>,
+    /// `AttributeCrafter.boostScale` (`AttributeCrafter.java:19`, default 1).
+    pub boost_scale: Option<f32>,
+    /// `AttributeCrafter.minEfficiency` (`AttributeCrafter.java:21`, default
+    /// -1).
+    pub min_efficiency: Option<f32>,
+    /// `AttributeCrafter.maxBoost` (`AttributeCrafter.java:23`, default 1).
+    pub max_boost: Option<f32>,
+    /// `AttributeCrafter.outputScale` (`AttributeCrafter.java:25`; `0` = the
+    /// output is not scaled by efficiency).
+    pub output_scale: Option<f32>,
+    /// `AttributeCrafter.scaleLiquidConsumption` (`AttributeCrafter.java:27`).
+    pub scale_liquid_consumption: Option<bool>,
+    /// `AttributeCrafter.displayEfficiency` (`AttributeCrafter.java:29`).
+    pub display_efficiency: Option<bool>,
+    /// `AttributeCrafter.displayScaledOutput` (`AttributeCrafter.java:31`).
+    pub display_scaled_output: Option<bool>,
+
+    // ---- environment family knobs (TiledFloor/TiledWall/WobbleProp) ----
+    /// `Block.variants` (`Block.java:136`, default 0): sprite variant count
+    /// (`variantRegions`). `TiledFloor(name, variants, maxSize)` and
+    /// `TiledWall(name, variants, maxSize)` set it (`TiledFloor.java:21`).
+    pub variants: Option<i32>,
+    /// `TiledFloor.maxSize`/`TiledWall.maxSize` (`TiledFloor.java:17`,
+    /// `TiledWall.java:16`, default 3): largest packed tile block the renderer
+    /// may assemble.
+    pub max_size: Option<i32>,
+    /// `WobbleProp.wscl` (`WobbleProp.java:9`, default 25).
+    pub wobble_scale: Option<f32>,
+    /// `WobbleProp.wmag` (`WobbleProp.java:9`, default 0.4).
+    pub wobble_magnitude: Option<f32>,
+    /// `WobbleProp.wtscl` (`WobbleProp.java:9`, default 1).
+    pub wobble_time_scale: Option<f32>,
+    /// `WobbleProp.wmag2` (`WobbleProp.java:9`, default 1).
+    pub wobble_magnitude2: Option<f32>,
 }
 
 impl Default for BlockSpec {
@@ -1589,6 +1709,42 @@ impl Default for BlockSpec {
             use_color: None,
             decorates: Vec::new(),
             player_controllable: None,
+            // Production family knobs (class defaults live in
+            // `world::block_kind_data`, applied when these stay unset).
+            output_items: Vec::new(),
+            output_liquids: Vec::new(),
+            liquid_output_directions: Vec::new(),
+            ignore_liquid_fullness: None,
+            separator_results: Vec::new(),
+            drill_time: None,
+            drill_tier: None,
+            hardness_drill_multiplier: None,
+            blocked_items: Vec::new(),
+            liquid_boost_intensity: None,
+            warmup_speed: None,
+            inverted_time: None,
+            beam_range: None,
+            pump_amount: None,
+            item_use_time: None,
+            pump_liquid: None,
+            base_efficiency: None,
+            attribute: None,
+            output_item: None,
+            item_boost_intensity: None,
+            boost_item_use_time: None,
+            boost_scale: None,
+            min_efficiency: None,
+            max_boost: None,
+            output_scale: None,
+            scale_liquid_consumption: None,
+            display_efficiency: None,
+            display_scaled_output: None,
+            variants: None,
+            max_size: None,
+            wobble_scale: None,
+            wobble_magnitude: None,
+            wobble_time_scale: None,
+            wobble_magnitude2: None,
         }
     }
 }
@@ -2543,6 +2699,91 @@ pub struct BlockDef {
     /// `:382-384`): whether the player may possess this turret's proxy unit.
     /// Default true; no vanilla turret clears it (mods may). L06 T2.
     pub player_controllable: bool,
+
+    // ---- production family knobs (append-only; GAPS #56 follow-up) ----
+    //
+    // Resolved content values with the Java *content* semantics: `None`/empty
+    // means "the JSON/mod content did not set it", and
+    // [`crate::world::block_kind_data::BlockKindData::from_def`] then applies
+    // the upstream class field initializer. They replace the name-keyed
+    // `apply_vanilla_knobs` overlay as the source of truth.
+    /// `GenericCrafter.outputItems` (`GenericCrafter.java:22`).
+    pub output_items: Vec<ItemStack>,
+    /// `GenericCrafter.outputLiquids` (`GenericCrafter.java:23`): per-tick
+    /// amounts (`(liquid, amount / 60f)` upstream).
+    pub output_liquids: Vec<(LiquidId, f32)>,
+    /// `GenericCrafter.liquidOutputDirections` (`GenericCrafter.java:35`); empty
+    /// = the Java default `{-1}` (dump/behaviour code applies the fallback).
+    pub liquid_output_directions: Vec<i8>,
+    /// `GenericCrafter.ignoreLiquidFullness` (`GenericCrafter.java:37`).
+    pub ignore_liquid_fullness: bool,
+    /// `Separator.results` (`Separator.java:20`).
+    pub separator_results: Vec<ItemStack>,
+    /// `Drill.drillTime` (also `BurstDrill`, `BeamDrill.drillTime`,
+    /// `WallCrafter.drillTime`); `None` = class default.
+    pub drill_time: Option<f32>,
+    /// `Drill.tier` (also `BeamDrill.tier`); `None` = class default.
+    pub drill_tier: Option<i32>,
+    /// `Drill.hardnessDrillMultiplier`; `None` = class default (50, 0 for
+    /// burst drills).
+    pub hardness_drill_multiplier: Option<f32>,
+    /// `Drill.blockedItems` (`blockedItem` folded in).
+    pub blocked_items: Vec<ItemId>,
+    /// `Drill.liquidBoostIntensity` / `WallCrafter.liquidBoostIntensity`.
+    pub liquid_boost_intensity: Option<f32>,
+    /// `Drill.warmupSpeed`.
+    pub warmup_speed: Option<f32>,
+    /// `BurstDrill.invertedTime`.
+    pub inverted_time: Option<f32>,
+    /// `BeamDrill.range`.
+    pub beam_range: Option<i32>,
+    /// `Pump.pumpAmount` (also `SolidPump`/`Fracker`).
+    pub pump_amount: Option<f32>,
+    /// `Fracker.itemUseTime`.
+    pub item_use_time: Option<f32>,
+    /// `SolidPump.result` (`Fracker` inherits it).
+    pub pump_liquid: Option<LiquidId>,
+    /// `SolidPump.baseEfficiency` / `AttributeCrafter.baseEfficiency`.
+    pub base_efficiency: Option<f32>,
+    /// Family `attribute` (`Attribute` name; `SolidPump`/`Fracker`/
+    /// `WallCrafter`/`AttributeCrafter`).
+    pub attribute: Option<String>,
+    /// `WallCrafter.output`.
+    pub output_item: Option<ItemId>,
+    /// `WallCrafter.itemBoostIntensity`.
+    pub item_boost_intensity: Option<f32>,
+    /// `WallCrafter.boostItemUseTime`.
+    pub boost_item_use_time: Option<f32>,
+    /// `AttributeCrafter.boostScale`.
+    pub boost_scale: Option<f32>,
+    /// `AttributeCrafter.minEfficiency`.
+    pub min_efficiency: Option<f32>,
+    /// `AttributeCrafter.maxBoost`.
+    pub max_boost: Option<f32>,
+    /// `AttributeCrafter.outputScale`.
+    pub output_scale: Option<f32>,
+    /// `AttributeCrafter.scaleLiquidConsumption`.
+    pub scale_liquid_consumption: Option<bool>,
+    /// `AttributeCrafter.displayEfficiency`.
+    pub display_efficiency: Option<bool>,
+    /// `AttributeCrafter.displayScaledOutput`.
+    pub display_scaled_output: Option<bool>,
+
+    // ---- environment family knobs (TiledFloor/TiledWall/WobbleProp) ----
+    /// `Block.variants` (`Block.java:136`): sprite variant count (`0` = the
+    /// plain region).
+    pub variants: i32,
+    /// `TiledFloor.maxSize`/`TiledWall.maxSize` (`0` = not a tiled class; the
+    /// class default 3 applies for tiled kinds).
+    pub max_size: i32,
+    /// `WobbleProp.wscl` (`None` = the class default 25).
+    pub wobble_scale: Option<f32>,
+    /// `WobbleProp.wmag` (`None` = the class default 0.4).
+    pub wobble_magnitude: Option<f32>,
+    /// `WobbleProp.wtscl` (`None` = the class default 1).
+    pub wobble_time_scale: Option<f32>,
+    /// `WobbleProp.wmag2` (`None` = the class default 1).
+    pub wobble_magnitude2: Option<f32>,
 }
 
 /// Whether the kind extends `Floor` (`world/blocks/environment/*`): base and
@@ -2564,6 +2805,9 @@ pub fn is_floor_kind(kind: BlockKind) -> bool {
             | BlockKind::SpawnBlock
             | BlockKind::RemoveOre
             | BlockKind::SteamVent
+            // `TiledFloor extends Floor` (`TiledFloor.java:14`); its `drawMain`
+            // is the tiled variant of `Floor.drawMain`.
+            | BlockKind::TiledFloor
     )
 }
 
@@ -2762,6 +3006,50 @@ impl BlockDef {
                 BuildVisibility::Shown
             }
         });
+        // Production family knobs (GAPS #56 follow-up). Every list resolves the
+        // same way the consumer/output stacks do, so a JSON mod's item/liquid
+        // names are validated at load time like `ContentParser`'s reflective
+        // field read. `None`/empty stays unset; `BlockKindData::from_def` then
+        // applies the Java class default.
+        let mut output_items = Vec::with_capacity(spec.output_items.len());
+        for stack in &spec.output_items {
+            output_items.push(resolve_item(registry, stack)?);
+        }
+        let mut output_liquids = Vec::with_capacity(spec.output_liquids.len());
+        for stack in &spec.output_liquids {
+            let liquid = registry
+                .liquid_id(stack.liquid)
+                .ok_or_else(|| ContentError::UnknownName(stack.liquid.to_owned()))?;
+            output_liquids.push((liquid, stack.amount));
+        }
+        let mut separator_results = Vec::with_capacity(spec.separator_results.len());
+        for stack in &spec.separator_results {
+            separator_results.push(resolve_item(registry, stack)?);
+        }
+        let mut blocked_items = Vec::with_capacity(spec.blocked_items.len());
+        for name in &spec.blocked_items {
+            blocked_items.push(
+                registry
+                    .item_id(name)
+                    .ok_or_else(|| ContentError::UnknownName((*name).to_owned()))?,
+            );
+        }
+        let pump_liquid = match spec.pump_liquid {
+            Some(name) => Some(
+                registry
+                    .liquid_id(name)
+                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
+            ),
+            None => None,
+        };
+        let output_item = match spec.output_item {
+            Some(name) => Some(
+                registry
+                    .item_id(name)
+                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
+            ),
+            None => None,
+        };
         // `Block.lightRadius`/`lightColor` (`Block.java:344,350` + the class and
         // `Blocks.java` overrides in [`java_light_defaults`]).
         let mut def = Self {
@@ -2955,6 +3243,42 @@ impl BlockDef {
                     | BlockKind::RemoveOre
                     | BlockKind::AirBlock
             )),
+            // Production family knobs (GAPS #56 follow-up).
+            output_items,
+            output_liquids,
+            liquid_output_directions: spec.liquid_output_directions,
+            ignore_liquid_fullness: spec.ignore_liquid_fullness.unwrap_or(false),
+            separator_results,
+            drill_time: spec.drill_time,
+            drill_tier: spec.drill_tier,
+            hardness_drill_multiplier: spec.hardness_drill_multiplier,
+            blocked_items,
+            liquid_boost_intensity: spec.liquid_boost_intensity,
+            warmup_speed: spec.warmup_speed,
+            inverted_time: spec.inverted_time,
+            beam_range: spec.beam_range,
+            pump_amount: spec.pump_amount,
+            item_use_time: spec.item_use_time,
+            pump_liquid,
+            base_efficiency: spec.base_efficiency,
+            attribute: spec.attribute.map(str::to_owned),
+            output_item,
+            item_boost_intensity: spec.item_boost_intensity,
+            boost_item_use_time: spec.boost_item_use_time,
+            boost_scale: spec.boost_scale,
+            min_efficiency: spec.min_efficiency,
+            max_boost: spec.max_boost,
+            output_scale: spec.output_scale,
+            scale_liquid_consumption: spec.scale_liquid_consumption,
+            display_efficiency: spec.display_efficiency,
+            display_scaled_output: spec.display_scaled_output,
+            // Environment family knobs (TiledFloor/TiledWall/WobbleProp).
+            variants: spec.variants.unwrap_or(0),
+            max_size: spec.max_size.unwrap_or(0),
+            wobble_scale: spec.wobble_scale,
+            wobble_magnitude: spec.wobble_magnitude,
+            wobble_time_scale: spec.wobble_time_scale,
+            wobble_magnitude2: spec.wobble_magnitude2,
         };
         // `Block.init`: `if(underBullets){ priority = TargetPriority.under; }`
         // (Block.java:1386-1387) — unconditional, so conveyors/conduits (which
@@ -4133,5 +4457,216 @@ mod tests {
         assert_eq!(ore.kind, BlockKind::OreBlock);
         assert_eq!(ore.item_drop, registry.item_id("copper"));
         assert_eq!(ore.region, "ore-copper");
+    }
+
+    /// GAPS #56 follow-up: every production/environment family knob that a mod
+    /// JSON block def can set (the `ContentParser` field surface) survives
+    /// `BlockSpec` → [`BlockDef::from_spec`] with the same value; the record is
+    /// the source of truth `BlockKindData::from_def` copies.
+    #[test]
+    fn block_family_fields_round_trip_from_spec() {
+        let registry = test_registry();
+        let bundle = crate::content::MemoryBundle::new();
+        let store = crate::content::MemoryUnlockStore::new();
+        let mut spec = BlockSpec {
+            name: "mod-family-knobs",
+            kind: BlockKind::GenericCrafter,
+            ..BlockSpec::default()
+        };
+        // `GenericCrafter.java:22-39`.
+        spec.output_items = vec![stack("copper", 2), stack("silicon", 3)];
+        spec.output_liquids = vec![liquid_stack("water", 0.2), liquid_stack("oil", 0.1)];
+        spec.liquid_output_directions = vec![1, 3];
+        spec.ignore_liquid_fullness = Some(true);
+        spec.separator_results = vec![stack("lead", 4)];
+        // `Drill.java:26-42` / `BurstDrill.java:26` / `BeamDrill.java:38-41`.
+        spec.drill_time = Some(123.0);
+        spec.drill_tier = Some(5);
+        spec.hardness_drill_multiplier = Some(0.0);
+        spec.blocked_items = vec!["thorium"];
+        spec.liquid_boost_intensity = Some(1.75);
+        spec.warmup_speed = Some(0.01);
+        spec.inverted_time = Some(140.0);
+        spec.beam_range = Some(7);
+        spec.drill_multipliers = vec![("beryllium", 2.0)];
+        // `Pump.java:20` / `SolidPump.java:22-26` / `Fracker.java:8` /
+        // `WallCrafter.java:28-49` / `AttributeCrafter.java:15-31`.
+        spec.pump_amount = Some(0.25);
+        spec.item_use_time = Some(60.0);
+        spec.pump_liquid = Some("oil");
+        spec.base_efficiency = Some(0.5);
+        spec.attribute = Some("sand");
+        spec.output_item = Some("sand");
+        spec.item_boost_intensity = Some(1.7);
+        spec.boost_item_use_time = Some(80.0);
+        spec.boost_scale = Some(0.15);
+        spec.min_efficiency = Some(9.0 - 0.0001);
+        spec.max_boost = Some(2.0);
+        spec.output_scale = Some(0.15);
+        spec.scale_liquid_consumption = Some(true);
+        spec.display_efficiency = Some(false);
+        spec.display_scaled_output = Some(false);
+        // `Block.java:136` / `TiledFloor.java:17-22` / `WobbleProp.java:9`.
+        spec.variants = Some(4);
+        spec.max_size = Some(2);
+        spec.wobble_scale = Some(30.0);
+        spec.wobble_magnitude = Some(0.5);
+        spec.wobble_time_scale = Some(2.0);
+        spec.wobble_magnitude2 = Some(0.75);
+
+        let def = BlockDef::from_spec(spec, &registry, &bundle, &store).expect("block def");
+        let item = |name: &str| registry.item_id(name).expect("item");
+        let liquid = |name: &str| registry.liquid_id(name).expect("liquid");
+
+        assert_eq!(
+            def.output_items,
+            vec![
+                ItemStack::new(item("copper"), 2),
+                ItemStack::new(item("silicon"), 3)
+            ]
+        );
+        assert_eq!(
+            def.output_liquids,
+            vec![(liquid("water"), 0.2), (liquid("oil"), 0.1)]
+        );
+        assert_eq!(def.liquid_output_directions, vec![1, 3]);
+        assert!(def.ignore_liquid_fullness);
+        assert_eq!(def.separator_results, vec![ItemStack::new(item("lead"), 4)]);
+        assert_eq!(def.drill_time, Some(123.0));
+        assert_eq!(def.drill_tier, Some(5));
+        assert_eq!(def.hardness_drill_multiplier, Some(0.0));
+        assert_eq!(def.blocked_items, vec![item("thorium")]);
+        assert_eq!(def.liquid_boost_intensity, Some(1.75));
+        assert_eq!(def.warmup_speed, Some(0.01));
+        assert_eq!(def.inverted_time, Some(140.0));
+        assert_eq!(def.beam_range, Some(7));
+        assert_eq!(def.drill_multipliers, vec![(item("beryllium"), 2.0)]);
+        assert_eq!(def.pump_amount, Some(0.25));
+        assert_eq!(def.item_use_time, Some(60.0));
+        assert_eq!(def.pump_liquid, Some(liquid("oil")));
+        assert_eq!(def.base_efficiency, Some(0.5));
+        assert_eq!(def.attribute.as_deref(), Some("sand"));
+        assert_eq!(def.output_item, Some(item("sand")));
+        assert_eq!(def.item_boost_intensity, Some(1.7));
+        assert_eq!(def.boost_item_use_time, Some(80.0));
+        assert_eq!(def.boost_scale, Some(0.15));
+        assert!((def.min_efficiency.unwrap() - (9.0 - 0.0001)).abs() < 1e-6);
+        assert_eq!(def.max_boost, Some(2.0));
+        assert_eq!(def.output_scale, Some(0.15));
+        assert_eq!(def.scale_liquid_consumption, Some(true));
+        assert_eq!(def.display_efficiency, Some(false));
+        assert_eq!(def.display_scaled_output, Some(false));
+        assert_eq!(def.variants, 4);
+        assert_eq!(def.max_size, 2);
+        assert_eq!(def.wobble_scale, Some(30.0));
+        assert_eq!(def.wobble_magnitude, Some(0.5));
+        assert_eq!(def.wobble_time_scale, Some(2.0));
+        assert_eq!(def.wobble_magnitude2, Some(0.75));
+
+        // An empty spec leaves every knob unset so `BlockKindData::from_def`
+        // applies the Java class default.
+        let plain = BlockDef::from_spec(
+            BlockSpec {
+                name: "mod-plain-drill",
+                kind: BlockKind::Drill,
+                ..BlockSpec::default()
+            },
+            &registry,
+            &bundle,
+            &store,
+        )
+        .expect("plain def");
+        assert!(plain.output_items.is_empty());
+        assert!(plain.output_liquids.is_empty());
+        assert!(plain.liquid_output_directions.is_empty());
+        assert_eq!(plain.drill_time, None);
+        assert_eq!(plain.drill_tier, None);
+        assert_eq!(plain.hardness_drill_multiplier, None);
+        assert!(plain.blocked_items.is_empty());
+        assert_eq!(plain.pump_amount, None);
+        assert_eq!(plain.item_use_time, None);
+        assert_eq!(plain.pump_liquid, None);
+        assert_eq!(plain.attribute, None);
+        assert_eq!(plain.max_size, 0);
+        assert_eq!(plain.wobble_scale, None);
+    }
+
+    /// An unresolvable content name in a family list is an `UnknownName` error,
+    /// not a silently dropped value (the parser reports the file).
+    #[test]
+    fn block_family_fields_reject_unknown_names() {
+        let registry = test_registry();
+        let bundle = crate::content::MemoryBundle::new();
+        let store = crate::content::MemoryUnlockStore::new();
+        let base = BlockSpec {
+            name: "mod-bad-family",
+            kind: BlockKind::Drill,
+            ..BlockSpec::default()
+        };
+
+        let mut bad_blocked = base.clone();
+        bad_blocked.blocked_items = vec!["not-an-item"];
+        assert_eq!(
+            BlockDef::from_spec(bad_blocked, &registry, &bundle, &store),
+            Err(ContentError::UnknownName(String::from("not-an-item")))
+        );
+
+        let mut bad_liquid = base.clone();
+        bad_liquid.pump_liquid = Some("not-a-liquid");
+        assert_eq!(
+            BlockDef::from_spec(bad_liquid, &registry, &bundle, &store),
+            Err(ContentError::UnknownName(String::from("not-a-liquid")))
+        );
+
+        let mut bad_output = base;
+        bad_output.output_items = vec![stack("not-an-item", 1)];
+        assert_eq!(
+            BlockDef::from_spec(bad_output, &registry, &bundle, &store),
+            Err(ContentError::UnknownName(String::from("not-an-item")))
+        );
+    }
+
+    /// GAPS #56 follow-up: the mod-only environment classes resolve through the
+    /// `ClassMap` replacement (`ClassMap.java:287-290`) and classify as floors /
+    /// walls / props so the environment behaviour and renderer dispatch hold.
+    #[test]
+    fn tiled_and_wobble_kinds_classify() {
+        use crate::mods::json::classmap::{ClassScope, ClassTagMap};
+        use crate::mods::json::resolve_block_kind;
+
+        for (class, kind, floor) in [
+            ("TiledFloor", BlockKind::TiledFloor, true),
+            ("TiledWall", BlockKind::TiledWall, false),
+            ("WobbleProp", BlockKind::WobbleProp, false),
+        ] {
+            assert_eq!(kind.name(), class);
+            assert_eq!(resolve_block_kind(class), Some(kind));
+            assert_eq!(
+                resolve_block_kind(&format!("mindustry.world.blocks.environment.{class}")),
+                Some(kind),
+                "{class} FQCN resolves"
+            );
+            assert_eq!(is_floor_kind(kind), floor, "{class} floor classification");
+            assert_eq!(
+                ClassTagMap::committed().resolve(class, ClassScope::Block),
+                Some(kind.name()),
+                "{class} classmap entry"
+            );
+        }
+        // `TiledFloor` is drawn as a floor but not as an overlay (`Floor`
+        // `drawMain`, not `OverlayFloor.drawBase`).
+        assert!(!is_overlay_floor_kind(BlockKind::TiledFloor));
+        // The classmap still builds and audits clean with the new kinds.
+        let map = ClassTagMap::committed();
+        assert_eq!(map.audit(), Vec::<String>::new());
+        assert!(map.resolve("TiledFloor", ClassScope::Block).is_some());
+        // The `BlockKind` ABI stays dense (ordinal == index in `ALL`).
+        assert_eq!(BlockKind::ALL.len(), 140);
+        for (index, kind) in BlockKind::ALL.iter().enumerate() {
+            assert_eq!(kind.ordinal(), index, "{} ordinal", kind.name());
+        }
+        assert_eq!(BlockKind::TiledFloor.ordinal(), 137);
+        assert_eq!(BlockKind::TiledWall.ordinal(), 138);
+        assert_eq!(BlockKind::WobbleProp.ordinal(), 139);
     }
 }

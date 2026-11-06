@@ -6,9 +6,15 @@
 //! M0 provides the plain [`StorageBuild`] deposit path (`vault`/`container`);
 //! `linkedCore` forwarding, the core inventory algorithm and the full unloader
 //! comparator land in milestones M4/M5.
+//!
+//! [`team_items`] is the team-shared core inventory (`CoreBlock.java:764-780`):
+//! every core of a team resolves its item module through one canonical core,
+//! the ECS-safe equivalent of Java's aliased `items` pointer. It subsumes the
+//! earlier R2 deferral and the `PAR-0484` linked-storage route.
 
 pub mod core_block;
 pub mod storage_block;
+pub mod team_items;
 pub mod unloader;
 
 use std::sync::Arc;
@@ -20,6 +26,11 @@ pub use core_block::{
     CoreBehavior, CoreBuild, CoreCampaignHooks, CoreHooks, NoopCoreCampaignHooks,
 };
 pub use storage_block::{StorageBehavior, StorageBuild};
+pub use team_items::{
+    add_to_core, canonical_core, core_holder, core_item_count, core_item_total, core_items,
+    link_team_cores, on_core_removed, remove_from_core, team_cores, team_item_count,
+    team_item_stacks,
+};
 pub use unloader::{ContainerStat, UnloaderBehavior, UnloaderBuild};
 
 /// Class-default behavior for a storage [`BlockKind`] (GAPS #55).

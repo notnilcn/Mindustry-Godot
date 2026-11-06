@@ -302,7 +302,8 @@ pub fn read_payload_conveyor_base(
         world.entity_mut(e).insert(PayloadHolder::default());
     }
     match super::payload_block::payload_read(world, r) {
-        super::payload_block::PayloadRead::Block(payload) => {
+        super::payload_block::PayloadRead::Block(payload)
+        | super::payload_block::PayloadRead::Unit(payload) => {
             if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
                 holder.payload = Some(payload);
             }

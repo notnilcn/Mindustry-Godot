@@ -56,6 +56,39 @@ pub fn spawn_unit_def(
     y: f32,
     rotation: f32,
 ) -> Entity {
+    spawn_unit_def_inner(world, seq, unit, team, x, y, rotation, true)
+}
+
+/// Spawns a carried unit payload (`new UnitPayload(unit.create(team))`).
+///
+/// The entity exists with its full plan-11 component bundle but is *not* a
+/// member of `Groups.unit` (the [`Unit`] marker is removed) and skips the
+/// `UnitComp.add` cap-death, mirroring Java where `UnitType.create` only
+/// constructs the unit and `Payload.dump` calls `unit.add()` later. The
+/// payload-block dump path re-inserts the marker and rejoins the runtime list.
+pub fn spawn_carried_unit_def(
+    world: &mut World,
+    seq: u64,
+    unit: &UnitTypeDef,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+) -> Entity {
+    spawn_unit_def_inner(world, seq, unit, team, x, y, rotation, false)
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the Java `create/spawn` signature
+fn spawn_unit_def_inner(
+    world: &mut World,
+    seq: u64,
+    unit: &UnitTypeDef,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    world_unit: bool,
+) -> Entity {
     let segmented = unit.segment_units > 1 && is_segmented(unit);
     let spacing = if unit.segment_spacing > 0.0 {
         unit.segment_spacing
@@ -70,7 +103,16 @@ pub fn spawn_unit_def(
         (0.0, 0.0)
     };
 
-    let head = spawn_single(world, seq, unit, team, x + offset_x, y + offset_y, rotation);
+    let head = spawn_single(
+        world,
+        seq,
+        unit,
+        team,
+        x + offset_x,
+        y + offset_y,
+        rotation,
+        world_unit,
+    );
 
     if segmented {
         let rad = rotation.to_radians();
@@ -86,6 +128,7 @@ pub fn spawn_unit_def(
                 x - cos * step + offset_x,
                 y - sin * step + offset_y,
                 rotation,
+                world_unit,
             );
             world.entity_mut(child).insert(SegmentComp {
                 parent: Some(last),
@@ -145,6 +188,7 @@ fn is_segmented(unit: &UnitTypeDef) -> bool {
 
 /// Spawns one entity with the base closure + kind components (no chaining).
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // mirrors the Java `create` bundle
 fn spawn_single(
     world: &mut World,
     seq: u64,
@@ -153,6 +197,7 @@ fn spawn_single(
     x: f32,
     y: f32,
     rotation: f32,
+    world_unit: bool,
 ) -> Entity {
     // `UnitType.create`: `unit.elevation = flying ? 1f : 0` (UnitType.java:566);
     // `isFlying()`/`isGrounded()`, the boost lerp and the strafe penalty read it.
@@ -223,7 +268,8 @@ fn spawn_single(
     // && !spawnedByCore && !dead && !rules.editor` -> `unitCapDeath` (kill
     // without explosion effects; the unit is marked dead here and
     // `resolve_deaths` removes it).
-    if unit.use_unit_cap
+    if world_unit
+        && unit.use_unit_cap
         && !world
             .get_resource::<crate::game::runtime::CampaignRuntime>()
             .is_some_and(|campaign| campaign.session.rules.editor)
@@ -236,6 +282,9 @@ fn spawn_single(
             health.health = 0.0;
             health.dead = true;
         }
+    }
+    if !world_unit {
+        world.entity_mut(entity).remove::<Unit>();
     }
     entity
 }

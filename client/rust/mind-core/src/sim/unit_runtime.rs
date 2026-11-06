@@ -90,6 +90,188 @@ pub fn unit_by_id(world: &World, id: i32) -> Option<Entity> {
         .min_by_key(|entity| entity.index())
 }
 
+// ---------------------------------------------------------------------------
+// Unit payloads (`world/blocks/payloads/UnitPayload.java`)
+// ---------------------------------------------------------------------------
+
+/// Spawns a carried unit payload (`new UnitPayload(type.create(team))`) at
+/// `(x, y)` for a payload block (`PayloadSource`/`UnitFactory`).
+///
+/// The entity is created through the plan-11 lifecycle but stays outside
+/// `Groups.unit` (no [`crate::entities::comp::Unit`] marker, not in
+/// [`UnitRuntime::units`]) until [`dump_carried_unit`] adds it, matching Java's
+/// `UnitType.create` + `Payload.dump` split. Returns the payload handle with a
+/// [`UnitPayloadSize`] for `Payload.size()`.
+pub fn create_unit_payload(
+    world: &mut World,
+    type_id: crate::content::UnitTypeId,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+) -> Option<crate::world::behavior::PayloadRef> {
+    let def = world
+        .get_non_send::<UnitRuntime>()?
+        .content
+        .unit(type_id)?
+        .clone();
+    Some(spawn_unit_payload(world, &def, team, x, y, rotation))
+}
+
+/// Content-resolved half of [`create_unit_payload`]: spawns the carried unit
+/// entity and returns its payload handle.
+///
+/// Split out because a block-runtime-only harness (no [`UnitRuntime`]) has no
+/// content registry in the world, while a block behavior already holds the
+/// resolved [`UnitTypeDef`](crate::content::registries::units::UnitTypeDef).
+/// Production unit blocks always have the runtime installed; the dump gates do
+/// need it.
+pub fn spawn_unit_payload(
+    world: &mut World,
+    def: &crate::content::registries::units::UnitTypeDef,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+) -> crate::world::behavior::PayloadRef {
+    let seq = crate::world::blocks::units::behavior::next_unit_seq(world);
+    let entity = crate::entities::comp::unit::lifecycle::spawn_carried_unit_def(
+        world, seq, def, team, x, y, rotation,
+    );
+    world
+        .entity_mut(entity)
+        .insert(crate::world::blocks::payloads::UnitPayloadSize(
+            def.hit_size,
+        ));
+    world
+        .entity_mut(entity)
+        .insert(crate::world::blocks::payloads::CarriedUnit);
+    crate::world::blocks::payloads::payload_ref(
+        crate::world::blocks::payloads::PayloadKind::Unit,
+        entity,
+        def.id.raw(),
+    )
+}
+
+/// `UnitPayload.dump` gates (`UnitPayload.java:104-127`) for a carried unit:
+/// `Units.canCreate`, the `unit.solidity()` tile test and the grounded-overlap
+/// count (`physicSize * 1.05` with the same `allowLegStep` layer).
+pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
+    let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
+        return false;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| runtime.content.unit(comp.type_id))
+    else {
+        return false;
+    };
+    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+    // `if(!Units.canCreate(unit.team, unit.type)) return false;`
+    if !crate::entities::comp::unit::queries::can_create_unit(world, team, def) {
+        return false;
+    }
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return false;
+    };
+    let rotation = world
+        .get::<UnitCore>(entity)
+        .map(|core| core.rotation)
+        .unwrap_or(0.0);
+    // `SolidPred solid = unit.solidity(); if(solid != null)` — flying units
+    // return null (`ElevationMoveComp.solidity`), everything else uses
+    // `EntityCollisions.solid` on the tile one unit ahead along the rotation.
+    if !crate::combat::bullet::unit_is_flying(world, entity) {
+        let rad = rotation.to_radians();
+        let tx = WorldGrid::to_tile(pos.x + rad.cos());
+        let ty = WorldGrid::to_tile(pos.y + rad.sin());
+        let solid = runtime
+            .grid
+            .tiles
+            .getn(tx, ty)
+            .is_none_or(|tile| tile.solid_full(&runtime.content));
+        if solid {
+            return false;
+        }
+    }
+    // `if(!unit.type.flying && Units.count(unit.x, unit.y,
+    // unit.physicSize() * 1.05f, o -> o.isGrounded() && (o.type.allowLegStep
+    // == unit.type.allowLegStep)) > 0) return false;`
+    if !def.flying {
+        let physic = def.hit_size * 0.7 * 1.05;
+        let physic2 = physic * physic;
+        let leg_step = def.allow_leg_step;
+        let overlap = runtime.units.iter().copied().any(|other| {
+            if other == entity || world.get_entity(other).is_err() {
+                return false;
+            }
+            let Some(other_pos) = world.get::<Pos>(other) else {
+                return false;
+            };
+            let (dx, dy) = (other_pos.x - pos.x, other_pos.y - pos.y);
+            if dx * dx + dy * dy > physic2 {
+                return false;
+            }
+            if !crate::combat::bullet::unit_is_grounded(world, other) {
+                return false;
+            }
+            world
+                .get::<UnitTypeComp>(other)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|other_def| other_def.allow_leg_step == leg_step)
+        });
+        if overlap {
+            return false;
+        }
+    }
+    true
+}
+
+/// `unit.add()` half of `UnitPayload.dump` (`UnitPayload.java:130-143`):
+/// re-inserts the `Groups.unit` marker, assigns a fresh entity id
+/// (`EntityGroup.nextId`), applies the random velocity nudge and joins the live
+/// runtime. The caller has already passed [`unit_payload_can_dump`].
+pub fn dump_carried_unit(world: &mut World, entity: Entity) -> bool {
+    if world.get_entity(entity).is_err() || !unit_payload_can_dump(world, entity) {
+        return false;
+    }
+    world
+        .entity_mut(entity)
+        .remove::<crate::world::blocks::payloads::CarriedUnit>();
+    world
+        .entity_mut(entity)
+        .remove::<crate::world::blocks::payloads::PayloadCarried>();
+    world.entity_mut(entity).insert(crate::entities::comp::Unit);
+    // `unit.vel.add(Mathf.range(0.5f), Mathf.range(0.5f))` (`UnitPayload.java:139`).
+    let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
+        return false;
+    };
+    let (jx, jy) = (
+        runtime
+            .rng
+            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+        runtime
+            .rng
+            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+    );
+    if let Some(mut vel) = world.get_mut::<Vel>(entity) {
+        vel.x += jx;
+        vel.y += jy;
+    }
+    // `unit.add()`: `EntityGroup.nextId()` then join `Groups.unit`.
+    runtime.seq = runtime.seq.wrapping_add(1);
+    let seq = runtime.seq;
+    if let Some(mut stored) = world.get_mut::<EntitySeq>(entity) {
+        stored.0 = seq;
+    } else {
+        world.entity_mut(entity).insert(EntitySeq(seq));
+    }
+    runtime.units.push(entity);
+    runtime.units_created += 1;
+    world.insert_non_send(runtime);
+    true
+}
+
 /// Pops the next queued waypoint onto the unit's target
 /// (`CommandAI.finishPath`: `targetPos = null` then the queue head,
 /// `CommandAI.java:476-490`; I01 T13).
@@ -1528,6 +1710,26 @@ impl Sim {
         let entity = runtime.spawn(ecs, name, team, x, y, rotation);
         ecs.insert_non_send(runtime);
         entity
+    }
+
+    /// `PayloadBlockBuild.getPayload()` accessor: the payload held by a
+    /// payload-block building (`PayloadHolder.payload`), independent of the
+    /// block family.
+    pub fn held_payload(&self, holder: Entity) -> Option<crate::world::behavior::PayloadRef> {
+        self.ecs
+            .0
+            .get::<crate::world::blocks::payloads::PayloadHolder>(holder)
+            .and_then(|state| state.payload)
+    }
+
+    /// `Payload.size()` of the payload held by `holder`, in world units
+    /// (block size for build payloads, `UnitType.hitSize` for unit payloads).
+    pub fn held_payload_size(&self, holder: Entity) -> Option<f32> {
+        let payload = self.held_payload(holder)?;
+        Some(crate::world::blocks::payloads::payload_size(
+            &self.ecs.0,
+            payload,
+        ))
     }
 
     /// Uploads the player movement axis (`Core.input.axis(Binding.moveX/Y)`)
@@ -8985,5 +9187,309 @@ mod markers_region_tests {
         for line in &failed {
             eprintln!("  import failed: {line}");
         }
+    }
+}
+
+/// Unit payloads (`world/blocks/payloads/UnitPayload.java`): carried-unit
+/// spawn, `dump()` gates and the native nested payload body — GAPS #23 /
+/// PAR-0518.
+#[cfg(test)]
+mod unit_payload_tests {
+    use super::*;
+    use crate::content::BlockId;
+    use crate::determinism::SimCommand;
+
+    fn install(sim: &mut Sim) {
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+    }
+
+    // ------------------------------------------------------------------
+    // Unit payloads (GAPS #23 / PAR-0518)
+    // ------------------------------------------------------------------
+
+    /// Places `name` through the live command path and returns its entity.
+    fn place_block(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
+        let block = sim.world_block_id(name).expect("block exists");
+        sim.command(SimCommand::Place {
+            x,
+            y,
+            block,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("placed");
+        sim.grid.entity_at(TilePos::new(x, y)).expect("entity")
+    }
+
+    fn add_item(sim: &mut Sim, e: Entity, name: &str, amount: i32) {
+        let id = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id(name)
+            .expect("item");
+        if let Some(mut items) = sim.ecs.0.get_mut::<crate::world::modules::ItemModule>(e) {
+            items.add(id, amount, 10_000);
+        }
+    }
+
+    fn carried_unit_entity(sim: &Sim, holder: Entity) -> Option<Entity> {
+        sim.held_payload(holder)
+            .filter(|payload| !payload.is_block)
+            .and_then(|payload| payload.entity)
+    }
+
+    /// GAPS #23 / PAR-0518: `UnitFactory.updateTile` builds a `UnitPayload`
+    /// instead of spawning the unit directly (`UnitFactory.java:424-444`); the
+    /// unit is carried (outside `Groups.unit`) until `moveOutPayload` dumps it,
+    /// and the dump enters it as a live unit with the planned type and health.
+    #[test]
+    fn unit_factory_output_is_carried_then_dumped() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let factory = place_block(&mut sim, "ground-factory", 5, 5);
+        let _power = place_block(&mut sim, "power-source", 3, 5);
+        add_item(&mut sim, factory, "silicon", 10);
+        add_item(&mut sim, factory, "lead", 10);
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_id("dagger")
+            .expect("dagger");
+        let dagger_health = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit(dagger)
+            .expect("dagger def")
+            .health;
+
+        let mut carried = false;
+        let mut dumped = false;
+        for _ in 0..1400 {
+            sim.tick().expect("tick");
+            if let Some(entity) = carried_unit_entity(&sim, factory) {
+                carried = true;
+                let world = &sim.ecs.0;
+                // A carried payload is not part of `Groups.unit`: no `Unit`
+                // membership marker and not in the live runtime list.
+                assert!(
+                    world.get::<crate::entities::comp::Unit>(entity).is_none(),
+                    "carried unit is not in Groups.unit"
+                );
+                assert!(!sim.unit_runtime().expect("runtime").units.contains(&entity));
+                assert!(
+                    world
+                        .get::<crate::world::blocks::payloads::CarriedUnit>(entity)
+                        .is_some()
+                );
+                assert!(
+                    world
+                        .get::<crate::world::blocks::payloads::PayloadCarried>(entity)
+                        .is_some()
+                );
+                let type_id = world
+                    .get::<UnitTypeComp>(entity)
+                    .map(|comp| comp.type_id)
+                    .expect("unit type");
+                assert_eq!(type_id, dagger, "the payload carries the planned unit");
+                let health = world.get::<Health>(entity).map(|h| h.health).unwrap_or(0.0);
+                assert_eq!(health, dagger_health, "payload spawns at full health");
+            }
+            if !dumped
+                && sim
+                    .unit_runtime()
+                    .expect("runtime")
+                    .units
+                    .iter()
+                    .any(|entity| {
+                        sim.ecs
+                            .0
+                            .get::<UnitTypeComp>(*entity)
+                            .is_some_and(|comp| comp.type_id == dagger)
+                    })
+            {
+                dumped = true;
+                break;
+            }
+        }
+        assert!(carried, "the factory held its output as a unit payload");
+        assert!(dumped, "moveOutPayload dumped the unit into the world");
+        let live = sim
+            .unit_runtime()
+            .expect("runtime")
+            .units
+            .iter()
+            .copied()
+            .find(|entity| {
+                sim.ecs
+                    .0
+                    .get::<UnitTypeComp>(*entity)
+                    .is_some_and(|comp| comp.type_id == dagger)
+            })
+            .expect("dumped unit tracked");
+        assert!(
+            sim.ecs.0.get::<crate::entities::comp::Unit>(live).is_some(),
+            "the dumped unit rejoined Groups.unit"
+        );
+        assert_eq!(
+            sim.ecs.0.get::<Health>(live).map(|h| h.health),
+            Some(dagger_health)
+        );
+        assert!(
+            carried_unit_entity(&sim, factory).is_none(),
+            "the factory slot cleared after the dump"
+        );
+    }
+
+    /// GAPS #23 / PAR-0518: `UnitPayload.dump` refuses a dump on a solid tile
+    /// or with a grounded unit of the same leg-step layer already overlapping
+    /// (`UnitPayload.java:104-127`), and succeeds once the blockers clear.
+    #[test]
+    fn unit_payload_dump_gates_solid_and_overlap() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_id("dagger")
+            .expect("dagger");
+        let (x, y) = (16.0 * 8.0 + 4.0, 16.0 * 8.0 + 4.0);
+        // A live grounded unit at the drop point: the overlap gate refuses.
+        let live = sim
+            .spawn_live_unit("dagger", 1, x, y, 0.0)
+            .expect("live unit");
+        let payload =
+            crate::sim::unit_runtime::create_unit_payload(&mut sim.ecs.0, dagger, 1, x, y, 0.0)
+                .expect("unit payload");
+        let carried = payload.entity.expect("entity");
+        assert!(
+            !crate::sim::unit_runtime::dump_carried_unit(&mut sim.ecs.0, carried),
+            "overlapping grounded unit refuses the dump"
+        );
+        // Clear the overlap: the dump succeeds and the unit becomes live.
+        if let Some(mut pos) = sim.ecs.0.get_mut::<Pos>(live) {
+            pos.x += 400.0;
+        }
+        assert!(
+            crate::sim::unit_runtime::dump_carried_unit(&mut sim.ecs.0, carried),
+            "cleared overlap dumps"
+        );
+        assert!(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Unit>(carried)
+                .is_some()
+        );
+        assert!(
+            sim.unit_runtime()
+                .expect("runtime")
+                .units
+                .contains(&carried)
+        );
+
+        // A solid tile under the unit (`unit.solidity()` -> `Tile.solid`)
+        // refuses the dump.
+        let (x2, y2) = (20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0);
+        let payload2 =
+            crate::sim::unit_runtime::create_unit_payload(&mut sim.ecs.0, dagger, 1, x2, y2, 0.0)
+                .expect("unit payload");
+        let carried2 = payload2.entity.expect("entity");
+        let wall = sim.world_block_id("copper-wall").expect("wall");
+        let tx = WorldGrid::to_tile(x2);
+        let ty = WorldGrid::to_tile(y2);
+        sim.grid.tiles.get_mut(tx, ty).block = BlockId::new(wall);
+        sim.refresh_unit_runtime();
+        assert!(
+            !crate::sim::unit_runtime::dump_carried_unit(&mut sim.ecs.0, carried2),
+            "solid tile refuses the dump"
+        );
+        sim.grid.tiles.get_mut(tx, ty).block = BlockId::AIR;
+        sim.refresh_unit_runtime();
+        assert!(
+            crate::sim::unit_runtime::dump_carried_unit(&mut sim.ecs.0, carried2),
+            "cleared solid dumps"
+        );
+    }
+
+    /// GAPS #23 / PAR-0518: the native unit-payload body writes and reads the
+    /// carried unit (type/pos/rotation/health/team) so a payload-block save
+    /// round-trips.
+    #[test]
+    fn unit_payload_body_round_trips() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_id("dagger")
+            .expect("dagger");
+        let payload = crate::sim::unit_runtime::create_unit_payload(
+            &mut sim.ecs.0,
+            dagger,
+            1,
+            100.0,
+            120.0,
+            37.0,
+        )
+        .expect("unit payload");
+        let entity = payload.entity.expect("entity");
+        if let Some(mut health) = sim.ecs.0.get_mut::<Health>(entity) {
+            health.health = 42.0;
+        }
+
+        let mut bytes = Vec::new();
+        {
+            let mut writer = crate::io::wire::WireWriter::new(&mut bytes);
+            crate::world::blocks::payloads::payload_write(&sim.ecs.0, Some(payload), &mut writer);
+        }
+        let mut reader = crate::io::wire::WireReader::new(&bytes);
+        let decoded = crate::world::blocks::payloads::payload_block::payload_read(
+            &mut sim.ecs.0,
+            &mut reader,
+        );
+        let crate::world::blocks::payloads::payload_block::PayloadRead::Unit(read_payload) =
+            decoded
+        else {
+            panic!("unit payload decoded");
+        };
+        assert_eq!(read_payload.content, dagger.raw());
+        let read_entity = read_payload.entity.expect("read entity");
+        let world = &sim.ecs.0;
+        assert_eq!(
+            world.get::<UnitTypeComp>(read_entity).map(|c| c.type_id),
+            Some(dagger)
+        );
+        assert_eq!(
+            world.get::<Health>(read_entity).map(|h| h.health),
+            Some(42.0),
+            "health round-trips"
+        );
+        assert_eq!(
+            world.get::<Pos>(read_entity).map(|pos| (pos.x, pos.y)),
+            Some((100.0, 120.0))
+        );
+        assert_eq!(
+            world.get::<UnitCore>(read_entity).map(|core| core.rotation),
+            Some(37.0),
+            "rotation round-trips"
+        );
+        assert!(
+            world
+                .get::<crate::world::blocks::payloads::CarriedUnit>(read_entity)
+                .is_some(),
+            "read unit is carried"
+        );
+        assert!(
+            world
+                .get::<crate::entities::comp::Unit>(read_entity)
+                .is_none(),
+            "read unit is not in Groups.unit"
+        );
     }
 }

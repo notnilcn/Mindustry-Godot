@@ -814,12 +814,12 @@
     {
       "alias": "TiledFloor",
       "scope": "Block",
-      "tag": "Floor"
+      "tag": "TiledFloor"
     },
     {
       "alias": "TiledWall",
       "scope": "Block",
-      "tag": "StaticWall"
+      "tag": "TiledWall"
     },
     {
       "alias": "TractorBeamTurret",
@@ -894,7 +894,7 @@
     {
       "alias": "WobbleProp",
       "scope": "Block",
-      "tag": "Prop"
+      "tag": "WobbleProp"
     },
     {
       "alias": "ArtilleryBulletType",

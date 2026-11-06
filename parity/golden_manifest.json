@@ -420,7 +420,7 @@
       "kind": "oracle",
       "path": "parity/mod_classmap.json",
       "owner_plan": "20",
-      "sha256": "fe6eb283ffa77863a0de1ffadc6b7555927ab056e24921203bedd2e041026f0b",
+      "sha256": "9b1e0f541d1e05e38c2e703393b64d4395b6e2bd5787f4539681044293b99acf",
       "regen": "mind-tools mods classmap"
     },
     {

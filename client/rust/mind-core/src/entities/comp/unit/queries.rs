@@ -227,13 +227,18 @@ pub fn unit_cap(world: &bevy_ecs::world::World, team: u8) -> Option<usize> {
 
 /// Live units of `type_id` on `team` (`TeamData.countType`; the runtime
 /// snapshot's per-type counts are rebuilt lazily, so count the entities).
+///
+/// Counts `Groups.unit` membership, not every unit entity: `TeamData.updateCount`
+/// runs from `UnitComp.add`/`remove` only, so carried unit payloads
+/// (`UnitPayload`, not added until dumped) and detached block-unit proxies
+/// (`BlockUnitc`) never contribute to the cap.
 pub fn live_type_count(
     world: &bevy_ecs::world::World,
     team: u8,
     type_id: crate::content::UnitTypeId,
 ) -> i32 {
-    use crate::entities::comp::unit::comp::UnitTypeComp;
-    use crate::entities::comp::{Health, TeamComp};
+    use crate::entities::comp::unit::comp::{BlockUnitComp, UnitTypeComp};
+    use crate::entities::comp::{Health, TeamComp, Unit};
 
     let mut count = 0;
     for entity_ref in world.iter_entities() {
@@ -241,6 +246,9 @@ pub fn live_type_count(
             continue;
         }
         if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            continue;
+        }
+        if entity_ref.get::<Unit>().is_none() || entity_ref.get::<BlockUnitComp>().is_some() {
             continue;
         }
         if entity_ref.get::<Health>().is_some_and(|health| health.dead) {
