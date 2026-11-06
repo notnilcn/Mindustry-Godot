@@ -187,7 +187,6 @@ fn is_segmented(unit: &UnitTypeDef) -> bool {
 }
 
 /// Spawns one entity with the base closure + kind components (no chaining).
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)] // mirrors the Java `create` bundle
 fn spawn_single(
     world: &mut World,

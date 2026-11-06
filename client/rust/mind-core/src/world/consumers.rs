@@ -994,12 +994,10 @@ pub fn runtime_requested_power(
         K::PowerDynamic { .. } => dynamic
             .map(|dynamic| dynamic.power(world, entity))
             .unwrap_or(0.0),
-        K::PowerCondition { usage } => {
-            if dynamic.is_some_and(|dynamic| dynamic.power_condition(world, entity)) {
-                *usage
-            } else {
-                0.0
-            }
+        K::PowerCondition { usage }
+            if dynamic.is_some_and(|dynamic| dynamic.power_condition(world, entity)) =>
+        {
+            *usage
         }
         _ => 0.0,
     }
@@ -1224,7 +1222,6 @@ impl Consumers {
 mod tests {
     use super::*;
     use crate::content::{BlockId, ContentRegistry};
-    use bevy_ecs::world::World;
 
     fn consumers_of(registry: &ContentRegistry, name: &str) -> Consumers {
         let def = registry

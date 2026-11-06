@@ -686,10 +686,10 @@ fn move_team_plan_to_tail(ctx: &mut AiCtx, team: u8, index: usize) {
         return;
     };
     let data = campaign.session.teams.get(crate::ecs::TeamId(team));
-    if index < data.plans.len() {
-        if let Some(plan) = data.plans.remove(index) {
-            data.plans.push_back(plan);
-        }
+    if index < data.plans.len()
+        && let Some(plan) = data.plans.remove(index)
+    {
+        data.plans.push_back(plan);
     }
 }
 

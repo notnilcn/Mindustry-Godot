@@ -33,7 +33,7 @@ use godot::classes::{
     Control, IControl, ImageTexture, InputEvent, InputEventMouseButton, InputEventMouseMotion,
     Node, StyleBox, StyleBoxTexture, Texture2D, Time,
 };
-use godot::global::MouseButton;
+use godot::global::{HorizontalAlignment, MouseButton};
 use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
 
@@ -50,6 +50,26 @@ const MAX_ZOOM: f32 = 10.0;
 const TILE_SIZE: f32 = 8.0;
 /// Provider node path (`scenes/game.tscn`).
 const PROVIDER_PATH: &str = "/root/Spine/World/MinimapProvider";
+/// Live HUD ping marker (`ui/fragments/hud.rs` `MindPingOverlay`): the
+/// fullscreen minimap copies its `PlayerComp.pingX/pingY/pingTime/pingText`
+/// (`MinimapRenderer.java:173-193`).
+const PING_OVERLAY_PATH: &str = "/root/Spine/Ui/UiRoot/HudGroup/hud/PingOverlay";
+/// `MinimapRenderer.drawEntities` ping diamond radius (`float rad = 12f`).
+const PING_DIAMOND_RADIUS: f32 = 12.0;
+/// `Lines.stroke(Scl.scl(scaleFactor * 9f))` — the dark outline layer.
+const PING_OUTLINE_STROKE: f32 = 9.0;
+/// `Lines.stroke(Scl.scl(scaleFactor * 3f))` — the team-colour layer.
+const PING_STROKE: f32 = 3.0;
+/// `player.pingY + scaleFactor * 30f` — the pointer triangle's tip offset.
+const PING_TRIANGLE_OFFSET: f32 = 30.0;
+/// `Fill.poly(..., 3, scaleFactor * 16f, -90f)` — the dark pointer size.
+const PING_TRIANGLE_DARK_RADIUS: f32 = 16.0;
+/// `Fill.poly(..., 3, scaleFactor * 10f, -90f)` — the colour pointer size.
+const PING_TRIANGLE_RADIUS: f32 = 10.0;
+/// `drawLabel(..., pingY + scaleFactor * 50f, ...)`.
+const PING_LABEL_Y: f32 = 50.0;
+/// `drawLabel(..., pingY + scaleFactor * 65f, ...)` (name above the text).
+const PING_NAME_Y: f32 = 65.0;
 /// `MinimapRenderer.drawEntities` unit icon size (`icon_size = 8`).
 const UNIT_ICON_SIZE: f32 = 8.0;
 /// Godot's `CMP_EPSILON` (`is_equal_approx` tolerance floor).
@@ -80,6 +100,8 @@ pub struct MindMinimapWidget {
     drag_last: Vector2,
     /// Cached `PROVIDER_PATH` node (re-resolved when it is freed).
     provider: Option<Gd<Node>>,
+    /// Cached HUD ping overlay (`PING_OVERLAY_PATH`; re-resolved when freed).
+    ping_overlay: Option<Gd<Node>>,
     /// Cached `Tex.pane` ninepatch (built once).
     pane: Option<Gd<StyleBox>>,
     /// `unit-<name>-ui` white masks for the `mixcol` unit draw
@@ -125,6 +147,10 @@ impl IControl for MindMinimapWidget {
             .draw_rect(rect, Color::from_rgba(0.0, 0.0, 0.0, 0.6));
         self.base_mut().draw_texture_rect(&texture, rect, false);
         self.draw_region(&texture);
+        // `MinimapRenderer.drawEntities(..., fullView = true)`: the player ping
+        // marker is drawn on the fullscreen minimap only (the HUD crop never
+        // includes it, `MinimapRenderer.java:173-193`).
+        self.draw_ping(&texture);
         self.base_mut()
             .draw_rect_ex(rect, Color::from_rgba(0.8, 0.8, 0.8, 0.5))
             .filled(false)
@@ -465,6 +491,121 @@ impl MindMinimapWidget {
             .done();
     }
 
+    /// `MinimapRenderer.drawEntities` full-view ping (`MinimapRenderer.java:173-193`):
+    /// the team-coloured diamond with its dark outline, the pointer triangle
+    /// below it and the player name / ping text labels.
+    ///
+    /// The live ping state is the HUD's `PlayerComp.drawPing` overlay
+    /// (`ui/fragments/hud.rs` `MindPingOverlay.ping_state`), so both copies
+    /// share `pingX/pingY/pingTime/pingText`; the HUD overlay stays the world
+    /// copy.
+    fn draw_ping(&mut self, texture: &Gd<Texture2D>) {
+        let Some(mut overlay) = self.ping_overlay_node() else {
+            return;
+        };
+        if !overlay.has_method("ping_state") {
+            return;
+        }
+        let Ok(state) = overlay.call("ping_state", &[]).try_to::<VarDictionary>() else {
+            return;
+        };
+        let read_real = |key: &str| {
+            state
+                .get(&GString::from(key).to_variant())
+                .and_then(|value| value.try_to::<f64>().ok())
+                .unwrap_or(0.0) as f32
+        };
+        let visible = state
+            .get(&GString::from("visible").to_variant())
+            .and_then(|value| value.try_to::<bool>().ok())
+            .unwrap_or(false);
+        // `player.pingTime > 0f && renderer.showPings`.
+        if !visible || read_real("time") <= 0.0 {
+            return;
+        }
+        let tex_size = texture.get_size();
+        let inner = Rect2::new(Vector2::ZERO, self.base().get_size());
+        let region = Rect2::new(Vector2::ZERO, tex_size);
+        let center = ping_widget_point(inner, region, tex_size, read_real("x"), read_real("y"));
+        let color = self.player_team_color();
+        let dark = Color::from_rgba(color.r * 0.3, color.g * 0.3, color.b * 0.3, 1.0);
+        // `Draw.color(Tmp.c1.set(player.color).mul(Color.darkGray));
+        //  Lines.stroke(Scl.scl(scaleFactor * 9f));
+        //  Lines.poly(pingX, pingY, 4, scaleFactor * rad, 0f);`
+        let diamond = ping_diamond_points(center, PING_DIAMOND_RADIUS);
+        self.base_mut()
+            .draw_polyline_ex(&diamond_closed(&diamond), dark)
+            .width(PING_OUTLINE_STROKE)
+            .done();
+        // `Fill.poly(pingX, pingY + scaleFactor * 30f, 3, scaleFactor * 16f, -90f);`
+        let triangle = ping_triangle_points(center, PING_TRIANGLE_DARK_RADIUS);
+        let triangle: PackedVector2Array = triangle.iter().copied().collect();
+        self.base_mut().draw_colored_polygon(&triangle, dark);
+        // `Draw.color(player.color); Lines.stroke(Scl.scl(scaleFactor * 3f));`
+        self.base_mut()
+            .draw_polyline_ex(&diamond_closed(&diamond), color)
+            .width(PING_STROKE)
+            .done();
+        let small: PackedVector2Array = ping_triangle_points(center, PING_TRIANGLE_RADIUS)
+            .iter()
+            .copied()
+            .collect();
+        self.base_mut().draw_colored_polygon(&small, color);
+        // `drawLabel(pingX, pingY + scaleFactor * 50f, ...)` (ping text, or the
+        // player name when no text) and the 0.7-scaled name above it.
+        let text = state
+            .get(&GString::from("text").to_variant())
+            .and_then(|value| value.try_to::<GString>().ok())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let name = state
+            .get(&GString::from("name").to_variant())
+            .and_then(|value| value.try_to::<GString>().ok())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        if text.is_empty() {
+            draw_centered_label(
+                &mut self.base_mut(),
+                center,
+                PING_LABEL_Y,
+                &name,
+                color,
+                1.0,
+            );
+        } else {
+            draw_centered_label(
+                &mut self.base_mut(),
+                center,
+                PING_LABEL_Y,
+                &text,
+                Color::WHITE,
+                1.0,
+            );
+            draw_centered_label(&mut self.base_mut(), center, PING_NAME_Y, &name, color, 0.7);
+        }
+    }
+
+    /// The player team colour (`Team.color`, `MinimapRenderer`'s
+    /// `player.color`); white when the sim host is absent.
+    fn player_team_color(&self) -> Color {
+        let Some(mut host) = kit::sim_host() else {
+            return Color::WHITE;
+        };
+        if !host.has_method("player_team_color") {
+            return Color::WHITE;
+        }
+        let packed = host
+            .call("player_team_color", &[])
+            .try_to::<i64>()
+            .unwrap_or(0xFFFF_FFFF) as u32;
+        Color::from_rgba8(
+            ((packed >> 24) & 0xFF) as u8,
+            ((packed >> 16) & 0xFF) as u8,
+            ((packed >> 8) & 0xFF) as u8,
+            (packed & 0xFF) as u8,
+        )
+    }
+
     fn draw_placeholder(&mut self) {
         let size = self.base().get_size();
         let rect = Rect2::new(Vector2::ZERO, size);
@@ -494,6 +635,19 @@ impl MindMinimapWidget {
             .filled(false)
             .width(1.0)
             .done();
+    }
+
+    /// The HUD ping overlay node (created lazily by the HUD fragment, so it is
+    /// re-resolved until it exists).
+    fn ping_overlay_node(&mut self) -> Option<Gd<Node>> {
+        if self
+            .ping_overlay
+            .as_ref()
+            .is_none_or(|node| !node.is_instance_valid())
+        {
+            self.ping_overlay = kit::node(PING_OVERLAY_PATH);
+        }
+        self.ping_overlay.clone()
     }
 
     fn provider_node(&mut self) -> Option<Gd<Node>> {
@@ -531,6 +685,87 @@ impl MindMinimapWidget {
 fn map_point(inner: Rect2, region: Rect2, tex_size: Vector2, tx: f32, ty: f32) -> Vector2 {
     let texture_point = Vector2::new(tx + 0.5, (tex_size.y - 1.0 - ty) + 0.5);
     inner.position + (texture_point - region.position) * (inner.size / region.size)
+}
+
+/// World-pixel point -> widget px inside the fullscreen map
+/// (`MinimapRenderer.drawEntities`'s world transform: `scaleFactor = w /
+/// world.unitWidth()`, i.e. one widget px per `8 / scale` world px).
+fn ping_widget_point(
+    inner: Rect2,
+    region: Rect2,
+    tex_size: Vector2,
+    world_x: f32,
+    world_y: f32,
+) -> Vector2 {
+    map_point(
+        inner,
+        region,
+        tex_size,
+        world_x / TILE_SIZE,
+        world_y / TILE_SIZE,
+    )
+}
+
+/// `Lines.poly(pingX, pingY, 4, scaleFactor * 12f, 0f)` in widget px: a square
+/// rotated 45 degrees (vertex-up diamond).
+fn ping_diamond_points(center: Vector2, radius: f32) -> [Vector2; 4] {
+    [
+        center + Vector2::new(0.0, -radius),
+        center + Vector2::new(radius, 0.0),
+        center + Vector2::new(0.0, radius),
+        center + Vector2::new(-radius, 0.0),
+    ]
+}
+
+/// The closed outline of [`ping_diamond_points`].
+fn diamond_closed(points: &[Vector2; 4]) -> PackedVector2Array {
+    let mut closed = points.to_vec();
+    closed.push(points[0]);
+    closed.into_iter().collect()
+}
+
+/// `Fill.poly(pingX, pingY + scaleFactor * 30f, 3, scaleFactor * radius, -90f)`:
+/// a pointer triangle centred 30 px below the diamond, vertex up.
+fn ping_triangle_points(center: Vector2, radius: f32) -> [Vector2; 3] {
+    let centroid = center + Vector2::new(0.0, PING_TRIANGLE_OFFSET);
+    let up = centroid - Vector2::new(0.0, radius);
+    let down = Vector2::new(radius * 0.866_025_4, radius * 0.5);
+    [up, centroid + down, centroid - down]
+}
+
+/// Draws a horizontally centred label at `center.y + y_offset` (the minimap
+/// ping name/text labels, `drawLabel(..., false)`).
+fn draw_centered_label(
+    base: &mut Control,
+    center: Vector2,
+    y_offset: f32,
+    text: &str,
+    color: Color,
+    scale: f32,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let Some(font) = base.get_theme_default_font() else {
+        return;
+    };
+    let font_size = ((base.get_theme_default_font_size() as f32) * scale)
+        .round()
+        .max(1.0) as i32;
+    let text_size = font
+        .get_string_size_ex(text)
+        .alignment(HorizontalAlignment::LEFT)
+        .width(-1.0)
+        .font_size(font_size)
+        .done();
+    let baseline = center.y + y_offset + font.get_ascent();
+    let position = Vector2::new(center.x - text_size.x / 2.0, baseline);
+    base.draw_string_ex(&font, position, text)
+        .alignment(HorizontalAlignment::LEFT)
+        .width(-1.0)
+        .font_size(font_size)
+        .modulate(color)
+        .done();
 }
 
 /// `Color(str)` for the provider's `RRGGBBAA` team colour (`Color.from_string`
@@ -572,6 +807,51 @@ mod tests {
         assert!(is_equal_approx(10.0, 10.000_05));
         // ... while 1.1e-4 off is outside it.
         assert!(!is_equal_approx(10.0, 10.000_11));
+    }
+
+    #[test]
+    fn ping_world_point_maps_like_the_minimap_renderer() {
+        // `MinimapRenderer.drawEntities` full view maps world pixels through
+        // `scaleFactor = w / world.unitWidth()`; in this widget that is the
+        // texture (tile) mapping with world px / 8.
+        let inner = Rect2::new(Vector2::ZERO, Vector2::new(160.0, 160.0));
+        let tex_size = Vector2::new(20.0, 20.0);
+        let region = Rect2::new(Vector2::ZERO, tex_size);
+        // World pixel (80, 80) is tile (10, 10): Java maps world pixels as
+        // `(world + tilesize/2) / tilesize` texels (`trans.translate(tilesize/2)`
+        // after the scale), i.e. texel (10.5, 9.5) with the row flip, and the
+        // widget scales the 20 texel map to 160 px (8 px per tile).
+        let point = ping_widget_point(inner, region, tex_size, 80.0, 80.0);
+        assert!((point.x - 84.0).abs() < f32::EPSILON, "x {point:?}");
+        assert!((point.y - 76.0).abs() < f32::EPSILON, "y {point:?}");
+        // A world point one tile further right moves one texture tile right.
+        let right = ping_widget_point(inner, region, tex_size, 88.0, 80.0);
+        assert!((right.x - point.x - 8.0).abs() < f32::EPSILON);
+        // A world point one tile further up moves one texture row up (the
+        // minimap row flip).
+        let up = ping_widget_point(inner, region, tex_size, 80.0, 88.0);
+        assert!((point.y - up.y - 8.0).abs() < f32::EPSILON, "y flip");
+        // Crop-aware: a camera crop of tiles 5..15 scales the same world point
+        // to `(texel - crop) * (widget / crop)`.
+        let crop = Rect2::new(Vector2::new(5.0, 5.0), Vector2::new(10.0, 10.0));
+        let cropped = ping_widget_point(inner, crop, tex_size, 80.0, 80.0);
+        assert!((cropped.x - (10.5 - 5.0) * 16.0).abs() < f32::EPSILON);
+        assert!((cropped.y - (9.5 - 5.0) * 16.0).abs() < f32::EPSILON);
+        // The diamond is vertex-up around the mapped point; the pointer sits
+        // 30 px below it with its vertex up.
+        let diamond = ping_diamond_points(point, PING_DIAMOND_RADIUS);
+        assert_eq!(diamond[0], point - Vector2::new(0.0, PING_DIAMOND_RADIUS));
+        assert_eq!(diamond[2], point + Vector2::new(0.0, PING_DIAMOND_RADIUS));
+        let triangle = ping_triangle_points(point, PING_TRIANGLE_RADIUS);
+        assert_eq!(
+            triangle[0],
+            point + Vector2::new(0.0, PING_TRIANGLE_OFFSET - PING_TRIANGLE_RADIUS)
+        );
+        assert!(
+            (triangle[1].y - (point.y + PING_TRIANGLE_OFFSET + PING_TRIANGLE_RADIUS * 0.5)).abs()
+                < 1e-4
+        );
+        assert!(triangle[1].x > point.x && triangle[2].x < point.x);
     }
 
     #[test]

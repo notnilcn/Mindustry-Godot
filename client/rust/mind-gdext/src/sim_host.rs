@@ -463,6 +463,44 @@ fn editor_team_choice(editor: bool, team: i64, teams: usize) -> Option<u8> {
     Some(team as u8)
 }
 
+/// `BulletType.drawLight`'s default circle light for a bullet def, or `None`
+/// when the kind overrides it with a line light.
+///
+/// Java's default body is
+/// `if(lightOpacity <= 0f || lightRadius <= 0f) return; Drawf.light(b,
+/// lightRadius, lightColor, lightOpacity)` (`BulletType.java:708-711`), with
+/// `lightRadius` derived in `init` (`Math.max(18, hitSize * 5f)`,
+/// `BulletType.java:862-863`). Four beam kinds replace it with
+/// `Drawf.light(x, y, x2, y2, stroke, tint, alpha)` in `draw` and empty
+/// `drawLight` bodies (`LaserBulletType.java:121-128`,
+/// `ContinuousLaserBulletType.java:70-76`,
+/// `ContinuousFlameBulletType.java:91-104`, `SapBulletType.java:58-59`); the
+/// host stamps those as `LightRenderer.line` primitives in `render::light`, so
+/// emitting the default circle too would double-light the beam.
+fn bullet_circle_light(
+    def: &mind_core::content::registries::bullets::BulletDef,
+) -> Option<(f32, [f32; 4], f32)> {
+    use mind_core::content::registries::bullets::BulletKind;
+    if matches!(
+        def.kind,
+        BulletKind::Laser
+            | BulletKind::ContinuousLaser
+            | BulletKind::ContinuousFlame
+            | BulletKind::Sap
+    ) {
+        return None;
+    }
+    if def.light_opacity <= 0.0 || def.light_radius <= 0.0 {
+        return None;
+    }
+    let color = def.light_color;
+    Some((
+        def.light_radius,
+        [color.r, color.g, color.b, color.a],
+        def.light_opacity,
+    ))
+}
+
 /// `Block.drawEnvironmentLight` (`Block.java:493-495`):
 /// `Drawf.light(tile.worldx(), tile.worldy(), lightRadius, lightColor,
 /// lightColor.a)` — the per-block environment light from the `BlockDef`
@@ -4146,6 +4184,18 @@ impl MindSimHost {
         self.sim.ecs.0.insert_resource(runtime);
     }
 
+    /// The installed runtime's `Vars.service`-equivalent tracker (`GAPS #68`):
+    /// the campaign systems count stats/achievements into it, and the facade
+    /// mirrors it into `MindCampaign` for persistence and the UI queries.
+    /// `None` without a campaign sector installed.
+    pub fn campaign_service(&self) -> Option<&mind_core::game::service::ServiceTracker> {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| &runtime.service)
+    }
+
     /// The installed runtime's `universe.secondsf()` (read-only; `None` with
     /// no campaign sector installed).
     pub fn campaign_universe_secondsf(&self) -> Option<f32> {
@@ -5182,12 +5232,22 @@ impl MindSimHost {
                 if bullet.finished() {
                     continue;
                 }
+                // `BulletType.drawLight` (`BulletType.java:708-711`) reads the
+                // def's light fields; the four beam kinds override it with a
+                // line light that `render::light` stamps separately, so they
+                // must not also cast the default circle.
+                let Some(def) = content.bullet(bullet.def) else {
+                    continue;
+                };
+                let Some((radius, color, opacity)) = bullet_circle_light(def) else {
+                    continue;
+                };
                 out.push(LightSource {
                     x: pos.x,
                     y: pos.y,
-                    radius: 18.0f32.max(bullet.hit_size * 5.0),
-                    color: pal::POWER_LIGHT,
-                    opacity: 0.3,
+                    radius,
+                    color,
+                    opacity,
                 });
             }
         }
@@ -12039,13 +12099,97 @@ mod tests {
         assert!((cryo.opacity - 0.19).abs() < 1e-6);
     }
 
+    /// GAPS #49 follow-up: the four beam kinds override `BulletType.drawLight`
+    /// with an empty body and draw a line light in `draw` (already stamped by
+    /// `render::light::bullet_line_light`), so the host must not also emit the
+    /// default circle. Every other kind keeps the default circle, now gated
+    /// and coloured by the def's own light fields
+    /// (`BulletType.java:708-711,862-863`).
+    #[test]
+    fn beam_bullet_kinds_skip_the_default_circle_light() {
+        use mind_core::content::Rgba;
+        use mind_core::content::registries::bullets::{BulletDef, BulletKind};
+
+        // A plain bullet with the class-default light fields (`BulletType`
+        // `init` derives `max(18, hitSize * 5)`; the radius is set here so the
+        // helper's gate has a value to read).
+        let plain = |radius: f32, opacity: f32| {
+            let mut def = BulletDef::new(BulletKind::Plain);
+            def.light_radius = radius;
+            def.light_opacity = opacity;
+            def.light_color = Rgba::new(1.0, 0.5, 0.25, 1.0);
+            def
+        };
+        assert_eq!(
+            bullet_circle_light(&plain(30.0, 0.3)),
+            Some((30.0, [1.0, 0.5, 0.25, 1.0], 0.3))
+        );
+        // `if(lightOpacity <= 0f || lightRadius <= 0f) return;`
+        assert_eq!(bullet_circle_light(&plain(30.0, 0.0)), None);
+        assert_eq!(bullet_circle_light(&plain(30.0, -1.0)), None);
+        assert_eq!(bullet_circle_light(&plain(0.0, 0.3)), None);
+        assert_eq!(bullet_circle_light(&plain(-1.0, 0.3)), None);
+
+        // The beam kinds never emit the default circle, even with live-looking
+        // light fields (Laser carries `colors[0]`; ContinuousLaser is orange in
+        // item-4's def; ContinuousFlame is `hitColor`; Sap is `Pal.sap`).
+        for kind in [
+            BulletKind::Laser,
+            BulletKind::ContinuousLaser,
+            BulletKind::ContinuousFlame,
+            BulletKind::Sap,
+        ] {
+            let mut def = BulletDef::new(kind);
+            def.light_radius = 40.0;
+            def.light_opacity = 0.7;
+            assert_eq!(
+                bullet_circle_light(&def),
+                None,
+                "{kind:?} must not double-light with a circle"
+            );
+        }
+
+        // Base content: every registered beam-kind def is skipped, and the
+        // non-beam kinds still produce lights.
+        let content = base_registry();
+        let mut beam_defs = 0usize;
+        for def in content.bullets() {
+            if matches!(
+                def.kind,
+                BulletKind::Laser
+                    | BulletKind::ContinuousLaser
+                    | BulletKind::ContinuousFlame
+                    | BulletKind::Sap
+            ) {
+                beam_defs += 1;
+                assert!(
+                    bullet_circle_light(def).is_none(),
+                    "registered beam bullet #{} must be skipped",
+                    def.id.raw()
+                );
+            }
+        }
+        assert!(beam_defs > 0, "base content has beam bullets");
+        // `shrapnel` also draws a line light in Java (`ShrapnelBulletType:69`)
+        // but keeps the default `drawLight`, so it must still cast a circle.
+        if let Some(shrapnel) = content
+            .bullets()
+            .iter()
+            .find(|def| def.kind == BulletKind::Shrapnel && def.light_radius > 0.0)
+        {
+            assert!(bullet_circle_light(shrapnel).is_some());
+        }
+    }
+
     /// PAR-0467: `BlockRenderer.java:846-855` floor/overlay lights from a
     /// placed floor tile (Java positions them at `Tile.worldx()/worldy()`).
     #[test]
     fn floor_light_sources_follow_the_java_table() {
         let content = base_registry();
         let mut grid = WorldGrid::new(6, 6);
-        let cryofluid = content.block_id("pooled-cryofluid").expect("cryofluid");
+        let Some(cryofluid) = content.block_id("pooled-cryofluid") else {
+            panic!("cryofluid");
+        };
         grid.tiles.get_mut(2, 3).floor = cryofluid;
         let view = CameraView {
             x: 24.0,
@@ -12064,7 +12208,9 @@ mod tests {
         assert!(light.color[0] < 1e-6 && (light.color[1] - 1.0).abs() < 1e-6);
 
         // A solid block on the tile blocks the floor light (`!obstructsLight`).
-        let wall = content.block_id("copper-wall").expect("wall");
+        let Some(wall) = content.block_id("copper-wall") else {
+            panic!("wall");
+        };
         grid.tiles.get_mut(2, 3).block = wall;
         assert!(floor_light_sources(&grid, &content, &view).is_empty());
     }

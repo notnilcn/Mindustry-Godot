@@ -17,6 +17,7 @@
 //! regenerate with `server/build.sh`, drift gate `server/build.sh --check`).
 
 pub mod binder;
+pub mod call_packet;
 pub mod chat;
 pub mod checksum;
 pub mod command_ring;
@@ -27,6 +28,7 @@ pub mod identity;
 #[rustfmt::skip]
 pub mod module_bindings;
 pub mod commands;
+pub mod event_type;
 pub mod events;
 pub mod protocol;
 pub mod relay;
@@ -36,9 +38,13 @@ pub mod session;
 pub mod snapshot;
 pub mod token;
 pub mod transport;
+pub mod typeio;
 pub mod waves;
 
 pub use binder::{BinderOptions, RowChange, TableBinder};
+pub use call_packet::{
+    CALL_QUEUE_LIMIT, CallChannel, CallError, CallHandler, CallKind, CallPacket, CallReject,
+};
 pub use chat::{
     CHAT_HISTORY_LIMIT, ChatLine, ChatLog, is_admin_channel, kind_name as chat_kind_name,
 };
@@ -50,6 +56,7 @@ pub use command_ring::{CommandRing, RingEntry};
 pub use commands::{CommandSender, PredictPolicy, PredictionQueue};
 pub use config::{Backoff, ConnectPolicy, ConnectionConfig, StdbMode};
 pub use connector::{Connector, ConnectorError, ConnectorEvent, ConnectorState};
+pub use event_type::{ALL_EVENT_TYPE_NAMES, EVENT_TYPE_TAG, EventDecodeError, EventType};
 pub use events::{EVENT_HISTORY_LIMIT, EventBus, ServerEvent, event_type_name};
 pub use identity::{LocalIdentity, is_player_arg, parse_player_suffix, parse_player_suffix_from};
 pub use protocol::{CLIENT_BUILD, PROTOCOL_VERSION, ProtocolError, check_protocol};

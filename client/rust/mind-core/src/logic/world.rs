@@ -127,6 +127,9 @@ pub struct ClientLogicDataEvent {
     pub reliable: bool,
 }
 
+/// A local `clientdata` channel handler: `(channel, callback)`.
+type ClientLogicDataHandler = Box<dyn FnMut(&ClientLogicDataEvent) + Send + Sync>;
+
 /// Local `clientdata` handler registry (the single-player half of
 /// `NetServer.logicClientDataHandlers`, `NetServer.java:131,605-607,698-705`).
 ///
@@ -138,7 +141,7 @@ pub struct ClientLogicDataEvent {
 /// no handler the instruction is a no-op (Java's empty handler map).
 #[derive(Default, bevy_ecs::prelude::Resource)]
 pub struct LogicClientDataBus {
-    handlers: Vec<(String, Box<dyn FnMut(&ClientLogicDataEvent) + Send + Sync>)>,
+    handlers: Vec<(String, ClientLogicDataHandler)>,
 }
 
 impl std::fmt::Debug for LogicClientDataBus {

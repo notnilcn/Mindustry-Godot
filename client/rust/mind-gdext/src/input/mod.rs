@@ -300,8 +300,15 @@ impl INode for MindInput {
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).
         self.mobile_time += delta;
-        let _ = self.mobile.tick(self.mobile_time);
+        if let Some(event) = self.mobile.tick(self.mobile_time) {
+            // `longPressTask` (`InputHandler.add`): a held finger enters line
+            // mode / payload targeting.
+            self.fold_mobile_gesture(event);
+        }
         self.mobile.update_transitions();
+        // `MobileInput.update` lineMode branch: the drag follows the held
+        // finger even without a new drag event (screen-edge auto-pan).
+        self.update_mobile_line();
     }
 }
 
@@ -666,8 +673,10 @@ impl MindInput {
         self.bridge.top_dialog = top;
     }
 
-    /// Folds a Godot touch event into the mobile gesture bridge and applies the
-    /// resulting camera pan/zoom. Returns whether the event was a touch event.
+    /// Folds a Godot touch event into the mobile gesture bridge, applies the
+    /// resulting camera pan/zoom and runs the placement decision tree
+    /// (`MobileInput.touchDown/tap/longPress/touchUp`). Returns whether the
+    /// event was a touch event.
     fn route_touch(&mut self, raw: &RawEvent) -> bool {
         let time = self.mobile_time;
         let events = match raw {
@@ -676,24 +685,173 @@ impl MindInput {
                     self.ui_pointers.insert(*pointer);
                     return true;
                 }
+                self.mobile.note_pointer(*x, *y);
                 self.mobile.touch_down(time, *x, *y, *pointer)
             }
             RawEvent::TouchMove { pointer, x, y } => {
                 if self.ui_pointers.contains(pointer) {
                     return true;
                 }
+                self.mobile.note_pointer(*x, *y);
                 self.mobile.touch_drag(time, *x, *y, *pointer)
             }
             RawEvent::TouchUp { pointer, x, y } => {
                 if self.ui_pointers.remove(pointer) {
                     return true;
                 }
+                self.mobile.note_pointer(*x, *y);
                 self.mobile.touch_up(time, *x, *y, *pointer)
             }
             _ => return false,
         };
         self.apply_gestures(&events);
+        // The core tree (`handle_gesture_with`) decides taps/line starts; the
+        // selected block's `LineBlock` + `LineRules` come from content.
+        for event in &events {
+            self.fold_mobile_gesture(event.clone());
+        }
+        match raw {
+            // `MobileInput.update` lineMode branch runs every frame while the
+            // finger is held; a drag event is the closest frame boundary here.
+            RawEvent::TouchMove { .. } => self.update_mobile_line(),
+            // `MobileInput.touchUp` (`MobileInput.java:557-580`): commit the
+            // placement line or deconstruct the breaking rect.
+            RawEvent::TouchUp { .. } => self.finish_mobile_touch(),
+            _ => {}
+        }
         true
+    }
+
+    /// Folds one gesture event into the mobile controller with the live world,
+    /// content and caps (`MobileInput`'s callbacks run in world pixels: Java
+    /// converts screen points through `Core.input.mouseWorld`).
+    fn fold_mobile_gesture(&mut self, event: gesture::GestureEvent) {
+        let Some(camera) = self.camera.clone() else {
+            return;
+        };
+        let world_event = {
+            let camera = camera.bind();
+            mobile::event_to_world(&event, |x, y| {
+                let world = camera.screen_to_world(f64::from(x), f64::from(y));
+                (world.x, world.y)
+            })
+        };
+        let caps = self.mobile_caps();
+        let Some(host) = self.sim_host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        let world = desktop::HostWorld::new(&guard);
+        let _ = self
+            .mobile
+            .handle_gesture(world_event, &world, guard.content_registry(), &caps);
+    }
+
+    /// `MobileInput.update` lineMode branch: rebuild the active line at the
+    /// tracked pointer's world position (auto-panned lines follow the finger).
+    fn update_mobile_line(&mut self) {
+        if !self.mobile.line_mode() {
+            return;
+        }
+        let Some((x, y)) = self.mobile.pointer() else {
+            return;
+        };
+        let Some(camera) = self.camera.clone() else {
+            return;
+        };
+        let world_pos = camera.bind().screen_to_world(f64::from(x), f64::from(y));
+        let Some(host) = self.sim_host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        let world = desktop::HostWorld::new(&guard);
+        self.mobile
+            .update_line(&world, guard.content_registry(), world_pos.x, world_pos.y);
+    }
+
+    /// `MobileInput.touchUp` line branch: queue the placed plans and enqueue
+    /// break commands for a deconstruction line, then leave line mode.
+    fn finish_mobile_touch(&mut self) {
+        if !self.mobile.line_mode() {
+            return;
+        }
+        let Some(mut host) = self.sim_host.clone() else {
+            return;
+        };
+        // Java `touchUp` reads the release point (`tileX(screenX)`, `tileY(screenY)`),
+        // not the last drag event: fold it into the tracked line end first.
+        let release = self.mobile.pointer().and_then(|(x, y)| {
+            let camera = self.camera.clone()?;
+            let world = camera.bind().screen_to_world(f64::from(x), f64::from(y));
+            Some((world.x, world.y))
+        });
+        let result = {
+            let guard = host.bind();
+            let world = desktop::HostWorld::new(&guard);
+            if let Some((world_x, world_y)) = release {
+                self.mobile
+                    .update_line(&world, guard.content_registry(), world_x, world_y);
+            }
+            self.mobile.finish_touch(&world)
+        };
+        self.enqueue_mobile_result(&mut host, result);
+        // The line is over; a new touch records a fresh pointer.
+        self.mobile.clear_pointer();
+    }
+
+    /// Enqueues the sim commands for a committed mobile line/selection
+    /// (`flushSelectPlans` -> `player.unit().addBuild`, `tryBreakBlock`).
+    fn enqueue_mobile_result(
+        &self,
+        host: &mut Gd<MindSimHost>,
+        result: mind_core::input::MobileTouchResult,
+    ) {
+        let team = host.bind().player_team();
+        let mut commands = Vec::new();
+        for plan in result.placed {
+            commands.push(SimCommand::Place {
+                x: plan.x as i16,
+                y: plan.y as i16,
+                block: plan.block.raw(),
+                rotation: plan.rotation as i8,
+                team,
+                // Player input queues on the player unit (`flushPlans`).
+                player: Some(0),
+            });
+        }
+        for (x, y) in result.breaks {
+            commands.push(SimCommand::Break {
+                x,
+                y,
+                player: Some(0),
+            });
+        }
+        if commands.is_empty() {
+            return;
+        }
+        let mut guard = host.bind_mut();
+        for command in commands {
+            guard.submit_player_command(command);
+        }
+    }
+
+    /// Capabilities pushed into the mobile decision tree (`settings`/focus).
+    fn mobile_caps(&self) -> mobile::MobileCaps {
+        let mut focus = FocusState::default();
+        focus.has_dialog = self.bridge.ui_dialog;
+        focus.has_field = self.bridge.text_focus;
+        focus.is_menu = !self.bridge.in_game;
+        mobile::MobileCaps {
+            focus,
+            menu: !self.bridge.in_game,
+            editor: false,
+            cutscene: false,
+            keyboard: self.mobile.keyboard_mode(),
+            block_replace: self.bridge.block_replace,
+            swap_diagonal: crate::settings_hub::with_settings(|settings| {
+                settings.get_bool("swapdiagonal", false)
+            }),
+        }
     }
 
     /// Applies gesture events that map directly to the camera rig (mobile pan
@@ -707,6 +865,12 @@ impl MindInput {
                 gesture::GestureEvent::Pan {
                     delta_x, delta_y, ..
                 } => {
+                    // `MobileInput.pan`: while a queued plan is selected the
+                    // drag shifts the plans instead of moving the camera (the
+                    // core controller does that shift in `handle_gesture_with`).
+                    if self.mobile.controller.selecting {
+                        continue;
+                    }
                     camera
                         .clone()
                         .bind_mut()
@@ -1823,22 +1987,55 @@ impl MindInput {
         self.mobile.set_block(block);
     }
 
-    /// `rotate` mobile button.
+    /// `rotate` mobile button (`MobileInput.java:205-219`): a rotatable selected
+    /// block advances its rotation, otherwise the button toggles schematic
+    /// select (`MobileController::rotate_button`). A negative `delta` is the
+    /// MCP reverse-rotate probe (Java's UI has no reverse button).
     #[func]
     pub fn mobile_rotate(&mut self, delta: i64) {
-        self.mobile.rotate(delta as i32);
+        if delta < 0 {
+            self.mobile.rotate(delta as i32);
+            return;
+        }
+        if delta == 0 {
+            return;
+        }
+        let Some(host) = self.sim_host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        self.mobile.rotate_button(guard.content_registry());
     }
 
-    /// `flip` mobile button.
+    /// `flip` mobile button (`MobileInput.java:341-342`):
+    /// `flipPlans(selectPlans, flipX/flipY)` about the mobile schematic origin,
+    /// with the real block size/offset (`MobileController::flip_selection`).
     #[func]
     pub fn mobile_flip(&mut self, flip_x: bool, flip_y: bool) {
-        self.mobile.flip(flip_x, flip_y);
+        let Some(host) = self.sim_host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        let content = guard.content_registry();
+        if flip_x {
+            self.mobile.flip_selection(true, content);
+        }
+        if flip_y {
+            self.mobile.flip_selection(false, content);
+        }
     }
 
-    /// `rotate plans` mobile button.
+    /// `rotate plans` mobile button (`MobileInput.java:344`):
+    /// `rotatePlans(selectPlans, direction)` about the mobile schematic origin
+    /// (`MobileController::rotate_selection`).
     #[func]
     pub fn mobile_rotate_plans(&mut self, direction: i64) {
-        self.mobile.rotate_plans(direction as i32);
+        let Some(host) = self.sim_host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        self.mobile
+            .rotate_selection(direction as i32, guard.content_registry());
     }
 
     /// `toggle command mode` mobile button.
@@ -1857,6 +2054,24 @@ impl MindInput {
     #[func]
     pub fn mobile_toggle_schematic(&mut self) -> bool {
         self.mobile.toggle_schematic()
+    }
+
+    /// Confirm mobile button (`MobileInput.java:222-266`): commits the queued
+    /// selection plans — valid placements become sim place commands, breaking
+    /// plans become break commands. Returns the committed plan count.
+    #[func]
+    pub fn mobile_confirm(&mut self) -> i64 {
+        let Some(mut host) = self.sim_host.clone() else {
+            return 0;
+        };
+        let result = {
+            let guard = host.bind();
+            let world = desktop::HostWorld::new(&guard);
+            self.mobile.confirm(&world)
+        };
+        let count = (result.placed.len() + result.breaks.len()) as i64;
+        self.enqueue_mobile_result(&mut host, result);
+        count
     }
 
     /// `clear building` mobile button.

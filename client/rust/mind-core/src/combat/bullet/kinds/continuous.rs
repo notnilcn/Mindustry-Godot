@@ -167,7 +167,7 @@ mod tests {
                 .get_mut::<Bullet>(bullet)
                 .expect("bullet state")
                 .time = time;
-            let mut ctx = h.combat_ctx();
+            let ctx = h.combat_ctx();
             behavior_for(BulletKind::ContinuousLaser).current_length(&ctx, bullet)
         };
         assert_eq!(length(&mut h, 0.0), 200.0, "full length before the fade");
@@ -188,7 +188,7 @@ mod tests {
                 .get_mut::<Bullet>(bullet)
                 .expect("bullet state")
                 .time = time;
-            let mut ctx = h.combat_ctx();
+            let ctx = h.combat_ctx();
             behavior_for(BulletKind::ContinuousFlame).current_length(&ctx, bullet)
         };
         assert_eq!(length(&mut h, 0.0), 0.0, "slope starts at zero");

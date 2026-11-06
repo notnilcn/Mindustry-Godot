@@ -22,6 +22,9 @@ owned by [`server/AGENTS.md`](../../../server/AGENTS.md).
 | `src/waves.rs` | `WaveName`, `BASE_TABLES`/`LOBBY_TABLES`/`GAME_TABLES`/`SNAPSHOT_TABLES`, `SubscriptionWaves`, `WaveEvent`. |
 | `src/binder.rs` | `TableBinder<A>`, `BinderOptions`, `RowChange<T>`, live callback registration. |
 | `src/relay.rs` | `CommandStream` ordered `my_match_commands` delivery, `OrderError`. |
+| `src/typeio.rs` | Network-only `TypeIO` codecs (GAPS #36): unit/building/tile/pos-entity/entity refs, unit controllers, `KickReason`, `TraceInfo`, `MenuResult`, `MarkerControl`, `UiBuilder` trees, `String[][]`, `AdminAction`, plus the `TypeIoWriter`/`TypeIoReader` wire primitives and caps. |
+| `src/call_packet.rs` | Server→client `@Remote` call packets (GAPS #35): `CallKind`/`CallPacket` `[kind][body]` encode/decode, `KickReason`, and the bounded `CallChannel` + `CallHandler` dispatch queue with a rejection tail. |
+| `src/event_type.rs` | The 89 upstream `EventType` classes (GAPS #37) plus the `{"type":"<Class>", ...}` JSON payload envelope (`EventType::encode`/`decode`). |
 | `src/protocol.rs` | `PROTOCOL_VERSION`, `CLIENT_BUILD`, `check_protocol`, `ProtocolError`. |
 | `src/checksum.rs` | `ChecksumMonitor`, `ChecksumReport`, `compare_at_command_id`, `host_canonical_correction`, `scope_bits`. |
 | `src/command_ring.rs` | `CommandRing`, `RingEntry`, bounded tail replay (`REPLAY_TAIL`). |
@@ -86,6 +89,10 @@ owned by [`server/AGENTS.md`](../../../server/AGENTS.md).
   `tail_after`/`covers_tail` replay.
 - `PROTOCOL_VERSION = 2` and `CLIENT_BUILD = 1`; `check_protocol` rejects version mismatches and
   clients older than `ProtocolInfo::min_client_build`.
+- `events.rs` maps every `EventKind` to the `event_type.rs` taxonomy (module-only
+  kinds excepted) and decodes a `{"type":"<Class>", ...}` row `detail` into a typed
+  `EventType` (`ServerEvent::typed`/`class_name`, `EventBus::typed_after`); plain
+  text details keep the kind mapping, so old and new rows coexist.
 - `CommandSender::send` stamps `client_tick = sim_tick + INPUT_DELAY_TICKS`, assigns a 1-based
   `sender_seq` and records a prediction; `preflight_validate` mirrors the server's cheap caps and
   `predict_policy` classifies each variant.

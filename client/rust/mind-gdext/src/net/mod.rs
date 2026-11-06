@@ -13,6 +13,7 @@
 //! (plan 14). This lane implements the Rust node; the scene wiring is left to
 //! the orchestrator because `game.tscn` is shared.
 
+pub mod call;
 pub mod relay;
 
 use std::net::ToSocketAddrs;
@@ -29,24 +30,25 @@ use mind_stdb::module_bindings::{
     AllAdminsTableAccessor, AllBansTableAccessor, AllMatchesTableAccessor, AllPlayersTableAccessor,
     AllWhitelistTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode,
     MatchPlayerState, MatchStatus, MemberRole, MyAdminActionsTableAccessor, MyKickTableAccessor,
-    MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
-    MyMatchSnapshotChunksTableAccessor, MyMatchSnapshotRequestsTableAccessor,
-    MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor,
-    MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind,
-    Visibility,
+    MyMatchChecksumsTableAccessor, MyMatchEventsTableAccessor, MyMatchMembersTableAccessor,
+    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotChunksTableAccessor,
+    MyMatchSnapshotRequestsTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
+    MyMatchTableAccessor, MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch,
+    SnapshotKind, Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
-    ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, PlayerAction, Roster,
-    RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
+    ConnectionConfig, Connector, ConnectorEvent, EventBus, HostParams, MatchSession, PlayerAction,
+    Roster, RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
 };
 
 use crate::settings_hub;
 use crate::sim_host::MindSimHost;
 use crate::wiring;
 
+use self::call::{CallBridge, CallEffect, effect_json};
 use self::relay::RelayRuntime;
 
 /// `stdb-server` setting default: the local harness (`tools/mp-local.sh up`)
@@ -220,6 +222,17 @@ pub struct MindNet {
     admin_actions_binder: Option<TableBinder<MyAdminActionsTableAccessor>>,
     /// `my_traces` rows (server answers to `admin_request_trace`).
     traces_binder: Option<TableBinder<MyTracesTableAccessor>>,
+    /// `my_match_events` rows projected onto the client `EventType` bus
+    /// (GAPS #37); typed payloads decode from the row detail envelope.
+    events: EventBus,
+    /// `my_match_events` binder (Game wave).
+    events_binder: Option<TableBinder<MyMatchEventsTableAccessor>>,
+    /// Server→client `@Remote` call channel (GAPS #35).
+    calls: CallBridge,
+    /// Applied calls not yet read by the UI/view owners (`server_calls_json`).
+    pending_calls: Vec<serde_json::Value>,
+    /// Last kick reason applied from a call (`None` until kicked).
+    kicked: Option<String>,
 }
 
 #[godot_api]
@@ -280,6 +293,11 @@ impl INode for MindNet {
             my_kick_binder: None,
             admin_actions_binder: None,
             traces_binder: None,
+            events: EventBus::new(),
+            events_binder: None,
+            calls: CallBridge::new(),
+            pending_calls: Vec::new(),
+            kicked: None,
         }
     }
 
@@ -311,10 +329,14 @@ impl INode for MindNet {
                     ConnectorEvent::Disconnected { .. } => {
                         self.session.on_disconnected();
                         self.roster.clear();
+                        self.events.clear();
+                        self.calls.clear();
                     }
                     ConnectorEvent::Resync => {
                         self.session.on_resync();
                         self.roster.clear();
+                        self.events.clear();
+                        self.calls.clear();
                     }
                     _ => {}
                 }
@@ -323,6 +345,7 @@ impl INode for MindNet {
             self.drain_my_matches();
             self.drain_members_rows();
             self.drain_roster();
+            self.drain_server_events();
             self.drain_state_rows();
             self.drain_public_matches();
             self.drain_player_states();
@@ -337,6 +360,7 @@ impl INode for MindNet {
         if connected_now && self.push_identity() {
             log::info!("MindNet: player identity pushed after connect");
         }
+        self.pump_server_calls();
         self.pump_probes();
         self.notify_session_state();
     }
@@ -429,6 +453,8 @@ impl MindNet {
         self.admin_actions_binder =
             Some(connector.bind::<MyAdminActionsTableAccessor>("my_admin_actions"));
         self.traces_binder = Some(connector.bind::<MyTracesTableAccessor>("my_traces"));
+        // `EventType` bus rows (GAPS #37): typed payloads arrive in `detail`.
+        self.events_binder = Some(connector.bind::<MyMatchEventsTableAccessor>("my_match_events"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -830,6 +856,71 @@ impl MindNet {
     #[func]
     pub fn get_members_json(&self) -> GString {
         GString::from(self.last_members_json.as_str())
+    }
+
+    /// Decodes and queues one server→client `@Remote` call frame
+    /// (`[kind: u8][body]`, GAPS #35). Returns `false` when the frame is
+    /// unknown or malformed; the rejection stays visible in
+    /// [`Self::call_channel_json`] and later frames keep working.
+    #[func]
+    pub fn push_call_frame(&mut self, frame: PackedByteArray) -> bool {
+        let accepted = self.calls.push_frame(frame.as_slice());
+        if !accepted {
+            log::warn!(
+                "MindNet: rejected server call frame: {}",
+                self.calls.rejects_json()
+            );
+        }
+        accepted
+    }
+
+    /// Drains the applied server calls as a JSON array
+    /// (`[{call: {...}, effect: {...}|null}]`, oldest first) and clears the
+    /// pending list.
+    ///
+    /// Calls are applied every frame ([`Self::pump_server_calls`]): a kick
+    /// leaves the match and shows the localized reason immediately; camera,
+    /// music and info-message effects are also reported per call so the
+    /// camera/audio/UI owners can consume them; every other call is reported
+    /// verbatim for its owner. The pending list is capped at
+    /// `CALL_QUEUE_LIMIT`, so a consumer that never polls cannot grow memory.
+    #[func]
+    pub fn server_calls_json(&mut self) -> GString {
+        let calls = std::mem::take(&mut self.pending_calls);
+        GString::from(serde_json::Value::Array(calls).to_string().as_str())
+    }
+
+    /// Call-channel diagnostics (queue depth, accepted/rejected/dropped, the
+    /// rejection tail, and the last applied kick reason).
+    #[func]
+    pub fn call_channel_json(&self) -> GString {
+        let mut stats = self.calls.stats_json();
+        stats["kicked"] = serde_json::Value::String(self.kicked.clone().unwrap_or_default());
+        GString::from(stats.to_string().as_str())
+    }
+
+    /// `my_match_events` rows as a JSON array (the `EventType` bus, GAPS #37).
+    #[func]
+    pub fn match_events_json(&self) -> GString {
+        GString::from(self.events.to_json().to_string().as_str())
+    }
+
+    /// `my_match_events` rows with their typed [`mind_stdb::EventType`]
+    /// payload: `[{id, kind, class, payload, detail}]`, in commit order.
+    #[func]
+    pub fn match_event_types_json(&self) -> GString {
+        let mut out = Vec::new();
+        for event in self.events.events() {
+            let typed = event.typed();
+            out.push(serde_json::json!({
+                "id": event.event_id,
+                "kind": format!("{:?}", event.kind),
+                "class": event.class_name(),
+                "payload": typed.as_ref().map(mind_stdb::EventType::encode).transpose().ok().flatten(),
+                "detail": event.detail,
+            }));
+        }
+        GString::from(serde_json::Value::Array(out).to_string().as_str())
     }
 
     /// Player-list rows (name, team, admin, connected, role) built from the
@@ -1611,6 +1702,74 @@ impl MindNet {
                 log::warn!("player_action {} failed: {error}", action.reducer());
                 false
             }
+        }
+    }
+
+    /// Drains the call channel every frame (GAPS #35): effects the net layer
+    /// owns are applied immediately (a kick must not wait for a UI poll) and
+    /// every applied call is retained for [`Self::server_calls_json`].
+    fn pump_server_calls(&mut self) {
+        let calls = self.calls.drain();
+        if calls.is_empty() {
+            return;
+        }
+        for call in calls {
+            let effect = CallBridge::classify(&call);
+            if let Some(effect) = &effect {
+                self.apply_call_effect(effect);
+            }
+            self.pending_calls.push(serde_json::json!({
+                "call": call.to_json(),
+                "effect": effect_json(effect.as_ref()),
+            }));
+        }
+        let limit = mind_stdb::CALL_QUEUE_LIMIT;
+        if self.pending_calls.len() > limit {
+            let excess = self.pending_calls.len() - limit;
+            self.pending_calls.drain(..excess);
+        }
+    }
+
+    /// Applies one classified call effect (GAPS #35). Kick shows the reason and
+    /// leaves the match; the other effects are data for their owners.
+    fn apply_call_effect(&mut self, effect: &CallEffect) {
+        match effect {
+            CallEffect::Kick { key, detail, quiet } => {
+                self.kicked = Some(if detail.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{key}: {detail}")
+                });
+                log::warn!("MindNet: kicked from the match: {key} {detail}");
+                if !*quiet {
+                    self.show_error(&format!("@{key}"), detail);
+                }
+                if self.session.match_id().is_some()
+                    && let Some(connector) = self.connector.as_mut()
+                    && let Err(error) = self.session.leave(connector)
+                {
+                    log::warn!("MindNet: leave after kick failed: {error}");
+                }
+            }
+            CallEffect::Camera { x, y } => {
+                log::debug!("MindNet: server camera pan to ({x}, {y})");
+            }
+            CallEffect::InfoMessage { message } => log::info!("MindNet: {message}"),
+            CallEffect::PlayMusic { music, interrupt } => {
+                log::debug!("MindNet: server music `{music}` (interrupt={interrupt})");
+            }
+        }
+    }
+
+    /// Applies every pending `my_match_events` row to the client `EventType`
+    /// bus. Rows are deduplicated by `event_id` inside [`EventBus`], so a
+    /// reconnect snapshot replay is harmless.
+    fn drain_server_events(&mut self) {
+        let Some(changes) = self.events_binder.as_ref().map(|binder| binder.drain()) else {
+            return;
+        };
+        for change in changes {
+            self.events.apply(change);
         }
     }
 

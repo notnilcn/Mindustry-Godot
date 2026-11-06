@@ -25,8 +25,9 @@ use mind_core::combat::view::TurretDrawState;
 use mind_core::content::{EffectId, Rgba, WeatherId};
 use mind_core::fx::{AllRegions, Decal, DecalPool, ShakeState, TrailRegistry};
 use mind_core::fx::{
-    DrawProgram, EffectData, EffectKind, EmptySnapshot, FxBus, FxEvent, FxPool, FxSettings,
-    WeatherFx, WeatherKind, WeatherStateView, WeatherView, build_program_into, registry,
+    DrawProgram, EffectData, EffectDef, EffectKind, EffectState, EmptySnapshot, FxBus, FxEvent,
+    FxPool, FxSettings, ViewSnapshot, WeatherFx, WeatherKind, WeatherStateView, WeatherView,
+    build_program_into, registry,
 };
 
 pub mod draw_turret;
@@ -62,6 +63,74 @@ fn shake_duration(intensity: f32, duration: f32) -> f32 {
     }
 }
 
+/// One effect line-light row: `(x1, y1, x2, y2, width, rgba)`.
+///
+/// `width` is the `LightRenderer.line` capsule radius and `rgba` already folds
+/// the body's alpha (`Draw.color(tint, alpha)`).
+type FxLightLine = (f32, f32, f32, f32, f32, [f32; 4]);
+
+/// The line light an effect body draws, for bodies that call the line-form
+/// `Drawf.light(x, y, x2, y2, stroke, tint, alpha)` overload instead of the
+/// circle form.
+///
+/// `Fx.pointBeam` (`Fx.java:152-160`): `Drawf.light(e.x, e.y, pos.getX(),
+/// pos.getY(), 20f, e.color, 0.6f * e.fout())` — the point-defense beam's only
+/// light. No other vanilla effect uses the line overload: `Fx.lightning`
+/// (`Fx.java:189-206`) and `Fx.chainLightning`/`chainEmp` (`:2877-2912`/
+/// `:2914-2949`) stroke `Lines` only and add no light.
+///
+/// Returns `(x1, y1, x2, y2, width, rgba)`; the row's alpha is the effective
+/// `Draw.color(tint, alpha)` alpha (`tint.a * 0.6 * fout`), matching
+/// `LightRenderer.line`'s `alpha` argument.
+fn fx_line_light(state: &EffectState) -> Option<FxLightLine> {
+    if state.def != EffectId::POINT_BEAM {
+        return None;
+    }
+    let EffectData::Position { x, y } = &state.data else {
+        return None;
+    };
+    let fin = (state.time / state.lifetime.max(1e-4)).clamp(0.0, 1.0);
+    let color = state.color;
+    Some((
+        state.x,
+        state.y,
+        *x,
+        *y,
+        // `Fx.pointBeam`'s stroke (`Fx.java:159`).
+        20.0,
+        [color.r, color.g, color.b, color.a * 0.6 * (1.0 - fin)],
+    ))
+}
+
+/// Builds one live effect into `program`, replacing the body's circle-light
+/// approximation with the exact line-light row when the Java body uses the
+/// line-form `Drawf.light` overload.
+///
+/// The core `Fx.pointBeam` body still emits `emit.light(x, y, 20, color,
+/// 0.6 * fout)` — a circle at the beam origin, the pre-GAPS-#49 stand-in —
+/// while Java draws only the capsule along the beam. The circle prims are
+/// dropped and the row is returned for the light pass.
+fn build_fx_program(
+    program: &mut DrawProgram,
+    def: &EffectDef,
+    state: &EffectState,
+    snapshot: &dyn ViewSnapshot,
+) -> Option<FxLightLine> {
+    let line = fx_line_light(state);
+    if line.is_none() {
+        build_program_into(def, state, snapshot, program);
+        return None;
+    }
+    let mut scratch = DrawProgram::new();
+    build_program_into(def, state, snapshot, &mut scratch);
+    for prim in scratch.prims.drain(..) {
+        if !matches!(prim.kind, PrimKind::Light { .. }) {
+            program.prims.push(prim);
+        }
+    }
+    line
+}
+
 /// `MindFx` — effect/decal/trail/shake pool host + MCP probes.
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -94,6 +163,12 @@ pub struct MindFx {
     /// Frame's `PrimKind::Light` prims `(x, y, radius, rgba, opacity)`,
     /// collected instead of drawn (H03 T16); forwarded to the light pass.
     view_lights: Vec<(f32, f32, f32, [f32; 4], f32)>,
+    /// Frame's line-light rows `(x1, y1, x2, y2, width, rgba)` for the effect
+    /// bodies that call the line-form `Drawf.light(x, y, x2, y2, stroke, tint,
+    /// alpha)` (`Fx.pointBeam`, `Fx.java:152-160`). The `PrimKind::Light`
+    /// circle a body emits as an approximation is dropped for these effects;
+    /// the light pass should stamp the rows as `LightRenderer.line` primitives.
+    view_light_lines: Vec<FxLightLine>,
     /// Sibling `World/Camera2D` (scene-wired); receives `FxEvent::Shake`.
     #[export]
     pub camera: Option<Gd<crate::camera::MindCamera2D>>,
@@ -122,6 +197,7 @@ impl INode2D for MindFx {
             env: None,
             region_cache: HashMap::new(),
             view_lights: Vec::new(),
+            view_light_lines: Vec::new(),
             camera: None,
         }
     }
@@ -142,10 +218,13 @@ impl INode2D for MindFx {
         program.clear();
         // H03 T16: this frame's light prims are re-collected from scratch.
         self.view_lights.clear();
+        self.view_light_lines.clear();
         let snapshot = EmptySnapshot;
         for state in self.pool.iter_live() {
             let def = registry().get(state.def);
-            build_program_into(def, state, &snapshot, &mut program);
+            if let Some(line) = build_fx_program(&mut program, def, state, &snapshot) {
+                self.view_light_lines.push(line);
+            }
         }
         self.append_view_prims(&mut program);
         self.append_turret_prims(&mut program);
@@ -613,6 +692,15 @@ impl MindFx {
         &self.view_lights
     }
 
+    /// The last drawn frame's line lights, as
+    /// `(x1, y1, x2, y2, width, rgba)` — the effects whose Java body calls the
+    /// line-form `Drawf.light` (`Fx.pointBeam`, GAPS #49 follow-up). Rust-only;
+    /// the light pass stamps them with `LightRenderer.line` semantics (the
+    /// capsule radius is `width`, the tint/alpha is `rgba`).
+    pub fn view_light_lines(&self) -> &[FxLightLine] {
+        &self.view_light_lines
+    }
+
     /// View-side effect spawn (H03 T10): status particles, landing dust and
     /// walk ripples derived from the unit view state. Not the sim `FxBus`
     /// (that stays the deterministic tick path); respects `effects`.
@@ -1035,7 +1123,7 @@ impl MindFx {
 
 #[cfg(test)]
 mod tests {
-    use super::shake_duration;
+    use super::*;
 
     /// BurstDrill/LaunchPad cues go through `FxSink::shake(amount)`, which
     /// queues `duration == 0`; the host must restore `Effect.shake(x, x, …)`
@@ -1056,5 +1144,151 @@ mod tests {
         // A zero cue stays zero (no NaN duration).
         assert_eq!(shake_duration(0.0, 0.0), 0.0);
         assert_eq!(shake_duration(-1.0, 0.0), 0.0);
+    }
+
+    use smallvec::SmallVec;
+
+    /// Test-only `expect` (`clippy::expect_used` is denied).
+    fn require<T>(value: Option<T>, what: &str) -> T {
+        match value {
+            Some(value) => value,
+            None => panic!("missing {what}"),
+        }
+    }
+
+    fn effect_state(def: EffectId, data: EffectData, time: f32, lifetime: f32) -> EffectState {
+        EffectState {
+            def,
+            x: 100.0,
+            y: 50.0,
+            rotation: 0.0,
+            color: Rgba::new(1.0, 0.5, 0.25, 1.0),
+            time,
+            lifetime,
+            data,
+            parent: None,
+            rot_with_parent: false,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            offset_pos: 0.0,
+            offset_rot: 0.0,
+            lifetime_override: None,
+            alive: true,
+            seed: 1,
+        }
+    }
+
+    /// GAPS #49 follow-up: `Fx.pointBeam` (`Fx.java:152-160`) is the one
+    /// vanilla effect body that uses the line-form
+    /// `Drawf.light(x, y, x2, y2, 20f, e.color, 0.6f * e.fout())`; the row is
+    /// the beam from the effect origin to the `Position` payload with the
+    /// stroke and the folded alpha (`tint.a * 0.6 * fout`).
+    #[test]
+    fn point_beam_emits_a_line_light_row() {
+        let state = effect_state(
+            EffectId::POINT_BEAM,
+            EffectData::Position { x: 300.0, y: 250.0 },
+            5.0,
+            10.0,
+        );
+        let row = require(fx_line_light(&state), "pointBeam line light");
+        assert_eq!(
+            (row.0, row.1, row.2, row.3, row.4),
+            (100.0, 50.0, 300.0, 250.0, 20.0)
+        );
+        assert_eq!([row.5[0], row.5[1], row.5[2]], [1.0, 0.5, 0.25]);
+        // Half life: `0.6 * fout = 0.3`.
+        assert!((row.5[3] - 0.3).abs() < 1e-6, "alpha {}", row.5[3]);
+
+        // Without the `Position` payload Java's body returns early: no light.
+        let empty = effect_state(EffectId::POINT_BEAM, EffectData::None, 5.0, 10.0);
+        assert!(fx_line_light(&empty).is_none());
+    }
+
+    /// The circle-light prim the core `Fx.pointBeam` body still emits is the
+    /// pre-GAPS-#49 stand-in for the missing `LightRenderer.line`; it must be
+    /// dropped when the exact line row is produced, and the beam stroke must
+    /// survive.
+    #[test]
+    fn point_beam_drops_the_circle_light_approximation() {
+        let snapshot = EmptySnapshot;
+        let def = registry().get(EffectId::POINT_BEAM);
+        let state = effect_state(
+            EffectId::POINT_BEAM,
+            EffectData::Position { x: 300.0, y: 250.0 },
+            5.0,
+            10.0,
+        );
+        let mut program = DrawProgram::new();
+        let line = build_fx_program(&mut program, def, &state, &snapshot);
+        assert!(line.is_some());
+        assert!(
+            program
+                .prims
+                .iter()
+                .all(|prim| !matches!(prim.kind, PrimKind::Light { .. })),
+            "the circle approximation is replaced by the row"
+        );
+        assert!(
+            program
+                .prims
+                .iter()
+                .any(|prim| matches!(prim.kind, PrimKind::Line { .. })),
+            "the beam stroke is still drawn"
+        );
+    }
+
+    /// `Fx.lightning` (`Fx.java:189-206`) and `Fx.chainLightning` (`:2877-2912`)
+    /// stroke `Lines` only and add no light in Java, so they must not produce
+    /// line-light rows; their prims pass through untouched.
+    #[test]
+    fn lightning_effects_do_not_emit_line_lights() {
+        let snapshot = EmptySnapshot;
+        let mut program = DrawProgram::new();
+
+        let lightning = effect_state(
+            EffectId::LIGHTNING,
+            EffectData::Positions(SmallVec::from_slice(&[
+                (0.0, 0.0),
+                (10.0, 2.0),
+                (20.0, -1.0),
+            ])),
+            5.0,
+            10.0,
+        );
+        assert!(fx_line_light(&lightning).is_none());
+        assert!(
+            build_fx_program(
+                &mut program,
+                registry().get(EffectId::LIGHTNING),
+                &lightning,
+                &snapshot
+            )
+            .is_none()
+        );
+        assert_eq!(
+            program.len(),
+            2 + 3,
+            "two segments + one cap circle per point"
+        );
+
+        program.clear();
+        let chain = effect_state(
+            EffectId::CHAIN_LIGHTNING,
+            EffectData::Position { x: 260.0, y: 50.0 },
+            5.0,
+            10.0,
+        );
+        assert!(fx_line_light(&chain).is_none());
+        assert!(
+            build_fx_program(
+                &mut program,
+                registry().get(EffectId::CHAIN_LIGHTNING),
+                &chain,
+                &snapshot
+            )
+            .is_none()
+        );
+        assert!(!program.is_empty(), "the jagged chain is still drawn");
     }
 }

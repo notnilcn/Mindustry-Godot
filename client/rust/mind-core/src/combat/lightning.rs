@@ -250,7 +250,7 @@ fn create_internal(
                     if other_team == team {
                         return false;
                     }
-                    snap = Some((wx as f32 * TILE_SIZE as f32, wy as f32 * TILE_SIZE as f32));
+                    snap = Some((wx as f32 * TILE_SIZE, wy as f32 * TILE_SIZE));
                     true
                 });
             }
@@ -500,7 +500,7 @@ mod tests {
             "the branch ends on the insulated wall"
         );
         assert_eq!(result.links, 0, "no chain target past the wall");
-        let ts = TILE_SIZE as f32;
+        let ts = TILE_SIZE;
         let snap = result.snap_point.expect("tile-corner snap point");
         assert_eq!(
             snap.0 % ts,

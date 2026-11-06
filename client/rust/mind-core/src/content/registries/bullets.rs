@@ -1033,6 +1033,13 @@ impl BulletDef {
                     Rgba::WHITE,
                 ];
                 bullet.width = 9.0;
+                // `ContinuousLaserBulletType` initializer (`:40-41`):
+                // `lightColor = Color.orange; lightOpacity = 0.7f;`. The beam
+                // line-light pass uses these values; carrying them on the def
+                // keeps the content ABI complete for the default `drawLight`
+                // path and for data patches.
+                bullet.light_color = Rgba::from_rgba8888(0xffa500ff);
+                bullet.light_opacity = 0.7;
             }
             BulletKind::Shrapnel => {
                 // `ShrapnelBulletType()` constructor.
@@ -2258,5 +2265,23 @@ mod tests {
 
         bullet.spawn_unit_range = Some((102.0, 4.0));
         assert_eq!(bullet.compute_range(), 102.0 * 4.0);
+    }
+
+    /// `ContinuousLaserBulletType`'s initializer carries `lightColor =
+    /// Color.orange` / `lightOpacity = 0.7f` (`:40-41`); the beam line-light
+    /// pass and data patches read them off the def.
+    #[test]
+    fn continuous_laser_def_carries_the_orange_light() {
+        let def = BulletDef::new(BulletKind::ContinuousLaser);
+        assert_eq!(def.light_color, Rgba::from_rgba8888(0xffa500ff));
+        assert_eq!(def.light_opacity, 0.7);
+        // The other beam kinds keep their own class defaults.
+        let sap = BulletDef::new(BulletKind::Sap);
+        assert_eq!(sap.light_color, super::pal::SAP);
+        assert_eq!(sap.light_opacity, 0.6);
+        // The generic default is `Pal.powerLight` / 0.3 (`BulletType.java`).
+        let plain = BulletDef::new(BulletKind::Plain);
+        assert_eq!(plain.light_color, super::pal::POWER_LIGHT);
+        assert_eq!(plain.light_opacity, 0.3);
     }
 }

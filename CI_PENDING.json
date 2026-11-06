@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T21:46:22Z",
+  "updated": "2026-11-06T22:22:08Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1371,6 +1371,32 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_items; ... unit_payload_tests; ... block_kind_data",
       "expected": "full lib passes; 8 team_items + 6 block_kind_data + payload tests",
       "risk": "only canonical core holds items (multi-core goldens may shift); native payload save format changed; BlockKind 137-139 append-only; classmap sha pin",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-222208",
+      "created_at": "2026-11-06T22:22:08Z",
+      "agent": "hx-simint",
+      "branch": "main",
+      "head": "6d891f27",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/sim",
+      "summary": "Sim consumer drain + ability queues + place_ended (GAPS #58/#61/#62)",
+      "files": [
+        "client/rust/mind-core/src/sim/runtime.rs",
+        "client/rust/mind-core/src/sim/mod.rs",
+        "client/rust/mind-core/src/sim/builder.rs",
+        "client/rust/mind-core/src/combat/abilities.rs"
+      ],
+      "gates": [
+        "fmt",
+        "cargo-test",
+        "cargo-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib consume; ... ability_queue; ... place_ended",
+      "expected": "42 + 4 + 1 pass; full lib 3066",
+      "risk": "inert until content Consume variants land; legacy generator ItemExplode may double-run; per-Sim schedule registration",
       "status": "pending"
     }
   ]

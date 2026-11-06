@@ -57,8 +57,8 @@ pub use line::{PlaceLine, flip_plans, iterate_line, rotate_plans};
 pub use mobile::{
     AREA_BREAK_START_TILES, EDGE_PAN, GestureDetector, GestureEvent, LINE_MODE_START_TILES,
     LONG_PRESS_SECONDS, MAX_FLING_DELAY_SECONDS, MAX_PAN_SPEED, MINE_DOUBLE_TAP_MS,
-    MobileController, PayloadTarget, TAP_COUNT_INTERVAL_SECONDS, TAP_SQUARE_HALF,
-    should_begin_mine,
+    MobileController, MobileTouchResult, PayloadTarget, TAP_COUNT_INTERVAL_SECONDS,
+    TAP_SQUARE_HALF, should_begin_mine,
 };
 pub use place_mode::{MobileMode, PlaceMode};
 pub use placement::{

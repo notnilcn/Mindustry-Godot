@@ -301,7 +301,12 @@ impl InputState {
                 }
             }
         }
-        self.place_mode = PlaceMode::Placing;
+        // `InputHandler.updateLine` never changes the interaction mode; the
+        // caller has already set it (`begin_place`/`begin_break`). A line built
+        // from no mode falls back to placing (the desktop line path).
+        if self.place_mode == PlaceMode::None {
+            self.place_mode = PlaceMode::Placing;
+        }
         self.preview.block = self.block;
         self.preview.rotation = params.rotation;
         self.preview.place_mode = self.place_mode;

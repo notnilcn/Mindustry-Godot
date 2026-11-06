@@ -21,7 +21,8 @@ use godot::obj::Base;
 use godot::prelude::*;
 
 use mind_core::assets::bundle::Bundle;
-use mind_core::content::registries::planets::GeneratorKind;
+use mind_core::content::registries::planets::{GeneratorKind, PlanetDef};
+use mind_core::content::settings_store::UnlockStore;
 use mind_core::content::tech::{ObjectiveSpec, TechNodeRef};
 use mind_core::content::{
     BlockId, ContentRef, ContentRegistry, ContentType, ItemId, LiquidId, MemoryBundle, PlanetId,
@@ -44,6 +45,7 @@ use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
 use mind_core::game::schematics::Schematics;
+use mind_core::game::service::{AchievementRow, ServiceTracker};
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
 use mind_core::game::universe::{Campaign, TurnContext, launch_plan};
 use mind_core::game::waves::WaveMapHooks;
@@ -140,6 +142,12 @@ pub struct MindCampaign {
     /// rebuilds on capture/loss), so repeat dialog opens reuse it until a
     /// capture/abandon invalidates the entry (T13/T14).
     planet_mesh_cache: Option<(String, VarDictionary)>,
+    /// THE shared achievement/stat tracker (`Vars.service` + `GameService`;
+    /// GAPS #68). Loaded from `Core.settings` at boot, injected into every
+    /// live [`CampaignRuntime`] (`with_service`) so the campaign systems keep
+    /// one counter graph across sector switches, mirrored back from the
+    /// runtime each pump and persisted on autosave/exit.
+    service: ServiceTracker,
 }
 
 #[godot_api]
@@ -171,6 +179,7 @@ impl INode for MindCampaign {
             playtesting_map: None,
             current_map_name: None,
             planet_mesh_cache: None,
+            service: ServiceTracker::new(),
         }
     }
 
@@ -224,6 +233,136 @@ fn resolve_preset_description(
                 .map(str::to_owned)
         })
         .unwrap_or_default()
+}
+
+/// Loads the shared achievement/stat tracker from a settings-backed store.
+///
+/// `DesktopLauncher`'s anonymous `GameService` keeps `Vars.service` alive for
+/// the whole process and reads the persisted `achievement-<name>` /
+/// `achievement-stat-<name>` keys on boot ([`ServiceTracker::load`]). The
+/// facade owns that one tracker and injects it into every live
+/// [`CampaignRuntime`], so sector switches never restart the counters.
+fn load_service(store: &dyn UnlockStore) -> ServiceTracker {
+    let mut tracker = ServiceTracker::new();
+    tracker.load(store);
+    tracker
+}
+
+/// Writes the shared tracker's stats/achievements through a settings-backed
+/// store (`GameService.storeStats`). The caller flushes `Core.settings`.
+fn save_service(tracker: &mut ServiceTracker, store: &mut dyn UnlockStore) {
+    tracker.save(store);
+}
+
+/// `Achievement` rows as JSON for the achievements table: declaration order,
+/// `{name, unlocked, progress, goal, stat}` (`LocalGameService::achievement_rows`;
+/// the extra two fields are the stat/goal the row's progress is clamped to).
+fn service_achievement_rows_json(service: &mind_core::game::service::LocalGameService) -> String {
+    let rows: Vec<serde_json::Value> = service
+        .achievement_rows()
+        .into_iter()
+        .map(|row: AchievementRow| {
+            serde_json::json!({
+                "name": row.achievement.name(),
+                "unlocked": row.unlocked,
+                "progress": row.progress,
+                "goal": row.achievement.goal(),
+                "stat": row.achievement.stat().map(|stat| stat.name()),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(rows).to_string()
+}
+
+/// `SStat` rows as JSON for the stats table: declaration order,
+/// `{name, value}` (`LocalGameService::stat_rows`).
+fn service_stat_rows_json(service: &mind_core::game::service::LocalGameService) -> String {
+    let rows: Vec<serde_json::Value> = service
+        .stat_rows()
+        .into_iter()
+        .map(|(stat, value)| serde_json::json!({ "name": stat.name(), "value": value }))
+        .collect();
+    serde_json::Value::Array(rows).to_string()
+}
+
+/// One body row of [`planet_body_rows`].
+struct PlanetBodyRow {
+    /// `Planet.name`.
+    name: String,
+    /// `true` for the solar system root (`SunMesh`, `Planets.java:25-40`).
+    sun: bool,
+    /// Body centre in the viewed planet's mesh frame.
+    position: [f32; 3],
+    /// `Planet.radius` (the mesh scale).
+    radius: f32,
+    /// `Planet.getRotation()` in degrees at this time.
+    rotation: f32,
+}
+
+/// `PlanetRenderer.renderPlanet` (`PlanetRenderer.java:139-153`): every visible
+/// body of the viewed planet's solar system except the viewed planet itself.
+///
+/// Java walks the `Planet.children` tree from `params.planet.solarSystem` and
+/// draws each planet at its world position; the port renders the viewed globe
+/// at the origin in its own rotated mesh frame (`planet_light`/
+/// `orbit_center_in_planet_frame`), so a body's row is
+/// `(body.position - viewed.position).rotate(Y, viewed.getRotation())` — the
+/// `Planet.getTransform` rotation applied to the world-space offset. The
+/// viewed planet is excluded because its hex mesh already *is* the globe.
+fn planet_body_rows(planets: &[PlanetDef], viewed: usize, seconds: f32) -> Vec<PlanetBodyRow> {
+    use mind_core::render::g3d::orbit::{
+        orbit_radii, rotate_y, rotation, solar_system, world_position,
+    };
+    let Some(viewed_def) = planets.get(viewed) else {
+        return Vec::new();
+    };
+    let orbit = orbit_radii(planets);
+    let system = solar_system(planets, viewed);
+    let viewed_pos = world_position(planets, &orbit, viewed, seconds);
+    let viewed_rot = rotation(
+        viewed_def,
+        orbit.get(viewed).copied().unwrap_or(0.0),
+        seconds,
+    );
+    let mut out = Vec::new();
+    for (index, body) in planets.iter().enumerate() {
+        // `if(!planet.visible()) return;` (and its children with it, since the
+        // Java recursion returns before descending).
+        if !body.visible || index == viewed || solar_system(planets, index) != system {
+            continue;
+        }
+        let mut ancestors_visible = true;
+        let mut ancestor = body.parent;
+        while let Some(parent) = ancestor {
+            match planets.get(parent.index()) {
+                Some(def) if def.visible => ancestor = def.parent,
+                _ => {
+                    ancestors_visible = false;
+                    break;
+                }
+            }
+        }
+        if !ancestors_visible {
+            continue;
+        }
+        let pos = world_position(planets, &orbit, index, seconds);
+        let position = rotate_y(
+            [
+                pos[0] - viewed_pos[0],
+                pos[1] - viewed_pos[1],
+                pos[2] - viewed_pos[2],
+            ],
+            viewed_rot,
+        );
+        out.push(PlanetBodyRow {
+            name: body.name.clone(),
+            sun: index == system,
+            position,
+            radius: body.radius,
+            rotation: rotation(body, orbit.get(index).copied().unwrap_or(0.0), seconds),
+        });
+    }
+    out
 }
 
 #[godot_api]
@@ -318,9 +457,18 @@ impl MindCampaign {
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;
+                // `Vars.service` boot (`DesktopLauncher`'s `GameService`
+                // implementation): the persisted `achievement-*` /
+                // `achievement-stat-*` keys come out of `Core.settings` before
+                // the first `CampaignRuntime` can drive the listener half.
+                self.service = settings_hub::with_settings(|settings| {
+                    let store = SettingsUnlockStore::new(settings);
+                    load_service(&store)
+                });
                 log::info!(
-                    "MindCampaign ready ({} save slot(s))",
-                    self.saves.slots.len()
+                    "MindCampaign ready ({} save slot(s), {} achievement(s))",
+                    self.saves.slots.len(),
+                    self.service.service().unlocked_count()
                 );
             }
             Err(error) => {
@@ -333,6 +481,68 @@ impl MindCampaign {
     /// The wired `MindSimHost` that owns the live sim/runtime.
     fn host(&self) -> Option<Gd<MindSimHost>> {
         wiring::optional(&self.sim_host)
+    }
+
+    /// Pulls the live runtime's achievement/stat tracker back into the facade.
+    ///
+    /// The runtime copy is authoritative while a sector runs (Java has one
+    /// global `Vars.service`; the port's `CampaignRuntime` owns the listener
+    /// state the campaign systems mutate), so every facade read/persist
+    /// mirrors it first. No-op without an installed runtime.
+    fn sync_service(&mut self) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let guard = host.bind();
+        if let Some(tracker) = guard.campaign_service() {
+            self.service = tracker.clone();
+        }
+    }
+
+    /// Writes the shared tracker through `Core.settings` (`GameService.storeStats`
+    /// half: the values land in the settings store; the caller flushes it).
+    fn persist_service(&mut self) {
+        self.sync_service();
+        settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
+            save_service(&mut self.service, &mut store);
+        });
+    }
+
+    /// The achievement rows as JSON (`achievement_rows`), for the achievements
+    /// table. Reads the live runtime's tracker when a sector is installed.
+    #[func]
+    pub fn service_achievement_rows_json(&mut self) -> GString {
+        self.sync_service();
+        GString::from(service_achievement_rows_json(self.service.service()).as_str())
+    }
+
+    /// The `SStat` rows as JSON (`stat_rows`), for the stats table.
+    #[func]
+    pub fn service_stat_rows_json(&mut self) -> GString {
+        self.sync_service();
+        GString::from(service_stat_rows_json(self.service.service()).as_str())
+    }
+
+    /// `(unlocked, total)` achievement completion for a UI progress line
+    /// (`LocalGameService::completion`), as `{"unlocked": n, "total": m}`.
+    #[func]
+    pub fn service_completion_json(&mut self) -> GString {
+        self.sync_service();
+        let (unlocked, total) = self.service.service().completion();
+        GString::from(
+            serde_json::json!({ "unlocked": unlocked, "total": total })
+                .to_string()
+                .as_str(),
+        )
+    }
+
+    /// The unlocked achievement names as JSON (`KEY_ACHIEVEMENTS` payload;
+    /// `LocalGameService::unlocked_json`).
+    #[func]
+    pub fn service_unlocked_json(&mut self) -> GString {
+        self.sync_service();
+        GString::from(self.service.service().unlocked_json().to_string().as_str())
     }
 
     /// `Saves.SaveSlot.savePreview` on the live world (`Saves.java:343-358`):
@@ -459,6 +669,9 @@ impl MindCampaign {
         {
             log::warn!("campaign save_all failed: {error}");
         }
+        // `GameService.storeStats` half: the shared tracker's stats and
+        // achievement flags land in the same settings store, then flush.
+        self.persist_service();
         if let Err(error) = settings_hub::save(&self.paths) {
             log::warn!("campaign settings flush failed: {error}");
         }
@@ -493,9 +706,9 @@ impl MindCampaign {
         Some(out)
     }
 
-    /// Copies the runtime campaign into the facade (no-op without a runtime).
-    /// Facade -> runtime copies never happen (T1: the runtime stays
-    /// authoritative until it is dropped).
+    /// Copies the runtime campaign + service tracker into the facade (no-op
+    /// without a runtime). Facade -> runtime copies never happen (T1: the
+    /// runtime stays authoritative until it is dropped).
     fn mirror_runtime_campaign(&mut self) {
         let Some(mut host) = self.host() else {
             return;
@@ -503,6 +716,10 @@ impl MindCampaign {
         let taken = host.bind_mut().take_campaign_runtime();
         if let Some(runtime) = taken {
             self.campaign = Some(runtime.campaign.clone());
+            // The runtime owns the live `Vars.service`-equivalent tracker
+            // (GAPS #68); keep the facade's copy current for the persist path
+            // and the UI queries.
+            self.service = runtime.service.clone();
             host.bind_mut().put_campaign_runtime(runtime);
         }
     }
@@ -518,6 +735,10 @@ impl MindCampaign {
         let Some(mut runtime) = host.bind_mut().take_campaign_runtime() else {
             return;
         };
+        // The runtime's tracker is authoritative while a sector is live; mirror
+        // it every pump so the persist path and the UI queries see the same
+        // `Vars.service` state the campaign systems just updated (GAPS #68).
+        self.service = runtime.service.clone();
         let events = runtime.take_events();
         let mut dirty = false;
 
@@ -561,6 +782,13 @@ impl MindCampaign {
             // live sector record (core snapshot, items, production, wave) lands
             // in settings next to the autosave (PAR-0153).
             self.persist_sector_record_in(Some(&mut runtime));
+            // `GameService.storeStats` at the autosave boundary: the tracker's
+            // stats/achievements land in the settings store alongside the
+            // sector record (the exit persist flushes the file).
+            settings_hub::with_settings(|settings| {
+                let mut store = SettingsUnlockStore::new(settings);
+                save_service(&mut self.service, &mut store);
+            });
             // `Saves.SaveSlot.save` -> `savePreview()` (autosave path).
             self.write_live_slot_preview(&file);
             host.bind_mut()
@@ -1301,7 +1529,11 @@ impl MindCampaign {
         // Install the runtime and register the live cores/spawns (GAP-9).
         let mut installed = false;
         if let Some(mut host) = self.host() {
-            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign.clone());
+            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign.clone())
+                // One shared `Vars.service` (GAPS #68): the facade's boot-loaded
+                // tracker goes into the live runtime, so the campaign systems
+                // keep counting into the same achievement/stat graph.
+                .with_service(self.service.clone());
             runtime.set_unlocked_content(collect_unlocked(&registry));
             host.bind_mut().install_campaign_runtime(runtime);
             // `Schematics.placeLaunchLoadout` (PAR-0085 step 5): a launcher
@@ -1676,7 +1908,10 @@ impl MindCampaign {
         }
         let mut installed = false;
         if let Some(mut host) = self.host() {
-            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign);
+            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign)
+                // Same shared service (GAPS #68): a custom map match counts
+                // into the one tracker too.
+                .with_service(self.service.clone());
             if let Some(registry) = self.registry.take() {
                 runtime.set_unlocked_content(collect_unlocked(&registry));
                 host.bind_mut().install_campaign_runtime(runtime);
@@ -4284,6 +4519,14 @@ impl MindCampaign {
         // `SaveVersion.writeMeta` (`SaveVersion.java:117-118`): prepare/save the
         // sector record as part of the save, like every other save path.
         self.persist_sector_record();
+        // `GameService.storeStats` on a sector switch: the live runtime (and
+        // its tracker) is about to be replaced by the destination world, so
+        // mirror the tracker now and write it through the settings store.
+        self.sync_service();
+        settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
+            save_service(&mut self.service, &mut store);
+        });
         self.write_live_slot_preview(&file);
         let Some(mut host) = self.host() else {
             return false;
@@ -6005,6 +6248,42 @@ impl MindCampaign {
         true
     }
 
+    /// The other bodies of the viewed planet's solar system for the planet
+    /// view (`PlanetRenderer.renderPlanet`, `PlanetRenderer.java:139-153`):
+    /// the sun and every other visible planet/moon, positioned in the viewed
+    /// planet's mesh frame (the frame `planet_mesh`/`planet_view` use, where
+    /// the viewed globe sits at the origin).
+    ///
+    /// Rows: `{name, kind: "sun"|"planet", position: Vector3, radius,
+    /// rotation}`. The viewed planet itself is excluded (its globe is drawn
+    /// separately), and bodies of other solar systems are skipped
+    /// (`solarSystem`, `Planet.java:220`). Empty for an unknown planet or
+    /// before content boot.
+    #[func]
+    pub fn planet_bodies(&mut self, planet: GString) -> VarArray {
+        let mut out = VarArray::new();
+        let seconds = self.universe_secondsf();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+            return out;
+        };
+        for row in planet_body_rows(registry.planets(), def.id.index(), seconds) {
+            let mut dict = VarDictionary::new();
+            dict.set("name", row.name.as_str());
+            dict.set("kind", if row.sun { "sun" } else { "planet" });
+            dict.set(
+                "position",
+                Vector3::new(row.position[0], row.position[1], row.position[2]),
+            );
+            dict.set("radius", row.radius);
+            dict.set("rotation", row.rotation);
+            out.push(&dict.to_variant());
+        }
+        out
+    }
+
     /// Planet globe data for the sector view (plan 16 g3d seam): the
     /// `PlanetGrid` sector topology, the render-plane grid-line mesh
     /// (`MeshBuilder.buildPlanetGrid` at `outlineRad * radius`) and the
@@ -6853,6 +7132,7 @@ mod tests {
     use super::*;
     use mind_core::assets::bundle::parse_properties;
     use mind_core::content::{MemoryUnlockStore, create_base_content};
+    use mind_core::game::achievements::{Achievement, SStat};
 
     /// Test-only `expect`: the workspace denies `clippy::expect_used`.
     fn require<T>(value: Option<T>, what: &str) -> T {
@@ -7160,5 +7440,192 @@ mod tests {
             !schematic_placeable_on_planet(&schematic, &registry, erekir.id, erekir_env, sun),
             "a Serpulo-only block is not offered on Erekir"
         );
+    }
+
+    /// GAPS #68 host wiring: the shared `Vars.service` tracker (a) boots from
+    /// the persisted settings keys, (b) is the exact tracker a fresh
+    /// `CampaignRuntime` runs on (`with_service`), and (c) round-trips the
+    /// values the campaign systems wrote through the save/load helpers the
+    /// autosave/exit paths call.
+    #[test]
+    fn service_injection_roundtrips_through_the_unlock_store() {
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+
+        // A previous session persisted a stat and an achievement under the
+        // module ABI keys (`achievement-*` / `achievement-stat-*`).
+        let mut boot_store = MemoryUnlockStore::new();
+        boot_store.set_i32("achievement-stat-unitsDestroyed", 1_234);
+        boot_store.set_bool("achievement-buildT5", true);
+
+        // Boot: `load_service` restores the tracker from `Core.settings`.
+        let boot = load_service(&boot_store);
+        assert_eq!(boot.service().get(SStat::UnitsDestroyed), 1_234);
+        assert!(boot.service().unlocked(Achievement::BuildT5));
+
+        // A default runtime starts empty; the facade injects the shared one.
+        let untouched = CampaignRuntime::new(PlaySession::default(), campaign.clone())
+            .with_service(ServiceTracker::new());
+        assert_eq!(untouched.service.service().get(SStat::UnitsDestroyed), 0);
+        let mut runtime =
+            CampaignRuntime::new(PlaySession::default(), campaign).with_service(boot.clone());
+        assert_eq!(runtime.service.service().get(SStat::UnitsDestroyed), 1_234);
+        assert!(runtime.service.service().unlocked(Achievement::BuildT5));
+
+        // The campaign listener half keeps counting on the injected tracker
+        // (the runtime systems call these hooks; the direct call is the same
+        // seam without a sim tick).
+        runtime.service.on_sector_launch();
+        assert_eq!(runtime.service.service().get(SStat::TimesLaunched), 1);
+        // The facade mirrors the runtime's copy every pump/persist.
+        let mirrored = runtime.service.clone();
+        assert_eq!(mirrored.service().get(SStat::TimesLaunched), 1);
+
+        // Autosave/exit: the mirrored tracker saves through the store...
+        let mut saved = MemoryUnlockStore::new();
+        let mut tracker = mirrored;
+        save_service(&mut tracker, &mut saved);
+        assert_eq!(saved.get_i32("achievement-stat-timesLaunched"), 1);
+        assert_eq!(saved.get_i32("achievement-stat-unitsDestroyed"), 1_234);
+        assert!(saved.get_bool("achievement-buildT5"));
+
+        // ...and the next boot sees the incremented stat plus the old values.
+        let reloaded = load_service(&saved);
+        assert_eq!(reloaded.service().get(SStat::TimesLaunched), 1);
+        assert_eq!(reloaded.service().get(SStat::UnitsDestroyed), 1_234);
+        assert!(reloaded.service().unlocked(Achievement::BuildT5));
+    }
+
+    /// The `#[func]` row payloads (`service_stat_rows_json` /
+    /// `service_achievement_rows_json`) keep Java declaration order and expose
+    /// the values/goals the UI tables render.
+    #[test]
+    fn service_rows_json_cover_every_stat_and_achievement() {
+        let mut tracker = ServiceTracker::new();
+        tracker.service_mut().set(SStat::BlocksBuilt, 2_500);
+        tracker.service_mut().unlock(Achievement::Place10kBlocks);
+
+        let stats: serde_json::Value =
+            match serde_json::from_str(&service_stat_rows_json(tracker.service())) {
+                Ok(value) => value,
+                Err(error) => panic!("stat rows JSON: {error}"),
+            };
+        let rows = stats.as_array().map(Vec::as_slice).unwrap_or_default();
+        assert_eq!(rows.len(), SStat::COUNT);
+        assert_eq!(rows[0]["name"], "unitsDestroyed");
+        let blocks = rows
+            .iter()
+            .find(|row| row["name"] == "blocksBuilt")
+            .unwrap_or_else(|| panic!("blocksBuilt row"));
+        assert_eq!(blocks["value"], 2_500);
+
+        let achievements: serde_json::Value =
+            match serde_json::from_str(&service_achievement_rows_json(tracker.service())) {
+                Ok(value) => value,
+                Err(error) => panic!("achievement rows JSON: {error}"),
+            };
+        let rows = achievements
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        assert_eq!(rows.len(), Achievement::COUNT);
+        let placed = rows
+            .iter()
+            .find(|row| row["name"] == "place10kBlocks")
+            .unwrap_or_else(|| panic!("place10kBlocks row"));
+        assert_eq!(placed["unlocked"], serde_json::json!(true));
+        assert_eq!(placed["progress"], 2_500);
+        assert_eq!(placed["goal"], 10_000);
+        assert_eq!(placed["stat"], "blocksBuilt");
+        // Event-only achievements report a `null` stat and zero goal.
+        let event_only = rows
+            .iter()
+            .find(|row| row["name"] == "defeatAttack5Waves")
+            .unwrap_or_else(|| panic!("defeatAttack5Waves row"));
+        assert!(event_only["stat"].is_null());
+        assert_eq!(event_only["goal"], 0);
+    }
+
+    /// GAPS #50 follow-up: `planet_bodies` derives the sun/planet rows from the
+    /// campaign orbit helpers in the viewed planet's mesh frame. The sun and
+    /// its sibling planets are the same solar system, the viewed planet is
+    /// excluded, and the world-space distances survive the frame rotation.
+    #[test]
+    fn planet_bodies_derive_the_solar_system_in_the_viewed_frame() {
+        use mind_core::render::g3d::orbit::{orbit_radii, rotation, world_position};
+
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        let planets = registry.planets();
+        let serpulo = require(registry.planet_by_name("serpulo"), "serpulo");
+        let erekir = require(registry.planet_by_name("erekir"), "erekir");
+        let sun = require(registry.planet_by_name("sun"), "sun");
+        let orbit = orbit_radii(planets);
+        let (serpulo_at, erekir_at, sun_at) =
+            (serpulo.id.index(), erekir.id.index(), sun.id.index());
+        assert_eq!(
+            mind_core::render::g3d::orbit::solar_system(planets, erekir_at),
+            sun_at,
+            "erekir orbits the sun"
+        );
+
+        let seconds = 1_234.5f32;
+        let rows = planet_body_rows(planets, serpulo_at, seconds);
+        // The viewed globe is drawn by `planet_mesh`, not as a system body.
+        assert!(
+            rows.iter().all(|row| row.name != "serpulo"),
+            "the viewed planet must not be duplicated"
+        );
+        let sun_row = rows
+            .iter()
+            .find(|row| row.name == "sun")
+            .unwrap_or_else(|| panic!("sun row"));
+        assert!(sun_row.sun, "the system root is the sun");
+        assert_eq!(sun_row.radius, sun.radius);
+        let erekir_row = rows
+            .iter()
+            .find(|row| row.name == "erekir")
+            .unwrap_or_else(|| panic!("erekir row"));
+        assert!(!erekir_row.sun);
+        // `Planet.getRotation()` is row-local (the billboard/globe spin).
+        assert_eq!(
+            erekir_row.rotation,
+            rotation(erekir, orbit[erekir_at], seconds)
+        );
+
+        // The row offset is the world offset turned by the viewed planet's
+        // rotation (`Planet.getTransform`): rotation preserves distance, so
+        // the sun->erekir separation is exactly `orbitRadius` in both frames.
+        let world = |at: usize| world_position(planets, &orbit, at, seconds);
+        let dist = |a: [f32; 3], b: [f32; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let row_sep = dist(sun_row.position, erekir_row.position);
+        let world_sep = dist(world(sun_at), world(erekir_at));
+        assert!(
+            (row_sep - world_sep).abs() < 1e-3,
+            "{row_sep} != {world_sep}"
+        );
+        assert!((world_sep - orbit[erekir_at]).abs() < 1e-3);
+        // A body at the viewed origin keeps its zero offset (the sun itself,
+        // seen from the sun: every child sits exactly on its orbit radius).
+        let from_sun = planet_body_rows(planets, sun_at, seconds);
+        let erekir_from_sun = from_sun
+            .iter()
+            .find(|row| row.name == "erekir")
+            .unwrap_or_else(|| panic!("erekir row from the sun"));
+        let radius = (erekir_from_sun.position[0] * erekir_from_sun.position[0]
+            + erekir_from_sun.position[2] * erekir_from_sun.position[2])
+            .sqrt();
+        assert!((radius - orbit[erekir_at]).abs() < 1e-3);
+        // The viewed planet is a row when another body is the viewpoint.
+        assert!(from_sun.iter().any(|row| row.name == "serpulo"));
     }
 }

@@ -17,8 +17,10 @@ use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::content::{
-    BarSpec, BlockDef, BlockFlag, BlockGroup, BlockId, ContentRegistry, EnvMask, Rgba,
+    BarSpec, BlockDef, BlockFlag, BlockGroup, BlockId, ContentRegistry, ContentType, EnvMask,
+    PlanetId, Rgba,
 };
+use crate::game::rules::{DEFAULT_ENV, Rules};
 
 use super::behavior::{BehaviorRegistry, BuildingBehavior, BuildingKind, resolve_behavior};
 use super::block_kind_data::BlockKindData;
@@ -211,19 +213,178 @@ impl BlockInstance {
         }
     }
 
-    /// `Block.getPlanConfigs(options)` (`Block.java:1663-1671`): the plan
-    /// config selects a content class when the block's `configurations` has
-    /// `Item.class`/`Liquid.class`.
-    pub fn plan_configs(&self) -> SmallVec<[ConfigKind; 2]> {
-        let kinds = self.behavior.config_kinds();
-        let mut out = SmallVec::new();
-        if kinds.contains(&ConfigKind::Item) {
-            out.push(ConfigKind::Item);
+    /// Config value kinds the block declares (`Block.configurations` keys).
+    ///
+    /// The runtime `configs` table is only populated by a behavior that also
+    /// installs handlers; the declared kinds on the behavior are the same set
+    /// (`config(Class, ...)` registers both), so they are unioned.
+    pub fn declared_config_kinds(&self) -> impl Iterator<Item = ConfigKind> + '_ {
+        self.behavior
+            .config_kinds()
+            .iter()
+            .copied()
+            .chain(self.configs.by_kind.iter().map(|(kind, _)| *kind))
+    }
+
+    /// `Block.getPlanConfigs(options)` (`Block.java:1663-1671`) plus the
+    /// `UnitFactory` (`UnitFactory.java:203-209`), `Constructor`
+    /// (`Constructor.java:50-53`), `PayloadSource` (`PayloadSource.java:71-75`)
+    /// and `PayloadRouter` (`PayloadRouter.java:49-53`) overrides: the content
+    /// options a plan's point-config popup lists.
+    ///
+    /// The default lists every item/liquid when the block declares an
+    /// `Item.class`/`Liquid.class` config (`configurations.containsKey`,
+    /// not the item/liquid container flags). `rules` supplies the ban and
+    /// environment filters; `None` keeps the rules-free options.
+    pub fn plan_configs(
+        &self,
+        content: &ContentRegistry,
+        rules: Option<&Rules>,
+    ) -> Vec<PlanConfigOption> {
+        let ctx = PlanConfigCtx::new(content, rules);
+        let mut options = Vec::new();
+        match self.def.kind {
+            crate::content::BlockKind::UnitFactory => {
+                self.unit_factory_plan_configs(&ctx, &mut options)
+            }
+            crate::content::BlockKind::Constructor => {
+                self.constructor_plan_configs(&ctx, &mut options)
+            }
+            crate::content::BlockKind::PayloadSource => {
+                self.payload_source_plan_configs(&ctx, &mut options)
+            }
+            crate::content::BlockKind::PayloadRouter => {
+                self.payload_router_plan_configs(&ctx, &mut options)
+            }
+            _ => self.default_plan_configs(&ctx, &mut options),
         }
-        if kinds.contains(&ConfigKind::Liquid) {
-            out.push(ConfigKind::Liquid);
+        options
+    }
+
+    /// `Block.getPlanConfigs` base (`Block.java:1664-1673`).
+    fn default_plan_configs(&self, ctx: &PlanConfigCtx<'_>, out: &mut Vec<PlanConfigOption>) {
+        let declares = |kind: ConfigKind| self.declared_config_kinds().any(|value| value == kind);
+        if declares(ConfigKind::Item) {
+            for item in ctx.content.items() {
+                out.push(PlanConfigOption::new(
+                    ContentType::Item,
+                    item.id.raw(),
+                    &item.name,
+                ));
+            }
         }
-        out
+        if declares(ConfigKind::Liquid) {
+            for liquid in ctx.content.liquids() {
+                out.push(PlanConfigOption::new(
+                    ContentType::Liquid,
+                    liquid.id.raw(),
+                    &liquid.name,
+                ));
+            }
+        }
+    }
+
+    /// `UnitFactory.getPlanConfigs` (`UnitFactory.java:203-209`): every plan
+    /// unit that is not banned.
+    fn unit_factory_plan_configs(&self, ctx: &PlanConfigCtx<'_>, out: &mut Vec<PlanConfigOption>) {
+        for plan in &self.def.unit_plans {
+            let Some(unit) = ctx.content.unit(plan.unit) else {
+                continue;
+            };
+            if ctx.banned_unit(&unit.name) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Unit,
+                unit.id.raw(),
+                &unit.name,
+            ));
+        }
+    }
+
+    /// `Constructor.canProduce` size range: the behavior's `minBlockSize`/
+    /// `maxBlockSize` knobs (class defaults `1..=2`, `Constructor.java:25`).
+    fn constructor_sizes(&self) -> (i32, i32) {
+        use crate::world::blocks::payloads::constructor::ConstructorBehavior;
+        let behavior = self.behavior.as_ref() as &dyn std::any::Any;
+        behavior
+            .downcast_ref::<ConstructorBehavior>()
+            .map(|behavior| (behavior.min_block_size, behavior.max_block_size))
+            .unwrap_or((1, 2))
+    }
+
+    /// `Constructor.getPlanConfigs` (`Constructor.java:49-52`) via
+    /// `canProduce` (`Constructor.java:54-56`).
+    fn constructor_plan_configs(&self, ctx: &PlanConfigCtx<'_>, out: &mut Vec<PlanConfigOption>) {
+        let (min, max) = self.constructor_sizes();
+        for block in ctx.content.blocks() {
+            if !ctx.constructor_can_produce(block, min, max) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Block,
+                block.id.raw(),
+                &block.name,
+            ));
+        }
+    }
+
+    /// `PayloadSource.getPlanConfigs` (`PayloadSource.java:71-75`): producible
+    /// blocks then producible units.
+    fn payload_source_plan_configs(
+        &self,
+        ctx: &PlanConfigCtx<'_>,
+        out: &mut Vec<PlanConfigOption>,
+    ) {
+        for block in ctx.content.blocks() {
+            if !ctx.payload_source_can_produce_block(block, self.def.size) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Block,
+                block.id.raw(),
+                &block.name,
+            ));
+        }
+        for unit in ctx.content.units() {
+            if !ctx.payload_source_can_produce_unit(unit) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Unit,
+                unit.id.raw(),
+                &unit.name,
+            ));
+        }
+    }
+
+    /// `PayloadRouter.getPlanConfigs` (`PayloadRouter.java:49-53`): sortable
+    /// blocks then sortable units.
+    fn payload_router_plan_configs(
+        &self,
+        ctx: &PlanConfigCtx<'_>,
+        out: &mut Vec<PlanConfigOption>,
+    ) {
+        for block in ctx.content.blocks() {
+            if !ctx.payload_router_can_sort_block(block, self.def.size) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Block,
+                block.id.raw(),
+                &block.name,
+            ));
+        }
+        for unit in ctx.content.units() {
+            if !ctx.payload_router_can_sort_unit(unit) {
+                continue;
+            }
+            out.push(PlanConfigOption::new(
+                ContentType::Unit,
+                unit.id.raw(),
+                &unit.name,
+            ));
+        }
     }
 
     /// `Block.placeEnded(tile, builder, rotation, config)` (`Block.java:1083-1085`):
@@ -238,6 +399,199 @@ impl BlockInstance {
     ) {
         self.behavior
             .place_ended(world, e, builder, rotation, config);
+    }
+}
+
+/// One selectable content of a plan's point-config popup
+/// (`Block.getPlanConfigs`'s `Seq<UnlockableContent>` entry).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlanConfigOption {
+    /// Content type (`item`/`liquid`/`block`/`unit`).
+    pub kind: ContentType,
+    /// Content name (parity ABI; already mod-prefixed).
+    pub name: String,
+    /// Dense content id in the type's id space.
+    pub id: u16,
+}
+
+impl PlanConfigOption {
+    /// Builds an option from a typed content record.
+    pub fn new(kind: ContentType, id: u16, name: &str) -> Self {
+        Self {
+            kind,
+            name: name.to_owned(),
+            id,
+        }
+    }
+
+    /// Bundle key of the option label (`item.<name>.name`, the key the
+    /// `PlanConfigFragment` popup resolves).
+    pub fn label(&self) -> String {
+        format!("{}.{}.name", self.kind.name(), self.name)
+    }
+}
+
+/// The `state.rules` + `state.getPlanet()` subset the `getPlanConfigs`
+/// overrides filter on.
+#[derive(Clone, Copy)]
+struct PlanConfigCtx<'a> {
+    /// Content registry.
+    content: &'a ContentRegistry,
+    /// Live game rules (`None` = rules-free).
+    rules: Option<&'a Rules>,
+    /// `state.getPlanet()`.
+    planet: Option<PlanetId>,
+    /// `Planets.sun` (matches every block, `UnlockableContent.isOnPlanet`).
+    sun: Option<PlanetId>,
+}
+
+impl<'a> PlanConfigCtx<'a> {
+    fn new(content: &'a ContentRegistry, rules: Option<&'a Rules>) -> Self {
+        let planet = rules.and_then(|rules| Self::planet_of(content, rules));
+        let sun = content.planet_id("sun");
+        Self {
+            content,
+            rules,
+            planet,
+            sun,
+        }
+    }
+
+    /// `GameState.getPlanet()` (`GameState.java:85-87`):
+    /// `rules.sector != null ? rules.sector.planet : rules.planet`.
+    fn planet_of(content: &ContentRegistry, rules: &Rules) -> Option<PlanetId> {
+        if let Some(sector) = &rules.sector
+            && let Some((planet, _)) = sector.0.rsplit_once('-')
+            && let Some(planet) = content.planet_id(planet)
+        {
+            return Some(planet);
+        }
+        content.planet_id(&rules.planet)
+    }
+
+    fn editor(&self) -> bool {
+        self.rules.is_some_and(|rules| rules.editor)
+    }
+
+    /// `state.rules.env` (the default environment when rules are absent).
+    fn env(&self) -> i32 {
+        self.rules.map(|rules| rules.env).unwrap_or(DEFAULT_ENV)
+    }
+
+    /// `rules.isBanned(block)` by content name.
+    fn banned_block(&self, name: &str) -> bool {
+        self.rules.is_some_and(|rules| rules.is_banned_block(name))
+    }
+
+    /// `rules.isBanned(unit)` by content name.
+    fn banned_unit(&self, name: &str) -> bool {
+        self.rules.is_some_and(|rules| rules.is_banned_unit(name))
+    }
+
+    /// `Block.environmentBuildable()` (`Block.java:1117-1119`).
+    fn environment_buildable(&self, def: &BlockDef) -> bool {
+        super::build::environment_buildable(def, self.planet, self.sun)
+    }
+
+    /// `Block.isVisible()` (`Block.java:1031-1033`): `!isHidden() && (editor ||
+    /// !hideBannedBlocks || !isBanned())`, with `isHidden()` being
+    /// `!BuildVisibility.visible() && !revealedBlocks.contains(this)`
+    /// (`Block.java:1553-1555`, `BuildVisibility.java:10-21`).
+    fn block_visible(&self, def: &BlockDef) -> bool {
+        use crate::content::registries::blocks::BuildVisibility as V;
+        let editor = self.editor();
+        let rules = self.rules;
+        let visible = match def.build_visibility {
+            V::Hidden | V::DebugOnly => false,
+            V::Shown => true,
+            V::EditorOnly => editor,
+            V::WorldProcessorOnly => {
+                editor || rules.is_some_and(|rules| rules.allow_edit_world_processors)
+            }
+            V::SandboxOnly => rules.is_none_or(|rules| rules.infinite_resources),
+            V::CampaignOnly => rules.is_none_or(|rules| rules.sector.is_some()),
+            // `Vars.indexer.isBlockPresent(Blocks.coreZone) || !state.isGame()`:
+            // a live game has the core-zone floor registered (the port has no
+            // content-presence index at this seam).
+            V::CoreZoneOnly => true,
+            V::LightingOnly => rules.is_none_or(|rules| {
+                rules.lighting || rules.infinite_resources || rules.sector.is_some()
+            }),
+            V::FogOnly => rules.is_none_or(|rules| rules.fog || rules.editor),
+            // Campaign launch-pad rules (`Planet.campaignRules`) are not a port
+            // field at this seam; treat the block as visible.
+            V::LegacyLaunchPadOnly | V::NotLegacyLaunchPadOnly => true,
+        };
+        let revealed = rules.is_some_and(|rules| rules.revealed_blocks.contains(def.name.as_str()));
+        let hidden = !visible && !revealed;
+        !hidden
+            && (editor
+                || !rules.is_some_and(|rules| {
+                    rules.hide_banned_blocks && rules.is_banned_block(&def.name)
+                }))
+    }
+
+    /// `Constructor.canProduce(Block)` (`Constructor.java:54-56`):
+    /// `b.isVisible() && b.size >= minBlockSize && b.size <= maxBlockSize &&
+    /// !(b instanceof CoreBlock) && !state.rules.isBanned(b) &&
+    /// b.environmentBuildable() && (filter.isEmpty() || filter.contains(b))`.
+    ///
+    /// The port's `BlockDef` has no `filter` field (no vanilla constructor sets
+    /// one; `Blocks.java:6710` leaves it empty), so the filter half is trivially
+    /// true.
+    fn constructor_can_produce(&self, block: &BlockDef, min: i32, max: i32) -> bool {
+        self.block_visible(block)
+            && block.size >= min
+            && block.size <= max
+            && block.kind != crate::content::BlockKind::CoreBlock
+            && !self.banned_block(&block.name)
+            && self.environment_buildable(block)
+    }
+
+    /// `PayloadSource.canProduce(Block)` (`PayloadSource.java:89-91`):
+    /// `!b.removed && b.isVisible() && b.size < size && b.allowedInPayloads &&
+    /// !isBanned(b) && b.environmentBuildable()`.
+    ///
+    /// `Block.allowedInPayloads` is not a ported `BlockDef` field and no vanilla
+    /// block clears it (default true), so that clause is treated as true.
+    fn payload_source_can_produce_block(&self, block: &BlockDef, source_size: i32) -> bool {
+        !block.removed
+            && self.block_visible(block)
+            && block.size < source_size
+            && !self.banned_block(&block.name)
+            && self.environment_buildable(block)
+    }
+
+    /// `PayloadSource.canProduce(UnitType)` (`PayloadSource.java:93-95`):
+    /// `!t.removed && !t.isHidden() && !t.isBanned() && t.supportsEnv(rules.env)`.
+    fn payload_source_can_produce_unit(
+        &self,
+        unit: &crate::content::registries::units::UnitTypeDef,
+    ) -> bool {
+        !unit.removed
+            && !unit.hidden
+            && !self.banned_unit(&unit.name)
+            && unit.supports_env(self.env())
+    }
+
+    /// `PayloadRouter.canSort(Block)` (`PayloadRouter.java:62-64`):
+    /// `b.isVisible() && b.size <= size && !(b instanceof CoreBlock) &&
+    /// !isBanned(b) && b.environmentBuildable()`.
+    fn payload_router_can_sort_block(&self, block: &BlockDef, router_size: i32) -> bool {
+        self.block_visible(block)
+            && block.size <= router_size
+            && block.kind != crate::content::BlockKind::CoreBlock
+            && !self.banned_block(&block.name)
+            && self.environment_buildable(block)
+    }
+
+    /// `PayloadRouter.canSort(UnitType)` (`PayloadRouter.java:66-68`):
+    /// `!t.isHidden() && !t.isBanned() && t.supportsEnv(rules.env)`.
+    fn payload_router_can_sort_unit(
+        &self,
+        unit: &crate::content::registries::units::UnitTypeDef,
+    ) -> bool {
+        !unit.hidden && !self.banned_unit(&unit.name) && unit.supports_env(self.env())
     }
 }
 
@@ -708,13 +1062,159 @@ mod tests {
         assert_eq!(electrolyzer.flip_rotation(1, false), 1);
         // Plan config classes come from the behavior's `configurations`.
         let sorter = table.instance(content.block_id("sorter").unwrap()).unwrap();
-        assert!(sorter.plan_configs().contains(&ConfigKind::Item));
-        assert!(!sorter.plan_configs().contains(&ConfigKind::Liquid));
+        let sorter_options = sorter.plan_configs(&content, None);
+        assert!(
+            sorter_options
+                .iter()
+                .any(|option| option.kind == ContentType::Item)
+        );
+        assert!(
+            !sorter_options
+                .iter()
+                .any(|option| option.kind == ContentType::Liquid)
+        );
         let wall = table
             .instance(content.block_id("copper-wall").unwrap())
             .unwrap();
-        assert!(wall.plan_configs().is_empty());
+        assert!(wall.plan_configs(&content, None).is_empty());
         let _ = BlockKind::Wall;
+    }
+
+    /// PAR-0555 remainder: `Block.getPlanConfigs` overrides —
+    /// `Block.java:1664-1673` default, `UnitFactory.java:203-209`,
+    /// `Constructor.java:50-53`, `PayloadSource.java:71-75`,
+    /// `PayloadRouter.java:49-53`.
+    #[test]
+    fn plan_configs_cover_the_java_overrides() {
+        let (content, table) = table();
+        let options = |name: &str, rules: Option<&Rules>| {
+            table
+                .get_named(name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .plan_configs(&content, rules)
+        };
+        // Default: a `config(Item.class, ...)` block lists every item, a
+        // `config(Liquid.class, ...)` block lists every liquid.
+        let sorter = options("sorter", None);
+        assert_eq!(sorter.len(), content.items().len());
+        assert!(sorter.iter().all(|option| option.kind == ContentType::Item));
+        // `Block.getPlanConfigs` does not fall back to the item/liquid container
+        // flags: a block with `hasItems` but no `Item.class` config has none.
+        let conveyor = table.get_named("conveyor").unwrap();
+        assert!(conveyor.def.has_items, "conveyors carry items");
+        assert!(conveyor.plan_configs(&content, None).is_empty());
+        // `UnitFactory.getPlanConfigs`: its plan units only.
+        let factory = options("ground-factory", None);
+        assert!(!factory.is_empty());
+        assert!(
+            factory
+                .iter()
+                .all(|option| option.kind == ContentType::Unit)
+        );
+        let unit_plans: Vec<String> = table
+            .get_named("ground-factory")
+            .unwrap()
+            .def
+            .unit_plans
+            .iter()
+            .filter_map(|plan| content.unit(plan.unit).map(|unit| unit.name.clone()))
+            .collect();
+        let listed: Vec<String> = factory.iter().map(|option| option.name.clone()).collect();
+        assert_eq!(listed, unit_plans);
+        // `Constructor.canProduce`: blocks within `minBlockSize..=maxBlockSize`,
+        // never cores, never hidden/banned blocks.
+        let constructor = options("constructor", None);
+        assert!(!constructor.is_empty());
+        assert!(
+            constructor
+                .iter()
+                .all(|option| option.kind == ContentType::Block)
+        );
+        let sizes: Vec<i32> = constructor
+            .iter()
+            .map(|option| {
+                content
+                    .block_id(&option.name)
+                    .and_then(|id| content.block(id))
+                    .unwrap()
+                    .size
+            })
+            .collect();
+        assert!(sizes.iter().all(|size| (1..=2).contains(size)), "{sizes:?}");
+        assert!(
+            !constructor
+                .iter()
+                .any(|option| option.name == "core-shard" || option.name == "air"),
+            "cores and hidden blocks are not producible"
+        );
+        // `large-constructor` uses size 3..=4 (`Blocks.java:6719-6720`).
+        assert!(options("large-constructor", None).iter().all(|option| {
+            content
+                .block_id(&option.name)
+                .and_then(|id| content.block(id))
+                .is_some_and(|def| (3..=4).contains(&def.size))
+        }));
+        // `PayloadSource.canProduce`: blocks smaller than the source (size 5,
+        // `Blocks.java:6782`) plus non-hidden, env-supporting units.
+        let source = options("payload-source", None);
+        assert!(
+            source
+                .iter()
+                .any(|option| option.kind == ContentType::Block)
+        );
+        assert!(source.iter().any(|option| option.kind == ContentType::Unit));
+        assert!(
+            !source
+                .iter()
+                .filter(|option| option.kind == ContentType::Block)
+                .any(|option| content
+                    .block_id(&option.name)
+                    .and_then(|id| content.block(id))
+                    .is_some_and(|def| def.size >= 5)),
+            "a payload source only produces blocks smaller than itself"
+        );
+        assert!(
+            source
+                .iter()
+                .filter(|option| option.kind == ContentType::Block)
+                .any(|option| content
+                    .block_id(&option.name)
+                    .and_then(|id| content.block(id))
+                    .is_some_and(|def| def.size == 4)),
+            "size-4 blocks fit inside the size-5 source"
+        );
+        // `PayloadRouter.canSort`: blocks up to the router size (3) plus units.
+        let router = options("payload-router", None);
+        assert!(
+            router
+                .iter()
+                .any(|option| option.kind == ContentType::Block)
+        );
+        assert!(router.iter().any(|option| option.kind == ContentType::Unit));
+        assert!(
+            !router
+                .iter()
+                .filter(|option| option.kind == ContentType::Block)
+                .any(|option| option.name == "core-shard"),
+            "a core cannot be sorted"
+        );
+        // Rules filters: a banned unit disappears from a unit-factory plan list,
+        // a banned block from the constructor list.
+        let mut rules = Rules::default();
+        rules.banned_units.insert(unit_plans[0].clone());
+        let filtered = options("ground-factory", Some(&rules));
+        assert_eq!(filtered.len(), factory.len() - 1);
+        let mut rules = Rules::default();
+        rules.banned_blocks.insert(constructor[0].name.clone());
+        let filtered = options("constructor", Some(&rules));
+        assert!(
+            filtered
+                .iter()
+                .all(|option| option.name != constructor[0].name),
+            "banned blocks are dropped from Constructor.getPlanConfigs"
+        );
+        // Label bundle keys follow the content type.
+        assert_eq!(sorter[0].label(), format!("item.{}.name", sorter[0].name));
     }
 
     #[test]

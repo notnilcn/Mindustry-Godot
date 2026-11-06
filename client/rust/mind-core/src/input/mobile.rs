@@ -526,6 +526,16 @@ fn rects_overlap(a: (f32, f32, f32), b: (f32, f32, f32)) -> bool {
     a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.2 && a.1 + a.2 > b.1
 }
 
+/// Result of [`MobileController::finish_line_touch`] (the host enqueues the
+/// placed plans and deconstructs the break tiles).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MobileTouchResult {
+    /// Valid placement plans committed to the build queue.
+    pub placed: Vec<ClientPlan>,
+    /// Tiles to deconstruct (`removeSelection` over the breaking line).
+    pub breaks: Vec<(i16, i16)>,
+}
+
 /// Long-press payload resolution (`MobileInput.longPress`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PayloadTarget {
@@ -769,34 +779,50 @@ impl MobileController {
     /// Confirm-button commit: valid selection plans enter the build queue,
     /// breaking plans are dropped (upstream `buildPlacementUI` confirm).
     pub fn confirm_plans(&mut self, world: &dyn PlacementWorld) -> usize {
+        self.confirm_plans_result(world).placed.len()
+    }
+
+    /// [`Self::confirm_plans`] returning the committed plans and the tiles the
+    /// breaking plans deconstruct (`MobileInput.java:222-266`: valid placements
+    /// queue, each `plan.breaking` calls `tryBreakBlock`).
+    pub fn confirm_plans_result(&mut self, world: &dyn PlacementWorld) -> MobileTouchResult {
         let plans = std::mem::take(&mut self.state.select_plans);
-        let mut committed = 0usize;
+        let mut result = MobileTouchResult::default();
         for plan in plans {
             if plan.breaking {
+                if world.block_at(plan.x, plan.y) != BlockId::AIR {
+                    result.breaks.push((plan.x as i16, plan.y as i16));
+                }
                 continue;
             }
             if world.valid_place(plan.block, plan.x, plan.y, plan.rotation) {
-                self.queue.add_build(plan, false);
-                committed += 1;
+                self.queue.add_build(plan.clone(), false);
+                result.placed.push(plan);
             }
         }
         self.mode.confirm_pending = false;
         self.selecting = false;
-        committed
+        result
     }
 
     /// `flushSelectPlans(linePlans)` on touch-up: commits the active drag line
     /// to the build queue (upstream `MobileInput.touchUp` placing branch).
     pub fn confirm_line(&mut self, world: &dyn PlacementWorld) -> usize {
+        self.confirm_line_plans(world).len()
+    }
+
+    /// [`Self::confirm_line`] returning the committed plans so the host can
+    /// enqueue them as sim place commands (the queue seam alone has no drain).
+    pub fn confirm_line_plans(&mut self, world: &dyn PlacementWorld) -> Vec<ClientPlan> {
         let plans = std::mem::take(&mut self.state.line_plans);
-        let mut committed = 0usize;
+        let mut committed = Vec::new();
         for plan in plans {
             if plan.breaking || plan.block == BlockId::AIR {
                 continue;
             }
             if world.valid_place(plan.block, plan.x, plan.y, plan.rotation) {
-                self.queue.add_build(plan, false);
-                committed += 1;
+                self.queue.add_build(plan.clone(), false);
+                committed.push(plan);
             }
         }
         self.state.line.clear();
@@ -804,6 +830,34 @@ impl MobileController {
         self.mode.line_mode = false;
         self.line_start = None;
         committed
+    }
+
+    /// `MobileInput.touchUp` line branch (`MobileInput.java:562-578`): commit a
+    /// placing line, or collect the tiles a breaking line deconstructs
+    /// (`removeSelection`), then leave line mode.
+    pub fn finish_line_touch(&mut self, world: &dyn PlacementWorld) -> MobileTouchResult {
+        let mut result = MobileTouchResult::default();
+        if !self.mode.line_mode {
+            return result;
+        }
+        if self.state.place_mode.is_placing() {
+            result.placed = self.confirm_line_plans(world);
+        } else if self.state.place_mode.is_breaking()
+            && let Some(start) = self.line_start
+        {
+            let end = self.last_line;
+            result.breaks = self
+                .state
+                .break_rect(world, start.x() as i32, start.y() as i32, end.0, end.1)
+                .iter()
+                .map(|packed| crate::world::pos::unpack(*packed))
+                .collect();
+            self.state.line.clear();
+            self.state.line_plans.clear();
+            self.mode.line_mode = false;
+            self.line_start = None;
+        }
+        result
     }
 
     /// Queues a placement plan on a tap (`selectPlans.add`).
@@ -1924,7 +1978,7 @@ mod tests {
     fn mobile_power_node_line_chains_nodes() {
         // `PowerNode.changePlacementPath` (`PowerNode.java:179-181`): the
         // NodeHooks spacing runs on the mobile drag before plan creation.
-        let mut world = ContentWorld::new(test_content(), 32, 4);
+        let world = ContentWorld::new(test_content(), 32, 4);
         let node = world.block_id("power-node");
         let mut controller = MobileController::new();
         mobile_drag(&mut controller, &world, node, (0, 0), (20, 0), true);
@@ -1942,7 +1996,7 @@ mod tests {
         // `ItemBridge.changePlacementPath` + `handlePlacementLine`
         // (`ItemBridge.java:195-208`): Chebyshev node spacing then Point2 link
         // configs, exactly as the desktop path.
-        let mut world = ContentWorld::new(test_content(), 16, 4);
+        let world = ContentWorld::new(test_content(), 16, 4);
         let bridge = world.block_id("bridge-conveyor");
         let mut controller = MobileController::new();
         mobile_drag(&mut controller, &world, bridge, (0, 0), (10, 0), true);
@@ -1996,6 +2050,89 @@ mod tests {
         assert_eq!(controller.line_start, Some(TilePos::new(3, 5)));
         controller.drag_to_with(&world, Some(&meta), Some(&rules), TilePos::new(7, 5));
         assert_eq!(controller.state.line_plans[2].block, junction);
+    }
+
+    #[test]
+    fn longpress_line_finishes_into_queued_plans() {
+        // `MobileInput.touchUp` (`MobileInput.java:562-570`): a placing line is
+        // flushed into the build queue on release; the committed plans are
+        // returned so the host can enqueue sim place commands.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let meta = world.line_block(conveyor);
+        let rules = world.rules(conveyor);
+        let mut controller = MobileController::new();
+        controller.state.select_block(Some(conveyor));
+        controller.state.begin_place();
+        controller.handle_gesture_with(
+            GestureEvent::LongPress {
+                x: 3.0 * TILESIZE as f32,
+                y: 5.0 * TILESIZE as f32,
+            },
+            &world,
+            Some(&meta),
+            Some(&rules),
+            &TestCaps::default(),
+        );
+        controller.drag_to_with(&world, Some(&meta), Some(&rules), TilePos::new(7, 5));
+        let finish = controller.finish_line_touch(&world);
+        assert_eq!(finish.placed.len(), 5);
+        assert!(finish.placed.iter().all(|plan| plan.block == conveyor));
+        assert!(finish.breaks.is_empty());
+        assert_eq!(controller.queue.len(), 5, "plans enter the build queue");
+        assert!(!controller.mode.line_mode);
+        assert_eq!(controller.state.place_mode, PlaceMode::None);
+        // A second finish without a line is a no-op.
+        assert_eq!(
+            controller.finish_line_touch(&world),
+            MobileTouchResult::default()
+        );
+    }
+
+    #[test]
+    fn breaking_line_finishes_into_deconstruct_tiles() {
+        // `MobileInput.touchUp` breaking branch (`MobileInput.java:565-568`)
+        // -> `removeSelection` over the dragged rect.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let wall = world.block_id("copper-wall");
+        world.set(2, 2, wall, 0);
+        world.set(3, 2, wall, 0);
+        world.set(2, 3, wall, 0);
+        let mut controller = MobileController::new();
+        controller.state.begin_break();
+        controller.begin_line(TilePos::new(2, 2));
+        controller.drag_to_with(&world, None, None, TilePos::new(3, 3));
+        let finish = controller.finish_line_touch(&world);
+        assert!(finish.placed.is_empty());
+        assert_eq!(finish.breaks.len(), 3);
+        assert!(finish.breaks.contains(&(2, 2)));
+        assert!(finish.breaks.contains(&(3, 2)));
+        assert!(finish.breaks.contains(&(2, 3)));
+        assert!(!controller.mode.line_mode);
+    }
+
+    #[test]
+    fn confirm_button_commits_placements_and_breaks() {
+        // `MobileInput.java:222-266`: the confirm button queues valid placements
+        // and deconstructs the breaking plans.
+        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let conveyor = world.block_id("conveyor");
+        let wall = world.block_id("copper-wall");
+        world.set(8, 8, wall, 0);
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(2, 2, 0, conveyor));
+        controller.add_select_plan(ClientPlan::break_plan(8, 8));
+        assert!(controller.mode.confirm_pending);
+        let result = controller.confirm_plans_result(&world);
+        assert_eq!(result.placed.len(), 1);
+        assert_eq!(result.placed[0].block, conveyor);
+        assert_eq!(result.breaks, vec![(8, 8)]);
+        assert!(!controller.mode.confirm_pending);
+        assert!(controller.state.select_plans.is_empty());
+        assert_eq!(controller.queue.len(), 1);
+        // The count wrapper keeps its old contract.
+        controller.add_select_plan(ClientPlan::place(3, 2, 0, conveyor));
+        assert_eq!(controller.confirm_plans(&world), 1);
     }
 
     #[test]

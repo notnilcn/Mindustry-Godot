@@ -2488,7 +2488,7 @@ mod tests {
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(6, 6, wall, 0, true));
         let wall_entity = harness.build_at(6, 6).expect("wall");
-        let mut ctx = harness.combat_ctx();
+        let ctx = harness.combat_ctx();
         status_area(
             ctx.world,
             Some(1),

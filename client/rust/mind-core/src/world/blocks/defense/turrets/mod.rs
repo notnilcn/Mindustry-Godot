@@ -2297,6 +2297,7 @@ fn build_plan_within(x: f32, y: f32, plan: &BuildPlan, range: f32) -> bool {
 /// `Build.validPlace(type, team, x, y, rot)` (`Build.java:171-174`): the
 /// 5-arg form defaults `checkVisible`/`checkCoreRadius` to true and still runs
 /// the unit-overlap check (`validPlaceIgnoreUnits` + `checkNoUnitOverlap`).
+#[allow(clippy::too_many_arguments)] // mirrors the Java `validPlace` argument bundle
 fn build_valid_place(
     world: &World,
     content: &ContentRegistry,

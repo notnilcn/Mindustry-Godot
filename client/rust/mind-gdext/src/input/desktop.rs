@@ -225,13 +225,22 @@ pub enum Effect {
 /// `valid_place` is the real `Build.validPlace` for the player team; build
 /// rotation and the `ChainedBuilding` walk read the live buildings. The host
 /// is borrowed immutably (`HostWorld` never mutates the sim).
-struct HostWorld<'a> {
+pub(crate) struct HostWorld<'a> {
     grid: &'a mind_core::world::WorldGrid,
     content: Option<&'a ContentRegistry>,
     host: &'a MindSimHost,
 }
 
-impl HostWorld<'_> {
+impl<'a> HostWorld<'a> {
+    /// Builds the world view over a bound sim host.
+    pub(crate) fn new(host: &'a MindSimHost) -> Self {
+        Self {
+            grid: host.grid(),
+            content: host.content_registry(),
+            host,
+        }
+    }
+
     /// Block kind at a tile (`None` out of bounds/unloaded).
     fn kind_at(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
         let content = self.content?;
@@ -305,6 +314,23 @@ impl PlacementWorld for HostWorld<'_> {
         self.content?.block(block).map(|def| def.kind)
     }
 
+    fn block_size(&self, block: BlockId) -> i32 {
+        // `BuildPlan.hitbox` / `Block.size` (`MobileInput.getPlan`,
+        // `checkOverlapPlacement`, `InputHandler.normalizeRectangle`).
+        self.content
+            .and_then(|content| content.block(block))
+            .map(|def| def.size)
+            .unwrap_or(1)
+    }
+
+    fn block_offset(&self, block: BlockId) -> f32 {
+        // `Block.offset` (`BuildPlan.drawx/drawy`, `4` for even footprints).
+        self.content
+            .and_then(|content| content.block(block))
+            .map(|def| def.offset)
+            .unwrap_or(0.0)
+    }
+
     fn chained_next(&self, x: i32, y: i32) -> Option<(i32, i32)> {
         // `ConveyorBuild.next()` = `nextc` (the front tile's conveyor of the
         // same team, `Conveyor.java:222/486-488`); `ConduitBuild.next()` is the
@@ -345,22 +371,37 @@ fn plan_drag_tile(origin: (i32, i32), grab_world: (f32, f32), world: (f32, f32))
     (origin.0 + dx, origin.1 + dy)
 }
 
-/// `Block.getPlanConfigs` default (`Block.java:1664-1673`):
-/// `configurations.containsKey(Item.class)` -> item options,
-/// `configurations.containsKey(Liquid.class)` -> liquid options. The declared
-/// kinds come from the runtime block table; an undeclared block falls back to
-/// the item/liquid-container flags (`Block.hasItems`/`hasLiquids`, the same
-/// fallback `config_spec` uses).
-fn plan_config_kinds(
-    declared: &[mind_core::world::ConfigKind],
-    has_items: bool,
-    has_liquids: bool,
-) -> (bool, bool) {
-    let items = declared.contains(&mind_core::world::ConfigKind::Item)
-        || (declared.is_empty() && has_items);
-    let liquids = declared.contains(&mind_core::world::ConfigKind::Liquid)
-        || (declared.is_empty() && has_liquids);
-    (items, liquids)
+/// `PlanConfigFragment` spec JSON from the block's plan-config options.
+///
+/// `{title, options: [{name, label}], value}`; the label is the bundle key of
+/// the content (`item.<name>.name`, `PlanConfigOption::label`). `None` when the
+/// block offers no options (`if(options.isEmpty()) return;`,
+/// `PlanConfigFragment.java:58`).
+fn plan_config_spec_json(
+    title: &str,
+    options: &[mind_core::world::block::PlanConfigOption],
+    value: Option<&str>,
+) -> Option<String> {
+    if options.is_empty() {
+        return None;
+    }
+    let options: Vec<serde_json::Value> = options
+        .iter()
+        .map(|option| {
+            serde_json::json!({
+                "name": option.name,
+                "label": option.label(),
+            })
+        })
+        .collect();
+    let mut spec = serde_json::json!({
+        "title": title,
+        "options": options,
+    });
+    if let Some(value) = value {
+        spec["value"] = serde_json::Value::from(value);
+    }
+    Some(spec.to_string())
 }
 
 /// How close a cursor must be to the carrying player unit to start a drop
@@ -2708,13 +2749,11 @@ impl DesktopBridge {
             .queue_player_place_config(x, y, plan.block, plan.rotation, config);
     }
 
-    /// `PlanConfigFragment.showConfig`'s option source. The default
-    /// `Block.getPlanConfigs` (`Block.java:1664-1673`) is the declared
-    /// item/liquid config kinds; `UnitFactory.getPlanConfigs`
-    /// (`UnitFactory.java:203-209`) lists its unit plans (banned units
-    /// dropped). The block-list overrides (`Constructor.java:50`,
-    /// `PayloadSource.java:71`, `PayloadRouter.java:49`) need the missing
-    /// `Block.getPlanConfigs` hook in `mc/world/block.rs` (reported).
+    /// `PlanConfigFragment.showConfig`'s option source:
+    /// `Block.getPlanConfigs(options)` — the base declared item/liquid classes
+    /// (`Block.java:1664-1673`) and the `UnitFactory`/`Constructor`/
+    /// `PayloadSource`/`PayloadRouter` overrides, resolved on the runtime
+    /// [`mind_core::world::block::BlockInstance`] with the live rules filters.
     fn plan_config_spec(&self, plan: &ClientPlan) -> Option<String> {
         let host = self.host.clone()?;
         let guard = host.bind();
@@ -2725,65 +2764,12 @@ impl DesktopBridge {
             return None;
         }
         let rules = guard.live_rules();
-        let banned = |name: &str| {
-            rules
-                .as_ref()
-                .is_some_and(|rules| rules.is_banned_unit(name))
-        };
-        let mut options: Vec<serde_json::Value> = Vec::new();
-        if def.kind == BlockKind::UnitFactory {
-            let push_unit = |options: &mut Vec<serde_json::Value>, name: &str| {
-                if banned(name) {
-                    return;
-                }
-                options.push(serde_json::json!({
-                    "name": name,
-                    "label": format!("unit.{name}.name"),
-                }));
-            };
-            if def.unit_plans.is_empty() {
-                for entry in content.entries(ContentType::Unit) {
-                    if let Some(name) = entry.name {
-                        push_unit(&mut options, name);
-                    }
-                }
-            } else {
-                for unit_plan in &def.unit_plans {
-                    if let Some(unit) = content.unit(unit_plan.unit) {
-                        let name = unit.name.clone();
-                        push_unit(&mut options, &name);
-                    }
-                }
-            }
-        } else {
-            // `configurations.containsKey(Item.class)` / `(Liquid.class)`.
-            let declared = guard.block_config_kinds(plan.block);
-            let (items, liquids) = plan_config_kinds(declared, def.has_items, def.has_liquids);
-            if items {
-                for entry in content.entries(ContentType::Item) {
-                    if let Some(name) = entry.name {
-                        options.push(serde_json::json!({
-                            "name": name,
-                            "label": format!("item.{name}.name"),
-                        }));
-                    }
-                }
-            }
-            if liquids {
-                for entry in content.entries(ContentType::Liquid) {
-                    if let Some(name) = entry.name {
-                        options.push(serde_json::json!({
-                            "name": name,
-                            "label": format!("liquid.{name}.name"),
-                        }));
-                    }
-                }
-            }
-        }
-        // `if(options.isEmpty()) return;`
-        if options.is_empty() {
-            return None;
-        }
+        // The overrides read the runtime instance (the `Constructor` size range
+        // lives on the behavior, `UnitFactory.plans` on the block); the table is
+        // only built when the popup actually opens (Ctrl-release of a plan).
+        let table = mind_core::world::block::BlockTable::build_default(content).ok()?;
+        let instance = table.instance(plan.block)?;
+        let options = instance.plan_configs(content, rules.as_ref());
         // `ItemSelection` checked entry (`selected.config`).
         let current = match &plan.config {
             mind_core::world::config::ConfigValue::Item(id) => {
@@ -2800,14 +2786,11 @@ impl DesktopBridge {
             }
             _ => None,
         };
-        let mut spec = serde_json::json!({
-            "title": format!("block.{}.name", def.name),
-            "options": options,
-        });
-        if let Some(current) = current {
-            spec["value"] = serde_json::Value::from(current);
-        }
-        Some(spec.to_string())
+        plan_config_spec_json(
+            &format!("block.{}.name", def.name),
+            &options,
+            current.as_deref(),
+        )
     }
 
     /// `PlanConfigFragment`'s `selected.config = content` then
@@ -4562,29 +4545,32 @@ mod tests {
     }
 
     #[test]
-    fn plan_config_options_follow_the_declared_config_kinds() {
-        // `Block.getPlanConfigs` default (`Block.java:1664-1673`).
-        use mind_core::world::ConfigKind;
-        assert_eq!(
-            plan_config_kinds(&[ConfigKind::Item], false, false),
-            (true, false)
-        );
-        assert_eq!(
-            plan_config_kinds(&[ConfigKind::Liquid], false, false),
-            (false, true)
-        );
-        assert_eq!(
-            plan_config_kinds(&[ConfigKind::Item, ConfigKind::Liquid], false, false),
-            (true, true)
-        );
-        // Undeclared container fallback (`config_spec`'s rule).
-        assert_eq!(plan_config_kinds(&[], true, false), (true, false));
-        assert_eq!(plan_config_kinds(&[], false, true), (false, true));
-        assert_eq!(plan_config_kinds(&[], false, false), (false, false));
-        // A non-item/non-liquid config kind lists nothing.
-        assert_eq!(
-            plan_config_kinds(&[ConfigKind::Number], true, true),
-            (false, false)
+    fn plan_config_spec_json_uses_the_content_option_labels() {
+        // PAR-0555: the spec is built from `Block.getPlanConfigs` options (the
+        // label is the bundle key of the option's content type).
+        use mind_core::content::ContentType;
+        use mind_core::world::block::PlanConfigOption;
+        let options = vec![
+            PlanConfigOption::new(ContentType::Item, 0, "copper"),
+            PlanConfigOption::new(ContentType::Liquid, 0, "water"),
+        ];
+        let spec =
+            plan_config_spec_json("block.sorter.name", &options, Some("copper")).expect("spec");
+        let parsed: serde_json::Value = serde_json::from_str(&spec).expect("json");
+        assert_eq!(parsed["title"], "block.sorter.name");
+        assert_eq!(parsed["value"], "copper");
+        assert_eq!(parsed["options"][0]["name"], "copper");
+        assert_eq!(parsed["options"][0]["label"], "item.copper.name");
+        assert_eq!(parsed["options"][1]["label"], "liquid.water.name");
+        // `if(options.isEmpty()) return;` — no popup without options.
+        assert!(plan_config_spec_json("block.conveyor.name", &[], None).is_none());
+        // No checked value leaves the key out.
+        let spec = plan_config_spec_json("t", &options, None).expect("spec");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&spec)
+                .expect("json")
+                .get("value")
+                .is_none()
         );
     }
 

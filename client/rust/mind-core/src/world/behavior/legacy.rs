@@ -137,7 +137,7 @@ pub fn remove_legacy_blocks(grid: &mut WorldGrid, content: &ContentRegistry) -> 
     let mut changed = 0;
     for y in 0..height {
         for x in 0..width {
-            let (tx, ty) = (x as i32, y as i32);
+            let (tx, ty) = (x, y);
             let block = grid.tiles.get(tx, ty).block;
             if block == BlockId::AIR {
                 continue;
@@ -196,7 +196,7 @@ pub fn remove_legacy_blocks_live(
     let mut stale: Vec<Entity> = Vec::new();
     for y in 0..grid.tiles.height {
         for x in 0..grid.tiles.width {
-            let tile = grid.tiles.get(x as i32, y as i32);
+            let tile = grid.tiles.get(x, y);
             if tile.block == BlockId::AIR {
                 continue;
             }

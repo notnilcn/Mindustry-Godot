@@ -122,11 +122,13 @@ mod tests {
             crate::entities::comp::unit::water_move::water_crawl_floor_speed_multiplier(false, 1.0),
             1.3
         );
-        assert!(
-            !crate::entities::comp::unit::water_move::UNDERWATER_HITTABLE
-                && !crate::entities::comp::unit::water_move::UNDERWATER_TARGETABLE
-                && crate::entities::comp::unit::water_move::UNDERWATER_COLLISION_LAYER == 3
-        );
+        const {
+            assert!(
+                !crate::entities::comp::unit::water_move::UNDERWATER_HITTABLE
+                    && !crate::entities::comp::unit::water_move::UNDERWATER_TARGETABLE
+                    && crate::entities::comp::unit::water_move::UNDERWATER_COLLISION_LAYER == 3
+            );
+        }
     }
 
     /// GAPS #61: `LaunchCoreComp` carries the launched block plus the Java

@@ -36,7 +36,6 @@
 //! capability as [`CustomLight`] (an arbitrary quad) and [`RegionLight`]
 //! (a textured, tinted, rotated rect) stamped into the map.
 
-
 //! S16-5 residual (PAR-0467 landed the data half): per-block
 //! `lightRadius`/`lightColor` now come from `BlockDef` (Java
 //! `Block.java:344,350` + the class/`Blocks.java` overrides), so the render

@@ -810,8 +810,10 @@ mod tests {
         let mut rng = ArcRand::new(1);
         let mut plans = VecDeque::new();
         let cores = [TilePos::new(16, 16)];
-        let mut rule = TeamRule::default();
-        rule.ai_core_spawn = true;
+        let rule = TeamRule {
+            ai_core_spawn: true,
+            ..Default::default()
+        };
         let mut inputs = BaseBuildInput {
             content: &harness.content,
             grid: &harness.grid,

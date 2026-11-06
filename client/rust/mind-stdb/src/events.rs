@@ -19,10 +19,18 @@
 //!   on [`ServerEvent::kind`];
 //! - votekick, name-ban, `/sync` and client-command rows have no upstream
 //!   `EventType` class; their module kind name is used verbatim.
+//!
+//! Typed payloads ([`crate::event_type::EventType`]): a row whose `detail` is a
+//! `{"type":"<Class>", ...}` envelope carries one of the 89 upstream classes
+//! and decodes through [`ServerEvent::typed`]. Rows with plain text (every row
+//! the module emits today) keep the kind mapping. The two paths meet in
+//! [`ServerEvent::class_name`], which is the single subscribe-side name the UI
+//! and the twin ledger consume.
 
 use std::collections::BTreeMap;
 
 use crate::binder::RowChange;
+use crate::event_type::EventType;
 use crate::module_bindings::{EventKind, MatchEvent};
 
 /// Maximum number of events retained client-side (the server prunes the table
@@ -46,6 +54,18 @@ pub const ALL_EVENT_KINDS: [EventKind; 18] = [
     EventKind::VoteFailed,
     EventKind::ConfigChange,
     EventKind::AdminAction,
+    EventKind::NameBan,
+    EventKind::NameUnban,
+    EventKind::SyncRequest,
+    EventKind::ClientCommand,
+];
+
+/// Kinds whose mapped name is the module's own: no upstream `EventType` class
+/// exists for them, so [`event_type_name`] returns the kind name verbatim.
+pub const MODULE_ONLY_EVENT_KINDS: [EventKind; 7] = [
+    EventKind::VoteStarted,
+    EventKind::VotePassed,
+    EventKind::VoteFailed,
     EventKind::NameBan,
     EventKind::NameUnban,
     EventKind::SyncRequest,
@@ -126,13 +146,39 @@ impl ServerEvent {
         event_type_name(self.kind)
     }
 
+    /// Typed `EventType` payload, when `detail` is a JSON envelope.
+    ///
+    /// Plain-text details are normal (module-only kinds and rows published
+    /// before the typed envelope existed), so this never errors: an
+    /// unparseable detail simply has no payload.
+    pub fn typed(&self) -> Option<EventType> {
+        EventType::decode(&self.detail).ok()
+    }
+
+    /// The upstream class this row names: the typed payload's class when one
+    /// is present, else the [`event_type_name`] kind mapping.
+    pub fn class_name(&self) -> &'static str {
+        match self.typed() {
+            Some(event) => event.class_name(),
+            None => event_type_name(self.kind),
+        }
+    }
+
+    /// Whether the row carries a typed `EventType` payload.
+    pub fn has_payload(&self) -> bool {
+        self.typed().is_some()
+    }
+
     /// Stable JSON line for the event bus consumer.
     pub fn to_json(&self) -> serde_json::Value {
+        let typed = self.typed();
         serde_json::json!({
             "id": self.event_id,
             "matchId": self.match_id,
             "kind": format!("{:?}", self.kind),
             "type": self.event_type(),
+            "class": typed.as_ref().map_or_else(|| self.event_type(), EventType::class_name),
+            "payload": typed.as_ref().map(EventType::encode).transpose().ok().flatten(),
             "actor": self.actor,
             "target": self.target,
             "detail": self.detail,
@@ -211,6 +257,20 @@ impl EventBus {
             .collect()
     }
 
+    /// Retained events with `event_id > after_id`, each paired with its typed
+    /// payload when the row carries one (the subscribe-side typed replay).
+    pub fn typed_after(&self, after_id: u64) -> Vec<(&ServerEvent, Option<EventType>)> {
+        self.after(after_id)
+            .into_iter()
+            .map(|event| (event, event.typed()))
+            .collect()
+    }
+
+    /// One event's typed payload by id.
+    pub fn typed_event(&self, event_id: u64) -> Option<EventType> {
+        self.events.get(&event_id).and_then(ServerEvent::typed)
+    }
+
     /// Greatest retained `event_id`, if any (consumer watermark).
     pub fn last_event_id(&self) -> Option<u64> {
         self.events.keys().next_back().copied()
@@ -253,6 +313,8 @@ impl EventBus {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
     use spacetimedb_sdk::{Identity, Timestamp};
 
@@ -369,5 +431,92 @@ mod tests {
         );
         assert_eq!(bus.limit(), 2);
         assert!(EventBus::with_limit(0).limit() >= 1);
+    }
+
+    /// The ABI kind mapping and the declared [`EventType`] taxonomy agree:
+    /// every mapped name is a real upstream class, and the module-only kinds
+    /// are the only ones without one.
+    #[test]
+    fn every_kind_maps_to_a_declared_event_class() {
+        assert_eq!(ALL_EVENT_KINDS.len(), 18);
+        assert_eq!(MODULE_ONLY_EVENT_KINDS.len(), 7);
+        for kind in ALL_EVENT_KINDS {
+            let name = event_type_name(kind);
+            if MODULE_ONLY_EVENT_KINDS.contains(&kind) {
+                assert!(
+                    !EventType::is_known_class(name),
+                    "{kind:?} unexpectedly maps to upstream class {name}"
+                );
+            } else {
+                assert!(
+                    EventType::is_known_class(name),
+                    "{kind:?} maps to {name}, which is not an upstream EventType class"
+                );
+            }
+        }
+        assert!(!crate::event_type::ALL_EVENT_TYPE_NAMES.is_empty());
+        // A representative upstream class per mapped kind group.
+        assert!(EventType::is_known_class(event_type_name(
+            EventKind::MatchCreate
+        )));
+        assert!(EventType::is_known_class(event_type_name(
+            EventKind::PlayerChat
+        )));
+        assert!(EventType::is_known_class(event_type_name(
+            EventKind::ConfigChange
+        )));
+        assert!(EventType::is_known_class(event_type_name(
+            EventKind::AdminAction
+        )));
+    }
+
+    /// A row whose `detail` is a typed envelope decodes into that class and
+    /// keeps its payload through the bus; a plain detail falls back to the
+    /// kind mapping.
+    #[test]
+    fn typed_payloads_flow_through_the_bus() {
+        let typed = EventType::UnitCreate {
+            unit: Some(7),
+            spawner: Some(16),
+            spawner_unit: None,
+        };
+        let mut typed_row = row(5, EventKind::PlayerJoin);
+        typed_row.detail = typed.encode().unwrap();
+        let mut legacy_row = row(6, EventKind::PlayerJoin);
+        legacy_row.detail = "player joined".to_string();
+
+        let mut bus = EventBus::new();
+        bus.apply(RowChange::Insert(typed_row.clone()));
+        bus.apply(RowChange::Insert(legacy_row.clone()));
+        assert_eq!(bus.typed_event(5), Some(typed.clone()));
+        assert_eq!(bus.typed_event(6), None);
+        assert_eq!(
+            bus.event(5).map(ServerEvent::class_name),
+            Some("UnitCreateEvent")
+        );
+        assert_eq!(
+            bus.event(6).map(ServerEvent::class_name),
+            Some("PlayerJoin")
+        );
+        assert!(bus.event(5).is_some_and(ServerEvent::has_payload));
+        assert!(bus.event(6).is_some_and(|event| !event.has_payload()));
+
+        let typed_after = bus.typed_after(4);
+        assert_eq!(typed_after.len(), 2);
+        assert_eq!(typed_after[0].1, Some(typed.clone()));
+        assert_eq!(typed_after[1].1, None);
+
+        let json = ServerEvent::from_row(&typed_row).to_json();
+        assert_eq!(json["class"], "UnitCreateEvent");
+        assert_eq!(json["type"], "PlayerJoin");
+        assert_eq!(
+            json["payload"],
+            typed.encode().unwrap(),
+            "payload is the same JSON envelope"
+        );
+        let legacy_json = ServerEvent::from_row(&legacy_row).to_json();
+        assert_eq!(legacy_json["class"], "PlayerJoin");
+        assert_eq!(legacy_json["type"], "PlayerJoin");
+        assert_eq!(legacy_json["payload"], serde_json::Value::Null);
     }
 }

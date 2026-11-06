@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T22:20:38Z",
+  "updated": "2026-11-06T22:52:46Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -16440,8 +16440,8 @@
           "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
         }
       ],
-      "claimed_by": "p1-orch",
-      "claimed_at": "2026-11-03T14:26:17Z"
+      "claimed_by": "hx-abilitydraw",
+      "claimed_at": "2026-11-06T22:36:55Z"
     },
     "PAR-0367": {
       "title": "Weapon `layerOffset` not applied when drawing weapons",
@@ -28851,7 +28851,7 @@
     },
     "PAR-0541": {
       "title": "Pre-existing gdext test panics: batch_f::audio_stream_name_uses_the_dp_prefix calls Godot FFI in a cargo unit test",
-      "status": "mismatch",
+      "status": "fixing",
       "fork": {
         "java": [
           {
@@ -28872,8 +28872,8 @@
           }
         ]
       },
-      "claimed_by": "hx-audio",
-      "claimed_at": "2026-11-06T14:47:49Z",
+      "claimed_by": "hx-abilitydraw",
+      "claimed_at": "2026-11-06T22:36:55Z",
       "severity": "P2",
       "gap": "cargo test -p mind-gdext --lib audio fails at HEAD f11557ea in ui::dialogs::batch_f::tests::audio_stream_name_uses_the_dp_prefix: VarDictionary::new() panics \"Godot engine not available; make sure you are not calling it from unit/doc tests\" (godot-ffi-0.5.5/src/lib.rs:625). The test is in gx/ui (not owned by hx-audio); it makes the packet-mandated audio test filter red even though all 13 audio tests pass. Fix: drop the VarDictionary construction from that test or gate it behind an engine-only harness.",
       "source": "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4603",
@@ -29048,6 +29048,11 @@
           "at": "2026-11-06T15:16:15Z",
           "by": "hx-stdb",
           "text": "Module half landed (server/spacetimedb, no client edits): ChatKind now has an append-only Admin variant; send_chat dispatches /t /a /votekick /vote /help /sync before filters; Admin channel requires an admin, private notices arrive as ChatKind::System rows with MatchChat.target set; vote session tables/reducers + 30 s expiry/5 min cooldown/1 h kick; /help text and vote links exercised by runs/PAR-0121/stdb-integration.sh (87 pass). Remaining for PAR-0545: client transport must send plain text through send_chat (already does) and bind my_match_chat incl. Admin + target rows; regenerate bindings (bash server/build.sh) for the new schema."
+        },
+        {
+          "at": "2026-11-06T22:52:35Z",
+          "by": "hx-server2",
+          "text": "GAPS #33 server command half landed in mind-headless/src/server (PAR-0585): chat command parser/dispatch (help/t/a/votekick/vote/sync) with Java replies, fixName/checkColor, kick_all on stop/exit, and config -> module server_config push for enable_votekick/interactRate*/antiSpam/whitelist/autoPause. Remaining PAR-0545 sub-items (PvP assignTeam call site in server/spacetimedb relay, clientSnapshot movement validation) are untouched; module-side Admin ChatKind + send_chat dispatch were already present."
         }
       ]
     },
@@ -29430,8 +29435,8 @@
           }
         ]
       },
-      "claimed_by": "hx-input",
-      "claimed_at": "2026-11-06T15:49:01Z",
+      "claimed_by": "hx-input2",
+      "claimed_at": "2026-11-06T22:26:18Z",
       "severity": "P2",
       "source": "GAPS.md#46",
       "gap": "The ping binding exists at HEAD (client/rust/mind-core/src/input/binding.rs:400, id 18) but nothing consumes it: no DesktopInput/MinimapFragment key or tap produces RemoteAction::Ping (input/action.rs:171 only names it), and no renderer draws the ping marker (Java DesktopInput.java:491, MinimapFragment.java:102-137, PlayerComp.drawPing).",
@@ -29445,15 +29450,25 @@
           "at": "2026-11-06T21:02:15Z",
           "by": "hx-input",
           "text": "Headless fix: binding->RemoteAction::Ping->HUD marker wired and unit-tested (ping_marker curve, ping_at truncation). Remaining routed work: fullscreen-minimap ping marker needs gx/ui/kit/widgets/minimap.rs or a gx/render hook (PlayerComp/MininapRenderer.java:173); live relay of the Ping action for multiplayer needs gx/net (command_emit already classifies Ping as a local 21 event, no SimCommand)."
+        },
+        {
+          "at": "2026-11-06T22:26:15Z",
+          "by": "hx-input2",
+          "text": "Remainder landed headlessly (PAR-0554): MindMinimapWidget draws the fullscreen-minimap ping marker (MinimapRenderer.java:173-193) - dark/team diamond with the pointer triangle and name/ping-text labels - reading the HUD MindPingOverlay ping_state() (shared pingX/pingY/pingTime/pingText), mapped world px -> minimap texel -> widget px (unit-tested). The HUD world overlay is unchanged. Still routed (outside ownership): multiplayer Ping relay needs gx/net."
         }
       ],
-      "fix": "P (Binding.ping, id 18) now emits RemoteAction::Ping at input.mouseWorldX/Y from input/desktop.rs dispatch_action plus a HUD world marker (MindPingOverlay in ui/fragments/hud.rs): 20 s PlayerComp.pingDuration, Java pow5Out fade / pow5In pop curve, team colour, player name + @ping.text label. Ctrl opens the @ping.text prompt (MindUi.show_text_input -> text_input_result) and truncates to Vars.maxPingTextLength=40; settings showpings gates the marker.",
+      "fix": "P (Binding.ping, id 18) now emits RemoteAction::Ping at input.mouseWorldX/Y from input/desktop.rs dispatch_action plus a HUD world marker (MindPingOverlay in ui/fragments/hud.rs): 20 s PlayerComp.pingDuration, Java pow5Out fade / pow5In pop curve, team colour, player name + @ping.text label. Ctrl opens the @ping.text prompt (MindUi.show_text_input -> text_input_result) and truncates to Vars.maxPingTextLength=40; settings showpings gates the marker. Remainder (hx-input2): the fullscreen-minimap copy of PlayerComp.drawPing (MinimapRenderer.java:173-193) is drawn by MindMinimapWidget (gx/ui/kit/widgets/minimap.rs) from the HUD MindPingOverlay's live ping state (dark + team diamond, pointer triangle, name/ping-text labels); the HUD world overlay is kept.",
       "evidence": [
         "cargo check -p mind-gdext exit 0",
         "cargo test -p mind-gdext --lib input::desktop::tests: 23 passed",
         "cargo test -p mind-gdext --lib ui::fragments::hud::tests: 5 passed",
         "godot --headless dialog_sweep_check: failed=0",
-        "godot --headless boot exit 0 (no errors)"
+        "godot --headless boot exit 0 (no errors)",
+        "cargo test -p mind-gdext --lib minimap: 6 passed (world->minimap ping mapping + marker geometry)",
+        "cargo test -p mind-gdext --lib input::desktop: 23 passed",
+        "godot --headless boot exit 0",
+        "godot --headless dialog_sweep_check failed=0",
+        "cargo fmt clean"
       ]
     },
     "PAR-0555": {
@@ -29495,8 +29510,8 @@
           }
         ]
       },
-      "claimed_by": "hx-input",
-      "claimed_at": "2026-11-06T15:49:01Z",
+      "claimed_by": "hx-input2",
+      "claimed_at": "2026-11-06T22:26:18Z",
       "severity": "P2",
       "source": "GAPS.md#46",
       "gap": "MindPlanConfigFragment.configure/plan_config_applied are only connected by the HUD scene; Java opens it from DesktopInput.java:800-812 on the ctrl-release of a moved BuildPlan (planConfig.showConfig(splan)), and the port's input/desktop.rs has no splan/plan-move state or config-options source (Block.getPlanConfigs).",
@@ -29510,14 +29525,23 @@
           "at": "2026-11-06T21:02:20Z",
           "by": "hx-input",
           "text": "Headless fix: splan drag + ctrl-release -> HUD plan_config -> applied re-queue, with default Item/Liquid/UnitFactory option source. Remaining routed work: (1) mc/world/block.rs needs Block.getPlanConfigs overrides - Constructor.canProduce (visible, minBlockSize<=size<=maxBlockSize, !CoreBlock, !rules.isBanned, environmentBuildable, filter), PayloadSource/PayloadRouter canProduce/canSort (blocks + units), and their call sites in input/desktop.rs plan_config_spec; (2) popup anchors at HudGroup origin instead of the plan's screen point (Java table.setPosition at plan.drawx/drawy); (3) no per-frame hide when the plan completes/is removed (PlanConfigFragment table.update)."
+        },
+        {
+          "at": "2026-11-06T22:26:15Z",
+          "by": "hx-input2",
+          "text": "Remainder landed headlessly (PAR-0555): BlockInstance::plan_configs(content, rules) now covers Block.java:1664-1673 plus UnitFactory.java:203-209, Constructor.java:50 canProduce (size 1..2 / 3..4 from the behavior, core/hidden/banned/env filters), PayloadSource.java:71 canProduce and PayloadRouter.java:49 canSort (blocks + units); gx/input/desktop.rs plan_config_spec calls it instead of the inline item/liquid source. Still routed (outside ownership): PlanConfigFragment popup anchor at the plan screen point and per-frame hide (gx/ui/fragments/**)."
         }
       ],
-      "fix": "PlanConfigFragment now has a caller: input/desktop.rs tracks DesktopInput.splan (queued, unstarted player plan grab on select tap, pointer-following drag, wheel rotation) and on select release with Ctrl held pushes Effect::OpenPlanConfig after inv/config hide (DesktopInput.java:800-812); non-Ctrl releases hide the popup. ui/fragments/hud.rs open_plan_config localizes and configures the existing HudGroup/plan_config node (typed MindPlanConfigFragment::configure, no #[func] needed), and MindInput connects its plan_config_applied signal to re-queue the plan with the chosen content (selected.config = content) and record Block.lastConfig. Option source: default Block.getPlanConfigs item/liquid declared kinds + UnitFactory.unit_plans (banned units filtered).",
+      "fix": "PlanConfigFragment now has a caller: input/desktop.rs tracks DesktopInput.splan (queued, unstarted player plan grab on select tap, pointer-following drag, wheel rotation) and on select release with Ctrl held pushes Effect::OpenPlanConfig after inv/config hide (DesktopInput.java:800-812); non-Ctrl releases hide the popup. ui/fragments/hud.rs open_plan_config localizes and configures the existing HudGroup/plan_config node (typed MindPlanConfigFragment::configure, no #[func] needed), and MindInput connects its plan_config_applied signal to re-queue the plan with the chosen content (selected.config = content) and record Block.lastConfig. Option source: default Block.getPlanConfigs item/liquid declared kinds + UnitFactory.unit_plans (banned units filtered). Remainder (hx-input2): mc/world/block.rs BlockInstance::plan_configs(content, rules) implements the full Java option source - declared Item/Liquid classes (configuration keys), UnitFactory.plans, Constructor.canProduce (behavior min/max size + core/hidden/banned/env filters), PayloadSource.canProduce and PayloadRouter.canSort (blocks + units) - and gx/input/desktop.rs plan_config_spec resolves it through the runtime BlockTable and serialises PlanConfigOption labels.",
       "evidence": [
         "cargo check -p mind-gdext exit 0",
         "cargo test -p mind-gdext --lib plan_: 3 passed (kind rule, Java Math.round drag tile, apply guard)",
         "godot --headless boot exit 0",
-        "godot --headless dialog_sweep_check failed=0"
+        "godot --headless dialog_sweep_check failed=0",
+        "cargo test -p mind-core --lib plan_config: 2 passed (Block.getPlanConfigs overrides + live-rules bans)",
+        "cargo test -p mind-core --lib input: 161 passed",
+        "cargo test -p mind-gdext --lib input::desktop: 23 passed",
+        "cargo fmt clean"
       ]
     },
     "PAR-0556": {
@@ -30082,22 +30106,34 @@
           }
         ]
       },
-      "claimed_by": "hx-mobile",
-      "claimed_at": "2026-11-06T21:01:24Z",
+      "claimed_by": "hx-input2",
+      "claimed_at": "2026-11-06T22:26:18Z",
       "severity": "P1",
       "gap": "mc/input/mobile.rs drag_to passed NoLineHooks and no LineRules, so mobile drags had no junction replacement, bridge auto-link or node spacing; get_plan matched the exact tile instead of the block footprint (GAPS.md#48).",
       "source": "GAPS.md#48",
-      "fix": "mobile.rs: drag_to_with/handle_gesture_with run LineRules+NodeHooks through InputState::update_line_with (junction getReplacement, bridge DP/auto-link, node chaining) gated by blockreplace; block/swap_diagonal/diagonal settings mirror IH:1952/2433; footprint-aware get_plan/check_overlap_placement via PlacementWorld::block_size/block_offset; MobileInput.schemOrigin schem_origin_with + accurate rotate/flip of select plans; rotate_button + toggle_swap_diagonal.",
+      "fix": "mobile.rs: drag_to_with/handle_gesture_with run LineRules+NodeHooks through InputState::update_line_with (junction getReplacement, bridge DP/auto-link, node chaining) gated by blockreplace; block/swap_diagonal/diagonal settings mirror IH:1952/2433; footprint-aware get_plan/check_overlap_placement via PlacementWorld::block_size/block_offset; MobileInput.schemOrigin schem_origin_with + accurate rotate/flip of select plans; rotate_button + toggle_swap_diagonal. Remainder (hx-input2): gdext HostWorld overrides PlacementWorld::block_size/block_offset from content; the touch bridge folds every gesture through MobileController::handle_gesture_with with line_rules_for(content, block)+LineBlock, updates the active line per frame/drag, flushes it on touch-up (finish_line_touch -> sim Place/Break commands) with a new mobile_confirm button, and rotate/flip/rotate-plans buttons call rotate_button/rotate_selection/flip_selection with content PlanBlockInfo; InputState::update_line_with no longer clobbers a Breaking mode.",
       "evidence": [
         "cargo test -p mind-core --lib input (158 passed, includes 12 new mobile tests)",
         "cargo check -p mind-gdext (ok)",
-        "cargo fmt (ok)"
+        "cargo fmt (ok)",
+        "cargo test -p mind-core --lib input: 161 passed (finish_line_touch place/break, confirm_plans_result, Breaking mode preserved)",
+        "cargo test -p mind-gdext --lib mobile: 2 passed (gesture screen->world, mobile caps)",
+        "cargo check -p mind-gdext exit 0",
+        "tools/run-cpu-intensive-task.sh --build exit 0",
+        "godot --headless boot exit 0",
+        "godot --headless dialog_sweep_check failed=0",
+        "cargo fmt clean"
       ],
       "notes": [
         {
           "at": "2026-11-06T21:01:25Z",
           "by": "hx-mobile",
           "text": "Verified headlessly: mobile junction replacement, conveyor bridge-over-wall DP + Point2 auto-link, power-node chaining, bridge Chebyshev spacing+links, even/odd footprint get_plan, breaking-plan world footprint, overlap with unit-plan mirror, rotate button gating, swapdiagonal line direction, offset-aware rotate/flip selection. Needed host hooks outside ownership: gdext HostWorld must override PlacementWorld::block_size/block_offset from content (default 1/0 until then), and mobile gdext should pass line_rules_for(...) into handle_gesture_with/drag_to_with (gestures are not yet folded into the controller)."
+        },
+        {
+          "at": "2026-11-06T22:26:15Z",
+          "by": "hx-input2",
+          "text": "Remainder landed headlessly (PAR-0568): gx/input/desktop.rs HostWorld now overrides block_size/block_offset from the content registry; gx/input/{mod,mobile}.rs fold Godot touch gestures through MobileController::handle_gesture_with with line_rules_for(content, block)+LineBlock, re-derive the line per frame and drag, flush on touch-up (placing -> queued Plan commands, breaking -> Break commands), add mobile_confirm (confirm_plans_result) and wire the rotate/flip/rotate-plans buttons to rotate_button/rotate_selection/flip_selection. Core seam fix: InputState::update_line_with keeps PlaceMode::Breaking (Java updateLine never changes the mode)."
         }
       ]
     },
@@ -30140,6 +30176,11 @@
           "at": "2026-11-06T21:02:19Z",
           "by": "hx-render2",
           "text": "Verified headlessly: 12 light tests (capsule/region/quad rasterizers, Java beam geometry, buffer pooling) + 64 render tests green; cargo check clean; headless boot exit 0."
+        },
+        {
+          "at": "2026-11-06T22:37:43Z",
+          "by": "hx-gxint",
+          "text": "Follow-up landed: PAR-0581 removes the double-lighting (host light_sources skipped default circles for Laser/ContinuousLaser/ContinuousFlame/Sap and now uses def light fields; ContinuousLaser def carries orange/0.7). PAR-0582 adds the Fx.pointBeam line-light producer (consumer wiring in render.rs/light.rs still pending)."
         }
       ]
     },
@@ -30182,6 +30223,11 @@
           "at": "2026-11-06T21:02:19Z",
           "by": "hx-render2",
           "text": "Verified headlessly: cubemap face order, SunMesh sphere/noise-ramp tests green; skybox code path is built at planet-view ready() (scene consumer exists in game.tscn); face PNGs present under assets/cubemaps/stars."
+        },
+        {
+          "at": "2026-11-06T22:37:43Z",
+          "by": "hx-gxint",
+          "text": "Follow-up landed: the documented consumer gap (MindCampaign.planet_bodies rows) is implemented in PAR-0580 -- sun/planet rows derived from the orbit/rotation helpers in the viewed planet mesh frame."
         }
       ]
     },
@@ -30675,13 +30721,21 @@
     },
     "PAR-0583": {
       "title": "GAPS #32 residual: dedicated host never loads mod content into its registry (reloadassets/mods only re-scan the mod dir)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "runs/PAR-0583/smoke.log"
             }
           }
         ]
@@ -30689,9 +30743,15 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0583"
+              "cmd": "cargo test -p mind-headless --lib server"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "runs/PAR-0583/smoke.sh"
             }
           }
         ]
@@ -30700,17 +30760,39 @@
       "claimed_at": "2026-11-06T22:20:33Z",
       "severity": "P1",
       "gap": "mind-headless/src/server/commands.rs cmd_mods/cmd_reloadassets built a throwaway Mods and only reported scan results; the host registry was base content only (boot_content()). mods only printed the scan, not the loaded set; reloadassets could never make mod JSON content or patches visible to the host.",
-      "source": "GAPS.md#32"
+      "source": "GAPS.md#32",
+      "fix": "mind-headless server now boots content through content::boot::build_registry_with_mods (Mods::load -> collect_boot_content -> createModContent -> mod patches), keeps the loaded Mods on ServerState, reports it from mods/mod, and reloadassets rebuilds + swaps the host registry. LocalHost owns ContentRegistry (no leaked &'static).",
+      "evidence": [
+        "cargo test -p mind-headless --lib server -> 74 passed",
+        "runs/PAR-0583/smoke.sh + smoke.log (boot 0 mods, reload -> 4 content files / 2 mods; Mods: Basic Mod + Unlock)",
+        "cargo check -p mind-gdext -> ok",
+        "unit: server::tests::boot_loads_mod_content_into_the_host_registry asserts basic-mod-test-wall / basic-mod-test-ingot in the host registry"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:52:42Z",
+          "by": "hx-server2",
+          "text": "Verified headlessly: boot with parity/mod_fixtures/basic -> registry contains basic-mod-test-wall/item; reloadassets after copying basic+unlock -> 'Reloaded 4 content file(s) from 2 mod(s).' and mods lists both. Running world keeps its cloned registry (documented), next host/load uses the new one."
+        }
+      ]
     },
     "PAR-0584": {
       "title": "GAPS #32 residual: dedicated host autosave never runs on the host clock (autosave/autosaveSpacing/autosaveAmount unused)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "runs/PAR-0584/smoke.log"
             }
           }
         ]
@@ -30718,9 +30800,15 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0584"
+              "cmd": "cargo test -p mind-headless --lib server"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "runs/PAR-0584/smoke.sh"
             }
           }
         ]
@@ -30729,11 +30817,81 @@
       "claimed_at": "2026-11-06T22:20:33Z",
       "severity": "P1",
       "gap": "autosave.rs had naming/rotation helpers only; no ServerState timer advanced by the host tick loop, so Java ServerControl.java:283-319 autosave never fired and long dedicated sessions produced no auto_*.msav backups.",
-      "source": "GAPS.md#32"
+      "source": "GAPS.md#32",
+      "fix": "ServerState advances a fixed-tick autosave clock from frame() (Java ServerControl.java:283-319: Trigger.update + autosaveCount.get(spacing*60)), resets it on HostEvent::Hosted, writes auto_<map>_<MM-dd-yyyy_HH-mm-ss>.msav through LocalHost::save and rotates to autosaveAmount; timestamps are UTC (documented deviation: no tz db/chrono).",
+      "evidence": [
+        "cargo test -p mind-headless --lib server -> 74 passed (autosave_fires_from_the_host_clock_and_writes_auto_file, autosave_is_skipped_without_a_hosted_world, autosave::tests::timestamp_matches_the_java_pattern)",
+        "runs/PAR-0584/smoke.sh + smoke.log (socket host loop, autosaveSpacing 1 -> auto_synthetic_11-06-2026_22-52-18.msav, 6248 bytes)",
+        "status shows Autosave in 1s (2 file(s) kept)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:52:42Z",
+          "by": "hx-server2",
+          "text": "Verified headlessly: socket-driven dedicated host (spacing 1s) produced auto_synthetic_11-06-2026_22-52-18.msav via the frame loop; unit tests cover interval/due math, Hosted reset, skip-without-world and timestamp format. Java ServerControl sorts by lastModified; rotation_order now uses parsed timestamp then mtime then name."
+        }
+      ]
     },
     "PAR-0585": {
       "title": "GAPS #33: NetServer command half — chat command parser/dispatch, fixName/checkColor, kickAll use, enableVotekick/interactRate gates",
-      "status": "fixing",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "runs/PAR-0585/smoke.log"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-headless --lib server"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "runs/PAR-0585/smoke.sh"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-server2",
+      "claimed_at": "2026-11-06T22:20:38Z",
+      "severity": "P1",
+      "gap": "No server-side chat command dispatch existed in mind-headless (only the module reducer path); fixName/checkColor were unported, NetHost::kick_all was never called, and the dedicated server config gates (enableVotekick, interactRate*) were never pushed to the module server_config row.",
+      "source": "GAPS.md#33",
+      "fix": "Added the NetServer.registerCommands command half to mind-headless: ChatCommand parser with exact Java replies (help/t/a/votekick/vote/sync, 6-per-page help, few/many/unknown handling), votekick session state machine (votesRequired 2/3, 30s duration, 5min cooldown, 1h kick), admin cancel, team/admin channel routing, /sync 5s gate, fixName/checkColor (transparent tags, 40-byte cap), interactRate window/limit/kick gate, console /-ingress, NetHost::kick_all on stop/exit, NetHost::say_kind(Team/Admin) and config -> module server_config push (enable_votekick, interact_rate_*, anti_spam, whitelist, auto_pause, rates).",
+      "evidence": [
+        "cargo test -p mind-headless --lib server -> 74 passed (12 new chat/name/gate tests)",
+        "cargo clippy -p mind-headless --lib --tests --no-deps -D warnings -> ok",
+        "runs/PAR-0585/smoke.sh + smoke.log: /help /sync /t /a /votekick /vote + usage/unknown errors via console",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:52:42Z",
+          "by": "hx-server2",
+          "text": "Verified headlessly: 74 server lib tests incl. 12 new parser/name/votekick/sync/interact tests + runs/PAR-0585 console smoke. Console '/'-ingress is a documented headless extension; networked private replies and world-resync delivery need a mind-stdb targeted chat row / world-resend hook (reported)."
+        }
+      ]
+    },
+    "PAR-0586": {
+      "title": "Pre-existing gdext test panics: 3 more batch_f tests call Godot FFI in cargo unit tests",
+      "status": "mismatch",
       "fork": {
         "java": [
           {
@@ -30749,16 +30907,54 @@
           {
             "tool": "note",
             "params": {
-              "text": "see runs/PAR-0585"
+              "text": "see runs/PAR-0586"
             }
           }
         ]
       },
-      "claimed_by": "hx-server2",
-      "claimed_at": "2026-11-06T22:20:38Z",
-      "severity": "P1",
-      "gap": "No server-side chat command dispatch existed in mind-headless (only the module reducer path); fixName/checkColor were unported, NetHost::kick_all was never called, and the dedicated server config gates (enableVotekick, interactRate*) were never pushed to the module server_config row.",
-      "source": "GAPS.md#33"
+      "claimed_by": "hx-abilitydraw",
+      "claimed_at": "2026-11-06T22:47:12Z",
+      "severity": "P2",
+      "gap": "cargo test -p mind-gdext --lib batch_f at HEAD 6d891f27 (after the PAR-0541 audio fix) still FAILS 3 tests: ui::dialogs::batch_f::tests::processor_markup_matches_java (batch_f.rs:4558), count_fields_counts_leaves (:4624) and schematics_fall_back_to_the_first_row (:4632). All construct VarDictionary/VarArray in a plain cargo test, so godot-ffi panics 'Godot engine not available' (godot-ffi-0.5.5/src/lib.rs:625). The audio test was fixed engine-free in PAR-0541; these three need the same treatment (pure assertions or an engine-only harness).",
+      "source": "cargo test -p mind-gdext --lib batch_f",
+      "evidence": [
+        "cargo test -p mind-gdext --lib batch_f -> FAILED: 3 failed (processor_markup_matches_java, count_fields_counts_leaves, schematics_fall_back_to_the_first_row), 6 passed",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4558,4624,4632"
+      ]
+    },
+    "PAR-0587": {
+      "title": "ArmorPlateAbility/MoveLightningAbility/UnitSpawnAbility mod content is dropped, so their new draw code is unreachable",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0587"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-abilitydraw",
+      "claimed_at": "2026-11-06T22:47:16Z",
+      "severity": "P2",
+      "gap": "PAR-0366 ported Ability.draw for ArmorPlate/UnitSpawn/MoveLightning (v146), but the mod content loader never produces those kinds: resolve_ability_kind (mind-core/src/mods/json/mod.rs:4102) lists neither ArmorPlateAbility, MoveLightningAbility nor UnitSpawnAbility; parse_ability (mod.rs:2071) explicitly warns+skips ArmorPlateAbility, and MoveLightning/UnitSpawn would raise 'unknown ability'. parse_ability_fields (mod.rs:2084) also reads none of healthMultiplier/spawnTime/spawnX/spawnY/chance/length/minSpeed/maxSpeed/alternate/heatRegion/bullet, so even after mapping the specs would be defaults. Vanilla omura UnitSpawnAbility was declared in PAR-0366 (standard.rs); mod workflows (JSON mods/patch data) remain unable to declare any of the three.",
+      "source": "PAR-0366 residual; mind-core/src/mods/json/mod.rs",
+      "evidence": [
+        "mind-core/src/mods/json/mod.rs:4102 resolve_ability_kind lacks ArmorPlate/MoveLightning/UnitSpawn",
+        "mind-core/src/mods/json/mod.rs:2071 warns and skips ArmorPlateAbility",
+        "mind-core/src/content/boot.rs:648 test asserts ArmorPlateAbility is skipped"
+      ]
     }
   },
   "recipes": {
