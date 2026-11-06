@@ -3513,8 +3513,25 @@ pub fn unit_update_system(world: &mut World) {
                 (Some(before), Some(after)) => (after.0 - before.0, after.1 - before.1),
                 _ => (0.0, 0.0),
             };
+            // Snapshot the legs before the kind pass so the splash pass can
+            // tell which feet actually stepped this tick
+            // (`LegsComp.java:196-202`).
+            let legs_before = world
+                .get::<crate::entities::comp::unit::LegsComp>(entity)
+                .cloned();
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
+            // GAPS #10: leg splash + crawler crush (the damage half of the
+            // kind updates, which needs `rules.unitDamage` and the content
+            // registry).
+            apply_movement_damage(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+                delta,
+                legs_before.as_ref(),
+            );
 
             // H07 T3: `MechComp.update` step + `UnitComp.update` walk sounds
             // (view-only; no-op without an audio sink).
@@ -3616,6 +3633,129 @@ pub fn unit_update_system(world: &mut World) {
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
+}
+
+/// Leg splash + crawler crush damage — the damage half of the kind movement
+/// bodies, run from the live unit loop after [`movement::update_kinematics`].
+///
+/// * `LegsComp.java:196-202`: on a step (`l.group` change) a legged unit deals
+///   `legSplashDamage * rules.unitDamage(team)` in `legSplashRange` at the
+///   foot's base, units and buildings included (`false, true` = no armor
+///   pierce, air hits).
+/// * `CrawlComp.java:56-93`: while moving, every tile in the crawl circle whose
+///   building belongs to another team takes `crushDamage * Time.delta *
+///   rules.unitDamage(team)`. `t.build.damage` is `BuildingComp.damage(float)`
+///   (`BuildingComp.java:2064-2088`: `rules.blockHealth`, the status/shield
+///   guards and death), i.e. [`crate::combat::damage::area::apply_health`].
+///
+/// The kind modules keep only geometry/scan state (`entities/comp/unit/{legs,
+/// crawl}.rs`); the damage pass needs the content registry and the live rules,
+/// so it lives here (GAPS #10).
+fn apply_movement_damage(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    entity: Entity,
+    delta: (f32, f32),
+    legs_before: Option<&crate::entities::comp::unit::LegsComp>,
+) {
+    if world
+        .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+        .is_some_and(|status| status.disarmed)
+    {
+        return;
+    }
+    let Some(def) = world
+        .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
+    else {
+        return;
+    };
+    let team = world
+        .get::<TeamComp>(entity)
+        .map(|team| team.team)
+        .unwrap_or(0);
+    let unit_damage = crate::game::runtime::rules_of(world)
+        .map(|rules| rules.unit_damage(team))
+        .unwrap_or(1.0);
+
+    if def.leg_splash_damage > 0.0
+        && let Some(before) = legs_before
+    {
+        // A leg stepped this tick when its foot moved (`update_legs` snaps a
+        // foot to its destination on a re-step).
+        let stepped: Vec<(f32, f32)> = world
+            .get::<crate::entities::comp::unit::LegsComp>(entity)
+            .map(|after| {
+                after
+                    .legs
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, leg)| {
+                        before.legs.get(*index).is_none_or(|old| {
+                            (old.foot_x - leg.foot_x).abs() > 0.0001
+                                || (old.foot_y - leg.foot_y).abs() > 0.0001
+                        })
+                    })
+                    .map(|(_, leg)| (leg.base_x, leg.base_y))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (x, y) in stepped {
+            crate::combat::damage::area::damage_area(
+                world,
+                content,
+                Some(team),
+                x,
+                y,
+                def.leg_splash_range,
+                def.leg_splash_damage * unit_damage,
+                crate::combat::damage::area::DamageOptions::default(),
+            );
+        }
+    }
+
+    if def.crush_damage > 0.0
+        && world
+            .get::<crate::entities::comp::unit::CrawlComp>(entity)
+            .is_some()
+    {
+        if (delta.0 * delta.0 + delta.1 * delta.1).sqrt() <= 0.001 {
+            return;
+        }
+        let Some(pos) = world.get::<Pos>(entity).copied() else {
+            return;
+        };
+        let hit_size = world
+            .get::<crate::entities::comp::unit::comp::HitboxComp>(entity)
+            .map(|hitbox| hitbox.hit_size)
+            .unwrap_or(0.0);
+        let tile = crate::config::TILESIZE as f32;
+        // `int radius = (int)Math.max(0, hitSize / tilesize * 2f)`.
+        let radius = (hit_size / tile * 2.0).max(0.0) as i32;
+        let mut targets: Vec<Entity> = Vec::new();
+        for cx in -radius..=radius {
+            for cy in -radius..=radius {
+                if cx * cx + cy * cy > radius {
+                    continue;
+                }
+                let tx = WorldGrid::to_tile(pos.x + cx as f32 * tile);
+                let ty = WorldGrid::to_tile(pos.y + cy as f32 * tile);
+                let Some(build) = grid.tiles.getn(tx, ty).and_then(|t| t.build) else {
+                    continue;
+                };
+                if world.get::<TeamComp>(build).map(|t| t.team) != Some(team) {
+                    targets.push(build);
+                }
+            }
+        }
+        // Overlapping tile samples can name the same building; damage it once.
+        targets.sort_by_key(|entity| entity.index());
+        targets.dedup();
+        for build in targets {
+            crate::combat::damage::area::apply_health(world, build, def.crush_damage * unit_damage);
+        }
+    }
 }
 
 /// Adopts units spawned by `spawnUnit` bullets (`BulletType.create` returns no
@@ -5760,13 +5900,35 @@ fn flying_main_target(
     core
 }
 
+/// `Block.targetable` (`Block.java:308`) for a live building.
+///
+/// Every vanilla block is targetable except the four world blocks that set
+/// `targetable = false` (`Blocks.java:7002,7014,7023,7030`:
+/// `world-processor`, `world-cell`, `world-message`, `world-switch`). The
+/// `BlockDef` field itself belongs to `mc/content/**`; the same four blocks are
+/// exactly the `BuildVisibility.worldProcessorOnly` set, so keying off the
+/// visibility keeps the rule without a content ABI change.
+fn block_targetable(world: &World, entity: Entity) -> bool {
+    let Some(block) = world
+        .get::<crate::entities::comp::Building>(entity)
+        .map(|building| building.block)
+    else {
+        return true;
+    };
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(block))
+        .is_none_or(|inst| {
+            inst.def.build_visibility
+                != crate::content::registries::blocks::BuildVisibility::WorldProcessorOnly
+        })
+}
+
 /// `AIController.targetFlagActive(x, y, flag, enemy=true)`: the closest enemy
 /// building carrying `flag` that is active. Java's predicate is
 /// `((items != null && items.any()) || status() != BlockStatus.noInput) && block.targetable`
 /// (AIController.java:277-284); `status()` is
 /// [`crate::world::status::java_block_status`] (`BuildingComp.java:638-652`).
-/// `block.targetable` has no port field, so that term is omitted (no vanilla
-/// flagged block sets it false; only world logic blocks do).
 fn target_flag_active(
     world: &World,
     queries: &TargetQueries,
@@ -5782,6 +5944,9 @@ fn target_flag_active(
         .map_or(0, |state| state.tick);
     let mut best: Option<(f32, Entity)> = None;
     for entity in queries.indexer.enemy_flagged(world, team, flag) {
+        if !block_targetable(world, entity) {
+            continue;
+        }
         let active = world
             .get::<crate::world::modules::ItemModule>(entity)
             .is_some_and(|items| items.any())
@@ -7700,6 +7865,175 @@ mod tests {
             "efficiency 0 is noInput (not a target)"
         );
         sim.ecs.0.insert_non_send(runtime);
+    }
+
+    /// GAPS #67: `Block.targetable` (`Block.java:308`) is false only for the
+    /// four `worldProcessorOnly` world blocks (`Blocks.java:7002,7014,7023,7030`).
+    #[test]
+    fn world_logic_blocks_are_not_targetable() {
+        use crate::world::TilePos;
+        use crate::world::harness::BuildHarness;
+
+        let mut harness = BuildHarness::new(8, 8, 1);
+        let spawn = |harness: &mut BuildHarness, name: &str| {
+            let inst = harness.table().get_named(name).expect(name).clone();
+            let (items, liquids) = (
+                harness.content.items().len(),
+                harness.content.liquids().len(),
+            );
+            let entity = inst.spawn(
+                &mut harness.world,
+                0,
+                TilePos::new(2, 2),
+                0,
+                0,
+                items,
+                liquids,
+            );
+            inst.behavior.create_state(&mut harness.world, entity);
+            entity
+        };
+        let processor = spawn(&mut harness, "world-processor");
+        let cell = spawn(&mut harness, "world-cell");
+        let wall = spawn(&mut harness, "copper-wall");
+        assert!(!block_targetable(&harness.world, processor));
+        assert!(!block_targetable(&harness.world, cell));
+        assert!(block_targetable(&harness.world, wall));
+    }
+
+    /// GAPS #10: `LegsComp.java:196-202` — a legged unit deals
+    /// `legSplashDamage` in `legSplashRange` at a stepping foot's base.
+    #[test]
+    fn legged_unit_splash_damages_nearby_enemy_units() {
+        use crate::ai::UnitHarness;
+        use crate::entities::comp::Health;
+        use crate::entities::comp::TeamComp;
+        use crate::entities::comp::unit::LegsComp;
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let (x, y) = crate::world::BuildHarness::tile_center(10, 10);
+        let arkyid = harness.spawn("arkyid", 2, x, y, 0.0).expect("arkyid");
+        let target = harness.spawn("dagger", 1, x + 1.0, y, 0.0).expect("dagger");
+        let Some(mut before) = harness.build.world.get::<LegsComp>(arkyid).cloned() else {
+            panic!("arkyid carries LegsComp");
+        };
+        // Pretend every foot re-stepped this tick.
+        for leg in &mut before.legs {
+            leg.foot_x += 100.0;
+        }
+        let health_before = harness
+            .build
+            .world
+            .get::<Health>(target)
+            .map(|health| health.health)
+            .unwrap_or(0.0);
+        apply_movement_damage(
+            &mut harness.build.world,
+            &harness.build.grid,
+            &harness.build.content,
+            arkyid,
+            (0.0, 0.0),
+            Some(&before),
+        );
+        let health_after = harness
+            .build
+            .world
+            .get::<Health>(target)
+            .map(|health| health.health)
+            .unwrap_or(0.0);
+        assert!(
+            health_after < health_before,
+            "leg splash hit the enemy unit ({health_after} < {health_before})"
+        );
+        // A disarmed legged unit deals no splash damage.
+        harness
+            .build
+            .world
+            .get_mut::<crate::entities::comp::unit::comp::StatusComp>(arkyid)
+            .expect("status comp")
+            .disarmed = true;
+        let health = harness.build.world.get::<Health>(target).unwrap().health;
+        apply_movement_damage(
+            &mut harness.build.world,
+            &harness.build.grid,
+            &harness.build.content,
+            arkyid,
+            (0.0, 0.0),
+            Some(&before),
+        );
+        assert_eq!(
+            harness.build.world.get::<Health>(target).unwrap().health,
+            health,
+            "disarmed units cannot splash"
+        );
+        assert_eq!(
+            harness.build.world.get::<TeamComp>(target).map(|t| t.team),
+            Some(1)
+        );
+    }
+
+    /// GAPS #10: `CrawlComp.java:56-93` — a moving crawler damages enemy
+    /// buildings under its crawl circle, idle crawlers do not.
+    #[test]
+    fn crawler_crushes_enemy_buildings_while_moving() {
+        use crate::ai::UnitHarness;
+        use crate::entities::comp::Health;
+        use crate::entities::comp::TeamComp;
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let wall = harness
+            .build
+            .content()
+            .block_id("copper-wall")
+            .expect("copper-wall");
+        assert!(harness.build.place(10, 10, wall, 0, true));
+        let build = harness.build.build_at(10, 10).expect("wall entity");
+        let building_team = harness
+            .build
+            .world
+            .get::<TeamComp>(build)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        let unit_team = if building_team == 1 { 2 } else { 1 };
+        let (x, y) = crate::world::BuildHarness::tile_center(10, 10);
+        let latum = harness.spawn("latum", unit_team, x, y, 0.0).expect("latum");
+        let before = harness
+            .build
+            .world
+            .get::<Health>(build)
+            .map(|health| health.health)
+            .unwrap_or(0.0);
+        apply_movement_damage(
+            &mut harness.build.world,
+            &harness.build.grid,
+            &harness.build.content,
+            latum,
+            (1.0, 0.0),
+            None,
+        );
+        let moving = harness
+            .build
+            .world
+            .get::<Health>(build)
+            .map(|health| health.health)
+            .unwrap_or(0.0);
+        assert!(
+            moving < before,
+            "moving latum crushed the wall ({moving} < {before})"
+        );
+        apply_movement_damage(
+            &mut harness.build.world,
+            &harness.build.grid,
+            &harness.build.content,
+            latum,
+            (0.0, 0.0),
+            None,
+        );
+        assert_eq!(
+            harness.build.world.get::<Health>(build).unwrap().health,
+            moving,
+            "an idle crawler deals no crush damage"
+        );
     }
 }
 

@@ -1038,6 +1038,14 @@ impl SimRuntime {
         grid: &mut WorldGrid,
         pending: &[(usize, DecodedBase)],
     ) -> usize {
+        // `World.endMapLoad` (`World.java:220-230`): legacy blocks must stop
+        // existing before any entity is spawned for their tile. The pending
+        // decoded bases were read from a save/map that still names the legacy
+        // block, so the sweep swaps the tile to its replacement (or air) and
+        // despawns the stale legacy entity; the loop below then spawns the
+        // replacement under its own block. No-op for an already-swept grid
+        // (`WorldGrid::end_map_load` runs the same pass on most load paths).
+        crate::world::behavior::legacy::remove_legacy_blocks_live(grid, &self.content, ecs);
         // Tile blocks are already assigned; suppress the tile-change counters
         // while the entity links are attached (`World.generating`).
         let generating = grid.generating;

@@ -169,17 +169,16 @@ pub fn create(
                 vel.y = rad.sin() * udef.speed;
             }
         }
-        // `if(spawned.controller() instanceof MissileAI ai) ai.shooter = ...`:
-        // upstream assigns only a Unit shooter (or a `ControlBlock`'s unit, the
-        // logic-controlled turret case; not ported). A plain turret leaves
-        // `ai.shooter` null, so the missile keeps its launch angle
-        // (BulletType.java:943-949).
+        // `if(spawned.controller() instanceof MissileAI ai) ai.shooter = ...`
+        // (`BulletType.java:943-949`): a Unit shooter is itself; a `ControlBlock`
+        // shooter (every `TurretBuild` implements it, `Turret.java:...`) assigns
+        // `control.unit()`, i.e. the turret's detached proxy unit. Without a
+        // shooter the missile keeps its launch angle.
         if udef.controller == crate::content::registries::units::ControllerKind::Missile {
-            let shooter = spawn.shooter.or(spawn.owner).filter(|entity| {
-                world
-                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(*entity)
-                    .is_some()
-            });
+            let shooter = spawn
+                .shooter
+                .or(spawn.owner)
+                .and_then(|entity| missile_shooter_unit(world, entity));
             world
                 .entity_mut(entity)
                 .insert(crate::ai::types::missile::MissileShooter(shooter));
@@ -308,6 +307,29 @@ pub fn create(
     Some(entity)
 }
 
+/// `BulletType.create`'s `MissileAI.shooter` resolution
+/// (`BulletType.java:943-949`):
+///
+/// ```java
+/// if(shooter instanceof Unit unit) ai.shooter = unit;
+/// if(shooter instanceof ControlBlock control) ai.shooter = control.unit();
+/// ```
+///
+/// Every `TurretBuild` implements `ControlBlock` and its `unit()` is the
+/// detached proxy the port keeps in `TurretState.block_unit`.
+fn missile_shooter_unit(world: &World, entity: Entity) -> Option<Entity> {
+    if world
+        .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+        .is_some()
+    {
+        return Some(entity);
+    }
+    world
+        .get::<crate::world::blocks::defense::turrets::TurretState>(entity)
+        .and_then(|state| state.block_unit)
+        .filter(|unit| world.get_entity(*unit).is_ok())
+}
+
 /// Relay variant of [`create`] (plan 21 `SimCommand::Bullet` handshake).
 ///
 /// The local creation path is identical; the command is emitted by plan 21's
@@ -359,5 +381,45 @@ mod tests {
             .expect("vel");
         assert!(vel.x > 0.0);
         assert_eq!(vel.y, 0.0);
+    }
+
+    /// GAPS #67 / PAR-0525: `BulletType.create`'s missile branch resolves a
+    /// `ControlBlock` building to its proxy unit (`TurretBuild.unit()`), a
+    /// plain unit to itself, and leaves an unknown shooter unset.
+    #[test]
+    fn missile_shooter_resolves_unit_and_control_block_proxy() {
+        use crate::content::UnitTypeId;
+        use crate::entities::comp::Pos;
+        use crate::entities::comp::unit::comp::UnitTypeComp;
+        use crate::world::blocks::defense::turrets::TurretState;
+
+        let mut harness = crate::combat::harness::CombatHarness::new(16, 16, 7);
+        let turret = harness
+            .spawn_test_turret("duo", 32.0, 32.0, 1)
+            .expect("turret");
+        let proxy = harness.build.world.spawn(Pos { x: 0.0, y: 0.0 }).id();
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("turret state")
+            .block_unit = Some(proxy);
+        assert_eq!(
+            missile_shooter_unit(&harness.build.world, turret),
+            Some(proxy)
+        );
+        let unit = harness
+            .build
+            .world
+            .spawn((
+                UnitTypeComp {
+                    type_id: UnitTypeId::new(0),
+                },
+                Pos { x: 0.0, y: 0.0 },
+            ))
+            .id();
+        assert_eq!(missile_shooter_unit(&harness.build.world, unit), Some(unit));
+        let plain = harness.build.world.spawn(Pos { x: 8.0, y: 8.0 }).id();
+        assert_eq!(missile_shooter_unit(&harness.build.world, plain), None);
     }
 }

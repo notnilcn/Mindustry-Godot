@@ -1442,6 +1442,21 @@ fn set_prop_bullet_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool
 }
 
 fn set_prop_building_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
+    // Building-family `setProp` overrides (`ForceBuild.setProp(shield)`
+    // `ForceProjector.java:157-163`, ...) run before the base
+    // `BuildingComp.setProp` table; `true` suppresses the generic branch.
+    let block = world.get::<Building>(e).map(|b| b.block);
+    let inst = block.and_then(|block| {
+        world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.get(block))
+            .cloned()
+    });
+    if let Some(inst) = inst
+        && inst.behavior.logic_set_prop(world, e, a, v)
+    {
+        return true;
+    }
     match a {
         LAccess::Health => {
             // `BuildingComp.setProp(health)` (`BuildingComp.java:2176-2183`):
@@ -1845,29 +1860,30 @@ pub fn control(
     if !allowed {
         return false;
     }
-    match a {
-        // `ControlI` on a turret: `TurretBuild.control` overrides
-        // (`Turret.java:522-540`) — `shoot` (numeric) and `shootp` (object).
-        LAccess::Shoot | LAccess::Shootp => {
-            let Some(block) = world.get::<Building>(e).map(|b| b.block) else {
-                return false;
-            };
-            let Some(inst) = world
-                .get_resource::<BlockTable>()
-                .and_then(|table| table.get(block))
-                .cloned()
-            else {
-                return false;
-            };
-            let empty = LVar::new("");
-            let params4: [LVar; 4] = std::array::from_fn(|i| {
-                params
-                    .get(i)
-                    .map(|p| (*p).clone())
-                    .unwrap_or_else(|| empty.clone())
-            });
-            inst.behavior.logic_control(world, e, a, &params4)
+    // `ControlI` family overrides (`TurretBuild.control` `Turret.java:522-540`,
+    // `DoorBuild.control` `Door.java:89-105`, ...) run before the base
+    // `BuildingComp.control` table: the hook receives all four params and a
+    // `true` return suppresses the generic accessor branch.
+    let block = world.get::<Building>(e).map(|b| b.block);
+    let inst = block.and_then(|block| {
+        world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.get(block))
+            .cloned()
+    });
+    if let Some(inst) = inst {
+        let empty = LVar::new("");
+        let params4: [LVar; 4] = std::array::from_fn(|i| {
+            params
+                .get(i)
+                .map(|p| (*p).clone())
+                .unwrap_or_else(|| empty.clone())
+        });
+        if inst.behavior.logic_control(world, e, a, &params4) {
+            return true;
         }
+    }
+    match a {
         LAccess::Enabled => {
             let enabled = params.first().map(|p| p.as_bool()).unwrap_or(false);
             if let Some(mut b) = world.get_mut::<Building>(e) {
@@ -2350,5 +2366,88 @@ mod tests {
             sim.ecs.0.get::<TeamComp>(bullet).map(|team| team.team),
             Some(3)
         );
+    }
+
+    /// PAR-0527: `control enabled` on a door dispatches into
+    /// `DoorBuild.control` (`Door.java:89-105`) instead of the generic
+    /// `BuildingComp.control` flag.
+    #[test]
+    fn control_enabled_dispatches_to_door_behavior() {
+        use crate::world::harness::BuildHarness;
+        let mut harness = BuildHarness::new(8, 8, 1);
+        let door = harness.content().block_id("door").expect("door");
+        assert!(harness.place(3, 3, door, 0, true));
+        let e = harness.build_at(3, 3).expect("entity");
+        let target = LogicObject::Building(e);
+        assert_eq!(
+            sense(&harness.world, &target, LAccess::Enabled),
+            Sensed::Num(0.0),
+            "a fresh door is closed (`Door.sense`)"
+        );
+        let mut one = LVar::new("p");
+        one.set_num(1.0);
+        assert!(control(
+            &mut harness.world,
+            &target,
+            LAccess::Enabled,
+            &[&one],
+            None,
+            true
+        ));
+        // `Door.sense(enabled)` reads the open state, not `Building.enabled`.
+        assert_eq!(
+            sense(&harness.world, &target, LAccess::Enabled),
+            Sensed::Num(1.0)
+        );
+        assert_eq!(
+            harness
+                .table()
+                .instance(door)
+                .expect("instance")
+                .behavior
+                .config(&harness.world, e),
+            crate::world::config::ConfigValue::Bool(true)
+        );
+    }
+
+    /// PAR-0527: `setprop @shield` on a force projector dispatches into
+    /// `ForceBuild.setProp(shield)` (`ForceProjector.java:157-163`).
+    #[test]
+    fn set_prop_shield_dispatches_to_force_projector() {
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+        use crate::world::harness::BuildHarness;
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let block = harness
+            .content()
+            .block_id("force-projector")
+            .expect("force-projector");
+        assert!(harness.place(6, 6, block, 0, true));
+        let e = harness.build_at(6, 6).expect("projector");
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(e) {
+            state.phase_heat = 0.0;
+            state.buildup = 0.0;
+        }
+        assert!(set_prop_num(
+            &mut harness.world,
+            &LogicObject::Building(e),
+            LAccess::Shield,
+            600.0
+        ));
+        // `force-projector.shieldHealth = 750` (`Blocks.java:1966-1974`).
+        assert_eq!(
+            harness
+                .world
+                .get::<ForceProjectorState>(e)
+                .expect("state")
+                .buildup,
+            150.0
+        );
+        // A non-overridden accessor still reaches the base table.
+        assert!(set_prop_num(
+            &mut harness.world,
+            &LogicObject::Building(e),
+            LAccess::Health,
+            10.0
+        ));
     }
 }

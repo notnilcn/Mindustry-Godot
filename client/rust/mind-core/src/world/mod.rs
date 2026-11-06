@@ -297,12 +297,15 @@ impl WorldGrid {
         self.generating = true;
     }
 
-    /// Ends a map load: darkness BFS, proximity (07 hook), counters reset to
-    /// `-1` (`World.endMapLoad` + `WorldLoadEvent` listener). Legacy-block
-    /// removal and building proximity are plan 07 hooks.
+    /// Ends a map load: legacy-block removal, darkness BFS, proximity (07 hook),
+    /// counters reset to `-1` (`World.endMapLoad` + `WorldLoadEvent` listener).
     pub fn end_map_load(&mut self, content: &ContentRegistry) {
-        // Building proximity + legacy-block removal are plan 07 hooks; the
-        // darkness BFS and counter reset are this plan's.
+        // `World.endMapLoad` (`World.java:220-230`): one tile pass that runs
+        // `LegacyBlock.removeSelf` (replacement block or air) and rebuilds each
+        // live building's proximity, *then* `addDarkness(tiles)` — the order
+        // matters because the legacy swap changes the block layout darkness
+        // reads. Building proximity is plan 07's (`materialize_buildings`).
+        crate::world::behavior::legacy::remove_legacy_blocks(self, content);
         darkness::add_darkness(self, content);
         self.generating = false;
         // `WorldLoadEvent` listener resets the counters.

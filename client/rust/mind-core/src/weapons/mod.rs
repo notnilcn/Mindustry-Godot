@@ -680,6 +680,17 @@ fn fire(
     if weapon.kind == WeaponKind::RepairBeamWeapon {
         return;
     }
+    // `Weapon.shoot` (`Weapon.java:513`): `unit.apply(shootStatus,
+    // shootStatusDuration)` before the pattern runs — vela applies `wet` to
+    // itself, the quasar/conquer lines apply `slow`/`unmoving` (GAPS #9).
+    if weapon.shoot_status != crate::content::StatusId::NONE {
+        crate::combat::damage::status::apply_status(
+            ctx.world,
+            unit,
+            weapon.shoot_status,
+            weapon.shoot_status_duration,
+        );
+    }
     if weapon.shoot.first_shot_delay > 0.0 {
         mounts[index].charging = true;
         let pitch = ctx.rng.range(
@@ -1155,6 +1166,45 @@ mod tests {
             }
         }
         assert!(matched > 0, "dagger weapon emitted Sounds.shoot");
+    }
+    /// GAPS #9 / PAR-0542: `Weapon.shoot` (`Weapon.java:513`) applies
+    /// `shootStatus` to the shooter on every shot.
+    #[test]
+    fn shoot_status_applies_to_the_shooter() {
+        use crate::entities::comp::unit::comp::StatusComp;
+
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, wall, 0, true));
+        let status = harness.content().status_id("slow").expect("slow");
+        let mut weapon =
+            weapon_with_bullet(&harness, 5.0, ShootPatternSpec::plain(1, 0.0, 0.0), "fuse");
+        weapon.shoot_status = status;
+        weapon.shoot_status_duration = 199.0;
+        let (ux, uy) = CombatHarness::tile_center(4, 8);
+        let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
+        harness
+            .build
+            .world
+            .entity_mut(unit)
+            .insert(StatusComp::default());
+        let applier =
+            crate::combat::damage::status::UnitStatusApply::from_content(harness.build.content());
+        harness
+            .build
+            .world
+            .insert_resource(crate::combat::damage::status::StatusApplier(Box::new(
+                applier,
+            )));
+        harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+        harness.set_unit_shoot(unit, 0, true);
+        harness.update_weapons_only();
+        let statuses = harness
+            .build
+            .world
+            .get::<StatusComp>(unit)
+            .expect("status comp");
+        assert_eq!(statuses.get_duration(status), 199.0);
     }
 }
 

@@ -182,6 +182,41 @@ pub fn remove_legacy_blocks(grid: &mut WorldGrid, content: &ContentRegistry) -> 
     changed
 }
 
+/// [`remove_legacy_blocks`] for a load path that already has live entities
+/// (the save/map reader decodes building bases before they are materialized):
+/// every legacy tile is swept and any building entity still linked to it is
+/// despawned. The pending decoded bases reference the legacy block, so the old
+/// entity must not survive the swap to its replacement (or to air)
+/// (`World.endMapLoad`, `World.java:220-230`).
+pub fn remove_legacy_blocks_live(
+    grid: &mut WorldGrid,
+    content: &ContentRegistry,
+    world: &mut World,
+) -> usize {
+    let mut stale: Vec<Entity> = Vec::new();
+    for y in 0..grid.tiles.height {
+        for x in 0..grid.tiles.width {
+            let tile = grid.tiles.get(x as i32, y as i32);
+            if tile.block == BlockId::AIR {
+                continue;
+            }
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if is_legacy_kind(def.kind)
+                && let Some(entity) = tile.build
+            {
+                stale.push(entity);
+            }
+        }
+    }
+    let changed = remove_legacy_blocks(grid, content);
+    for entity in stale {
+        let _ = world.despawn(entity);
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +337,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The live load path despawns the legacy block's building entity instead
+    /// of leaving an orphan behind after the tile swaps to its replacement.
+    #[test]
+    fn live_sweep_despawns_the_legacy_entity() {
+        use crate::entities::comp::Building;
+        use crate::sim::runtime::load_vanilla_content;
+
+        let content = load_vanilla_content().expect("vanilla content");
+        let table = BlockTable::build_default(&content).expect("table");
+        let legacy = content
+            .block_id("legacy-unit-factory-air")
+            .expect("legacy-unit-factory-air");
+        let mut world = World::new();
+        let mut grid = WorldGrid::new(16, 16);
+        grid.tiles.get_mut(7, 7).block = legacy;
+        let entity = world
+            .spawn(Building::new(TilePos::new(7, 7), legacy, 0))
+            .id();
+        world.insert_resource(table);
+        grid.tiles.get_mut(7, 7).build = Some(entity);
+
+        let changed = remove_legacy_blocks_live(&mut grid, &content, &mut world);
+        assert_eq!(changed, 1);
+        assert!(
+            world.get_entity(entity).is_err(),
+            "the legacy building entity is despawned"
+        );
+        assert_eq!(
+            grid.tiles.get(7, 7).block,
+            content.block_id("air-factory").expect("air-factory")
+        );
+        assert_eq!(grid.tiles.get(7, 7).build, None);
     }
 }

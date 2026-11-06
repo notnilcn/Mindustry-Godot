@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T15:36:40Z",
+  "updated": "2026-11-06T16:08:18Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -13990,6 +13990,11 @@
           "at": "2026-11-03T09:21:24Z",
           "by": "orch-p1",
           "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        },
+        {
+          "at": "2026-11-06T16:08:18Z",
+          "by": "hx-bindings",
+          "text": "Client consumed the chat ABI added by this item (hx-bindings, worktree Mindustry-Godot-p1b): new mind_stdb::ChatLog binds my_match_chat and filters ChatKind::Admin + private MatchChat.target rows for the viewer; new mind_stdb::EventBus maps my_match_events EventKind rows onto the upstream EventType names (GAPS #37 bus source); roster trace now merges my_traces answers (admin_request_trace, PlayerAction::RequestTrace); Connector/admin reducers + subscription waves updated (my_match_chat already subscribed; added my_match_events/my_traces/my_admin_actions/all_admins/all_bans/all_whitelist). Status left verified (client consumption note only; no new server evidence)."
         }
       ],
       "claimed_by": "hx-stdb",
@@ -14196,6 +14201,11 @@
           "at": "2026-11-03T09:21:24Z",
           "by": "orch-p1",
           "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        },
+        {
+          "at": "2026-11-06T16:08:18Z",
+          "by": "hx-bindings",
+          "text": "Client half landed (hx-bindings, worktree Mindustry-Godot-p1b): client/rust/mind-stdb/src/module_bindings regenerated with the pinned spacetime 2.10.1 CLI from the merged module (ChatKind::Admin, MatchChat.target, ChatFilter.match_id, 22 AdminActionKind variants, my_match_events/my_traces/all_action_filters/all_player_info, ServerConfig +9 knobs, 7 new admin_* reducers). New mind_stdb::ChatLog applies the module's chat_visible predicate (Admin only for admins, private target only for the target, Team only for the same team) and re-filters retained lines when the viewer's admin flag/team changes; Connector gained admin_add_match_chat_filter/admin_remove_match_chat_filter plus the action-filter, name-ban and request-trace calls; Game wave now subscribes my_match_events/my_traces and the previously unsubscribed my_admin_actions, and Lobby now subscribes all_admins/all_bans/all_whitelist. Status left verified; client evidence: cargo test -p mind-stdb --lib -> 65 passed."
         }
       ],
       "claimed_by": "hx-stdb",
@@ -27663,14 +27673,16 @@
           }
         ]
       },
-      "action": [
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "cargo test -p mind-core --lib live_sweep_despawns_the_legacy_entity"
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib live_sweep_despawns_the_legacy_entity"
+            }
           }
-        }
-      ],
+        ]
+      },
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:32Z",
       "severity": "P2",
@@ -27718,8 +27730,6 @@
           }
         ]
       },
-      "claimed_by": "hx-wiring",
-      "claimed_at": "2026-11-06T15:03:32Z",
       "severity": "P1",
       "source": "GAPS.md#23",
       "gap": "dump_unit_payload always false, unit payload IO Unsupported, PayloadSource never creates units, UnitFactory spawns units directly instead of a UnitPayload.",
@@ -28078,14 +28088,16 @@
           }
         ]
       },
-      "action": [
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "cargo test -p mind-core --lib combat::bullet"
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib missile_shooter_resolves_unit_and_control_block_proxy"
+            }
           }
-        }
-      ],
+        ]
+      },
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:32Z",
       "severity": "P2",
@@ -28101,11 +28113,17 @@
           "at": "2026-11-06T15:36:40Z",
           "by": "hx-wiring",
           "text": "ControlBlock shooter resolution landed in combat/bullet/spawn.rs (GAPS #67 missile half). Verified headlessly; no new dedicated test (the fixture turrets carry no block_unit proxy, and a proxy-missile end-to-end test would need a live turret entity with block_unit — covered by code review + full-suite regression)."
+        },
+        {
+          "at": "2026-11-06T15:53:38Z",
+          "by": "hx-wiring",
+          "text": "Added the dedicated missile_shooter_unit test after the first ledger write; evidence updated (proxy -> TurretState.block_unit, unit -> itself, unknown -> None)."
         }
       ],
       "fix": "combat/bullet/spawn.rs missile branch now resolves MissileAI.shooter like BulletType.java:943-949: a Unit shooter is itself, otherwise a ControlBlock building resolves control.unit() — the port s TurretState.block_unit proxy (every TurretBuild implements ControlBlock upstream: Turret.java TurretBuild implements ControlBlock). missile_shooter_unit() helper; a turret without a proxy still leaves shooter None (unchanged).",
       "evidence": [
-        "cargo test -p mind-core --lib: 2993 passed, 0 failed, 4 ignored (missile/spawn tests green)",
+        "cargo test -p mind-core --lib: 2995 passed, 0 failed, 4 ignored",
+        "new test combat::bullet::spawn::tests::missile_shooter_resolves_unit_and_control_block_proxy (ControlBlock proxy, plain unit, no-shooter)",
         "cargo check -p mind-gdext: exit 0"
       ]
     },
@@ -28165,14 +28183,16 @@
           }
         ]
       },
-      "action": [
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "cargo test -p mind-core --lib access::tests::control_enabled_dispatches_to_door_behavior"
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib control_enabled_dispatches_to_door_behavior"
+            }
           }
-        }
-      ],
+        ]
+      },
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:31Z",
       "severity": "P0",
@@ -28211,14 +28231,16 @@
           }
         ]
       },
-      "action": [
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "cargo test -p mind-core --lib build_turret_scans_the_team_rebuild_queue"
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib build_turret_scans_the_team_rebuild_queue"
+            }
           }
-        }
-      ],
+        ]
+      },
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:31Z",
       "severity": "P0",
@@ -28798,6 +28820,11 @@
           "at": "2026-11-06T14:48:24Z",
           "by": "hx-audio",
           "text": "Exact routed call sites (outside hx-audio ownership): (1) LaunchPad: client/rust/mind-core/src/world/behavior/campaign.rs:570-600 (update_tile) already computes (x,y); after spawning the payload call crate::audio::sim::emit_world_sound(world, SoundId::PAD_LAUNCH, x, y, 1.0, 1.0, 0.1). (2) BurstDrill burst: client/rust/mind-core/src/world/behavior/production.rs:566-572 (after invert_time=1.0; progress%=drill_time) call building_centre_of(world,e) then emit_world_sound(world, SoundId::DRILL_IMPACT, x, y, 0.6, 1.0, 0.1). (3) BurstDrill ambient: client/rust/mind-core/src/audio/ambient.rs:146-152 ambient_volume_scale BlockKind::BurstDrill must multiply by clamp(DrillState.progress / drill_time)^4 (DrillState is in entities/comp/building.rs:144; dominantItem None => 0). gx/fx.rs owns Effect.shake(2,2) + Fx.shockwave for the burst and Effect.shake(3,3) + Fx.launchPod for the pad (LaunchPad.java:156-158, BurstDrill.java:115-117). emit_world_sound already applies Mathf.range-style pitch jitter (audio/sim.rs:285-307)."
+        },
+        {
+          "at": "2026-11-06T16:02:35Z",
+          "by": "hx-audio2",
+          "text": "hx-audio2 wiring pass 2026-11-07 (worktree main 01d18ac6): wired the previously unreachable call sites. (1) LaunchPad launch: mc/world/behavior/campaign.rs LaunchPadBehavior::update_tile now calls emit_world_sound(world, SoundId::PAD_LAUNCH, x, y, 1.0, 1.0, 0.1) after the payload spawn plus emit_launch_view -> FxSink effect Fx.launchPod (EffectId::LAUNCH_POD) + shake 3 (LaunchPad.java:149,156-158). (2) BurstDrill burst: mc/world/behavior/production.rs DrillBehavior::update_burst now calls emit_burst_cues -> drillImpact at 0.6 / pitch 1 +/- 0.1, Effect.shake(2,2) and Fx.shockwave (EffectId::SHOCKWAVE) tinted dominantItem.color (BurstDrill.java:113-118; class defaults). (3) BurstDrill ambient: mc/audio/ambient.rs ambient_volume_scale multiplies the Drill volume by clamp(progress/getDrillTime)^4 via burst_drill_progress_factor, 0 without a dominant item (BurstDrill.java:123-124; Drill.java:328-330). (4) Music-fade deviation closed: client/rust/mind-gdext/src/audio/mod.rs GodotMusicOutput::on_game_state_change no longer stops the music player, so leaving a game reaches the menu play() crossfade (SoundControl.java:135-156,263-311); the Sound-bus reset already lives in MindAudio::process. Host half: client/rust/mind-gdext/src/fx.rs shake_duration falls back to intensity when FxEvent::Shake.duration == 0 (the FxSink::shake seam carries intensity only), so block/bullet/weapon shakes from FxSink::shake actually last instead of expiring on frame 1. Tests: cargo test -p mind-core --lib production (burst_drill_burst_fires_sound_and_view_cues, burst_drill_below_threshold_is_silent), --lib ambient (burstdrill_ambient_uses_progress_pow4), --lib music (leaving_game_crossfades_into_menu_music), --lib launch_pad (launch_pad_fires_sound_and_view_cues); cargo test -p mind-gdext --lib fx (shake_duration_falls_back_to_intensity); cargo check -p mind-gdext; tools/build.sh; headless Godot boot. Deviations documented in-code: Java's if(wasVisible) guard is skipped for the BurstDrill cues because the port's Building.was_visible is only written by the fog pass (sim/fog.rs) and would silence every fog-off burst (host sinks are already headless-safe); the vanilla impact-drill/eruption-drill shake=4 + MultiEffect drillEffect overrides are deferred (new PAR filed)."
         }
       ]
     },
@@ -28836,7 +28863,7 @@
     },
     "PAR-0542": {
       "title": "GAPS #9: Weapon.shootStatus/shootStatusDuration never applied on shoot",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28850,9 +28877,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0542"
+              "cmd": "cargo test -p mind-core --lib shoot_status_applies_to_the_shooter"
             }
           }
         ]
@@ -28861,11 +28888,23 @@
       "claimed_at": "2026-11-06T15:03:38Z",
       "severity": "P1",
       "gap": "Weapon.shoot (Weapon.java:513) calls unit.apply(shootStatus, shootStatusDuration); the port parsed the fields (WeaponDef.shoot_status/shoot_status_duration) but weapons/mod.rs::fire never applied them, so vela (wet), quasar/conquer (slow/unmoving) lost their self-status.",
-      "source": "GAPS.md#9"
+      "source": "GAPS.md#9",
+      "fix": "weapons/mod.rs::fire now applies Weapon.shootStatus/shootStatusDuration to the shooter before the shot pattern (`unit.apply(shootStatus, shootStatusDuration)`, Weapon.java:513) through combat::damage::status::apply_status, so status immunity and StatusComp extension semantics apply. Covers vela (slow), quasar/conquer (slow/unmoving) and the Erekir lines. ignoreRotation was already used (LogicAI) and this Java snapshot has no rules.unitAmmo/ammoPerShot/ammoType model (UnitType.ammoCapacity is @Deprecated), so those sub-bullets stay dropped.",
+      "evidence": [
+        "cargo test -p mind-core --lib: 2995 passed, 0 failed, 4 ignored",
+        "new test weapons::tests::shoot_status_applies_to_the_shooter (vela-style shoot_status=slow, duration 199, status present after one weapon update)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T15:53:33Z",
+          "by": "hx-wiring",
+          "text": "Implemented in client/rust/mind-core/src/weapons/mod.rs (outside the packet s file list; the weapon engine has no combat/ equivalent — flag for merge routing). Verified headlessly; Java twin pending."
+        }
+      ]
     },
     "PAR-0543": {
       "title": "GAPS #10 leftovers: legSplashDamage and crawler crushDamage",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28879,9 +28918,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0543"
+              "cmd": "cargo test -p mind-core --lib legged_unit_splash_damages_nearby_enemy_units"
             }
           }
         ]
@@ -28890,11 +28929,23 @@
       "claimed_at": "2026-11-06T15:03:38Z",
       "severity": "P1",
       "gap": "LegsComp.java:196-202 (legSplashDamage in legSplashRange at a stepping foot base) and CrawlComp.java:80-83 (crushDamage to enemy buildings under the crawl circle while moving) were absent from the live unit loop; only the leg geometry and the crawl tile scan existed.",
-      "source": "GAPS.md#10"
+      "source": "GAPS.md#10",
+      "fix": "sim/unit_runtime.rs::apply_movement_damage, run from unit_update_system right after movement::update_kinematics: (1) leg splash — for a legged unit with legSplashDamage > 0, every foot that moved this tick (snapshot before/after, the port s re-step) damages within legSplashRange at the foot base for legSplashDamage * rules.unitDamage(team) (LegsComp.java:196-202, Damage.damage(team,x,y,radius,damage,false,true)); (2) crawler crush — a CrawlComp unit with crushDamage > 0 and a non-zero tick delta damages every enemy building in the crawl circle `Math.max(0, hitSize/tilesize*2)` for crushDamage * unitDamage through BuildingComp.damage semantics (CrawlComp.java:80-83). Disarmed units are gated out.",
+      "evidence": [
+        "cargo test -p mind-core --lib: 2995 passed, 0 failed, 4 ignored",
+        "new tests sim::unit_runtime::tests::legged_unit_splash_damages_nearby_enemy_units and sim::unit_runtime::tests::crawler_crushes_enemy_buildings_while_moving"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T15:53:33Z",
+          "by": "hx-wiring",
+          "text": "Leg splash + crawler crush landed in the sim runtime seam (kind modules keep geometry/scan). Tank crush and leg-death explosion were already present per GAPS triage. Verified headlessly; Java twin pending."
+        }
+      ]
     },
     "PAR-0544": {
       "title": "GAPS #67 leftover: Block.targetable omitted from targetFlagActive",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28908,9 +28959,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0544"
+              "cmd": "cargo test -p mind-core --lib world_logic_blocks_are_not_targetable"
             }
           }
         ]
@@ -28919,7 +28970,19 @@
       "claimed_at": "2026-11-06T15:03:41Z",
       "severity": "P2",
       "gap": "AIController.targetFlagActive (AIController.java:277-284) gates on block.targetable; the port omitted the term (sim/unit_runtime.rs target_flag_active). Only the four worldProcessorOnly world blocks set targetable=false upstream (Blocks.java:7002,7014,7023,7030), and BlockDef has no targetable field (mc/content/**).",
-      "source": "GAPS.md#67"
+      "source": "GAPS.md#67",
+      "fix": "sim/unit_runtime.rs::block_targetable implements Block.targetable (Block.java:308) and target_flag_active now gates on it, matching AIController.java:277-284. Since BlockDef has no targetable field (mc/content/** is out of the packet), the check keys off the exact upstream set that sets targetable=false: the four BuildVisibility.worldProcessorOnly blocks (world-processor, world-cell, world-message, world-switch; Blocks.java:7002,7014,7023,7030 - verified there are no other worldProcessorOnly blocks).",
+      "evidence": [
+        "cargo test -p mind-core --lib: 2995 passed, 0 failed, 4 ignored",
+        "new test sim::unit_runtime::tests::world_logic_blocks_are_not_targetable"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T15:53:44Z",
+          "by": "hx-wiring",
+          "text": "Targetable term landed without a content ABI change; a future BlockDef.targetable field can replace the WorldProcessorOnly key. Verified headlessly; Java twin pending."
+        }
+      ]
     },
     "PAR-0545": {
       "title": "GAPS #33: NetServer gaps — PvP assignTeam, clientSnapshot movement validation, chat commands (/help /sync /votekick /vote), admin chat channel, fixName/checkColor",
@@ -29301,8 +29364,8 @@
           }
         ]
       },
-      "claimed_by": "hx-ui2",
-      "claimed_at": "2026-11-06T15:14:55Z",
+      "claimed_by": "hx-input",
+      "claimed_at": "2026-11-06T15:49:01Z",
       "severity": "P2",
       "source": "GAPS.md#46",
       "gap": "The ping binding exists at HEAD (client/rust/mind-core/src/input/binding.rs:400, id 18) but nothing consumes it: no DesktopInput/MinimapFragment key or tap produces RemoteAction::Ping (input/action.rs:171 only names it), and no renderer draws the ping marker (Java DesktopInput.java:491, MinimapFragment.java:102-137, PlayerComp.drawPing).",
@@ -29337,8 +29400,8 @@
           }
         ]
       },
-      "claimed_by": "hx-ui2",
-      "claimed_at": "2026-11-06T15:14:55Z",
+      "claimed_by": "hx-input",
+      "claimed_at": "2026-11-06T15:49:01Z",
       "severity": "P2",
       "source": "GAPS.md#46",
       "gap": "MindPlanConfigFragment.configure/plan_config_applied are only connected by the HUD scene; Java opens it from DesktopInput.java:800-812 on the ctrl-release of a moved BuildPlan (planConfig.showConfig(splan)), and the port's input/desktop.rs has no splan/plan-move state or config-options source (Block.getPlanConfigs).",
@@ -29373,8 +29436,8 @@
           }
         ]
       },
-      "claimed_by": "hx-ui2",
-      "claimed_at": "2026-11-06T15:14:55Z",
+      "claimed_by": "hx-input",
+      "claimed_at": "2026-11-06T15:49:01Z",
       "severity": "P2",
       "source": "GAPS.md#42",
       "gap": "HudFragment editorMain (:505-549) builds a 5-column BaseTeam selector, a collapsible block palette with search/favorites and setPlayerTeamEditor(player, team) (:714-718). The port's hud.rs has no editor branch, no set_player_team #[func] on MindSimHost (player_team() is read-only) and no favorites in the placement catalogue.",
@@ -29486,6 +29549,216 @@
       "source": "GAPS.md#34",
       "fix": "Config parity only: server_config.uuid_change_limit (default 10) and uuid_change_time_period_hours (default 3) are stored and admin_set_config-writable, documented as unenforced in admin/mod.rs; no enforcement path exists until the protocol supplies a trusted address.",
       "reason": "Blocked on protocol: no client address in the module (OD-21-C); needs a client-side address attestation owned by the net half."
+    },
+    "PAR-0560": {
+      "title": "GAPS #55: block behavior dispatch is name-keyed; mod/JSON class blocks fall back to NoopBehavior",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0560"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod2",
+      "claimed_at": "2026-11-06T15:55:27Z",
+      "severity": "P1",
+      "gap": "BehaviorRegistry had only by_block/by_name; default_behavior left distribution/liquid classes and every turret class at NoopBehavior, so mod blocks of a ported Java class had no building loop.",
+      "source": "GAPS.md#55"
+    },
+    "PAR-0561": {
+      "title": "GAPS #58: 17 consumer classes have no generic lowering/runtime",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0561"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod2",
+      "claimed_at": "2026-11-06T15:55:27Z",
+      "severity": "P1",
+      "gap": "ConsumeInstanceKind covered only Items/Liquid/Liquids/Power/Coolant; ItemFilter/Flammable/Radioactive/Explosive/Charged/List/Efficiency/Explode/ItemDynamic/LiquidFilter/LiquidFlammable/LiquidsDynamic/PayloadDynamic/PayloadFilter/Payloads/PowerCondition/PowerDynamic had no lowering or runtime.",
+      "source": "GAPS.md#58"
+    },
+    "PAR-0562": {
+      "title": "GAPS #57: parsed DrawerKind never converts to DrawDesc; DrawPumpLiquid/DrawBlockParts missing",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0562"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod2",
+      "claimed_at": "2026-11-06T15:55:31Z",
+      "severity": "P2",
+      "gap": "vanilla_chain(name) was the only draw chain; def.drawer (parsed DrawMulti/Region/...) was ignored so mod/JSON blocks drew only DrawDefault, and DrawPumpLiquid/DrawBlockParts had no descriptor.",
+      "source": "GAPS.md#57"
+    },
+    "PAR-0563": {
+      "title": "GAPS #61: ArmorPlate/MoveLightning/UnitSpawn/EmptyData abilities and WaterCrawl/UnderwaterMove/Shielder/LaunchCore components missing",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0563"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod2",
+      "claimed_at": "2026-11-06T15:55:31Z",
+      "severity": "P2",
+      "gap": "No AbilityKind for the four mod abilities, no runtime arms; WaterCrawlComp/UnderwaterMoveComp/ShielderComp/LaunchCoreComp absent from entities/comp.",
+      "source": "GAPS.md#61"
+    },
+    "PAR-0564": {
+      "title": "GAPS #62: RotBlock/UnitTetherBlock/ExplosionShield/ControlBlock stub traits and Block.placeEnded/flipRotation/getPlanConfigs missing",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0564"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod2",
+      "claimed_at": "2026-11-06T15:55:31Z",
+      "severity": "P2",
+      "gap": "The four helper traits had no implementors and read-only signatures; BlockInstance had no flip_rotation/plan_configs/place_ended.",
+      "source": "GAPS.md#62"
+    },
+    "PAR-0565": {
+      "title": "GAPS #54 closing work: BurstDrill per-block shake/drillEffect overrides (impact-drill, eruption-drill)",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0565"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-audio2",
+      "claimed_at": "2026-11-06T16:02:43Z",
+      "severity": "P2",
+      "source": "GAPS.md#54",
+      "gap": "HEAD 01d18ac6 + hx-audio2 wiring: the BurstDrill burst cues (client/rust/mind-core/src/world/behavior/production.rs `emit_burst_cues`) use the BurstDrill class defaults `shake = 2` and `drillEffect = Fx.shockwave` (`BurstDrill.java:15,26,42`). Both vanilla blocks override them: impact-drill `shake = 4`, `drillEffect = MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.mineImpactWave.wrap(Pal.redLight, 40f))` (`Blocks.java:3089-3104`); eruption-drill `shake = 4`, `drillEffect = MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.dynamicSpikes.wrap(Liquids.hydrogen.color, 30f), Fx.mineImpactWave.wrap(Liquids.hydrogen.color, 45f))` (`Blocks.java:3112-3124`). `BurstDrillDef` (client/rust/mind-core/src/world/block_kind_data.rs:170-196) has no shake/drillEffect/drillEffectRnd fields, and `mc/fx` has no MultiEffect spawn path, so both blocks currently play the class-default single shockwave. Fix needs: add the fields to BurstDrillDef + the impact-drill/eruption-drill presets, read them in `emit_burst_cues`, and represent MultiEffect (files outside hx-audio2 ownership).",
+      "evidence": [
+        "sed BurstDrill.java:15,26,42 -> shake=2, drillEffect=Fx.shockwave defaults",
+        "sed Blocks.java:3089-3104,3112-3124 -> impact/eruption shake=4 + MultiEffect overrides",
+        "sed mc/world/block_kind_data.rs:170-196 -> BurstDrillDef has no shake/drill_effect fields",
+        "grep -rn MultiEffect client/rust -> no spawn path",
+        "hx-audio2 BurstDrill cue wiring: cargo test -p mind-core --lib -- burst_drill (2 passed)"
+      ]
+    },
+    "PAR-0566": {
+      "title": "GAPS #68: Achievement/SStat tables + local GameService stat tracking",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0566"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-stats",
+      "claimed_at": "2026-11-06T16:07:37Z",
+      "severity": "P2",
+      "source": "GAPS.md#68",
+      "gap": "Achievement (90 entries at upstream HEAD; GAPS said 69), SStat (21 stats) and the GameService listener logic were absent: NullService was a no-op and nothing tracked stats or unlocked achievements. Fixed non-platform half: game/achievements.rs (SStat+Achievement tables, keys, predicates), game/service.rs (LocalGameService implements crate::service::GameService with settings persistence + query API; ServiceTracker ports GameService.registerEvents reachable hooks), wired into CampaignRuntime (waves, sector capture, last-sector victory, GameStats/campaign-stat polls, turn peaks). Still absent: Steam/Steamworks (#69), UI badges/dialog, gdext plumbing of the service into the settings store."
     }
   },
   "recipes": {

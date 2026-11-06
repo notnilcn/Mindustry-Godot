@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T15:30:17Z",
+  "updated": "2026-11-06T15:48:37Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1091,6 +1091,96 @@
       "repro": "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib; bash server/build.sh",
       "expected": "94 module tests pass; bindings drift-clean after regen",
       "risk": "ABI additions (ChatKind::Admin, MatchChat.target, ChatFilter.match_id, ServerConfig +9, new tables/views); client bindings stale until regenerated",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-154837",
+      "created_at": "2026-11-06T15:48:37Z",
+      "agent": "hx-host",
+      "branch": "main",
+      "head": "47062ea2",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/content/registries/blocks,client/rust/mind-gdext/src",
+      "summary": "Per-block emitLight lightRadius/lightColor + floor env lights (PAR-0467)",
+      "files": [
+        "client/rust/mind-core/src/content/registries/blocks/mod.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-gdext/src/render/light.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib light; ... -p mind-gdext --lib light",
+      "expected": "19 + 3 passed; headless boot exit 0",
+      "risk": "BlockDef ABI append; floor obstructs_light now false; floor light scan every 4th frame; multiblock 1 light per building",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-154837-2",
+      "created_at": "2026-11-06T15:48:37Z",
+      "agent": "hx-ui2",
+      "branch": "main",
+      "head": "47062ea2",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "UI leftovers: JoinDialog version gate + savefail + MapObjectives widgets + Effects preview (GAPS #45/#46)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/dialogs/batch_a.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_b.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_e.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_j.rs",
+        "client/rust/mind-gdext/src/ui/root.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "dialog-sweep"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::batch_b::tests; headless dialog_sweep_check",
+      "expected": "14 focused tests; DIALOGCHECK failed=0",
+      "risk": "rich-label markup; safeConnect now blocks mismatched builds; ObjectiveValue depends on marker_classes_json",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-154837-3",
+      "created_at": "2026-11-06T15:48:37Z",
+      "agent": "hx-net",
+      "branch": "main",
+      "head": "47062ea2",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-headless/src/server,client/rust/mind-stdb,client/rust/mind-gdext/src/net",
+      "summary": "Dedicated host real Sim + mind-stdb roster/MindNet player facade (PAR-0124/0122)",
+      "files": [
+        "client/rust/mind-headless/src/server/host.rs",
+        "client/rust/mind-headless/src/server/mod.rs",
+        "client/rust/mind-headless/src/server/commands.rs",
+        "client/rust/mind-headless/src/server/dedicated.rs",
+        "client/rust/mind-headless/src/server/net_host.rs",
+        "client/rust/mind-headless/src/server/socket.rs",
+        "client/rust/mind-stdb/src/roster.rs",
+        "client/rust/mind-stdb/src/lib.rs",
+        "client/rust/mind-stdb/src/waves.rs",
+        "client/rust/mind-stdb/src/session.rs",
+        "client/rust/mind-gdext/src/net/mod.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib server; ... -p mind-stdb --lib",
+      "expected": "54 + 54 passed; live STDB smoke",
+      "risk": "new subscription tables must exist in the published module; boot loop persists while hosting; gx/ui player-list wiring pending",
       "status": "pending"
     }
   ]
