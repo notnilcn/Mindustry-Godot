@@ -178,3 +178,42 @@ fn decode_looping(bytes: &[u8], looping: bool) -> Option<Gd<AudioStream>> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `findMusic`'s extension handling: a bare name resolves through
+    /// `music/<name>.ogg`, an explicit `.ogg`/`.mp3` keeps its extension.
+    #[test]
+    fn normalize_adds_the_ogg_extension() {
+        assert_eq!(normalize("game1"), "game1.ogg");
+        assert_eq!(normalize("music/beta"), "music/beta.ogg");
+        assert_eq!(normalize("game1.ogg"), "game1.ogg");
+        assert_eq!(normalize("alpha.mp3"), "alpha.mp3");
+    }
+
+    /// The data-asset overlay (`DataAudioLoader`, PAR-0394) stores bytes
+    /// without decoding, so its bookkeeping is testable without a Godot
+    /// runtime; `clear_data_streams` drops only `dp-` entries.
+    #[test]
+    fn data_stream_overlay_lifecycle() {
+        let mut cache = StreamCache::default();
+        assert_eq!(cache.sound_count(), 0);
+        assert_eq!(cache.data_stream_count(), 0);
+        assert!(!cache.is_data_stream("dp-test"));
+        assert_eq!(cache.file_of("test"), None);
+
+        cache.add_data_stream("dp-test", vec![1, 2, 3], false);
+        assert_eq!(cache.data_stream_count(), 1);
+        assert!(cache.is_data_stream("dp-test"));
+
+        // Re-registering replaces the bytes (`unload` then `load`).
+        cache.add_data_stream("dp-test", vec![4, 5], false);
+        assert_eq!(cache.data_stream_count(), 1);
+
+        cache.clear_data_streams();
+        assert_eq!(cache.data_stream_count(), 0);
+        assert!(!cache.is_data_stream("dp-test"));
+    }
+}

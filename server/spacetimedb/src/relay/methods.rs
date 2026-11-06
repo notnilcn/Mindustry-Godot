@@ -6,7 +6,7 @@
 //! sim can re-use them (D2, §3.10) and so their behavior is unit-testable
 //! without a database.
 
-use spacetimedb::{ReducerContext, Table};
+use spacetimedb::{Identity, ReducerContext, Table};
 
 use crate::admin::admin_identity as _;
 
@@ -100,12 +100,26 @@ pub struct JoinGate {
     pub stored_password_hash: Option<u64>,
     /// Password supplied by the joiner, if any.
     pub supplied_password: Option<String>,
+    /// The target name matches a `server_config.banned_name_patterns` regex
+    /// (Java `Administration.isNameBanned`; same generic ban message).
+    pub name_banned: bool,
+    /// Seconds left on a kick cooldown (Java `Administration.getKickTime`).
+    pub kicked_secs_left: Option<u64>,
 }
 
-/// Cheap join validation (ban → whitelist → cap → password), stable reasons.
+/// Cheap join validation (ban → name ban → kick cooldown → whitelist → cap →
+/// password), stable reasons.
 pub fn validate_join(gate: &JoinGate) -> Result<(), String> {
-    if gate.banned {
+    if gate.banned || gate.name_banned {
+        // Java deliberately uses `KickReason.banned` for a name ban so the
+        // player cannot probe which pattern matched (`NetServer.java:195-199`).
         return Err("You are banned from this server.".to_string());
+    }
+    if let Some(secs) = gate.kicked_secs_left
+        && secs > 0
+    {
+        // Java `KickReason.recentKick`.
+        return Err("You were recently kicked from this server.".to_string());
     }
     if gate.whitelist_enabled && !gate.whitelisted {
         return Err("This server is whitelisted.".to_string());
@@ -466,6 +480,11 @@ pub fn is_admin(ctx: &ReducerContext) -> bool {
         .identity()
         .find(ctx.sender())
         .is_some()
+}
+
+/// Whether `identity` (not necessarily the caller) has a global admin grant.
+pub fn is_admin_for(ctx: &ReducerContext, identity: Identity) -> bool {
+    ctx.db.admin_identity().identity().find(identity).is_some()
 }
 
 /// Whether the caller is the match host or a global admin.

@@ -5539,8 +5539,10 @@ impl MindCampaign {
         let (
             sitems,
             destination_allow,
+            destination_allow_schematics,
             destination_preset,
             launcher_core_name,
+            planet_default_core,
             from_name,
             from_preset,
         ) = {
@@ -5577,20 +5579,43 @@ impl MindCampaign {
             (
                 launcher_sector.items().clone(),
                 destination_sector.allow_launch_loadout(planet_def.allow_launch_loadout),
+                destination_sector.allow_launch_schematics(planet_def.allow_launch_schematics),
                 destination_sector.preset,
                 launcher_sector.info.info.best_core_type.clone(),
+                planet_def.default_core.clone().unwrap_or_default(),
                 from_name,
                 launcher_sector.preset_name.clone(),
             )
         };
 
         let schematics = self.load_schematics(registry);
-        let core = registry
-            .block_id(&launcher_core_name)
-            .or_else(|| registry.block_id("core-shard"));
-        let default_index = core
-            .and_then(|core| schematics.get_default_loadout(core))
-            .or_else(|| core.and_then(|core| schematics.get_loadouts(core).first().copied()));
+        // `PlanetDialog.java:1405`: the picker's core is the launcher's best
+        // core when the *destination* allows launch schematics, and the
+        // planet's default core otherwise (`LaunchLoadoutDialog.java:162`
+        // then seeds the selection from that core's last-used loadout).
+        let core_name = launch_core_name(
+            registry,
+            &planet_default_core,
+            &launcher_core_name,
+            destination_allow_schematics,
+        );
+        let core = registry.block_id(&core_name);
+        // `universe.getLoadout(core)` (`LaunchLoadoutDialog.java:162`): the
+        // last loadout used for the launcher's core type, persisted as
+        // `lastloadout-<core>`; Java falls back to `core-shard`'s first
+        // loadout (`:163`).
+        let seeded_index = self.campaign.as_ref().and_then(|campaign| {
+            settings_hub::with_settings(|settings| {
+                campaign
+                    .universe
+                    .get_loadout_index(settings, &schematics, registry, &core_name)
+            })
+        });
+        let default_index = seeded_index.or_else(|| {
+            registry
+                .block_id("core-shard")
+                .and_then(|shard| schematics.get_loadouts(shard).first().copied())
+        });
         let selected_index = usize::try_from(loadout_index)
             .ok()
             .filter(|index| *index < schematics.all.len())
@@ -5615,16 +5640,7 @@ impl MindCampaign {
             .unwrap_or(0);
 
         // `ItemSeq schems = selected.requirements()`.
-        let requirement_seq = selected.requirements(registry);
-        let requirements: indexmap::IndexMap<String, i32> = registry
-            .items()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                let amount = requirement_seq.get(ItemId::new(index as u16));
-                (amount != 0).then(|| (item.name.clone(), amount))
-            })
-            .collect();
+        let requirements = launch_requirements(selected, registry);
 
         // `universe.getLaunchResources()`, with the `show()` on-planet filter
         // (`launch.set(item, 0)` for items not on the launcher's planet).
@@ -5711,38 +5727,49 @@ impl MindCampaign {
             }
         }
 
-        let mut total = requirements.clone();
-        for (item, amount) in &planned {
-            *total.entry(item.clone()).or_insert(0) += *amount;
-        }
-        // `LaunchLoadoutDialog` schematic grid (`entry.key.size <= core.size`):
-        // every loadout whose core is no larger than the launcher's core, in
-        // `Schematics.all` order (the dialog renders these as row buttons).
+        // `total = selected.requirements() + universe.getLaunchResources()`
+        // (`LaunchLoadoutDialog.java:79-84`): the launcher pays exactly this
+        // at `PlanetDialog.playSelected` (`PlanetDialog.java:1409-1410`).
+        let total = launch_total(&requirements, &planned);
+        // `LaunchLoadoutDialog.java:167-196`: the schematic grid only renders
+        // when the destination allows launch schematics, offers every loadout
+        // whose core is no larger than the picker's core, and skips loadouts
+        // with a block that cannot be built on the launcher's planet.
         let core_size = core
             .and_then(|core| registry.block(core))
             .map(|block| block.size)
             .unwrap_or(3);
+        let env = registry
+            .planet(planet_id)
+            .map(|planet| mind_core::game::planet::env_mask(&planet.default_env))
+            .unwrap_or(0);
+        let sun = registry.planet_by_name("sun").map(|planet| planet.id);
         let mut loadout_rows: Vec<serde_json::Value> = Vec::new();
-        for index in 0..schematics.all.len() {
-            let Some(loadout) = schematics.all.get(index) else {
-                continue;
-            };
-            let Some(loadout_core) = loadout.find_core(registry) else {
-                continue;
-            };
-            let Some(def) = registry.block(loadout_core) else {
-                continue;
-            };
-            if def.size > core_size {
-                continue;
+        if destination_allow_schematics {
+            for index in 0..schematics.all.len() {
+                let Some(loadout) = schematics.all.get(index) else {
+                    continue;
+                };
+                let Some(loadout_core) = loadout.find_core(registry) else {
+                    continue;
+                };
+                let Some(def) = registry.block(loadout_core) else {
+                    continue;
+                };
+                if def.size > core_size {
+                    continue;
+                }
+                if !schematic_placeable_on_planet(loadout, registry, planet_id, env, sun) {
+                    continue;
+                }
+                loadout_rows.push(serde_json::json!({
+                    "index": index,
+                    "name": loadout.name(),
+                    "core": def.name,
+                    "is_default": schematics.get_default_loadout(loadout_core) == Some(index),
+                    "file": loadout.file,
+                }));
             }
-            loadout_rows.push(serde_json::json!({
-                "index": index,
-                "name": loadout.name(),
-                "core": def.name,
-                "is_default": schematics.get_default_loadout(loadout_core) == Some(index),
-                "file": loadout.file,
-            }));
         }
         let nonzero = |map: &indexmap::IndexMap<String, i32>| {
             let mut out = serde_json::Map::new();
@@ -5753,20 +5780,37 @@ impl MindCampaign {
             }
             out
         };
+        // `from.removeItems(loadout.requirements())` +
+        // `from.removeItems(universe.getLaunchResources())` as one stack list
+        // (`PlanetDialog.java:1409-1410`); `planet_launch` charges this.
+        let launch_cost: Vec<serde_json::Value> = total
+            .iter()
+            .filter(|(_, amount)| **amount != 0)
+            .map(|(item, amount)| serde_json::json!({"item": item, "amount": amount}))
+            .collect();
+        // `LaunchLoadoutDialog.java:204-210`: a destination that forbids launch
+        // schematics shows the preset description pane instead of the grid.
+        let preset_description =
+            resolve_preset_description(Some(registry), &self.bundle, destination_preset);
         let value = serde_json::json!({
             "from": from_name,
             "from_preset": from_preset,
             "capacity": capacity,
             "allow_launch_loadout": destination_allow,
+            "allow_launch_schematics": destination_allow_schematics,
+            "preset_description": preset_description,
+            "core": core_name,
             "stored": nonzero(&sitems),
             "requirements": nonzero(&requirements),
             "resources": nonzero(&planned),
             "max": max,
             "valid": valid,
             "total": nonzero(&total),
+            "launch_cost": launch_cost,
             "preset_loadout": nonzero(&preset_loadout),
             "loadouts": loadout_rows,
             "selected": selected_index,
+            "selected_file": selected.file,
         });
         if persist_resources {
             self.persist();
@@ -6645,6 +6689,90 @@ fn variant_amount(value: &Variant) -> i64 {
     }
 }
 
+/// `PlanetDialog.java:1405`: the core whose loadout list the launch picker
+/// offers. With `destination.allowLaunchSchematics()` the launcher's best core
+/// wins (`from.info.bestCoreType instanceof CoreBlock`), otherwise the planet's
+/// default core is forced (PAR-0509). A missing/`air` best core or default
+/// falls back to `core-shard`.
+fn launch_core_name(
+    registry: &ContentRegistry,
+    planet_default_core: &str,
+    launcher_best_core: &str,
+    allow_schematics: bool,
+) -> String {
+    let is_core_block = |name: &str| {
+        registry
+            .block_id(name)
+            .and_then(|id| registry.block(id))
+            .is_some_and(|def| def.kind == mind_core::content::BlockKind::CoreBlock)
+    };
+    let fallback = if is_core_block(planet_default_core) {
+        planet_default_core.to_owned()
+    } else {
+        "core-shard".to_owned()
+    };
+    if allow_schematics && is_core_block(launcher_best_core) {
+        launcher_best_core.to_owned()
+    } else {
+        fallback
+    }
+}
+
+/// `Schematic.requirements()` as a non-zero `item name -> amount` map, in item
+/// content order (the `ItemSeq` the launch charge is read from).
+fn launch_requirements(
+    schematic: &mind_core::game::schematic::Schematic,
+    registry: &ContentRegistry,
+) -> indexmap::IndexMap<String, i32> {
+    let requirements = schematic.requirements(registry);
+    registry
+        .items()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let amount = requirements.get(ItemId::new(index as u16));
+            (amount != 0).then(|| (item.name.clone(), amount))
+        })
+        .collect()
+}
+
+/// `LaunchLoadoutDialog.update`'s `total` (`LaunchLoadoutDialog.java:79-84`):
+/// the selected schematic's requirements plus the staged launch resources.
+/// `PlanetDialog.playSelected` removes exactly this from the launcher
+/// (`PlanetDialog.java:1409-1410`), so it must be priced from the schematic
+/// the picker actually selected rather than the planet-default core's loadout
+/// list (PAR-0489).
+fn launch_total(
+    requirements: &indexmap::IndexMap<String, i32>,
+    resources: &indexmap::IndexMap<String, i32>,
+) -> indexmap::IndexMap<String, i32> {
+    let mut total = requirements.clone();
+    for (item, amount) in resources {
+        if *amount != 0 {
+            *total.entry(item.clone()).or_insert(0) += *amount;
+        }
+    }
+    total
+}
+
+/// `LaunchLoadoutDialog.java:171-176`: a loadout is offered only when every
+/// tile's block supports the launcher planet's default environment and can be
+/// built there (`Block.supportsEnv`/`Block.isOnPlanet`).
+fn schematic_placeable_on_planet(
+    schematic: &mind_core::game::schematic::Schematic,
+    registry: &ContentRegistry,
+    planet: PlanetId,
+    env: i32,
+    sun: Option<PlanetId>,
+) -> bool {
+    schematic.tiles.iter().all(|tile| {
+        registry.block(tile.block).is_some_and(|def| {
+            mind_core::world::build::supports_env_bits(def, env)
+                && mind_core::world::build::environment_buildable(def, Some(planet), sun)
+        })
+    })
+}
+
 /// Parses a launch-loadout payload: the dialog envelope
 /// `{"core": ..., "stacks": [...]}` (`PlanetDialog.playSelected`) or the legacy
 /// bare `[{item, amount}]` array.
@@ -6725,6 +6853,22 @@ mod tests {
     use super::*;
     use mind_core::assets::bundle::parse_properties;
     use mind_core::content::{MemoryUnlockStore, create_base_content};
+
+    /// Test-only `expect`: the workspace denies `clippy::expect_used`.
+    fn require<T>(value: Option<T>, what: &str) -> T {
+        match value {
+            Some(value) => value,
+            None => panic!("missing {what}"),
+        }
+    }
+
+    /// Test-only `expect` for fallible setup (`clippy::expect_used` is denied).
+    fn require_ok<T, E: std::fmt::Display>(value: Result<T, E>, what: &str) -> T {
+        match value {
+            Ok(value) => value,
+            Err(error) => panic!("{what}: {error}"),
+        }
+    }
 
     /// EV-0063: the registry boots with an empty `MemoryBundle`, so the paused
     /// dialog's `@objective` gate must resolve the description from the live
@@ -6861,5 +7005,160 @@ mod tests {
         let accrued = saves.update_policy(update, &settings, DEFAULT_SAVE_INTERVAL_SECONDS);
         assert_eq!(accrued.playtime_added, 61_000);
         assert!(saves.get_total_playtime() > 12_345);
+    }
+
+    /// PAR-0489: the launch charge is the *selected* schematic's requirements
+    /// plus the staged launch resources (`PlanetDialog.java:1409-1410`), not
+    /// the planet-default core's loadout list. The old path looked the chosen
+    /// index up in `campaign_section("loadouts")` (built from
+    /// `planet.default_core`), which never contains a larger-core schematic,
+    /// so `core-nucleus`+ loadouts launched for free.
+    #[test]
+    fn launch_cost_prices_the_selected_schematic_not_the_default_core_list() {
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&registry);
+
+        // `basicNucleus` is the vanilla `core-nucleus` loadout.
+        let nucleus_core = require(registry.block_id("core-nucleus"), "core-nucleus");
+        let nucleus_index = require(
+            schematics.get_default_loadout(nucleus_core),
+            "basicNucleus loadout",
+        );
+        let nucleus = &schematics.all[nucleus_index];
+        let requirements = launch_requirements(nucleus, &registry);
+        assert!(
+            !requirements.is_empty(),
+            "basicNucleus carries its blocks' build costs"
+        );
+
+        // The old cost source (the planet-default core's loadout rows) never
+        // lists the nucleus schematic, which is why its requirements were lost.
+        let default_rows =
+            mind_core::ui::campaign::loadout_views(&schematics, &registry, "core-shard");
+        assert!(!default_rows.is_empty(), "core-shard has loadouts");
+        assert!(
+            default_rows.iter().all(|row| row.index != nucleus_index),
+            "the default-core list cannot price a nucleus loadout (PAR-0489)"
+        );
+
+        // `total = selected.requirements() + universe.getLaunchResources()`.
+        let resources = indexmap::IndexMap::from([("copper".to_owned(), 100)]);
+        let total = launch_total(&requirements, &resources);
+        let copper = requirements.get("copper").copied().unwrap_or(0);
+        assert_eq!(
+            total.get("copper").copied(),
+            Some(copper + 100),
+            "schematic copper requirement + staged resources"
+        );
+        for (item, amount) in &requirements {
+            if item != "copper" {
+                assert_eq!(
+                    total.get(item),
+                    Some(amount),
+                    "`{item}` requirement charged"
+                );
+            }
+        }
+    }
+
+    /// PAR-0509: `PlanetDialog.java:1405` picks the launcher's best core only
+    /// when the destination allows launch schematics; otherwise the planet
+    /// default core is forced (`LaunchLoadoutDialog` then renders no grid).
+    /// Serpulo allows schematics (`Planets.java:138`), Erekir does not.
+    #[test]
+    fn launch_core_follows_destination_allow_launch_schematics() {
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        assert!(
+            require(registry.planet_by_name("serpulo"), "serpulo").allow_launch_schematics,
+            "Serpulo allows launch schematics"
+        );
+        assert!(
+            !require(registry.planet_by_name("erekir"), "erekir").allow_launch_schematics,
+            "Erekir keeps the default `allowLaunchSchematics = false`"
+        );
+        // Schematics allowed: the launcher's `bestCoreType` wins.
+        assert_eq!(
+            launch_core_name(&registry, "core-shard", "core-nucleus", true),
+            "core-nucleus"
+        );
+        // Destination forbids schematics: always the planet default core, even
+        // when the launcher's best core is larger.
+        assert_eq!(
+            launch_core_name(&registry, "core-bastion", "core-nucleus", false),
+            "core-bastion"
+        );
+        // `SectorInfo.bestCoreType` defaults to a non-core block ("air");
+        // Java's `instanceof CoreBlock` check falls back to the default core.
+        assert_eq!(
+            launch_core_name(&registry, "core-shard", "air", true),
+            "core-shard"
+        );
+        assert_eq!(
+            launch_core_name(&registry, "core-bastion", "", true),
+            "core-bastion"
+        );
+    }
+
+    /// `LaunchLoadoutDialog.java:171-176`: a loadout whose blocks cannot be
+    /// built on the launcher's planet is not offered. Uses a Serpulo tech-tree
+    /// block (`copper-wall` -> `shownPlanets = [serpulo]`): buildable on
+    /// Serpulo, not on Erekir (`Block.isOnPlanet`).
+    #[test]
+    fn launch_grid_skips_blocks_not_buildable_on_the_planet() {
+        let mut registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        // `shownPlanets` is assigned by the `init`/`postInit` sweeps
+        // (`Planet.init` -> `TechTree.addPlanet`, `Block.postInit`), which the
+        // live client boot runs after `create_base_content`.
+        require_ok(registry.init(), "content init");
+        require_ok(registry.post_init(), "content postInit");
+        let copper_wall = require(registry.block_id("copper-wall"), "copper-wall");
+        let serpulo_id = require(registry.planet_by_name("serpulo"), "serpulo").id;
+        assert!(
+            registry
+                .block(copper_wall)
+                .is_some_and(|def| def.unlock.shown_planets.contains(&serpulo_id)),
+            "copper-wall is registered to Serpulo's tech tree"
+        );
+        let schematic = mind_core::game::schematic::Schematic {
+            tiles: vec![mind_core::game::schematic::Stile::new(
+                copper_wall,
+                0,
+                0,
+                Default::default(),
+                0,
+            )],
+            labels: Vec::new(),
+            tags: Default::default(),
+            width: 1,
+            height: 1,
+            file: None,
+            mod_name: None,
+        };
+        let serpulo = require(registry.planet_by_name("serpulo"), "serpulo");
+        let erekir = require(registry.planet_by_name("erekir"), "erekir");
+        let sun = registry.planet_by_name("sun").map(|planet| planet.id);
+        let serpulo_env = mind_core::game::planet::env_mask(&serpulo.default_env);
+        let erekir_env = mind_core::game::planet::env_mask(&erekir.default_env);
+        assert!(
+            schematic_placeable_on_planet(&schematic, &registry, serpulo.id, serpulo_env, sun),
+            "a Serpulo block is offered on Serpulo"
+        );
+        assert!(
+            !schematic_placeable_on_planet(&schematic, &registry, erekir.id, erekir_env, sun),
+            "a Serpulo-only block is not offered on Erekir"
+        );
     }
 }

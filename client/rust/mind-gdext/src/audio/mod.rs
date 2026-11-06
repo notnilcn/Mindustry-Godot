@@ -11,6 +11,7 @@
 
 pub mod buses;
 pub mod decorator;
+pub mod hooks;
 pub mod streams;
 pub mod voices;
 
@@ -18,22 +19,20 @@ use godot::classes::{AudioListener2D, AudioServer, AudioStreamPlayer, INode, Nod
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
-use indexmap::IndexMap;
-
 use mind_core::audio::frame::{AudioGameState, LoopPos, LoopSource, TurretLoopSource};
 use mind_core::audio::math::{Listener, MIN_INTERVAL_MS, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
     ActiveVoice, AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput,
     MusicContext, MusicOutput, MusicPlayer, MusicRef, OneShotPlan, PlanetMusic, SeededAudioRng,
-    SharedAudioLog, SoundId, SoundLoopAction, SoundLoopState, SoundPlayState, SoundPriorityTable,
-    TickedAudioEvent, bus_for_sound, plan_one_shot, settings_keys,
+    SharedAudioLog, SoundId, SoundPlayState, SoundPriorityTable, TickedAudioEvent, bus_for_sound,
+    plan_one_shot, settings_keys,
 };
 
 use crate::wiring;
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
 use streams::StreamCache;
-use voices::{LoopVoicePool, VoicePool};
+use voices::{LoopVoicePool, SoundLoopInput, SoundLoopTable, SoundLoopVoice, VoicePool};
 
 /// The audio node.
 #[derive(GodotClass)]
@@ -69,10 +68,10 @@ pub struct MindAudio {
     frame_loops: Vec<LoopSource>,
     /// Per-frame turret `SoundLoop` inputs (T6).
     turret_loop_sources: Vec<TurretLoopSource>,
-    /// Live turret `SoundLoop` fade states by key (T6).
-    turret_loops: IndexMap<u64, SoundLoopState>,
-    /// Scratch: voices stopped by the turret-loop sweep.
-    stopped_voices: Vec<u64>,
+    /// Live per-key `SoundLoop` fade voices (`SoundLoop.java`): the per-frame
+    /// turret/weapon scan and the `AudioEvent::LoopInstance` sink share one
+    /// lifecycle so each key keeps its own pitch/volume/fade/stop.
+    sound_loops: SoundLoopTable,
     /// Previous frame's `in_game` (`ResetEvent` mirror, T7).
     last_in_game: Option<bool>,
     /// Previous observed wave (wave-event edge detection, T7).
@@ -159,8 +158,7 @@ impl INode for MindAudio {
             ambient: AmbientSnapshot::default(),
             frame_loops: Vec::with_capacity(16),
             turret_loop_sources: Vec::with_capacity(8),
-            turret_loops: IndexMap::new(),
-            stopped_voices: Vec::with_capacity(8),
+            sound_loops: SoundLoopTable::new(),
             last_in_game: None,
             last_wave: None,
             last_tick: 0,
@@ -317,6 +315,9 @@ impl INode for MindAudio {
             .as_ref()
             .map(SharedAudioLog::take_events)
             .unwrap_or_default();
+        // Mark every per-key `SoundLoop` unreported; both the event sink and
+        // the per-frame turret/weapon scan re-report their live keys below.
+        self.sound_loops.begin_frame();
         self.apply_events(&events, now_ms, delta_frames);
 
         let context = self.music_context(now_ms, delta_frames);
@@ -338,7 +339,7 @@ impl INode for MindAudio {
                 loop_pool.stop_all();
             }
             self.mixer = LoopMixer::new();
-            self.turret_loops.clear();
+            self.sound_loops.clear();
             self.last_wave = None;
         }
         self.last_in_game = Some(in_game);
@@ -402,80 +403,52 @@ impl INode for MindAudio {
                 self.mixer
                     .accumulate(source.sound, x, y, source.volume, source.pitch, listener);
             }
-            // `SoundLoop` instances: volumes include `sfxvol` (Java
-            // `calcVolume`), unlike the `SoundControl.loop` aggregation.
+            // `SoundLoop` instances (turret + continuous weapon mounts):
+            // volumes include `sfxvol` (Java `calcVolume`), unlike the
+            // `SoundControl.loop` aggregation. The per-key table owns the
+            // fade lifecycle; `sweep` stops keys that vanished this frame
+            // (`remove()`/`onDestroyed` -> `soundLoop.stop()`).
             let sfx = self.sfx_scale();
-            for source in &self.turret_loop_sources {
-                let state = self.turret_loops.entry(source.key).or_insert_with(|| {
-                    SoundLoopState::new(source.sound, source.base_volume, source.key)
-                });
-                let action =
-                    state.update(source.x, source.y, source.play, source.volume_scl, listener);
-                match action {
-                    SoundLoopAction::Start { volume, pan, pitch } => {
-                        if let Some(pool) = self.loop_pool.as_mut()
-                            && let Some(stream) = self.streams.sound(state.sound.name(), true)
-                        {
-                            let voice = pool.start(
-                                stream,
-                                volume * sfx,
-                                pitch,
-                                pan,
-                                (listener.x, listener.y),
-                                listener.width,
-                            );
-                            state.voice = Some(voice);
-                        }
-                    }
-                    SoundLoopAction::Update { voice, volume, pan } => {
-                        if let Some(pool) = self.loop_pool.as_mut() {
-                            pool.update(
-                                voice,
-                                volume * sfx,
-                                1.0,
-                                pan,
-                                (listener.x, listener.y),
-                                listener.width,
-                            );
-                        }
-                    }
-                    SoundLoopAction::Stop { voice } => {
-                        if let Some(pool) = self.loop_pool.as_mut() {
-                            pool.stop(voice);
-                        }
-                    }
-                    SoundLoopAction::None => {}
-                }
-            }
-            // Keys not reported this frame stop (`remove()`/`onDestroyed` ->
-            // `soundLoop.stop()`).
-            {
-                let sources = &self.turret_loop_sources;
-                let stopped = &mut self.stopped_voices;
-                self.turret_loops.retain(|key, state| {
-                    let live = sources.iter().any(|source| source.key == *key);
-                    if !live && let Some(voice) = state.stop() {
-                        stopped.push(voice);
-                    }
-                    live
-                });
-            }
             if let Some(pool) = self.loop_pool.as_mut() {
-                for voice in &self.stopped_voices {
-                    pool.stop(*voice);
+                let mut voice = GodotSoundLoopVoice {
+                    pool,
+                    streams: &mut self.streams,
+                    listener,
+                    sfx,
+                };
+                for source in &self.turret_loop_sources {
+                    self.sound_loops.update(
+                        SoundLoopInput {
+                            key: source.key,
+                            sound: source.sound,
+                            base_volume: source.base_volume,
+                            x: source.x,
+                            y: source.y,
+                            play: source.play,
+                            volume_scl: source.volume_scl,
+                            pitch: 1.0,
+                            delta_frames,
+                        },
+                        listener,
+                        &mut voice,
+                    );
                 }
+                self.sound_loops.sweep(&mut voice);
             }
-            self.stopped_voices.clear();
-        } else if !self.turret_loops.is_empty() {
-            // Leaving the game (or pausing into a teardown): stop every turret
-            // loop voice.
-            let states = std::mem::take(&mut self.turret_loops);
+        } else if !self.sound_loops.is_empty() {
+            // Leaving the game (or pausing into a teardown): stop every
+            // `SoundLoop` voice.
+            let sfx = self.sfx_scale();
             if let Some(pool) = self.loop_pool.as_mut() {
-                for (_, mut state) in states {
-                    if let Some(voice) = state.stop() {
-                        pool.stop(voice);
-                    }
-                }
+                let mut voice = GodotSoundLoopVoice {
+                    pool,
+                    streams: &mut self.streams,
+                    listener,
+                    sfx,
+                };
+                self.sound_loops.stop_all(&mut voice);
+            } else {
+                self.sound_loops.clear();
             }
             self.turret_loop_sources.clear();
         }
@@ -661,15 +634,31 @@ impl MindAudio {
         self.settings.sfxvol as f32 / 100.0
     }
 
+    /// `Sound.at(x, y, pitch, volume)` on the Sound bus: per-sound
+    /// `falloffOffset` falloff, `sfxvol`, pan and the 16 ms `checkFrame` gate.
+    fn play_at_world(&mut self, name: &str, x: f32, y: f32, pitch: f32, volume: f32) {
+        let listener = self.listener();
+        let offset = SoundId::by_name(name)
+            .map(|id| self.table.spec(id).falloff_offset)
+            .unwrap_or(0.0);
+        let scaled = calc_falloff(x, y, listener, offset) * self.sfx_scale() * volume;
+        if scaled < MIN_PLAY_VOLUME {
+            return;
+        }
+        let pan = calc_pan(x, listener);
+        self.play_sound(name, scaled, pitch, pan, true);
+    }
+
     /// Applies the drained sim events (plan 18 §3.3): one-shots to the voice
-    /// pool, loop aggregation into the `LoopMixer`, and music control through
-    /// the `MusicPlayer`. Persistent loop voices and the in-engine §7c sweep
-    /// are the documented deferred half.
+    /// pool, loop aggregation into the `LoopMixer`, per-key `SoundLoop` fade
+    /// voices into [`SoundLoopTable`], and music control through the
+    /// `MusicPlayer`.
     fn apply_events(&mut self, events: &[TickedAudioEvent], now_ms: f64, delta_frames: f32) {
         if events.is_empty() {
             return;
         }
         let listener = self.listener();
+        let sfx = self.sfx_scale();
         for ticked in events {
             self.events_applied = self.events_applied.wrapping_add(1);
             match &ticked.event {
@@ -727,16 +716,41 @@ impl MindAudio {
                         .accumulate(*sound, *x, *y, *volume, *pitch, listener);
                 }
                 AudioEvent::LoopInstance {
+                    key,
                     sound,
                     x,
                     y,
+                    play,
                     volume_scl,
-                    ..
                 } => {
-                    // SoundLoop instances accumulate into the same mix; their
-                    // per-key fade voices are the deferred in-engine half.
-                    self.mixer
-                        .accumulate(*sound, *x, *y, *volume_scl, 1.0, listener);
+                    // `SoundLoop.update(x, y, play, volumeScl)` per instance:
+                    // the event carries no constructor `baseVolume`, so the
+                    // `new SoundLoop(sound, 1f)` default (continuous weapon
+                    // mounts, `Weapon.java:392`) applies. Keep the per-key
+                    // fade voice instead of folding it into the aggregate mix.
+                    if let Some(pool) = self.loop_pool.as_mut() {
+                        let mut voice = GodotSoundLoopVoice {
+                            pool,
+                            streams: &mut self.streams,
+                            listener,
+                            sfx,
+                        };
+                        self.sound_loops.update(
+                            SoundLoopInput {
+                                key: *key,
+                                sound: *sound,
+                                base_volume: 1.0,
+                                x: *x,
+                                y: *y,
+                                play: *play,
+                                volume_scl: *volume_scl,
+                                pitch: 1.0,
+                                delta_frames,
+                            },
+                            listener,
+                            &mut voice,
+                        );
+                    }
                 }
                 AudioEvent::LoopCamera { sound, volume } => {
                     self.mixer
@@ -765,6 +779,7 @@ impl MindAudio {
                     if let Some(loop_pool) = &mut self.loop_pool {
                         loop_pool.stop_all();
                     }
+                    self.sound_loops.clear();
                     self.mixer = LoopMixer::new();
                 }
                 AudioEvent::Construct {
@@ -1025,6 +1040,49 @@ impl LoopOutput for GodotLoopOutput<'_> {
     }
 }
 
+/// [`SoundLoopVoice`] backed by the pooled looping 2D voices.
+///
+/// Applies the `sfxvol` multiplier the existing `SoundLoop` path used (Java
+/// `Sound.calcVolume`); the per-key table itself stays pure
+/// `SoundLoop` math so it can be unit-tested without a Godot runtime.
+struct GodotSoundLoopVoice<'a> {
+    pool: &'a mut LoopVoicePool,
+    streams: &'a mut StreamCache,
+    listener: Listener,
+    sfx: f32,
+}
+
+impl SoundLoopVoice for GodotSoundLoopVoice<'_> {
+    fn start(&mut self, sound: SoundId, volume: f32, pitch: f32, pan: f32) -> u64 {
+        match self.streams.sound(sound.name(), true) {
+            Some(stream) => self.pool.start(
+                stream,
+                volume * self.sfx,
+                pitch,
+                pan,
+                (self.listener.x, self.listener.y),
+                self.listener.width,
+            ),
+            None => 0,
+        }
+    }
+
+    fn update(&mut self, voice: u64, volume: f32, pitch: f32, pan: f32) {
+        self.pool.update(
+            voice,
+            volume * self.sfx,
+            pitch,
+            pan,
+            (self.listener.x, self.listener.y),
+            self.listener.width,
+        );
+    }
+
+    fn stop(&mut self, voice: u64) {
+        self.pool.stop(voice);
+    }
+}
+
 #[godot_api]
 impl MindAudio {
     /// Whether the audio driver finished `_ready`.
@@ -1143,6 +1201,67 @@ impl MindAudio {
             player.set_volume_linear(self.settings.musicvol as f32 / 100.0);
             player.play();
         }
+    }
+
+    /// Java `BurstDrill` burst cue (`BurstDrill.java:116`):
+    /// `drillSound.at(x, y, 1f + range(0.1), 0.6)` with `Sounds.drillImpact`.
+    ///
+    /// The burst trigger lives in `mind-core`'s BurstDrill update; this is its
+    /// audio half (`Effect.shake` and `drillEffect` stay render-side).
+    #[func]
+    pub fn play_burstdrill_burst(&mut self, x: f64, y: f64) {
+        let pitch = hooks::pitch_with_rand(&mut self.rng, hooks::BURST_DRILL_PITCH_RAND);
+        self.play_at_world(
+            "drillImpact",
+            x as f32,
+            y as f32,
+            pitch,
+            hooks::BURST_DRILL_SOUND_VOLUME,
+        );
+    }
+
+    /// `BurstDrill.ambientVolume()` audio half
+    /// (`BurstDrill.java:123-124`): `ambientSoundVolume * ambientVolume() *
+    /// pow(progress, 4)`. The ambient snapshot is assembled in `mind-core`
+    /// (`audio/ambient.rs`); exposed for the pending core hook and the twin
+    /// harness.
+    #[func]
+    pub fn burstdrill_ambient_volume(&self, progress: f64, base_volume: f64) -> f64 {
+        f64::from(hooks::burst_drill_ambient_factor(progress as f32)) * base_volume
+    }
+
+    /// Java `LaunchPad` launch cue (`LaunchPad.java:149`):
+    /// `launchSound.at(x, y, 1f + range(0.1))` with `Sounds.padLaunch`.
+    ///
+    /// The launch trigger and payload release hook live in `mind-core`'s
+    /// LaunchPad behavior; this is its audio half.
+    #[func]
+    pub fn play_launch_pad(&mut self, x: f64, y: f64) {
+        let pitch = hooks::pitch_with_rand(&mut self.rng, hooks::LAUNCH_PAD_PITCH_RAND);
+        self.play_at_world("padLaunch", x as f32, y as f32, pitch, 1.0);
+    }
+
+    /// Per-key `SoundLoop` count (inspector; `SoundLoop.java` instances).
+    #[func]
+    pub fn sound_loop_count(&self) -> i64 {
+        self.sound_loops.len() as i64
+    }
+
+    /// Live voice id for a per-key `SoundLoop` (`-1` when none; inspector).
+    #[func]
+    pub fn sound_loop_voice(&self, key: i64) -> i64 {
+        self.sound_loops
+            .voice(key as u64)
+            .map_or(-1, |voice| voice as i64)
+    }
+
+    /// Current per-key `SoundLoop` fade volume (`0..1`, `0` when unknown;
+    /// inspector).
+    #[func]
+    pub fn sound_loop_fade(&self, key: i64) -> f64 {
+        self.sound_loops
+            .fade_volume(key as u64)
+            .map_or(0.0, f64::from)
     }
 
     /// Forces a track by name (`findMusic`-style), optionally interrupting.
@@ -1421,6 +1540,10 @@ impl MindAudio {
         );
         dict.set(&key("voices"), &(self.voice_count().to_variant()));
         dict.set(&key("loop_sounds"), &(self.mixer.len() as i64).to_variant());
+        dict.set(
+            &key("sound_loops"),
+            &(self.sound_loops.len() as i64).to_variant(),
+        );
         dict.set(&key("events"), &(self.pending_events().to_variant()));
         dict.set(
             &key("events_applied"),

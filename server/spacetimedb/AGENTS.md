@@ -15,12 +15,16 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 |---|---|
 | `lib.rs` | Crate root; declares `admin`, `campaign`, `chat`, `identity`, `main`, `mods`, `relay`. |
 | `admin/mod.rs` | `server_config` singleton (`ServerConfig`, id 0), `admin_identity`, `player_ban`, `whitelist_entry`, server-only `admin_rate`, append-only `admin_action_log`; `AdminActionKind`, the `admin_*` reducers and the admin-gated views. |
+| `admin/actions.rs` | `ActionType` (Java parity), persisted `action_filter` policy rows, server-only `action_rate` interaction windows; `admin_add_action_filter`/`admin_remove_action_filter`, `all_action_filters`, `action_type_for`, `action_verdict`, `interact_decision`, `enforce_action_filters`. |
+| `admin/history.rs` | Server-only `player_info` history (names, joins, kicks, kick-cooldown expiry), `player_trace` answers to `adminRequest(trace)`; `record_join`/`record_name`/`record_kick`/`apply_kick`, `find_by_name`/`search_names`, name-ban regex validation/enforcement, `admin_ban_name`/`admin_unban_name`/`admin_request_trace`, `all_player_info`/`my_traces`. |
 | `campaign/mod.rs` | `campaign`/`sector_info`/`unlock`/`campaign_stats`/`schematic` tables with their CRUD reducers/views; `persist_from_command`. |
-| `chat/mod.rs` | `ChatKind`, `match_chat`, server-only `chat_rate`, admin-managed `chat_filter`; `send_chat`, `sanitize_text`, `filter_mutes`, `rate_limit`. |
+| `chat/mod.rs` | `ChatKind` (`All`/`Team`/`System`/`Admin`), `match_chat` (with private `target`), server-only `chat_rate`, per-match server-only `match_chat_state`, admin-managed `chat_filter` (global or match-scoped); `send_chat` command dispatch, `broadcast_system`/`private_notice`, `sanitize_text`, `filter_mutes`, `rate_limit`, `chat_visible`. |
+| `chat/commands.rs` | Pure `/t`, `/a`, `/votekick`, `/vote`, `/help`, `/sync` parser + `/help` paging (Java `NetServer.registerCommands`). |
+| `chat/vote.rs` | `match_vote`, `vote_ballot`, `vote_cooldown`; `start_vote`/`cast_vote`/`expire_votes`/`sweep_votes`, `votes_required`, kick-on-pass through `apply_kick`. |
 | `identity/` | `tables.rs` (`player`, `player_session`, `player_profile`, `client_settings`), `methods.rs` validators, `reducers.rs` (`set_username`, `create_profile`, `update_client_settings`), `views.rs` (`local_player`, `all_players`, ...). |
 | `main/` | `global.rs` tunables, `seeds.rs` code seeds, `content_seed.rs` generated `VANILLA_CONTENT`, `lifecycle.rs` (`init`/`client_connected`/`client_disconnected`), `audit.rs` server-only `audit_log` + `audit`, `tables.rs` (`protocol_info`, `relay_config`, `AuditKind`). |
 | `mods/mod.rs` | `match_mod`, `content_catalog`; `check_mods` and `content_name_allowed`. |
-| `relay/` | Match directory/membership, the private `match_command` log, rate/session state, rules, plan snapshots, checksums, snapshots, UI events, LWW player state and the maintenance sweep; every relay reducer and view. |
+| `relay/` | Match directory/membership, the private `match_command` log, rate/session state, rules, plan snapshots, checksums, snapshots, UI events, published `match_event` server events, LWW player state and the maintenance sweep; every relay reducer and view. |
 | `Cargo.toml` | `cdylib` crate `mindustry_godot`, its own workspace, pinned to `spacetimedb = "=2.10.1"`. |
 
 ## Responsibilities
@@ -36,13 +40,25 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
   `persist_from_command`, `rules_after_command`, then `rate_allow` assigns a
   monotonic `sender_seq` and appends the `CommandKind` row to the private
   `match_command` log. `sender_command_state` records per-sender acceptance.
-- **Chat.** `send_chat` sanitizes text, applies `chat_filter` mute patterns
-  (three infractions set `chat_rate.muted_until` 60 s ahead), then the
-  `server_config` rate window; `ChatKind::System` requires host/admin.
+- **Chat.** `send_chat` rate-gates the connection, parses `/` commands before
+  the filters (Java `NetClient.sendChatMessage`), dispatches `/t`, `/a`,
+  `/votekick`, `/vote`, `/help`, `/sync`, then sanitizes, applies the
+  global + match-scoped `chat_filter` patterns (three infractions set the
+  per-match `match_chat_state.muted_until` 60 s ahead) and the built-in
+  anti-spam gate (`messageRateLimit`/`messageSpamKick`). `ChatKind::Admin` needs
+  an admin, `ChatKind::System` the host/admin; every notice is a `match_chat`
+  row so clients converge through `my_match_chat`.
 - **Moderation.** `admin_kick`/`admin_ban`/`admin_unban`, whitelist and admin
-  grant reducers, `admin_set_config`, the chat-filter reducers and the ordered
-  wave/team/tile emitters; each committed action appends `admin_action_log` and
-  an `audit_log` line. Bans are identity-only (no IP/subnet bans).
+  grant reducers, `admin_set_config`, the chat-filter reducers (global and
+  match-scoped), action filters, PlayerInfo history/trace/name bans and the
+  ordered wave/team/tile emitters; each committed action appends
+  `admin_action_log` and an `audit_log` line. Bans are identity-only (no IP/subnet
+  bans); name bans are case-insensitive regexes enforced on create/join, and a
+  kick cooldown blocks rejoin until `player_info.last_kicked_at`.
+- **Events.** `relay/events.rs` publishes one `match_event` row per
+  server-observable event (match lifecycle, join/leave/kick, chat, votes,
+  config/name-ban/admin changes, `/sync`); `my_match_events` is the client
+  `EventType` bus source (GAPS #37).
 - **Campaign/schematics.** Campaign writes require the campaign host or a global
   admin; schematics are owner-scoped. `RelayMatch.campaign_id` keys campaign
   rows, and `persist_from_command` writes `ResearchUnlock`, `SectorCapture` and
@@ -56,8 +72,8 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 - **Maintenance.** `tick_maintenance` runs on the `maintenance_schedule`
   interval and prunes the command log behind the snapshot watermark, expired
   bans, disconnected members past `MEMBER_GRACE_SECS`, ended matches past
-  `match_ttl_hours`, chat/UI/checksum/snapshot/plan retention, idle rate rows
-  and old player sessions.
+  `match_ttl_hours`, chat/UI/checksum/snapshot/plan/event/trace retention,
+  expired votekick sessions, idle rate rows and old player sessions.
 
 ## Rules
 
@@ -81,17 +97,19 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 - **Server-only tables** (no `public`): `audit_log`, `relay_member`,
   `match_command`, `command_rate`, `sender_command_state`, `match_kick`,
   `match_snapshot_request`, `match_snapshot_chunk`, `snapshot_rate`,
-  `checksum_rate`, `match_player_state_rate`, `chat_rate`, `admin_rate`,
-  `maintenance_schedule`.
+  `checksum_rate`, `match_player_state_rate`, `chat_rate`, `match_chat_state`,
+  `admin_rate`, `action_filter`, `action_rate`, `player_info`, `player_trace`,
+  `match_vote`, `vote_ballot`, `vote_cooldown`, `maintenance_schedule`.
   Clients reach them through member semijoin views (`my_match_commands`,
   `my_kick`, `my_match_snapshot_chunks`, `my_sender_command_state`, ...).
 - **Member semijoin views.** `all_matches` lists public non-ended matches; the
   other match views (`my_matches`, `my_match_members`, `my_match_state`,
   `my_match_commands`, `my_match_chat`, `my_match_checksums`,
   `my_match_snapshots`, `my_match_snapshot_requests`, `my_match_ui_events`,
-  `my_match_player_states`, `my_match_plans`) resolve the caller's active match
-  through `relay_member` and never expose another match's rows. Admin views
-  (`am_i_admin`, `all_bans`, `all_whitelist`, `all_admins`, `all_chat_filters`,
+  `my_match_player_states`, `my_match_plans`, `my_match_events`) resolve the
+  caller's active match through `relay_member` and never expose another match's
+  rows. Admin views (`am_i_admin`, `all_bans`, `all_whitelist`, `all_admins`,
+  `all_chat_filters`, `all_action_filters`, `all_player_info`, `my_traces`,
   `my_admin_actions`) gate on `admin_identity`.
 - **Campaign keying.** Campaign and schematic persistence is keyed by
   `RelayMatch.campaign_id`; a match without one keeps it a no-op.
@@ -101,10 +119,14 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 ## Verification
 
 ```bash
+cargo test --manifest-path server/spacetimedb/Cargo.toml --lib   # pure unit suites
 cargo check --manifest-path server/spacetimedb/Cargo.toml --tests
 spacetime describe mindustry --server local --json   # tables/reducers/views
 ```
 
-The `#[cfg(test)]` suites (`admin`, `mods`, `chat`, `campaign`, `identity`,
-`main`, `relay`) are pure and typecheck under `cargo check --tests`; the
-`cdylib` cannot be linked in place, so they are not run as Rust tests.
+The `#[cfg(test)]` suites (`admin`, `chat`, `mods`, `campaign`, `identity`,
+`main`, `relay`) are pure and **do** run: `cargo test --lib` links the crate as a
+test harness on the host target (verified 2026-11-06, 94 tests). The
+`cdylib`-only note in older revisions was stale. Reducer behaviour is exercised
+end-to-end by publishing to a local `spacetime start` node and calling reducers
+(see `runs/PAR-0121/`).

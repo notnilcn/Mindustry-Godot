@@ -193,3 +193,62 @@ pub const MAX_UNLOCK_REQUIREMENTS_JSON: usize = 8 * 1024;
 
 /// Campaign-stat key cap.
 pub const MAX_STAT_KEY: usize = 100;
+
+// ---- Chat commands, votekick, player history and action filters ------------
+// Values mirror `NetServer.java:108-116` (vote timings) and
+// `Administration.java:33-200` (message/action spam gates).
+
+/// Chat mute duration after repeated filter infractions (plan §6.6).
+pub const CHAT_MUTE_SECS: u64 = 60;
+
+/// Filter infractions before [`CHAT_MUTE_SECS`] applies (upstream three strikes).
+pub const CHAT_INFRACTION_LIMIT: u32 = 3;
+
+/// Duplicate-message suppression window (Java `Administration`: 10 s).
+pub const CHAT_DUPLICATE_WINDOW_SECS: u64 = 10;
+
+/// Votekick session duration (Java `NetServer.voteDuration = 30 s`).
+pub const VOTE_DURATION_SECS: u64 = 30;
+
+/// Votekick pass ban duration (Java `NetServer.kickDuration = 1 h`).
+pub const VOTE_KICK_SECS: u64 = 60 * 60;
+
+/// Per-player votekick cooldown (Java `NetServer.voteCooldown = 5 min`).
+pub const VOTE_COOLDOWN_SECS: u64 = 60 * 5;
+
+/// Interaction-rate kick cooldown (Java action filter passes 30 s).
+pub const INTERACT_KICK_SECS: u64 = 30;
+
+/// Message-spam kick cooldown (Java `player.con.kick(..., 1000 * 60 * 2)`).
+pub const MESSAGE_SPAM_KICK_SECS: u64 = 60 * 2;
+
+/// Minimum online players for `/votekick` (Java `NetServer`: at least 3).
+pub const VOTE_MIN_PLAYERS: usize = 3;
+
+/// Base votes required to pass (Java `votesRequired`).
+pub const VOTE_BASE_REQUIRED: u32 = 2;
+
+/// PlayerInfo retained-name cap (history stays bounded).
+pub const MAX_PLAYER_NAMES: usize = 32;
+
+/// PlayerInfo retained-ip cap (no IP source under D2; kept for parity shape).
+pub const MAX_PLAYER_IPS: usize = 16;
+
+/// PlayerInfo name cap (mirrors `identity::methods::MAX_USERNAME_LEN`).
+pub const MAX_PLAYER_NAME_LEN: usize = 40;
+
+/// Name-ban regex pattern cap (Java stores arbitrary regexes; bounded here).
+pub const MAX_NAME_PATTERN_LEN: usize = 128;
+
+/// Player-trace retention (plan §6.8: 24 h).
+pub const PLAYER_TRACE_RETENTION_SECS: u64 = 24 * 3600;
+
+/// Match-event retention (plan §6.8: 5 min, same as UI events).
+pub const MATCH_EVENT_RETENTION_SECS: u64 = 5 * 60;
+
+/// Closed vote/ballot retention (plan §6.8: 10 min).
+pub const VOTE_RETENTION_SECS: u64 = 10 * 60;
+
+/// Cap for server-generated chat notices (help pages, vote tallies). Player
+/// chat keeps [`MAX_TEXT`]; notices need room for a multi-line `/help` page.
+pub const MAX_SYSTEM_TEXT: usize = 480;

@@ -2209,6 +2209,16 @@ pub enum InlineEffectKind {
     WaveEffect = 3,
     /// `WrapEffect` (recolored child).
     WrapEffect = 4,
+    /// `ParticleEffect` (`ContentParser`'s default inline class).
+    ParticleEffect = 5,
+    /// `RadialEffect` (repeated child at angle intervals).
+    RadialEffect = 6,
+    /// `SeqEffect` (children played in sequence).
+    SeqEffect = 7,
+    /// `SoundEffect` (sound + optional child effect).
+    SoundEffect = 8,
+    /// `NoiseEffect` (camera-space noise layers).
+    NoiseEffect = 9,
 }
 
 impl InlineEffectKind {
@@ -2220,6 +2230,11 @@ impl InlineEffectKind {
             InlineEffectKind::ExplosionEffect => "ExplosionEffect",
             InlineEffectKind::WaveEffect => "WaveEffect",
             InlineEffectKind::WrapEffect => "WrapEffect",
+            InlineEffectKind::ParticleEffect => "ParticleEffect",
+            InlineEffectKind::RadialEffect => "RadialEffect",
+            InlineEffectKind::SeqEffect => "SeqEffect",
+            InlineEffectKind::SoundEffect => "SoundEffect",
+            InlineEffectKind::NoiseEffect => "NoiseEffect",
         }
     }
 }
@@ -2281,6 +2296,119 @@ pub struct EffectSpec {
     pub stroke_from: f32,
     /// `WaveEffect.strokeTo`.
     pub stroke_to: f32,
+    /// `Effect.startDelay` (`0` default; `SoundEffect` inherits the child's,
+    /// `-1` = unset).
+    pub start_delay: f32,
+    /// `Effect.baseRotation`.
+    pub base_rotation: f32,
+    /// `ParticleEffect.colorFrom` (`Color.white`; `None` = class default).
+    pub particle_color_from: Option<crate::content::color::Rgba>,
+    /// `ParticleEffect.particles` (`6`).
+    pub particles: i32,
+    /// `ParticleEffect.randLength` (`true`).
+    pub rand_length: bool,
+    /// `ParticleEffect.casingFlip`.
+    pub casing_flip: bool,
+    /// `ParticleEffect.cone` (`180`).
+    pub cone: f32,
+    /// `ParticleEffect.length` (`20`).
+    pub length: f32,
+    /// `ParticleEffect.baseLength`.
+    pub base_length: f32,
+    /// `ParticleEffect.offsetX`.
+    pub offset_x: f32,
+    /// `ParticleEffect.offsetY`.
+    pub offset_y: f32,
+    /// `ParticleEffect.lightScl` (`2`).
+    pub light_scl: f32,
+    /// `ParticleEffect.lightOpacity` (`0.6`).
+    pub light_opacity: f32,
+    /// `ParticleEffect.lightColor` (nullable).
+    pub light_color: Option<crate::content::color::Rgba>,
+    /// `ParticleEffect.interp` (`Interp.linear`).
+    pub interp: crate::content::registries::units::parts::InterpKind,
+    /// `ParticleEffect.sizeInterp` (nullable; null falls back to `interp`).
+    pub size_interp: Option<crate::content::registries::units::parts::InterpKind>,
+    /// `ParticleEffect.colorInterp` (nullable).
+    pub color_interp: Option<crate::content::registries::units::parts::InterpKind>,
+    /// `ParticleEffect.widthInterp` (nullable).
+    pub width_interp: Option<crate::content::registries::units::parts::InterpKind>,
+    /// `ParticleEffect.heightInterp` (nullable).
+    pub height_interp: Option<crate::content::registries::units::parts::InterpKind>,
+    /// `ParticleEffect.spin` (degrees/tick).
+    pub particle_spin: f32,
+    /// `ParticleEffect.sizeChangeStart`.
+    pub size_change_start: f32,
+    /// `ParticleEffect.widthChangeStart`.
+    pub width_change_start: f32,
+    /// `ParticleEffect.heightChangeStart`.
+    pub height_change_start: f32,
+    /// `ParticleEffect.useRotation` (`true`).
+    pub use_rotation: bool,
+    /// `ParticleEffect.offset` (draw rotation offset).
+    pub particle_offset: f32,
+    /// `ParticleEffect.region` (`"circle"`).
+    pub region: String,
+    /// `ParticleEffect.widthFrom`.
+    pub width_from: f32,
+    /// `ParticleEffect.widthTo`.
+    pub width_to: f32,
+    /// `ParticleEffect.heightFrom`.
+    pub height_from: f32,
+    /// `ParticleEffect.heightTo`.
+    pub height_to: f32,
+    /// `ParticleEffect.line`.
+    pub line: bool,
+    /// `ParticleEffect.lenFrom`.
+    pub len_from: f32,
+    /// `ParticleEffect.lenTo`.
+    pub len_to: f32,
+    /// `ParticleEffect.cap` (`true`).
+    pub cap: bool,
+    /// `RadialEffect.rotationSpacing` (`90`).
+    pub rotation_spacing: f32,
+    /// `RadialEffect.rotationOffset`.
+    pub rotation_offset: f32,
+    /// `RadialEffect.effectRotationOffset`.
+    pub effect_rotation_offset: f32,
+    /// `RadialEffect.lengthOffset`.
+    pub length_offset: f32,
+    /// `RadialEffect.amount` (`4`).
+    pub amount: i32,
+    /// `SoundEffect.sound` (`Sounds.none` default).
+    pub sound: Option<crate::content::registries::sound_meta::SoundId>,
+    /// `SoundEffect.minPitch` (`0.8`).
+    pub min_pitch: f32,
+    /// `SoundEffect.maxPitch` (`1.2`).
+    pub max_pitch: f32,
+    /// `SoundEffect.minVolume` (`1`).
+    pub min_volume: f32,
+    /// `SoundEffect.maxVolume` (`1`).
+    pub max_volume: f32,
+    /// `NoiseEffect.noisePath` (`sprites/distortAlpha.png`).
+    pub noise_path: String,
+    /// `NoiseEffect.noiseScl` (`1000`).
+    pub noise_scl: f32,
+    /// `NoiseEffect.opacity` (`0.3`).
+    pub opacity: f32,
+    /// `NoiseEffect.baseSpeed` (`0.4`).
+    pub base_speed: f32,
+    /// `NoiseEffect.intensity` (`1`).
+    pub intensity: f32,
+    /// `NoiseEffect.windX` (`1`).
+    pub wind_x: f32,
+    /// `NoiseEffect.windY` (`0`).
+    pub wind_y: f32,
+    /// `NoiseEffect.layers` (`4`).
+    pub layers: i32,
+    /// `NoiseEffect.layerSpeedMul` (`-1.3`).
+    pub layer_speed_mul: f32,
+    /// `NoiseEffect.layerAlphaMul` (`0.7`).
+    pub layer_alpha_mul: f32,
+    /// `NoiseEffect.layerSclMul` (`0.8`).
+    pub layer_scl_mul: f32,
+    /// `NoiseEffect.layerColorMul` (`0.9`).
+    pub layer_color_mul: f32,
 }
 
 impl EffectSpec {
@@ -2324,6 +2452,94 @@ impl EffectSpec {
     pub fn wave() -> Self {
         Self {
             kind: InlineEffectKind::WaveEffect,
+            ..Self::default()
+        }
+    }
+
+    /// `new ParticleEffect()` with its `entities/effect/ParticleEffect.java`
+    /// field initializers.
+    pub fn particle() -> Self {
+        Self {
+            kind: InlineEffectKind::ParticleEffect,
+            lifetime: 50.0,
+            particle_color_from: Some(crate::content::color::Rgba::WHITE),
+            color_to: Some(crate::content::color::Rgba::WHITE),
+            particles: 6,
+            rand_length: true,
+            cone: 180.0,
+            length: 20.0,
+            light_scl: 2.0,
+            light_opacity: 0.6,
+            interp: crate::content::registries::units::parts::InterpKind::Linear,
+            use_rotation: true,
+            region: String::from("circle"),
+            width_from: 1.0,
+            width_to: 1.0,
+            height_from: 1.0,
+            height_to: 1.0,
+            size_from: 2.0,
+            stroke_from: 2.0,
+            len_from: 4.0,
+            len_to: 2.0,
+            cap: true,
+            ..Self::default()
+        }
+    }
+
+    /// `new RadialEffect()` (clip 100, `amount = 4`, spacing 90).
+    pub fn radial() -> Self {
+        Self {
+            kind: InlineEffectKind::RadialEffect,
+            lifetime: 50.0,
+            clip: 100.0,
+            rotation_spacing: 90.0,
+            amount: 4,
+            ..Self::default()
+        }
+    }
+
+    /// `new SeqEffect()` (clip 100; lifetime is the sum of the children after
+    /// `init()`, set by the parser once the children are known).
+    pub fn seq() -> Self {
+        Self {
+            kind: InlineEffectKind::SeqEffect,
+            lifetime: 50.0,
+            clip: 100.0,
+            ..Self::default()
+        }
+    }
+
+    /// `new SoundEffect()` (`startDelay = -1`; `init()` inherits the child's).
+    pub fn sound_effect() -> Self {
+        Self {
+            kind: InlineEffectKind::SoundEffect,
+            lifetime: 50.0,
+            start_delay: -1.0,
+            min_pitch: 0.8,
+            max_pitch: 1.2,
+            min_volume: 1.0,
+            max_volume: 1.0,
+            ..Self::default()
+        }
+    }
+
+    /// `new NoiseEffect()` (`clip = Float.MAX_VALUE`; noise layer defaults).
+    pub fn noise() -> Self {
+        Self {
+            kind: InlineEffectKind::NoiseEffect,
+            lifetime: 50.0,
+            clip: f32::MAX,
+            noise_path: String::from("sprites/distortAlpha.png"),
+            noise_scl: 1000.0,
+            opacity: 0.3,
+            base_speed: 0.4,
+            intensity: 1.0,
+            wind_x: 1.0,
+            layers: 4,
+            layer_speed_mul: -1.3,
+            layer_alpha_mul: 0.7,
+            layer_scl_mul: 0.8,
+            layer_color_mul: 0.9,
             ..Self::default()
         }
     }

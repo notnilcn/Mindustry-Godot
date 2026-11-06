@@ -7,8 +7,10 @@
 
 use godot::classes::{AudioStream, AudioStreamPlayer, AudioStreamPlayer2D, Node, Node2D};
 use godot::prelude::*;
+use indexmap::IndexMap;
 
-use mind_core::audio::{ActiveVoice, SoundId};
+use mind_core::audio::math::{Listener, SOUND_LOOP_FADE};
+use mind_core::audio::{ActiveVoice, SoundId, SoundLoopAction, SoundLoopState};
 
 /// World one-shot voices (`MAX_VOICES`).
 pub const MAX_VOICES: usize = 128;
@@ -378,5 +380,515 @@ impl LoopVoicePool {
             player.stop();
             self.generation[slot] = self.generation[slot].wrapping_add(1);
         }
+    }
+}
+
+/// One per-instance `SoundLoop.update(x, y, play[, volumeScl])` input.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundLoopInput {
+    /// Stable per-instance voice key (`Turret`/weapon-mount/block entity).
+    pub key: u64,
+    /// Looped sound.
+    pub sound: SoundId,
+    /// Base volume from the `SoundLoop` constructor (`loopSoundVolume` for
+    /// turrets, `1f` for continuous weapon mounts).
+    pub base_volume: f32,
+    /// World x (px).
+    pub x: f32,
+    /// World y (px).
+    pub y: f32,
+    /// Whether the loop should be playing (fade in) this frame.
+    pub play: bool,
+    /// Call-site `volumeScl` (turret `activeSoundVolume()`, `1` for weapons).
+    pub volume_scl: f32,
+    /// Voice pitch. Java `SoundLoop.update` always starts at `1f`; the field
+    /// exists for the host hook and is held constant while fading (Java's
+    /// `Core.audio.set(id, pan, volume)` does not touch pitch).
+    pub pitch: f32,
+    /// Frames elapsed since the previous update (`Time.delta`, 60 fps units):
+    /// `SoundLoop.update` scales `fadeSpeed` by it (`SoundLoop.java:38-40`).
+    pub delta_frames: f32,
+}
+
+/// Voice operations required by [`SoundLoopTable`].
+pub trait SoundLoopVoice {
+    /// Starts a loop voice; `0` means the pool/stream refused (retry next frame).
+    fn start(&mut self, sound: SoundId, volume: f32, pitch: f32, pan: f32) -> u64;
+    /// Updates a running voice's volume/pitch/pan.
+    fn update(&mut self, voice: u64, volume: f32, pitch: f32, pan: f32);
+    /// Stops a voice.
+    fn stop(&mut self, voice: u64);
+}
+
+#[derive(Debug, Clone)]
+struct SoundLoopEntry {
+    state: SoundLoopState,
+    /// Fixed pitch for the voice (Java never re-pitches an existing `SoundLoop`).
+    pitch: f32,
+    /// Updated this frame (`SoundLoop.update` called for the key).
+    seen: bool,
+}
+
+/// `Time.delta` for the fade step; a non-finite/non-positive frame delta
+/// counts as one 60 Hz frame instead of freezing or reversing the fade.
+fn fade_delta(delta_frames: f32) -> f32 {
+    if delta_frames.is_finite() && delta_frames > 0.0 {
+        delta_frames
+    } else {
+        1.0
+    }
+}
+
+/// Per-key `SoundLoop` fade voices (`SoundLoop.java`).
+///
+/// Java keeps one `SoundLoop` per turret building and one per continuous weapon
+/// mount, each with its own `id`, `volume` fade and `baseVolume`. Folding the
+/// instances into the aggregated `LoopMixer` loses that per-key lifecycle (and
+/// its pitch/volume independence), so this table owns one [`SoundLoopState`]
+/// per key and drives an independent pooled voice through [`SoundLoopVoice`].
+///
+/// The table is driven by both client paths: the per-frame turret/weapon scan
+/// and the drained `AudioEvent::LoopInstance` events. Call [`begin_frame`] once
+/// per frame, [`update`] for every reported key, then [`sweep`]; a key that is
+/// not reported in a frame is stopped (`SoundLoop.stop()` on teardown).
+///
+/// [`begin_frame`]: SoundLoopTable::begin_frame
+/// [`update`]: SoundLoopTable::update
+/// [`sweep`]: SoundLoopTable::sweep
+pub struct SoundLoopTable {
+    entries: IndexMap<u64, SoundLoopEntry>,
+}
+
+impl Default for SoundLoopTable {
+    fn default() -> Self {
+        SoundLoopTable::new()
+    }
+}
+
+impl SoundLoopTable {
+    /// Creates an empty per-key table.
+    pub fn new() -> Self {
+        SoundLoopTable {
+            entries: IndexMap::with_capacity(8),
+        }
+    }
+
+    /// Number of live per-key loops (including fully-faded-out ones awaiting
+    /// their key to stop being reported).
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether no per-key loop is tracked.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Live voice id for a key (`None` before the first `SoundLoop.update`).
+    pub fn voice(&self, key: u64) -> Option<u64> {
+        self.entries.get(&key).and_then(|entry| entry.state.voice)
+    }
+
+    /// Current fade volume for a key (`0..1`, `SoundLoop.volume`).
+    pub fn fade_volume(&self, key: u64) -> Option<f32> {
+        self.entries.get(&key).map(|entry| entry.state.volume)
+    }
+
+    /// Clears the frame's "reported" marks; call at the top of `process`.
+    pub fn begin_frame(&mut self) {
+        for entry in self.entries.values_mut() {
+            entry.seen = false;
+        }
+    }
+
+    /// `SoundLoop.update(x, y, play[, volumeScl])` for one key.
+    ///
+    /// Starts the voice on the first playing frame at `volume = 0` (Java's
+    /// `sound.loop(...)` runs before the first `fadeSpeed` step), fades it in
+    /// or out at `SoundLoop.fadeSpeed * Time.delta`, then updates volume/pan. A
+    /// changed sound or `baseVolume` for the same key replaces the instance
+    /// (the old voice is stopped first).
+    pub fn update(
+        &mut self,
+        input: SoundLoopInput,
+        listener: Listener,
+        out: &mut impl SoundLoopVoice,
+    ) {
+        if input.base_volume <= 0.0 || input.sound.is_none_or_unset() {
+            return;
+        }
+        let entry = self
+            .entries
+            .entry(input.key)
+            .or_insert_with(|| SoundLoopEntry {
+                state: SoundLoopState::new(input.sound, input.base_volume, input.key),
+                pitch: input.pitch,
+                seen: false,
+            });
+        if entry.state.sound != input.sound || entry.state.base_volume != input.base_volume {
+            if let Some(voice) = entry.state.stop() {
+                out.stop(voice);
+            }
+            entry.state = SoundLoopState::new(input.sound, input.base_volume, input.key);
+        }
+        entry.pitch = input.pitch;
+        entry.seen = true;
+        // `volume = clamp(volume + fadeSpeed * Time.delta)` (`SoundLoop.java:38-40`).
+        entry.state.fade_speed = SOUND_LOOP_FADE * fade_delta(input.delta_frames);
+        let action = entry
+            .state
+            .update(input.x, input.y, input.play, input.volume_scl, listener);
+        match action {
+            SoundLoopAction::Start { volume, pan, .. } => {
+                let voice = out.start(input.sound, volume, entry.pitch, pan);
+                if voice != 0 {
+                    entry.state.voice = Some(voice);
+                }
+            }
+            SoundLoopAction::Update { voice, volume, pan } => {
+                out.update(voice, volume, entry.pitch, pan);
+            }
+            SoundLoopAction::Stop { voice } => out.stop(voice),
+            SoundLoopAction::None => {}
+        }
+    }
+
+    /// Stops every key that was not reported this frame (`SoundLoop.stop` on
+    /// `remove()`/`onDestroyed`).
+    pub fn sweep(&mut self, out: &mut impl SoundLoopVoice) {
+        self.entries.retain(|_, entry| {
+            if entry.seen {
+                return true;
+            }
+            if let Some(voice) = entry.state.stop() {
+                out.stop(voice);
+            }
+            false
+        });
+    }
+
+    /// Stops and drops every per-key loop (`ResetEvent`/leaving the game).
+    pub fn stop_all(&mut self, out: &mut impl SoundLoopVoice) {
+        for entry in self.entries.values_mut() {
+            if let Some(voice) = entry.state.stop() {
+                out.stop(voice);
+            }
+        }
+        self.entries.clear();
+    }
+
+    /// Drops every per-key loop without touching voices (the caller already
+    /// stopped the whole pool).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingVoices {
+        started: Vec<(u64, SoundId, f32, f32, f32)>,
+        updated: Vec<(u64, f32, f32, f32)>,
+        stopped: Vec<u64>,
+        next: u64,
+        refuse_next_start: bool,
+    }
+
+    impl SoundLoopVoice for RecordingVoices {
+        fn start(&mut self, sound: SoundId, volume: f32, pitch: f32, pan: f32) -> u64 {
+            if self.refuse_next_start {
+                self.refuse_next_start = false;
+                return 0;
+            }
+            self.next += 1;
+            let voice = self.next;
+            self.started.push((voice, sound, volume, pitch, pan));
+            voice
+        }
+
+        fn update(&mut self, voice: u64, volume: f32, pitch: f32, pan: f32) {
+            self.updated.push((voice, volume, pitch, pan));
+        }
+
+        fn stop(&mut self, voice: u64) {
+            self.stopped.push(voice);
+        }
+    }
+
+    fn listener() -> Listener {
+        Listener::new(0.0, 0.0, 200.0)
+    }
+
+    fn input(key: u64, play: bool) -> SoundLoopInput {
+        SoundLoopInput {
+            key,
+            sound: SoundId::LOOP_DRILL,
+            base_volume: 0.8,
+            x: 0.0,
+            y: 0.0,
+            play,
+            volume_scl: 0.5,
+            pitch: 1.0,
+            delta_frames: 1.0,
+        }
+    }
+
+    /// `SoundLoop.java:26-46`: the first playing frame creates a voice at the
+    /// current (zero) fade volume, then each frame fades by `fadeSpeed` and
+    /// `Core.audio.set`s the volume; `play = false` fades out and stops at
+    /// `0.001`, routing `calcFalloff * volume * baseVolume * volumeScl`.
+    #[test]
+    fn per_key_fade_in_out_and_volume() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+        let mut listener = listener();
+        listener.x = 0.0;
+
+        table.begin_frame();
+        table.update(input(9, true), listener, &mut out);
+        assert_eq!(out.started.len(), 1, "first playing frame starts a voice");
+        assert_eq!(out.started[0].2, 0.0, "Java starts the loop at volume 0");
+        assert_eq!(out.started[0].3, 1.0, "Java passes pitch 1f");
+        assert_eq!(table.voice(9), Some(1));
+
+        // 20 fade steps of `SOUND_LOOP_FADE` reach full volume.
+        for _ in 0..19 {
+            table.begin_frame();
+            table.update(input(9, true), listener, &mut out);
+        }
+        // The 20th step lands exactly on 1.0 (float accumulation aside).
+        table.begin_frame();
+        table.update(input(9, true), listener, &mut out);
+        let fade = table.fade_volume(9).unwrap_or(-1.0);
+        assert!((fade - 1.0).abs() < 1.0e-5, "fade {fade}");
+        // `calcVolume(0,0) = 1` at the listener: 1 * 0.8 * 0.5 = 0.4.
+        let (_, volume, pitch, pan) = *out.updated.last().unwrap_or(&(0, -1.0, 0.0, 0.0));
+        assert!((volume - 0.4).abs() < 1.0e-5, "volume {volume}");
+        assert_eq!(pitch, 1.0);
+        assert_eq!(pan, 0.0);
+
+        // Fade out: 20 steps of 0.05 take the volume from 1.0 to 0, and the
+        // state stops the voice when it reaches `SOUND_LOOP_STOP_VOLUME`.
+        let mut stop_frame = 0;
+        for frame in 0..25 {
+            table.begin_frame();
+            table.update(input(9, false), listener, &mut out);
+            if !out.stopped.is_empty() {
+                stop_frame = frame;
+                break;
+            }
+        }
+        assert!(stop_frame >= 1, "faded out before a frame");
+        assert_eq!(table.voice(9), None);
+        assert_eq!(out.stopped, vec![1]);
+        // The key is still reported, so the entry survives the sweep with no
+        // voice (so a later `play = true` fades it back in).
+        table.sweep(&mut out);
+        assert_eq!(table.len(), 1);
+    }
+
+    /// `SoundLoop.java:38-40`: the fade step is `fadeSpeed * Time.delta`, so a
+    /// 30 fps frame (delta 2.0) moves twice as far as a 60 fps frame; a hostile
+    /// delta falls back to one frame instead of freezing the fade.
+    #[test]
+    fn fade_step_scales_with_delta() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+        let mut frame = input(4, true);
+        frame.delta_frames = 2.0;
+
+        table.begin_frame();
+        table.update(frame, listener(), &mut out);
+        assert_eq!(table.fade_volume(4), Some(0.0), "start frame stays at 0");
+
+        table.begin_frame();
+        table.update(frame, listener(), &mut out);
+        assert!((table.fade_volume(4).unwrap_or(-1.0) - 0.1).abs() < 1.0e-6);
+
+        frame.delta_frames = 0.5;
+        table.begin_frame();
+        table.update(frame, listener(), &mut out);
+        assert!((table.fade_volume(4).unwrap_or(-1.0) - 0.125).abs() < 1.0e-6);
+
+        frame.delta_frames = f32::NAN;
+        table.begin_frame();
+        table.update(frame, listener(), &mut out);
+        assert!((table.fade_volume(4).unwrap_or(-1.0) - 0.175).abs() < 1.0e-6);
+
+        frame.delta_frames = 0.0;
+        table.begin_frame();
+        table.update(frame, listener(), &mut out);
+        assert!((table.fade_volume(4).unwrap_or(-1.0) - 0.225).abs() < 1.0e-6);
+    }
+
+    /// Keys own independent voices/volumes: updating one key must not restart,
+    /// stop or otherwise touch another (`SoundLoop` is per entity/mount).
+    #[test]
+    fn keys_own_independent_voices() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+
+        table.begin_frame();
+        table.update(input(1, true), listener(), &mut out);
+        table.update(input(2, true), listener(), &mut out);
+        assert_eq!(out.started.len(), 2);
+        assert_ne!(table.voice(1), table.voice(2));
+
+        // Fade key 1 only; key 2 stays at fade volume 0 with its own voice.
+        for _ in 0..20 {
+            table.begin_frame();
+            table.update(input(1, true), listener(), &mut out);
+        }
+        assert!((table.fade_volume(1).unwrap_or(-1.0) - 1.0).abs() < 1.0e-5);
+        assert_eq!(table.fade_volume(2), Some(0.0));
+        assert_eq!(table.voice(2), Some(2));
+        // No update addressed voice 2 after its start.
+        assert!(out.updated.iter().all(|(voice, ..)| *voice == 1));
+    }
+
+    /// Continuous weapon mounts use `new SoundLoop(sound, 1f)`: base volume 1
+    /// with the start pitch held for every later `Core.audio.set`.
+    #[test]
+    fn weapon_mount_base_volume_and_pitch() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+        let mut weapon = SoundLoopInput {
+            key: 1 << 63,
+            sound: SoundId::SHOOT_LASER,
+            base_volume: 1.0,
+            pitch: 1.25,
+            volume_scl: 1.0,
+            ..input(0, true)
+        };
+
+        table.begin_frame();
+        table.update(weapon, listener(), &mut out);
+        assert_eq!(out.started.len(), 1);
+        assert_eq!(out.started[0].3, 1.25, "host pitch is used on start");
+        assert_eq!(out.started[0].2, 0.0);
+
+        for _ in 0..20 {
+            table.begin_frame();
+            table.update(weapon, listener(), &mut out);
+        }
+        let (voice, volume, pitch, _) = *out.updated.last().unwrap_or(&(0, -1.0, 0.0, 0.0));
+        assert_eq!(voice, 1);
+        assert!((volume - 1.0).abs() < 1.0e-5, "volume {volume}");
+        assert_eq!(pitch, 1.25, "pitch is held through the fade");
+
+        // `baseVolume <= 0` short-circuits (`SoundLoop.java:22`).
+        weapon.key = 4;
+        weapon.base_volume = 0.0;
+        table.begin_frame();
+        table.update(weapon, listener(), &mut out);
+        assert_eq!(out.started.len(), 1);
+        assert_eq!(table.len(), 1);
+    }
+
+    /// A destroyed/removed instance stops being reported: `sweep` must call
+    /// `SoundLoop.stop()` and drop the key (no leaked voice).
+    #[test]
+    fn sweep_stops_unreported_keys() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+
+        table.begin_frame();
+        table.update(input(1, true), listener(), &mut out);
+        table.update(input(2, true), listener(), &mut out);
+        table.sweep(&mut out);
+        assert_eq!(table.len(), 2);
+
+        // Only key 2 is reported this frame.
+        table.begin_frame();
+        table.update(input(2, true), listener(), &mut out);
+        table.sweep(&mut out);
+        assert_eq!(table.len(), 1);
+        assert_eq!(out.stopped, vec![1]);
+        assert_eq!(table.voice(2), Some(2));
+
+        // No key reported: every remaining voice stops.
+        table.begin_frame();
+        table.sweep(&mut out);
+        assert!(table.is_empty());
+        assert_eq!(out.stopped, vec![1, 2]);
+    }
+
+    /// A full loop pool (`start` returns 0) must leave the key voiceless and
+    /// retry on the next frame instead of pinning a `Some(0)` id.
+    #[test]
+    fn pool_full_start_retries_next_frame() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices {
+            refuse_next_start: true,
+            ..RecordingVoices::default()
+        };
+
+        table.begin_frame();
+        table.update(input(3, true), listener(), &mut out);
+        assert!(out.started.is_empty());
+        assert_eq!(table.voice(3), None);
+
+        table.begin_frame();
+        table.update(input(3, true), listener(), &mut out);
+        assert_eq!(out.started.len(), 1);
+        assert_eq!(table.voice(3), Some(1));
+    }
+
+    /// A key whose sound/base volume changes (turret config restart, reused
+    /// entity slot) gets a fresh `SoundLoop`: the old voice stops first.
+    #[test]
+    fn changed_sound_replaces_voice() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+
+        table.begin_frame();
+        table.update(input(5, true), listener(), &mut out);
+        let first = table.voice(5);
+
+        table.begin_frame();
+        let mut changed = input(5, true);
+        changed.sound = SoundId::LOOP_MINE_BEAM;
+        table.update(changed, listener(), &mut out);
+        assert_eq!(out.stopped, vec![first.unwrap_or(0)]);
+        assert_eq!(out.started.len(), 2);
+        assert_eq!(out.started[1].1, SoundId::LOOP_MINE_BEAM);
+        assert_ne!(table.voice(5), first);
+    }
+
+    /// `stop_all` (leaving the game / `ResetEvent`) stops every voice; `clear`
+    /// is the pool-already-stopped variant.
+    #[test]
+    fn stop_all_and_clear() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+        table.begin_frame();
+        table.update(input(1, true), listener(), &mut out);
+        table.update(input(2, true), listener(), &mut out);
+
+        table.stop_all(&mut out);
+        assert_eq!(out.stopped, vec![1, 2]);
+        assert!(table.is_empty());
+
+        table.begin_frame();
+        table.update(input(7, true), listener(), &mut out);
+        table.clear();
+        assert!(table.is_empty());
+        assert_eq!(table.voice(7), None);
+    }
+
+    /// Silent sentinels are ignored (sim events may carry `Sounds.none`).
+    #[test]
+    fn unset_sound_is_ignored() {
+        let mut table = SoundLoopTable::new();
+        let mut out = RecordingVoices::default();
+        let mut silent = input(8, true);
+        silent.sound = SoundId::NONE;
+        table.begin_frame();
+        table.update(silent, listener(), &mut out);
+        assert!(table.is_empty());
+        assert!(out.started.is_empty());
     }
 }

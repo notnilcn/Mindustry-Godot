@@ -2343,6 +2343,7 @@ impl UnitSink for RegistrySink<'_> {
                     ))
                 })?,
                 BulletRef::Inline(spec) => self.build_bullet((**spec).clone())?,
+                BulletRef::Named(id) => self.resolved_bullet(*id)?,
             };
             weapons.push(WeaponDef::from_spec(weapon, bullet, self.registry)?);
         }

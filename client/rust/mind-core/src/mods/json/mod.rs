@@ -86,6 +86,19 @@ pub struct ContentJsonParser<'a> {
     /// all field reads to `ContentParser.finishParsing`,
     /// `ContentParser.java:1005-1007`, so a floor may name a later prop).
     pending_decorations: Vec<PendingDecoration>,
+    /// Deferred `research` tech-node insertions (`ContentParser.readFields`
+    /// removes the key and defers the tree reparenting to `postreads`;
+    /// `ContentParser.java:1270,1337-1400`).
+    pending_research: Vec<PendingResearch>,
+}
+
+/// One deferred `research` tech-node insertion.
+#[derive(Debug, Clone)]
+struct PendingResearch {
+    file: String,
+    mod_id: Option<crate::content::ModId>,
+    content: ContentRef,
+    value: Value,
 }
 
 /// One deferred `decoration` read (`ContentParser.read`, `ContentParser.java:963`).
@@ -126,6 +139,7 @@ impl<'a> ContentJsonParser<'a> {
             allow_patching: true,
             classmap: ClassTagMap::committed(),
             pending_decorations: Vec::new(),
+            pending_research: Vec::new(),
         }
     }
 
@@ -154,8 +168,327 @@ impl<'a> ContentJsonParser<'a> {
                 ))),
             }
         }
+        for pending in std::mem::take(&mut self.pending_research) {
+            registry.set_current_mod(pending.mod_id.clone());
+            if let Err(error) = self.apply_research(registry, pending) {
+                errors.push(error);
+            }
+        }
         registry.set_current_mod(previous);
         errors
+    }
+
+    /// Applies one deferred `research` node (`ContentParser` `postreads`:
+    /// remove the old node, build the replacement, attach to the parent or the
+    /// root list, then rebind `content.techNode`).
+    fn apply_research(
+        &mut self,
+        registry: &mut ContentRegistry,
+        pending: PendingResearch,
+    ) -> Result<(), ContentParseError> {
+        use crate::content::tech::{ObjectiveSpec, TechNode, TechNodeRef};
+
+        let file = pending.file.clone();
+        let content = pending.content;
+        let (
+            parent_name,
+            custom_requirements,
+            root,
+            root_name,
+            requires_unlock,
+            planet_name,
+            objective_values,
+        ) = match &pending.value {
+            Value::String(name) => (Some(name.clone()), None, false, None, false, None, None),
+            Value::Object(object) => (
+                object
+                    .get("parent")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                object.get("requirements").cloned(),
+                field_bool(object, "root").unwrap_or(false),
+                object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                field_bool(object, "requiresUnlock").unwrap_or(false),
+                object
+                    .get("planet")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                object.get("objectives").cloned(),
+            ),
+            _ => {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `research` must be a parent name string or an object"
+                )));
+            }
+        };
+
+        let requirements = match &custom_requirements {
+            Some(value) => {
+                let specs = self.parse_stacks(registry, &file, value)?;
+                let mut out = Vec::with_capacity(specs.len());
+                for spec in specs {
+                    let item = registry.item_id(spec.item).ok_or_else(|| {
+                        ContentParseError::new(format!(
+                            "{file}: unknown research requirement item `{}`",
+                            spec.item
+                        ))
+                    })?;
+                    out.push(crate::content::ItemStack {
+                        item,
+                        amount: spec.amount,
+                    });
+                }
+                out
+            }
+            None => crate::content::tech::content_research_requirements(registry, content),
+        };
+
+        // `TechNode` constructor: dependencies become `Research` objectives.
+        let mut objectives: Vec<ObjectiveSpec> =
+            crate::content::tech::content_dependencies(registry, content)
+                .into_iter()
+                .map(ObjectiveSpec::Research)
+                .collect();
+        if let Some(Value::Array(entries)) = objective_values {
+            for entry in &entries {
+                if let Some(objective) = self.parse_research_objective(registry, &file, entry)
+                    && !objectives.contains(&objective)
+                {
+                    objectives.push(objective);
+                }
+            }
+        }
+        // All items/liquids get a `Produce` objective unless one was given.
+        if matches!(content.type_, ContentType::Item | ContentType::Liquid)
+            && !objectives
+                .iter()
+                .any(|objective| matches!(objective, ObjectiveSpec::Produce(c) if *c == content))
+        {
+            objectives.push(ObjectiveSpec::Produce(content));
+        }
+
+        // `TechNode.remove()`: detach the current node from its parent/roots
+        // without shifting the positional `TechNodeRef` indices.
+        let old = registry
+            .tech
+            .nodes
+            .iter()
+            .position(|node| node.content == Some(content))
+            .map(|index| TechNodeRef(index as u32));
+        if let Some(old) = old {
+            let parent = registry.tech.nodes[old.index()].parent;
+            if let Some(parent) = parent
+                && let Some(record) = registry.tech.node_mut(parent)
+            {
+                record.children.retain(|child| *child != old);
+            }
+            registry.tech.roots.retain(|node| *node != old);
+        }
+
+        // Parent lookup: content name first (mod-prefixed then bare), then the
+        // stored node name (`ContentParser.java:1392-1401`).
+        let parent_ref = parent_name.as_ref().and_then(|name| {
+            let prefixed = registry.transform_name(name);
+            for candidate in [name.as_str(), prefixed.as_str()] {
+                if let Some(reference) = registry.by_name(candidate)
+                    && let Some(index) = registry
+                        .tech
+                        .nodes
+                        .iter()
+                        .position(|node| node.content == Some(reference))
+                {
+                    return Some(TechNodeRef(index as u32));
+                }
+            }
+            registry
+                .tech
+                .nodes
+                .iter()
+                .position(|node| node.content_name == *name || node.content_name == prefixed)
+                .map(|index| TechNodeRef(index as u32))
+        });
+        if !root && parent_name.is_some() && parent_ref.is_none() {
+            self.warn(
+                &file,
+                format!(
+                    "research parent `{}` is not in the tech tree",
+                    parent_name.as_deref().unwrap_or("")
+                ),
+            );
+        }
+
+        let planet = planet_name
+            .as_ref()
+            .and_then(|name| {
+                let prefixed = registry.transform_name(name);
+                [name.as_str(), prefixed.as_str()]
+                    .iter()
+                    .find_map(|candidate| {
+                        registry.by_name(candidate).and_then(|reference| {
+                            (reference.type_ == ContentType::Planet)
+                                .then_some(crate::content::PlanetId::new(reference.id))
+                        })
+                    })
+            })
+            .or_else(|| {
+                parent_ref
+                    .and_then(|parent| registry.tech.node(parent))
+                    .and_then(|node| node.planet)
+            });
+
+        let index = match old {
+            Some(old) => old.index(),
+            None => {
+                registry.tech.nodes.push(TechNode {
+                    depth: 0,
+                    name: None,
+                    requires_unlock: false,
+                    parent: None,
+                    root_node: None,
+                    research_cost_multipliers: Vec::new(),
+                    content: None,
+                    content_name: String::new(),
+                    requirements: Vec::new(),
+                    finished_requirements: Vec::new(),
+                    objectives: Vec::new(),
+                    children: Vec::new(),
+                    planet: None,
+                    tree: None,
+                });
+                registry.tech.nodes.len() - 1
+            }
+        };
+        let reference = TechNodeRef(index as u32);
+        let content_name =
+            crate::content::tech::content_name_of(registry, content).unwrap_or_default();
+        let (depth, root_node, multipliers, tree) = match parent_ref {
+            Some(parent) => {
+                let record = &registry.tech.nodes[parent.index()];
+                (
+                    record.depth + 1,
+                    record.root_node.or(Some(parent)),
+                    record.research_cost_multipliers.clone(),
+                    record.tree,
+                )
+            }
+            None => (0, None, Vec::new(), None),
+        };
+        {
+            let node = &mut registry.tech.nodes[index];
+            node.depth = depth;
+            node.parent = parent_ref;
+            node.root_node = root_node;
+            node.research_cost_multipliers = multipliers;
+            node.content = Some(content);
+            node.content_name = content_name.clone();
+            node.finished_requirements = requirements
+                .iter()
+                .map(|stack| crate::content::ItemStack {
+                    item: stack.item,
+                    amount: 0,
+                })
+                .collect();
+            node.requirements = requirements;
+            node.objectives = objectives;
+            node.planet = planet;
+            node.tree = tree;
+            if root {
+                node.name = Some(root_name.clone().unwrap_or_else(|| content_name.clone()));
+                node.requires_unlock = requires_unlock;
+            }
+        }
+        if let Some(parent) = parent_ref
+            && let Some(record) = registry.tech.node_mut(parent)
+            && !record.children.contains(&reference)
+        {
+            record.children.push(reference);
+        }
+        if root {
+            registry.tech.roots.push(reference);
+        }
+        registry.set_tech_node(content, reference);
+        Ok(())
+    }
+
+    /// `Objectives.Objective` JSON (`ContentParser.java:348-363`): a string is
+    /// a content name (`new Research(content)`); an object dispatches on
+    /// `type` (`SectorComplete`/`OnSector`/`OnPlanet`/`Research`/`Produce`).
+    fn parse_research_objective(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        value: &Value,
+    ) -> Option<crate::content::tech::ObjectiveSpec> {
+        use crate::content::tech::ObjectiveSpec;
+        let resolve_any = |raw: &str| {
+            let prefixed = registry.transform_name(raw);
+            registry
+                .by_name(raw)
+                .or_else(|| registry.by_name(&prefixed))
+        };
+        match value {
+            Value::String(raw) => match resolve_any(raw) {
+                Some(reference) => Some(ObjectiveSpec::Research(reference)),
+                None => {
+                    self.warn(file, format!("unknown research objective content `{raw}`"));
+                    None
+                }
+            },
+            Value::Object(object) => {
+                let class = object.get("type").and_then(Value::as_str).unwrap_or("");
+                let field = |key: &str| object.get(key).and_then(Value::as_str);
+                match class {
+                    "SectorComplete" | "OnSector" => {
+                        let raw = field("preset").or_else(|| field("sector"))?;
+                        let reference = resolve_any(raw)?;
+                        if reference.type_ != ContentType::Sector {
+                            self.warn(file, format!("`{raw}` is not a sector"));
+                            return None;
+                        }
+                        let sector = crate::content::SectorId::new(reference.id);
+                        Some(if class == "OnSector" {
+                            ObjectiveSpec::OnSector(sector)
+                        } else {
+                            ObjectiveSpec::SectorComplete(sector)
+                        })
+                    }
+                    "OnPlanet" => {
+                        let raw = field("planet")?;
+                        let reference = resolve_any(raw)?;
+                        if reference.type_ != ContentType::Planet {
+                            self.warn(file, format!("`{raw}` is not a planet"));
+                            return None;
+                        }
+                        Some(ObjectiveSpec::OnPlanet(crate::content::PlanetId::new(
+                            reference.id,
+                        )))
+                    }
+                    "Research" | "Produce" => {
+                        let raw = field("content")
+                            .or_else(|| field("block"))
+                            .or_else(|| field("unit"))
+                            .or_else(|| field("item"))?;
+                        let reference = resolve_any(raw)?;
+                        Some(if class == "Research" {
+                            ObjectiveSpec::Research(reference)
+                        } else {
+                            ObjectiveSpec::Produce(reference)
+                        })
+                    }
+                    other => {
+                        self.warn(
+                            file,
+                            format!("unknown research objective `{other}`; ignored"),
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Parser restricted for data-patch content (`dp` identity).
@@ -189,20 +522,34 @@ impl<'a> ContentJsonParser<'a> {
             ContentParseError::new(format!("{file}: content must be a JSON object"))
         })?;
         self.check_null_fields(file, content_type, object)?;
-        match content_type {
-            ContentType::Item => self.parse_item(registry, file, stem, object),
-            ContentType::Block => self.parse_block(registry, file, stem, object),
-            ContentType::Liquid => self.parse_liquid(registry, file, stem, object),
-            ContentType::Status => self.parse_status(registry, file, stem, object),
-            ContentType::Unit => self.parse_unit(registry, file, stem, object),
-            ContentType::Weather => self.parse_weather(registry, file, stem, object),
-            ContentType::Sector => self.parse_sector(registry, file, stem, object),
-            ContentType::Planet => self.parse_planet(registry, file, stem, object),
-            ContentType::Team => self.parse_team(registry, file, stem, object),
-            other => Err(ContentParseError::new(format!(
-                "{file}: content type `{other}` is not supported yet (plan 20 M2)"
-            ))),
+        let reference = match content_type {
+            ContentType::Item => self.parse_item(registry, file, stem, object)?,
+            ContentType::Block => self.parse_block(registry, file, stem, object)?,
+            ContentType::Liquid => self.parse_liquid(registry, file, stem, object)?,
+            ContentType::Status => self.parse_status(registry, file, stem, object)?,
+            ContentType::Unit => self.parse_unit(registry, file, stem, object)?,
+            ContentType::Weather => self.parse_weather(registry, file, stem, object)?,
+            ContentType::Sector => self.parse_sector(registry, file, stem, object)?,
+            ContentType::Planet => self.parse_planet(registry, file, stem, object)?,
+            ContentType::Team => self.parse_team(registry, file, stem, object)?,
+            other => {
+                return Err(ContentParseError::new(format!(
+                    "{file}: content type `{other}` is not supported yet (plan 20 M2)"
+                )));
+            }
+        };
+        // `UnlockableContent` `research` key (`ContentParser.readFields`
+        // removes it before the field loop and defers the node insertion to
+        // `postreads`, `ContentParser.java:1337-1400`).
+        if let Some(research) = object.get("research") {
+            self.pending_research.push(PendingResearch {
+                file: file.to_owned(),
+                mod_id: registry.current_mod().cloned(),
+                content: reference,
+                value: research.clone(),
+            });
         }
+        Ok(reference)
     }
 
     /// `checkNullFields`: refuses explicit `null` on non-nullable fields.
@@ -520,6 +867,107 @@ impl<'a> ContentJsonParser<'a> {
         }
         if let Some(value) = field_f32(object, "overlayAlpha") {
             spec.overlay_alpha = Some(value);
+        }
+        // Remaining `Block`/`Floor`/`Wall` scalar fields
+        // (`Block.java:80-220`, `Floor.java:60-100`).
+        for (field, target) in [
+            ("scaledHealth", &mut spec.scaled_health),
+            ("buildTime", &mut spec.build_time),
+            ("buildCostMultiplier", &mut spec.build_cost_multiplier),
+            ("researchCostMultiplier", &mut spec.research_cost_multiplier),
+            ("priority", &mut spec.priority),
+            ("oreThreshold", &mut spec.ore_threshold),
+            ("oreScale", &mut spec.ore_scale),
+            ("albedo", &mut spec.albedo),
+            ("speedMultiplier", &mut spec.speed_multiplier),
+            ("drownTime", &mut spec.drown_time),
+            ("statusDuration", &mut spec.floor_status_duration),
+            ("dragMultiplier", &mut spec.floor_drag_multiplier),
+            ("damageTaken", &mut spec.floor_damage_taken),
+            ("liquidMultiplier", &mut spec.liquid_multiplier),
+            ("crushDamageMultiplier", &mut spec.crush_damage_multiplier),
+            ("depositCooldown", &mut spec.deposit_cooldown),
+            ("constructTime", &mut spec.construct_time),
+            ("craftTime", &mut spec.craft_time),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("unitCapModifier", &mut spec.unit_cap_modifier),
+            ("fogRadius", &mut spec.fog_radius),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("solidifies", &mut spec.solidifies),
+            ("incinerateNonBuildable", &mut spec.incinerate_non_buildable),
+            ("requiresCoreZone", &mut spec.requires_core_zone),
+            ("ignoreBuildDarkness", &mut spec.ignore_build_darkness),
+            ("insulated", &mut spec.insulated),
+            ("canOverdrive", &mut spec.can_overdrive),
+            ("absorbLasers", &mut spec.absorb_lasers),
+            ("allowCorePlacement", &mut spec.allow_core_placement),
+            ("playerUnmineable", &mut spec.player_unmineable),
+            ("wallOre", &mut spec.wall_ore),
+            ("oreDefault", &mut spec.ore_default),
+            ("generateIcons", &mut spec.generate_icons),
+            ("hasColor", &mut spec.has_color),
+            ("squareSprite", &mut spec.square_sprite),
+            ("drawCached", &mut spec.draw_cached),
+            ("drawDynamic", &mut spec.draw_dynamic),
+            ("fillsTile", &mut spec.fills_tile),
+            ("hasShadow", &mut spec.has_shadow),
+            ("customShadow", &mut spec.custom_shadow),
+            ("obstructsLight", &mut spec.obstructs_light),
+            ("emitLight", &mut spec.emit_light),
+            ("drawTeamOverlay", &mut spec.draw_team_overlay),
+            ("shallow", &mut spec.shallow),
+            ("crushFragile", &mut spec.crush_fragile),
+            ("unitMoveBreakable", &mut spec.unit_move_breakable),
+            ("teamPassable", &mut spec.team_passable),
+            ("alwaysReplace", &mut spec.always_replace),
+            ("privileged", &mut spec.privileged),
+            ("replaceable", &mut spec.replaceable),
+            ("quickRotate", &mut spec.quick_rotate),
+            ("rotate", &mut spec.rotate),
+            ("rotateDraw", &mut spec.rotate_draw),
+            ("rotateDrawEditor", &mut spec.rotate_draw_editor),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = Some(value);
+            }
+        }
+        if let Some(name) = object.get("group").and_then(Value::as_str) {
+            spec.group = Some(resolve_block_group(name));
+        }
+        if let Some(name) = object.get("cacheLayer").and_then(Value::as_str) {
+            if let Some(layer) = resolve_cache_layer(name) {
+                spec.cache_layer = Some(layer);
+            } else {
+                self.warn(file, format!("unknown cacheLayer `{name}`"));
+            }
+        }
+        for (field, target) in [
+            ("itemDrop", &mut spec.item_drop),
+            ("liquidDrop", &mut spec.liquid_drop),
+            ("region", &mut spec.region),
+        ] {
+            if let Some(name) = object.get(field).and_then(Value::as_str) {
+                *target = Some(Box::leak(name.to_owned().into_boxed_str()));
+            }
+        }
+        if let Some(status) = object.get("status").and_then(Value::as_str) {
+            spec.floor_status = Some(Box::leak(status.to_owned().into_boxed_str()));
+        }
+        if let Some(color) = object.get("mapColor").and_then(parse_color) {
+            spec.map_color = Some(color);
+        }
+        if let Some(requirements) = object.get("researchCost") {
+            spec.research_cost = Some(self.parse_stacks(registry, file, requirements)?);
         }
         // `Floor.blendGroup` (`Floor.java:62`; J02 T1). A self reference keeps
         // the `None` (self) default — the block is not registered yet, so
@@ -1244,6 +1692,272 @@ impl<'a> ContentJsonParser<'a> {
                 *target = Some(value);
             }
         }
+        // Remaining `UnitType` scalar fields (`UnitType.java:60-260`).
+        for (field, target) in [
+            ("boostMultiplier", &mut spec.boost_multiplier),
+            ("floorMultiplier", &mut spec.floor_multiplier),
+            ("baseRotateSpeed", &mut spec.base_rotate_speed),
+            ("clipSize", &mut spec.clip_size),
+            ("deathShake", &mut spec.death_shake),
+            ("stepShake", &mut spec.step_shake),
+            ("rippleScale", &mut spec.ripple_scale),
+            ("riseSpeed", &mut spec.rise_speed),
+            ("descentSpeed", &mut spec.descent_speed),
+            ("fallSpeed", &mut spec.fall_speed),
+            ("missileAccelTime", &mut spec.missile_accel_time),
+            ("maxRange", &mut spec.max_range),
+            ("circleTargetRadius", &mut spec.circle_target_radius),
+            ("crashDamageMultiplier", &mut spec.crash_damage_multiplier),
+            ("wreckHealthMultiplier", &mut spec.wreck_health_multiplier),
+            ("drownTimeMultiplier", &mut spec.drown_time_multiplier),
+            ("strafePenalty", &mut spec.strafe_penalty),
+            ("researchCostMultiplier", &mut spec.research_cost_multiplier),
+            ("knockbackMultiplier", &mut spec.knockback_multiplier),
+            ("groundLayer", &mut spec.ground_layer),
+            ("flyingLayer", &mut spec.flying_layer),
+            ("payloadCapacity", &mut spec.payload_capacity),
+            ("aimDst", &mut spec.aim_dst),
+            ("buildBeamOffset", &mut spec.build_beam_offset),
+            ("targetPriority", &mut spec.target_priority),
+            ("shadowElevation", &mut spec.shadow_elevation),
+            ("shadowElevationScl", &mut spec.shadow_elevation_scl),
+            ("engineOffset", &mut spec.engine_offset),
+            ("engineSize", &mut spec.engine_size),
+            ("engineLayer", &mut spec.engine_layer),
+            ("itemOffsetY", &mut spec.item_offset_y),
+            ("lightRadius", &mut spec.light_radius),
+            ("lightOpacity", &mut spec.light_opacity),
+            ("softShadowScl", &mut spec.soft_shadow_scl),
+            ("fogRadius", &mut spec.fog_radius),
+            ("waveTrailX", &mut spec.wave_trail_x),
+            ("waveTrailY", &mut spec.wave_trail_y),
+            ("trailScl", &mut spec.trail_scl),
+            ("legLength", &mut spec.leg_length),
+            ("legSpeed", &mut spec.leg_speed),
+            ("legForwardScl", &mut spec.leg_forward_scl),
+            ("legBaseOffset", &mut spec.leg_base_offset),
+            ("legMoveSpace", &mut spec.leg_move_space),
+            ("legExtension", &mut spec.leg_extension),
+            ("legPairOffset", &mut spec.leg_pair_offset),
+            ("legLengthScl", &mut spec.leg_length_scl),
+            ("legStraightLength", &mut spec.leg_straight_length),
+            ("legMaxLength", &mut spec.leg_max_length),
+            ("legMinLength", &mut spec.leg_min_length),
+            ("legSplashDamage", &mut spec.leg_splash_damage),
+            ("legSplashRange", &mut spec.leg_splash_range),
+            ("baseLegStraightness", &mut spec.base_leg_straightness),
+            ("legStraightness", &mut spec.leg_straightness),
+            ("mechLandShake", &mut spec.mech_land_shake),
+            ("mechSideSway", &mut spec.mech_side_sway),
+            ("mechFrontSway", &mut spec.mech_front_sway),
+            ("mechStride", &mut spec.mech_stride),
+            ("segmentMag", &mut spec.segment_mag),
+            ("segmentScl", &mut spec.segment_scl),
+            ("segmentPhase", &mut spec.segment_phase),
+            ("segmentRotSpeed", &mut spec.segment_rot_speed),
+            ("segmentMaxRot", &mut spec.segment_max_rot),
+            ("segmentSpacing", &mut spec.segment_spacing),
+            ("segmentRotationRange", &mut spec.segment_rotation_range),
+            ("crawlSlowdown", &mut spec.crawl_slowdown),
+            ("deathSoundVolume", &mut spec.death_sound_volume),
+            ("wreckSoundVolume", &mut spec.wreck_sound_volume),
+            ("loopSoundVolume", &mut spec.loop_sound_volume),
+            ("stepSoundVolume", &mut spec.step_sound_volume),
+            ("stepSoundPitch", &mut spec.step_sound_pitch),
+            ("stepSoundPitchRange", &mut spec.step_sound_pitch_range),
+            ("moveSoundVolume", &mut spec.move_sound_volume),
+            ("moveSoundPitchMin", &mut spec.move_sound_pitch_min),
+            ("moveSoundPitchMax", &mut spec.move_sound_pitch_max),
+            ("tankMoveVolume", &mut spec.tank_move_volume),
+            ("mineSoundVolume", &mut spec.mine_sound_volume),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("outlineRadius", &mut spec.outline_radius),
+            ("trailLength", &mut spec.trail_length),
+            ("legCount", &mut spec.leg_count),
+            ("legGroupSize", &mut spec.leg_group_size),
+            ("treadFrames", &mut spec.tread_frames),
+            ("treadPullOffset", &mut spec.tread_pull_offset),
+            ("segments", &mut spec.segments),
+            ("segmentUnits", &mut spec.segment_units),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("wobble", &mut spec.wobble),
+            ("faceTarget", &mut spec.face_target),
+            ("circleTarget", &mut spec.circle_target),
+            ("autoDropBombs", &mut spec.auto_drop_bombs),
+            ("targetBuildingsMobile", &mut spec.target_buildings_mobile),
+            ("canBoost", &mut spec.can_boost),
+            ("boostWhenBuilding", &mut spec.boost_when_building),
+            ("boostWhenMining", &mut spec.boost_when_mining),
+            ("controlSelectGlobal", &mut spec.control_select_global),
+            ("allowedInPayloads", &mut spec.allowed_in_payloads),
+            ("hittable", &mut spec.hittable),
+            ("killable", &mut spec.killable),
+            ("targetable", &mut spec.targetable),
+            ("vulnerableWithPayloads", &mut spec.vulnerable_with_payloads),
+            ("pickupUnits", &mut spec.pickup_units),
+            ("physics", &mut spec.physics),
+            ("canDrown", &mut spec.can_drown),
+            ("coreUnitDock", &mut spec.core_unit_dock),
+            ("createWreck", &mut spec.create_wreck),
+            ("createScorch", &mut spec.create_scorch),
+            ("lowAltitude", &mut spec.low_altitude),
+            ("rotateToBuilding", &mut spec.rotate_to_building),
+            ("allowLegStep", &mut spec.allow_leg_step),
+            ("legPhysicsLayer", &mut spec.leg_physics_layer),
+            ("hovering", &mut spec.hovering),
+            ("omniMovement", &mut spec.omni_movement),
+            ("rotateMoveFirst", &mut spec.rotate_move_first),
+            ("healFlash", &mut spec.heal_flash),
+            ("singleTarget", &mut spec.single_target),
+            ("forceMultiTarget", &mut spec.force_multi_target),
+            ("internal", &mut spec.internal),
+            (
+                "internalGenerateSprites",
+                &mut spec.internal_generate_sprites,
+            ),
+            ("bounded", &mut spec.bounded),
+            ("autoFindTarget", &mut spec.auto_find_target),
+            ("targetUnderBlocks", &mut spec.target_under_blocks),
+            ("alwaysShootWhenMoving", &mut spec.always_shoot_when_moving),
+            ("hoverable", &mut spec.hoverable),
+            ("alwaysCreateOutline", &mut spec.always_create_outline),
+            ("generateFullIcon", &mut spec.generate_full_icon),
+            ("squareShape", &mut spec.square_shape),
+            ("drawBuildBeam", &mut spec.draw_build_beam),
+            ("drawMineBeam", &mut spec.draw_mine_beam),
+            ("drawCell", &mut spec.draw_cell),
+            ("drawItems", &mut spec.draw_items),
+            ("drawShields", &mut spec.draw_shields),
+            ("drawBody", &mut spec.draw_body),
+            ("drawSoftShadow", &mut spec.draw_soft_shadow),
+            ("drawMinimap", &mut spec.draw_minimap),
+            ("useEngineElevation", &mut spec.use_engine_elevation),
+            ("allowChangeCommands", &mut spec.allow_change_commands),
+            ("outlines", &mut spec.outlines),
+            ("mineWalls", &mut spec.mine_walls),
+            ("mineFloor", &mut spec.mine_floor),
+            ("mineHardnessScaling", &mut spec.mine_hardness_scaling),
+            ("legBaseUnder", &mut spec.leg_base_under),
+            ("lockLegBase", &mut spec.lock_leg_base),
+            ("legContinuousMove", &mut spec.leg_continuous_move),
+            ("flipBackLegs", &mut spec.flip_back_legs),
+            ("flipLegSide", &mut spec.flip_leg_side),
+            ("emitWalkSound", &mut spec.emit_walk_sound),
+            ("emitWalkEffect", &mut spec.emit_walk_effect),
+            ("mechStepParticles", &mut spec.mech_step_particles),
+            ("crushFragile", &mut spec.crush_fragile),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("healColor", &mut spec.heal_color),
+            ("lightColor", &mut spec.light_color),
+            ("shieldColor", &mut spec.shield_color),
+            ("engineColor", &mut spec.engine_color),
+            ("engineColorInner", &mut spec.engine_color_inner),
+            ("trailColor", &mut spec.trail_color),
+            ("outlineColor", &mut spec.outline_color),
+            ("mechLegColor", &mut spec.mech_leg_color),
+        ] {
+            if let Some(color) = object.get(field).and_then(parse_color) {
+                *target = Some(color);
+            }
+        }
+        for (field, target) in [
+            ("deathSound", &mut spec.death_sound),
+            ("wreckSound", &mut spec.wreck_sound),
+            ("loopSound", &mut spec.loop_sound),
+            ("stepSound", &mut spec.step_sound),
+            ("tankMoveSound", &mut spec.tank_move_sound),
+            ("moveSound", &mut spec.move_sound),
+            ("mineSound", &mut spec.mine_sound),
+        ] {
+            if let Some(sound) = self.parse_sound(file, object.get(field)) {
+                *target = Some(sound);
+            }
+        }
+        for (field, target) in [
+            ("fallEffect", &mut spec.fall_effect),
+            ("fallEngineEffect", &mut spec.fall_engine_effect),
+            ("deathExplosionEffect", &mut spec.death_explosion_effect),
+        ] {
+            if let Some(value) = object.get(field)
+                && let Some(effect) = self.parse_effect_ref(file, value)
+            {
+                *target = Some(effect);
+            }
+        }
+        if let Some(Value::Array(entries)) = object.get("targetFlags") {
+            for entry in entries {
+                if let Some(flag) = entry
+                    .as_str()
+                    .and_then(crate::mods::patch::resolve_block_flag)
+                {
+                    spec.target_flags.push(Some(flag));
+                } else if let Some(name) = entry.as_str() {
+                    self.warn(file, format!("unknown targetFlags entry `{name}`"));
+                }
+            }
+        }
+        for (field, target) in [("defaultCommand", &mut spec.default_command)] {
+            if let Some(name) = object.get(field).and_then(Value::as_str) {
+                let reference = self
+                    .resolve_prefixed(registry, ContentType::UnitCommand, name)
+                    .ok_or_else(|| {
+                        ContentParseError::new(format!(
+                            "{file}: unknown unit command `{name}` for `{field}`"
+                        ))
+                    })?;
+                let leaked = registry
+                    .unit_command(crate::content::UnitCommandId::new(reference.id))
+                    .map(|record| record.name.clone())
+                    .unwrap_or_else(|| name.to_owned());
+                *target = Some(Box::leak(leaked.into_boxed_str()));
+            }
+        }
+        for (field, target) in [
+            ("commands", &mut spec.commands),
+            ("stances", &mut spec.stances),
+        ] {
+            if let Some(Value::Array(entries)) = object.get(field) {
+                let type_ = if field == "commands" {
+                    ContentType::UnitCommand
+                } else {
+                    ContentType::UnitStance
+                };
+                for entry in entries {
+                    let Some(name) = entry.as_str() else {
+                        continue;
+                    };
+                    let Some(reference) = self.resolve_prefixed(registry, type_, name) else {
+                        self.warn(file, format!("unknown {field} entry `{name}`"));
+                        continue;
+                    };
+                    let leaked = match type_ {
+                        ContentType::UnitCommand => registry
+                            .unit_command(crate::content::UnitCommandId::new(reference.id))
+                            .map(|record| record.name.clone()),
+                        _ => registry
+                            .unit_stance(crate::content::UnitStanceId::new(reference.id))
+                            .map(|record| record.name.clone()),
+                    }
+                    .unwrap_or_else(|| name.to_owned());
+                    target.push(Box::leak(leaked.into_boxed_str()));
+                }
+            }
+        }
         if let Some(class) = object.get("controller").and_then(Value::as_str) {
             spec.controller = Some(self.resolve_controller(class).ok_or_else(|| {
                 ContentParseError::new(format!("{file}: unknown controller `{class}`"))
@@ -1628,11 +2342,19 @@ impl<'a> ContentJsonParser<'a> {
         }
         match weapon.get("bullet") {
             Some(Value::Object(bullet)) => {
-                let bullet_spec = self.parse_bullet(file, bullet)?;
+                let bullet_spec = self.parse_bullet(registry, file, bullet)?;
                 spec.bullet = BulletRef::Inline(Box::new(bullet_spec));
             }
-            Some(Value::String(_)) => {
-                self.warn(file, "named bullet references are not supported yet (M2b)");
+            Some(Value::String(raw)) => {
+                // `ContentParser` bullet field parser: a string is
+                // `field(Bullets.class, name)` (`ContentParser.java:165-170`).
+                let named = registry
+                    .bullet_by_name(raw)
+                    .or_else(|| crate::content::registries::bullets::bullet_by_java_name(raw));
+                match named {
+                    Some(id) => spec.bullet = BulletRef::Named(id),
+                    None => self.warn(file, format!("unknown named bullet `{raw}`")),
+                }
             }
             _ => {}
         }
@@ -1653,7 +2375,19 @@ impl<'a> ContentJsonParser<'a> {
                     dps: 0.0,
                 }
             }
-            _ => ResolvedBullet {
+            BulletRef::Named(id) => {
+                let record = registry.bullet(*id).ok_or_else(|| {
+                    ContentParseError::new(format!("{file}: named bullet is not registered"))
+                })?;
+                ResolvedBullet {
+                    id: *id,
+                    range: record.compute_range(),
+                    heals: record.heals(),
+                    kill_shooter: record.kill_shooter,
+                    dps: record.estimate_dps,
+                }
+            }
+            BulletRef::Placeholder | BulletRef::Pre(_) => ResolvedBullet {
                 id: crate::content::BulletId::new(0),
                 range: 0.0,
                 heals: false,
@@ -1728,6 +2462,7 @@ impl<'a> ContentJsonParser<'a> {
     /// Parses an inline `bullet` object into a [`BulletSpec`] (M2 subset).
     fn parse_bullet(
         &mut self,
+        registry: &ContentRegistry,
         file: &str,
         object: &Map<String, Value>,
     ) -> Result<BulletSpec, ContentParseError> {
@@ -1848,18 +2583,244 @@ impl<'a> ContentJsonParser<'a> {
                 *target = Some(value);
             }
         }
+        // Remaining `BulletType` scalar fields (`BulletType.java:55-230`).
+        for (field, target) in [
+            ("rangeOverride", &mut spec.range_override),
+            ("maxRange", &mut spec.max_range),
+            ("homingPower", &mut spec.homing_power),
+            ("homingRange", &mut spec.homing_range),
+            ("homingDelay", &mut spec.homing_delay),
+            ("followAimSpeed", &mut spec.follow_aim_speed),
+            ("weaveScale", &mut spec.weave_scale),
+            ("weaveMag", &mut spec.weave_mag),
+            ("optimalLifeFract", &mut spec.optimal_life_fract),
+            ("maxDamageFraction", &mut spec.max_damage_fraction),
+            ("armorMultiplier", &mut spec.armor_multiplier),
+            ("blockArmorMultiplier", &mut spec.block_armor_multiplier),
+            (
+                "buildingDamageMultiplier",
+                &mut spec.building_damage_multiplier,
+            ),
+            ("shieldDamageMultiplier", &mut spec.shield_damage_multiplier),
+            ("statusDuration", &mut spec.status_duration),
+            ("statusChance", &mut spec.status_chance),
+            ("stickyExtraLifetime", &mut spec.sticky_extra_lifetime),
+            ("inaccuracy", &mut spec.inaccuracy),
+            ("hitShake", &mut spec.hit_shake),
+            ("despawnShake", &mut spec.despawn_shake),
+            ("trailWidth", &mut spec.trail_width),
+            ("trailChance", &mut spec.trail_chance),
+            ("trailInterval", &mut spec.trail_interval),
+            ("trailParam", &mut spec.trail_param),
+            ("trailSpread", &mut spec.trail_spread),
+            ("fragRandomSpread", &mut spec.frag_random_spread),
+            ("fragSpread", &mut spec.frag_spread),
+            ("fragAngle", &mut spec.frag_angle),
+            ("fragVelocityMin", &mut spec.frag_velocity_min),
+            ("fragVelocityMax", &mut spec.frag_velocity_max),
+            ("fragLifeMin", &mut spec.frag_life_min),
+            ("fragLifeMax", &mut spec.frag_life_max),
+            ("fragOffsetMin", &mut spec.frag_offset_min),
+            ("fragOffsetMax", &mut spec.frag_offset_max),
+            ("bulletInterval", &mut spec.bullet_interval),
+            ("intervalRandomSpread", &mut spec.interval_random_spread),
+            ("intervalSpread", &mut spec.interval_spread),
+            ("intervalAngle", &mut spec.interval_angle),
+            ("intervalDelay", &mut spec.interval_delay),
+            ("lightningDamage", &mut spec.lightning_damage),
+            ("lightningCone", &mut spec.lightning_cone),
+            ("lightningAngle", &mut spec.lightning_angle),
+            (
+                "spawnBulletRandomSpread",
+                &mut spec.spawn_bullet_random_spread,
+            ),
+            ("puddleRange", &mut spec.puddle_range),
+            ("puddleAmount", &mut spec.puddle_amount),
+            ("suppressionRange", &mut spec.suppression_range),
+            ("suppressionDuration", &mut spec.suppression_duration),
+            (
+                "suppressionEffectChance",
+                &mut spec.suppression_effect_chance,
+            ),
+            ("shrinkX", &mut spec.shrink_x),
+            ("shrinkY", &mut spec.shrink_y),
+            ("spin", &mut spec.spin),
+            ("rotationOffset", &mut spec.rotation_offset),
+            ("damageInterval", &mut spec.damage_interval),
+            ("shake", &mut spec.shake),
+            ("sideLength", &mut spec.side_length),
+            ("sideWidth", &mut spec.side_width),
+            ("sideAngle", &mut spec.side_angle),
+            ("lightningSpacing", &mut spec.lightning_spacing),
+            ("lightningDelay", &mut spec.lightning_delay),
+            ("lightningAngleRand", &mut spec.lightning_angle_rand),
+            ("serrationLenScl", &mut spec.serration_len_scl),
+            ("serrationWidth", &mut spec.serration_width),
+            ("serrationSpacing", &mut spec.serration_spacing),
+            ("serrationSpaceOffset", &mut spec.serration_space_offset),
+            ("serrationFadeOffset", &mut spec.serration_fade_offset),
+            ("sapStrength", &mut spec.sap_strength),
+            ("lengthRand", &mut spec.length_rand),
+            ("empRadius", &mut spec.emp_radius),
+            ("timeIncrease", &mut spec.time_increase),
+            ("timeDuration", &mut spec.time_duration),
+            ("powerDamageScl", &mut spec.power_damage_scl),
+            ("powerSclDecrease", &mut spec.power_scl_decrease),
+            ("unitDamageScl", &mut spec.unit_damage_scl),
+            ("pointEffectSpace", &mut spec.point_effect_space),
+            ("layer", &mut spec.layer),
+            ("trailMult", &mut spec.trail_mult),
+            ("trailSize", &mut spec.trail_size),
+            ("explodeRange", &mut spec.explode_range),
+            ("explodeDelay", &mut spec.explode_delay),
+            ("flakDelay", &mut spec.flak_delay),
+            ("flakInterval", &mut spec.flak_interval),
+            ("recoil", &mut spec.recoil),
+            ("rangeChange", &mut spec.range_change),
+            ("minRangeChange", &mut spec.min_range_change),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("fragBullets", &mut spec.frag_bullets),
+            ("pierceFragCap", &mut spec.pierce_frag_cap),
+            ("intervalBullets", &mut spec.interval_bullets),
+            ("multiRepeat", &mut spec.multi_repeat),
+            ("puddles", &mut spec.puddles),
+            ("trailLength", &mut spec.trail_length),
+            ("serrations", &mut spec.serrations),
+            ("despawnUnitCount", &mut spec.despawn_unit_count),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("removeAfterPierce", &mut spec.remove_after_pierce),
+            ("laserAbsorb", &mut spec.laser_absorb),
+            ("laserBullet", &mut spec.laser_bullet),
+            ("displayAmmoMultiplier", &mut spec.display_ammo_multiplier),
+            ("killShooter", &mut spec.kill_shooter),
+            ("instantDisappear", &mut spec.instant_disappear),
+            ("splashDamagePierce", &mut spec.splash_damage_pierce),
+            ("scaledSplashDamage", &mut spec.scaled_splash_damage),
+            ("impact", &mut spec.impact),
+            ("pierceArmor", &mut spec.pierce_armor),
+            ("hittable", &mut spec.hittable),
+            ("targetBlocks", &mut spec.target_blocks),
+            ("targetMissiles", &mut spec.target_missiles),
+            ("reflectable", &mut spec.reflectable),
+            ("absorbable", &mut spec.absorbable),
+            ("collidesAir", &mut spec.collides_air),
+            ("collidesGround", &mut spec.collides_ground),
+            ("collidesTiles", &mut spec.collides_tiles),
+            ("collidesTeam", &mut spec.collides_team),
+            ("collideFloor", &mut spec.collide_floor),
+            ("collideTerrain", &mut spec.collide_terrain),
+            ("sticky", &mut spec.sticky),
+            ("despawnHit", &mut spec.despawn_hit),
+            ("fragOnHit", &mut spec.frag_on_hit),
+            ("fragOnDespawn", &mut spec.frag_on_despawn),
+            ("fragOnAbsorb", &mut spec.frag_on_absorb),
+            ("delayFrags", &mut spec.delay_frags),
+            ("trailRotation", &mut spec.trail_rotation),
+            ("underwater", &mut spec.underwater),
+            ("weaveRandom", &mut spec.weave_random),
+            ("largeHit", &mut spec.large_hit),
+            ("hitUnits", &mut spec.hit_units),
+            ("faceOutwards", &mut spec.face_outwards),
+            ("hitUnder", &mut spec.hit_under),
+            ("ignoreSpawnAngle", &mut spec.ignore_spawn_angle),
+            ("scaleKeepVelocity", &mut spec.scale_keep_velocity),
+            ("scaleLife", &mut spec.scale_life),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("trailColor", &mut spec.trail_color),
+            ("lightningColor", &mut spec.lightning_color),
+            ("suppressColor", &mut spec.suppress_color),
+            ("backColor", &mut spec.back_color),
+            ("frontColor", &mut spec.front_color),
+            ("mixColorFrom", &mut spec.mix_color_from),
+            ("mixColorTo", &mut spec.mix_color_to),
+            ("hitColor", &mut spec.hit_color),
+            ("fromColor", &mut spec.from_color),
+            ("toColor", &mut spec.to_color),
+            ("beamColor", &mut spec.beam_color),
+        ] {
+            if let Some(color) = object.get(field).and_then(parse_color) {
+                *target = Some(color);
+            }
+        }
+        for (field, target) in [
+            ("trailInterp", &mut spec.trail_interp),
+            ("shrinkInterp", &mut spec.shrink_interp),
+        ] {
+            if let Some(name) = object.get(field).and_then(Value::as_str) {
+                *target = Some(parse_interp(name));
+            }
+        }
+        if let Some(value) = object.get("sprite") {
+            spec.sprite = Some(value.as_str().map(str::to_owned));
+        }
+        if let Some(value) = object.get("backSprite") {
+            spec.back_sprite = Some(value.as_str().map(str::to_owned));
+        }
+        // `BulletType.spawnUnit`/`despawnUnit` name a registered unit (upstream
+        // assigns a constructed `UnitType`; JSON mods reference one by name).
+        for (field, target) in [
+            ("spawnUnit", &mut spec.spawn_unit_name),
+            ("despawnUnit", &mut spec.despawn_unit_name),
+        ] {
+            match object.get(field) {
+                Some(Value::String(raw)) => {
+                    let reference = self
+                        .resolve_prefixed(registry, ContentType::Unit, raw)
+                        .ok_or_else(|| {
+                            ContentParseError::new(format!(
+                                "{file}: unknown unit `{raw}` for bullet `{field}`"
+                            ))
+                        })?;
+                    let name = registry
+                        .unit(crate::content::UnitTypeId::new(reference.id))
+                        .map(|unit| unit.name.clone())
+                        .unwrap_or_else(|| raw.clone());
+                    *target = Some(Box::leak(name.into_boxed_str()));
+                }
+                Some(Value::Object(_)) => {
+                    self.warn(
+                        file,
+                        format!(
+                            "bullet `{field}` inline unit objects are not supported; name a unit instead"
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+        if let Some(value) = field_f32(object, "despawnUnitChance") {
+            spec.despawn_unit_chance = Some(value);
+        }
+        if let Some(value) = field_f32(object, "despawnUnitRadius") {
+            spec.despawn_unit_radius = Some(value);
+        }
         // Nested bullets (`frag`/`intervalBullet`/`spawnBullets`); plan 20 M2b.
         if let Some(Value::Object(frag)) = object.get("frag") {
-            spec.frag_bullet = Some(Box::new(self.parse_bullet(file, frag)?));
+            spec.frag_bullet = Some(Box::new(self.parse_bullet(registry, file, frag)?));
         }
         if let Some(Value::Object(interval)) = object.get("intervalBullet") {
-            spec.interval_bullet = Some(Box::new(self.parse_bullet(file, interval)?));
+            spec.interval_bullet = Some(Box::new(self.parse_bullet(registry, file, interval)?));
         }
         if let Some(Value::Array(entries)) = object.get("spawnBullets") {
             let mut bullets = Vec::with_capacity(entries.len());
             for entry in entries {
                 if let Some(map) = entry.as_object() {
-                    bullets.push(self.parse_bullet(file, map)?);
+                    bullets.push(self.parse_bullet(registry, file, map)?);
                 }
             }
             spec.spawn_bullets = bullets;
@@ -2404,15 +3365,11 @@ impl<'a> ContentJsonParser<'a> {
         file: &str,
         object: &Map<String, Value>,
     ) -> Option<EffectRef> {
-        let Some(class) = object.get("type").and_then(Value::as_str) else {
-            // Upstream's default class is `ParticleEffect`; the port has no
-            // particle-config model yet, so the object is reported, not guessed.
-            self.warn(
-                file,
-                "inline effect without `type` defaults to ParticleEffect (unsupported); ignored",
-            );
-            return None;
-        };
+        // `ContentParser.java:79`: the default inline class is `ParticleEffect`.
+        let class = object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("ParticleEffect");
         let Some(tag) = self.classmap.resolve(class, ClassScope::Effect) else {
             self.warn(file, format!("unknown effect type `{class}`"));
             return None;
@@ -2512,6 +3469,116 @@ impl<'a> ContentJsonParser<'a> {
                     .unwrap_or(crate::content::Rgba::WHITE);
                 EffectSpec::wrap(child, color, 0.0)
             }
+            "ParticleEffect" => {
+                let mut effect = EffectSpec::particle();
+                self.read_particle_fields(file, object, &mut effect);
+                effect
+            }
+            "RadialEffect" => {
+                let mut effect = EffectSpec::radial();
+                if let Some(child) = object
+                    .get("effect")
+                    .and_then(|value| self.parse_effect_ref(file, value))
+                {
+                    effect.children.push(child);
+                }
+                for (field, target) in [
+                    ("rotationSpacing", &mut effect.rotation_spacing),
+                    ("rotationOffset", &mut effect.rotation_offset),
+                    ("effectRotationOffset", &mut effect.effect_rotation_offset),
+                    ("lengthOffset", &mut effect.length_offset),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                if let Some(value) = field_i32(object, "amount") {
+                    effect.amount = value;
+                }
+                effect
+            }
+            "SeqEffect" => {
+                let mut effect = EffectSpec::seq();
+                if let Some(Value::Array(entries)) = object.get("effects") {
+                    for entry in entries {
+                        if let Some(child) = self.parse_effect_ref(file, entry) {
+                            effect.children.push(child);
+                        }
+                    }
+                }
+                // `SeqEffect.init()` (`SeqEffect.java:22-29`): lifetime is the
+                // sum of the child lifetimes, clip the max child clip.
+                effect.lifetime = effect.children.iter().map(EffectRef::lifetime).sum();
+                effect.clip = effect
+                    .children
+                    .iter()
+                    .map(|child| match child {
+                        EffectRef::Inline(spec) => spec.clip,
+                        EffectRef::Named(_) => 0.0,
+                    })
+                    .fold(100.0_f32, f32::max);
+                effect
+            }
+            "SoundEffect" => {
+                let mut effect = EffectSpec::sound_effect();
+                if let Some(sound) = self.parse_sound(file, object.get("sound")) {
+                    effect.sound = Some(sound);
+                }
+                if let Some(child) = object
+                    .get("effect")
+                    .and_then(|value| self.parse_effect_ref(file, value))
+                {
+                    // `SoundEffect.init()`: unset `startDelay` inherits the child.
+                    if effect.start_delay < 0.0 {
+                        if let EffectRef::Inline(spec) = &child {
+                            effect.start_delay = spec.start_delay;
+                        } else {
+                            effect.start_delay = 0.0;
+                        }
+                    }
+                    effect.children.push(child);
+                }
+                for (field, target) in [
+                    ("minPitch", &mut effect.min_pitch),
+                    ("maxPitch", &mut effect.max_pitch),
+                    ("minVolume", &mut effect.min_volume),
+                    ("maxVolume", &mut effect.max_volume),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                effect
+            }
+            "NoiseEffect" => {
+                let mut effect = EffectSpec::noise();
+                if let Some(path) = object.get("noisePath").and_then(Value::as_str) {
+                    effect.noise_path = path.to_owned();
+                }
+                if let Some(color) = object.get("color").and_then(parse_color) {
+                    effect.color = Some(color);
+                }
+                for (field, target) in [
+                    ("noiseScl", &mut effect.noise_scl),
+                    ("opacity", &mut effect.opacity),
+                    ("baseSpeed", &mut effect.base_speed),
+                    ("intensity", &mut effect.intensity),
+                    ("windX", &mut effect.wind_x),
+                    ("windY", &mut effect.wind_y),
+                    ("layerSpeedMul", &mut effect.layer_speed_mul),
+                    ("layerAlphaMul", &mut effect.layer_alpha_mul),
+                    ("layerSclMul", &mut effect.layer_scl_mul),
+                    ("layerColorMul", &mut effect.layer_color_mul),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                if let Some(value) = field_i32(object, "layers") {
+                    effect.layers = value;
+                }
+                effect
+            }
             other => {
                 self.warn(
                     file,
@@ -2528,6 +3595,17 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(value) = field_f32(object, "clip") {
             spec.clip = value;
         }
+        if let Some(value) = field_f32(object, "startDelay") {
+            spec.start_delay = value;
+        }
+        if let Some(value) = field_f32(object, "baseRotation") {
+            spec.base_rotation = value;
+        }
+        // `Effect.rotWithParent`/`followParent` are runtime flags with no
+        // renderer half in the port yet; accept them to keep parity warnings
+        // quiet (unknown fields warn upstream only with `ignoreUnknownFields`).
+        let _ = field_bool(object, "followParent");
+        let _ = field_bool(object, "rotWithParent");
         if matches!(spec.kind, InlineEffectKind::WrapEffect) {
             // `WrapEffect.init()` copies the child lifetime.
             if let Some(child) = spec.children.first() {
@@ -2535,6 +3613,83 @@ impl<'a> ContentJsonParser<'a> {
             }
         }
         Some(EffectRef::Inline(Box::new(spec)))
+    }
+
+    /// Reads the `ParticleEffect` field set (`ParticleEffect.java:14-65`).
+    fn read_particle_fields(
+        &mut self,
+        file: &str,
+        object: &Map<String, Value>,
+        effect: &mut EffectSpec,
+    ) {
+        for (field, target) in [
+            ("cone", &mut effect.cone),
+            ("length", &mut effect.length),
+            ("baseLength", &mut effect.base_length),
+            ("offsetX", &mut effect.offset_x),
+            ("offsetY", &mut effect.offset_y),
+            ("lightScl", &mut effect.light_scl),
+            ("lightOpacity", &mut effect.light_opacity),
+            ("spin", &mut effect.particle_spin),
+            ("sizeFrom", &mut effect.size_from),
+            ("sizeTo", &mut effect.size_to),
+            ("sizeChangeStart", &mut effect.size_change_start),
+            ("widthChangeStart", &mut effect.width_change_start),
+            ("heightChangeStart", &mut effect.height_change_start),
+            ("offset", &mut effect.particle_offset),
+            ("widthFrom", &mut effect.width_from),
+            ("widthTo", &mut effect.width_to),
+            ("heightFrom", &mut effect.height_from),
+            ("heightTo", &mut effect.height_to),
+            ("strokeFrom", &mut effect.stroke_from),
+            ("strokeTo", &mut effect.stroke_to),
+            ("lenFrom", &mut effect.len_from),
+            ("lenTo", &mut effect.len_to),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = value;
+            }
+        }
+        if let Some(value) = field_i32(object, "particles") {
+            effect.particles = value;
+        }
+        for (field, target) in [
+            ("randLength", &mut effect.rand_length),
+            ("casingFlip", &mut effect.casing_flip),
+            ("useRotation", &mut effect.use_rotation),
+            ("line", &mut effect.line),
+            ("cap", &mut effect.cap),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = value;
+            }
+        }
+        if let Some(color) = object.get("colorFrom").and_then(parse_color) {
+            effect.particle_color_from = Some(color);
+        }
+        if let Some(color) = object.get("colorTo").and_then(parse_color) {
+            effect.color_to = Some(color);
+        }
+        if let Some(color) = object.get("lightColor").and_then(parse_color) {
+            effect.light_color = Some(color);
+        }
+        if let Some(region) = object.get("region").and_then(Value::as_str) {
+            effect.region = region.to_owned();
+        }
+        if let Some(interp) = object.get("interp").and_then(Value::as_str) {
+            effect.interp = parse_interp(interp);
+        }
+        for (field, target) in [
+            ("sizeInterp", &mut effect.size_interp),
+            ("colorInterp", &mut effect.color_interp),
+            ("widthInterp", &mut effect.width_interp),
+            ("heightInterp", &mut effect.height_interp),
+        ] {
+            if let Some(interp) = object.get(field).and_then(Value::as_str) {
+                *target = Some(parse_interp(interp));
+            }
+        }
+        let _ = file;
     }
 
     /// Parses a sound name (`SoundId::by_name`; `Sounds.<field>` upstream).
@@ -3177,6 +4332,35 @@ pub fn resolve_generator_kind(name: &str) -> Option<GeneratorKind> {
     })
 }
 
+/// `BlockGroup` name to enum (`BlockGroup.java`; unknown names fall back to
+/// `none` like an unknown enum constant in the parser's lenient mode).
+pub fn resolve_block_group(name: &str) -> crate::content::registries::blocks::BlockGroup {
+    use crate::content::registries::blocks::BlockGroup;
+    match name {
+        "walls" => BlockGroup::Walls,
+        "projectors" => BlockGroup::Projectors,
+        "turrets" => BlockGroup::Turrets,
+        "transportation" => BlockGroup::Transportation,
+        "power" => BlockGroup::Power,
+        "liquids" => BlockGroup::Liquids,
+        "drills" => BlockGroup::Drills,
+        "units" => BlockGroup::Units,
+        "logic" => BlockGroup::Logic,
+        "payloads" => BlockGroup::Payloads,
+        "heat" => BlockGroup::Heat,
+        _ => BlockGroup::None,
+    }
+}
+
+/// `CacheLayer` name to enum (`CacheLayer.java` order).
+pub fn resolve_cache_layer(name: &str) -> Option<crate::render::layer::CacheLayerId> {
+    use crate::render::layer::CacheLayerId;
+    CacheLayerId::ALL
+        .iter()
+        .copied()
+        .find(|layer| layer.name() == name)
+}
+
 /// Parses a JSON color (hex string or `[r,g,b,a]`).
 pub fn parse_color(value: &Value) -> Option<Rgba> {
     match value {
@@ -3240,6 +4424,7 @@ fn field_bool(object: &Map<String, Value>, key: &str) -> Option<bool> {
 /// (`UnlockableContent.java:34-79`). Read by [`ContentJsonParser::apply_unlock_fields`]
 /// and accepted by every top-level kind's field list.
 const UNLOCK_FIELDS: &[&str] = &[
+    "research",
     "details",
     "credit",
     "alwaysUnlocked",
@@ -3540,6 +4725,115 @@ mod tests {
             Some("sand-boulder")
         );
         assert_eq!(decoration("mods-bad-floor").as_deref(), Some("air"));
+    }
+
+    /// #59: `research` on a mod content record inserts a tech node
+    /// (`ContentParser.java:1337-1400`): parent by content name, explicit
+    /// requirements, custom objectives, the implicit item Produce objective,
+    /// and the root/planet branch.
+    #[test]
+    fn research_inserts_tech_nodes() {
+        use crate::content::tech::{ObjectiveSpec, TechNodeRef};
+        let mut reg = registry();
+        let mut parser = ContentJsonParser::new();
+        reg.set_current_mod(Some(crate::content::ModId(String::from("mods"))));
+        parser
+            .parse(
+                &mut reg,
+                "w.json",
+                "research-wall",
+                r#"{"type":"Wall","health":500,"size":1,
+                    "research":{"parent":"router","requirements":["copper/10"],
+                      "objectives":[{"type":"Research","content":"router"}]}}"#,
+                ContentType::Block,
+            )
+            .expect("block");
+        parser
+            .parse(
+                &mut reg,
+                "i.json",
+                "research-dust",
+                r#"{"name":"Research Dust","research":"router"}"#,
+                ContentType::Item,
+            )
+            .expect("item");
+        parser
+            .parse(
+                &mut reg,
+                "r.json",
+                "research-root",
+                r#"{"type":"Wall","health":100,
+                    "research":{"root":true,"name":"mod-research-root",
+                      "requiresUnlock":true,"planet":"serpulo"}}"#,
+                ContentType::Block,
+            )
+            .expect("root block");
+        let errors = parser.finish_parsing(&mut reg);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let wall_id = reg.block_id("mods-research-wall").expect("wall");
+        let wall = reg.block(wall_id).expect("wall def");
+        let node_ref = wall.unlock.tech_node.expect("tech node");
+        let node = reg.tech().node(node_ref).expect("node");
+        assert_eq!(node.content, Some(ContentRef::block(wall_id)));
+        assert_eq!(node.requirements.len(), 1);
+        assert_eq!(node.requirements[0].amount, 10);
+        assert_eq!(
+            reg.item(node.requirements[0].item)
+                .map(|item| item.name.as_str()),
+            Some("copper")
+        );
+        assert!(
+            node.objectives
+                .iter()
+                .any(|objective| matches!(objective, ObjectiveSpec::Research(_))),
+            "custom objective: {:?}",
+            node.objectives
+        );
+        let router_node = reg
+            .tech()
+            .nodes
+            .iter()
+            .position(|candidate| candidate.content_name == "router")
+            .map(|index| TechNodeRef(index as u32))
+            .expect("router node");
+        assert_eq!(node.parent, Some(router_node));
+        assert!(
+            reg.tech()
+                .node(router_node)
+                .expect("router")
+                .children
+                .contains(&node_ref)
+        );
+
+        let item_id = reg.item_id("mods-research-dust").expect("item");
+        let item = reg.item(item_id).expect("item def");
+        let item_node = reg
+            .tech()
+            .node(item.unlock.tech_node.expect("item node"))
+            .expect("item node record");
+        assert!(
+            item_node.objectives.iter().any(|objective| matches!(
+                objective,
+                ObjectiveSpec::Produce(c) if *c == ContentRef::item(item_id)
+            )),
+            "implicit produce objective: {:?}",
+            item_node.objectives
+        );
+
+        let root_id = reg.block_id("mods-research-root").expect("root");
+        let root_def = reg.block(root_id).expect("root def");
+        let root_ref = root_def.unlock.tech_node.expect("root node");
+        let root_node = reg.tech().node(root_ref).expect("root record");
+        assert_eq!(root_node.name.as_deref(), Some("mod-research-root"));
+        assert!(root_node.requires_unlock);
+        assert!(reg.tech().roots.contains(&root_ref));
+        assert_eq!(
+            root_node.planet,
+            reg.by_name("serpulo")
+                .filter(|reference| reference.type_ == ContentType::Planet)
+                .map(|reference| crate::content::PlanetId::new(reference.id))
+        );
     }
 
     /// L06 T2: `Turret.playerControllable` (`Turret.java:103`) parses from
@@ -3898,6 +5192,243 @@ mod tests {
         assert_eq!(unit.weapons.len(), 1);
         assert_eq!(unit.weapons[0].name, "test-gun");
         assert!(unit.weapons[0].bullet.id.raw() >= 112);
+    }
+
+    /// #59: `BlockSpec`'s extended `Block`/`Floor` field surface reads from
+    /// mod JSON (the parser used to stop at ~30 fields).
+    #[test]
+    fn block_extended_field_surface() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-wall",
+            r#"{"type":"Wall","health":100,"size":1,
+                "fogRadius":9,"canOverdrive":false,"squareSprite":true,
+                "insulated":true,"absorbLasers":true,"replaceable":false,
+                "priority":2.5,"unitCapModifier":3,"region":"mod-wall-region",
+                "itemDrop":"copper","mapColor":"3366ff","drawTeamOverlay":true,
+                "buildCostMultiplier":0.5,"buildTime":40,"albedo":0.25,
+                "group":"walls","cacheLayer":"walls"}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-mod-wall").expect("block");
+        assert_eq!(block.fog_radius, 9);
+        assert!(!block.can_overdrive);
+        assert!(block.square_sprite);
+        assert!(block.insulated);
+        assert!(block.absorb_lasers);
+        assert!(!block.replaceable);
+        assert_eq!(block.priority, 2.5);
+        assert_eq!(block.unit_cap_modifier, 3);
+        assert_eq!(block.region, "mod-wall-region");
+        assert_eq!(
+            block
+                .item_drop
+                .and_then(|id| reg.item(id))
+                .map(|i| i.name.as_str()),
+            Some("copper")
+        );
+        assert_eq!(
+            block.map_color,
+            Some(crate::content::Rgba::new(0.2, 0.4, 1.0, 1.0))
+        );
+        assert!(block.draw_team_overlay);
+        assert_eq!(block.build_cost_multiplier, 0.5);
+        assert_eq!(block.build_time, 40.0);
+        assert_eq!(block.albedo, 0.25);
+        assert_eq!(
+            block.group,
+            crate::content::registries::blocks::BlockGroup::Walls
+        );
+        assert_eq!(block.cache_layer, crate::render::layer::CacheLayerId::Walls);
+    }
+
+    /// #59: the extended `UnitType` field surface (stats, sounds, effects,
+    /// target flags, commands/stances/defaultCommand).
+    #[test]
+    fn unit_extended_field_surface() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "mod-mech",
+            r#"{"name":"Mod Mech","type":"mech","health":500,
+                "boostMultiplier":1.5,"payloadCapacity":64,"outlineRadius":4,
+                "outlineColor":"ff0000","deathSound":"explosion","deathSoundVolume":0.5,
+                "mineWalls":true,"hittable":false,"internal":true,
+                "targetFlags":["core","storage"],"defaultCommand":"move",
+                "commands":["move","repair"],"stances":["stop"]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-mod-mech").expect("unit");
+        assert_eq!(unit.boost_multiplier, 1.5);
+        assert_eq!(unit.payload_capacity, 64.0);
+        assert_eq!(unit.outline_radius, 4);
+        assert_eq!(
+            unit.outline_color,
+            crate::content::Rgba::new(1.0, 0.0, 0.0, 1.0)
+        );
+        assert_eq!(
+            unit.death_sound,
+            crate::content::registries::sound_meta::SoundId::by_name("explosion")
+                .expect("explosion sound")
+        );
+        assert_eq!(unit.death_sound_volume, 0.5);
+        assert!(unit.mine_walls);
+        assert!(!unit.hittable);
+        assert!(unit.internal);
+        assert_eq!(
+            unit.target_flags,
+            vec![
+                Some(crate::content::registries::blocks::BlockFlag::Core),
+                Some(crate::content::registries::blocks::BlockFlag::Storage),
+            ]
+        );
+        assert_eq!(unit.commands.len(), 2);
+        assert_eq!(unit.stances.len(), 1);
+        assert!(unit.default_command.is_some());
+    }
+
+    /// #59: inline `ParticleEffect`/`RadialEffect`/`SeqEffect`/`SoundEffect`/
+    /// `NoiseEffect` records parse through the `Effect` field parser
+    /// (`ContentParser.java:72-82`); the default inline class is
+    /// `ParticleEffect` when `type` is omitted.
+    #[test]
+    fn inline_effect_classes_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "fx-mech",
+            r#"{"name":"Fx Mech","type":"mech","weapons":[{"name":"fx-gun","bullet":{
+                "type":"BasicBulletType","damage":1,
+                "hitEffect":{"type":"ParticleEffect","particles":12,"region":"spark",
+                             "colorFrom":"ff0000","cone":90,"lightColor":"00ff00",
+                             "interp":"pow2In"},
+                "despawnEffect":{"type":"RadialEffect","amount":3,"rotationSpacing":45,
+                                 "effect":{"type":"ParticleEffect","particles":2}},
+                "shootEffect":{"type":"SeqEffect","effects":[
+                    {"type":"ParticleEffect","length":8},
+                    {"type":"SoundEffect","sound":"shoot","minPitch":0.5,
+                     "effect":{"type":"NoiseEffect","layers":2,"color":"00ff00"}}]},
+                "smokeEffect":{"particles":3}
+            }}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-fx-mech").expect("unit");
+        let bullet = reg
+            .bullet(unit.weapons[0].bullet.id)
+            .expect("bullet registered");
+        let EffectRef::Inline(hit) = &bullet.hit_effect else {
+            panic!("hitEffect not inline: {:?}", bullet.hit_effect);
+        };
+        assert_eq!(hit.kind, InlineEffectKind::ParticleEffect);
+        assert_eq!(hit.particles, 12);
+        assert_eq!(hit.region, "spark");
+        assert_eq!(hit.cone, 90.0);
+        assert_eq!(
+            hit.particle_color_from,
+            Some(crate::content::Rgba::new(1.0, 0.0, 0.0, 1.0))
+        );
+        assert_eq!(
+            hit.light_color,
+            Some(crate::content::Rgba::new(0.0, 1.0, 0.0, 1.0))
+        );
+        assert_eq!(hit.interp, InterpKind::Pow2In);
+        assert!(hit.rand_length && hit.use_rotation && hit.cap);
+
+        let EffectRef::Inline(radial) = &bullet.despawn_effect else {
+            panic!("despawnEffect not inline");
+        };
+        assert_eq!(radial.kind, InlineEffectKind::RadialEffect);
+        assert_eq!(radial.amount, 3);
+        assert_eq!(radial.rotation_spacing, 45.0);
+        assert_eq!(radial.clip, 100.0, "RadialEffect() sets clip 100");
+        let EffectRef::Inline(radial_child) = &radial.children[0] else {
+            panic!("radial child not inline");
+        };
+        assert_eq!(radial_child.particles, 2);
+
+        let EffectRef::Inline(seq) = &bullet.shoot_effect else {
+            panic!("shootEffect not inline");
+        };
+        assert_eq!(seq.kind, InlineEffectKind::SeqEffect);
+        assert_eq!(seq.children.len(), 2);
+        // `SeqEffect.init()`: lifetime is the sum of the children.
+        assert_eq!(
+            seq.lifetime,
+            seq.children[0].lifetime() + seq.children[1].lifetime()
+        );
+        let EffectRef::Inline(sound) = &seq.children[1] else {
+            panic!("sound child not inline");
+        };
+        assert_eq!(sound.kind, InlineEffectKind::SoundEffect);
+        assert_eq!(sound.min_pitch, 0.5);
+        assert!(sound.sound.is_some());
+        let EffectRef::Inline(noise) = &sound.children[0] else {
+            panic!("noise child not inline");
+        };
+        assert_eq!(noise.kind, InlineEffectKind::NoiseEffect);
+        assert_eq!(noise.layers, 2);
+        assert_eq!(noise.clip, f32::MAX, "NoiseEffect is never clipped");
+        assert_eq!(
+            noise.color,
+            Some(crate::content::Rgba::new(0.0, 1.0, 0.0, 1.0))
+        );
+
+        // No `type` -> upstream's `ParticleEffect` default class.
+        let EffectRef::Inline(smoke) = &bullet.smoke_effect else {
+            panic!("smokeEffect not inline");
+        };
+        assert_eq!(smoke.kind, InlineEffectKind::ParticleEffect);
+        assert_eq!(smoke.particles, 3);
+    }
+
+    /// #59: `BulletType.spawnUnit`/`despawnUnit` name a registered unit
+    /// (`ContentParser` field read), the despawn-unit knobs carry over, and a
+    /// string `bullet` value resolves a named `Bullets.<field>` reference.
+    #[test]
+    fn bullet_unit_refs_and_named_bullets() {
+        use crate::content::registries::bullets::FIREBALL;
+        let mut reg = registry();
+        let (_, scout) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "scout",
+            r#"{"name":"Scout","type":"mech","health":100,"speed":1.5,"lifetime":90}"#,
+        );
+        assert!(scout.is_ok(), "{scout:?}");
+        let (_, spawner) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "spawner",
+            r#"{"name":"Spawner","type":"mech","weapons":[
+                {"name":"spawn-gun","bullet":{"type":"BasicBulletType","damage":1,
+                 "spawnUnit":"scout","despawnUnit":"scout","despawnUnitCount":3,
+                 "despawnUnitChance":0.5,"despawnUnitRadius":2,"faceOutwards":true}},
+                {"name":"fire-gun","bullet":"fireball"}]}"#,
+        );
+        assert!(spawner.is_ok(), "{spawner:?}");
+        let unit = reg.unit_by_name("mods-spawner").expect("unit");
+        assert_eq!(unit.weapons.len(), 2);
+
+        let spawn_bullet = reg.bullet(unit.weapons[0].bullet.id).expect("spawn bullet");
+        let scout_id = reg.unit_id("mods-scout").expect("scout");
+        assert_eq!(spawn_bullet.spawn_unit, Some(scout_id));
+        assert_eq!(spawn_bullet.despawn_unit, Some(scout_id));
+        assert_eq!(spawn_bullet.despawn_unit_count, 3);
+        assert!((spawn_bullet.despawn_unit_chance - 0.5).abs() < 1e-6);
+        assert!((spawn_bullet.despawn_unit_radius - 2.0).abs() < 1e-6);
+        assert!(spawn_bullet.face_outwards);
+        // `BulletType.range` for a spawn-unit bullet is `lifetime * speed`.
+        let scout_def = reg.unit(scout_id).expect("scout def");
+        assert_eq!(
+            spawn_bullet.spawn_unit_range,
+            Some((scout_def.lifetime, scout_def.speed))
+        );
+
+        assert_eq!(unit.weapons[1].bullet.id, FIREBALL);
     }
 
     #[test]

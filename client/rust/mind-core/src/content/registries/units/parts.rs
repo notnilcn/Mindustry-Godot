@@ -63,9 +63,10 @@ impl BlendingKind {
 
 /// `Interp` curve tag (used by `PartProgressSpec::Curve` and bullet trail
 /// interpolation; append-only).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum InterpKind {
     /// `Interp.linear`.
+    #[default]
     Linear = 0,
     /// `Interp.one` (constant 1).
     One = 1,

@@ -472,7 +472,260 @@ impl DataPatcher {
                     }
                 },
             ),
-            _ => self.warn(format!("unknown field `block.{name}.{field}`")),
+            "region" => {
+                if mode != FieldMode::Set {
+                    return;
+                }
+                if let Some(region) = value.as_str() {
+                    self.set_block_field(
+                        registry,
+                        reference,
+                        field,
+                        |block| block.region.clone(),
+                        move |block, v: String| block.region = v,
+                        region.to_owned(),
+                    );
+                }
+            }
+            "itemDrop" => {
+                if mode != FieldMode::Set {
+                    return;
+                }
+                if let Some(name) = value.as_str() {
+                    let resolved = registry
+                        .item_id(name)
+                        .or_else(|| registry.item_id(&registry.transform_name(name)));
+                    match resolved {
+                        Some(item) => self.set_block_field(
+                            registry,
+                            reference,
+                            field,
+                            |block| block.item_drop,
+                            move |block, v| block.item_drop = v,
+                            Some(item),
+                        ),
+                        None => {
+                            self.warn(format!("unknown item `{name}` for `block.{name}.itemDrop`"))
+                        }
+                    }
+                }
+            }
+            "liquidDrop" => {
+                if mode != FieldMode::Set {
+                    return;
+                }
+                if let Some(name) = value.as_str() {
+                    let resolved = registry
+                        .liquid_id(name)
+                        .or_else(|| registry.liquid_id(&registry.transform_name(name)));
+                    match resolved {
+                        Some(liquid) => self.set_block_field(
+                            registry,
+                            reference,
+                            field,
+                            |block| block.liquid_drop,
+                            move |block, v| block.liquid_drop = v,
+                            Some(liquid),
+                        ),
+                        None => self.warn(format!(
+                            "unknown liquid `{name}` for `block.{name}.liquidDrop`"
+                        )),
+                    }
+                }
+            }
+            _ => {
+                if !self.apply_block_scalar(registry, reference, id, field, mode, value) {
+                    self.warn(format!("unknown field `block.{name}.{field}`"));
+                }
+            }
+        }
+    }
+
+    /// Applies one scalar `block.<name>.<field>` edit; `false` = unknown field.
+    ///
+    /// Generalises the `DataPatcher` block surface over every scalar
+    /// [`BlockDef`](crate::content::BlockDef) field the JSON content format can
+    /// address (`DataPatcher.java` field reflection).
+    fn apply_block_scalar(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        id: BlockId,
+        field: &str,
+        mode: FieldMode,
+        value: &Value,
+    ) -> bool {
+        macro_rules! int {
+            ($field:ident, $json:literal) => {
+                if field == $json {
+                    self.set_i32(
+                        registry,
+                        reference,
+                        field,
+                        value,
+                        mode,
+                        |r| r.block(id).map(|b| b.$field),
+                        move |r, v| {
+                            if let Some(b) = r.block_mut(id) {
+                                b.$field = v;
+                            }
+                        },
+                    );
+                    return true;
+                }
+            };
+        }
+        macro_rules! float {
+            ($field:ident, $json:literal) => {
+                if field == $json {
+                    self.set_f32(
+                        registry,
+                        reference,
+                        field,
+                        value,
+                        mode,
+                        |r| r.block(id).map(|b| b.$field),
+                        move |r, v| {
+                            if let Some(b) = r.block_mut(id) {
+                                b.$field = v;
+                            }
+                        },
+                    );
+                    return true;
+                }
+            };
+        }
+        macro_rules! boolean {
+            ($field:ident, $json:literal) => {
+                if field == $json {
+                    self.set_bool(
+                        registry,
+                        reference,
+                        field,
+                        value,
+                        mode,
+                        |r| r.block(id).map(|b| b.$field),
+                        move |r, v| {
+                            if let Some(b) = r.block_mut(id) {
+                                b.$field = v;
+                            }
+                        },
+                    );
+                    return true;
+                }
+            };
+        }
+
+        // Numeric fields (`Block.java`/`Floor.java`/subclass field surface).
+        int!(fog_radius, "fogRadius");
+        int!(unit_cap_modifier, "unitCapModifier");
+        int!(item_capacity, "itemCapacity");
+        int!(autotile_variants, "autotileVariants");
+        int!(autotile_mid_variants, "autotileMidVariants");
+        int!(tiling_variants, "tilingVariants");
+        int!(size_offset, "sizeOffset");
+        float!(scaled_health, "scaledHealth");
+        float!(build_time, "buildTime");
+        float!(build_cost_multiplier, "buildCostMultiplier");
+        float!(research_cost_multiplier, "researchCostMultiplier");
+        float!(priority, "priority");
+        float!(liquid_capacity, "liquidCapacity");
+        float!(ore_threshold, "oreThreshold");
+        float!(ore_scale, "oreScale");
+        float!(albedo, "albedo");
+        float!(visual_rotation_offset, "visualRotationOffset");
+        float!(base_explosiveness, "baseExplosiveness");
+        float!(explosiveness_scale, "explosivenessScale");
+        float!(flammability_scale, "flammabilityScale");
+        float!(speed_multiplier, "speedMultiplier");
+        float!(drown_time, "drownTime");
+        float!(overlay_alpha, "overlayAlpha");
+        float!(floor_status_duration, "statusDuration");
+        float!(floor_drag_multiplier, "dragMultiplier");
+        float!(floor_damage_taken, "damageTaken");
+        float!(liquid_multiplier, "liquidMultiplier");
+        float!(crush_damage_multiplier, "crushDamageMultiplier");
+        float!(deposit_cooldown, "depositCooldown");
+        float!(construct_time, "constructTime");
+        float!(craft_time, "craftTime");
+        float!(offset, "offset");
+        float!(building_cache_layer, "buildingCacheLayer");
+        boolean!(under_bullets, "underBullets");
+        boolean!(rebuildable, "rebuildable");
+        boolean!(deconstruct_drop_all_liquid, "deconstructDropAllLiquid");
+        boolean!(incinerate_non_buildable, "incinerateNonBuildable");
+        boolean!(requires_core_zone, "requiresCoreZone");
+        boolean!(ignore_build_darkness, "ignoreBuildDarkness");
+        boolean!(solidifies, "solidifies");
+        boolean!(save_data, "saveData");
+        boolean!(save_config, "saveConfig");
+        boolean!(configurable, "configurable");
+        boolean!(in_editor, "inEditor");
+        boolean!(placeable_player, "placeablePlayer");
+        boolean!(placeable_liquid, "placeableLiquid");
+        boolean!(placeable_on, "placeableOn");
+        boolean!(insulated, "insulated");
+        boolean!(can_overdrive, "canOverdrive");
+        boolean!(absorb_lasers, "absorbLasers");
+        boolean!(allow_core_placement, "allowCorePlacement");
+        boolean!(player_unmineable, "playerUnmineable");
+        boolean!(wall_ore, "wallOre");
+        boolean!(ore_default, "oreDefault");
+        boolean!(rotate, "rotate");
+        boolean!(rotate_draw, "rotateDraw");
+        boolean!(rotate_draw_editor, "rotateDrawEditor");
+        boolean!(square_sprite, "squareSprite");
+        boolean!(has_color, "hasColor");
+        boolean!(draw_cached, "drawCached");
+        boolean!(draw_dynamic, "drawDynamic");
+        boolean!(fills_tile, "fillsTile");
+        boolean!(has_shadow, "hasShadow");
+        boolean!(custom_shadow, "customShadow");
+        boolean!(obstructs_light, "obstructsLight");
+        boolean!(emit_light, "emitLight");
+        boolean!(draw_team_overlay, "drawTeamOverlay");
+        boolean!(autotile, "autotile");
+        boolean!(draw_edge_in, "drawEdgeIn");
+        boolean!(draw_edge_out, "drawEdgeOut");
+        boolean!(shallow, "shallow");
+        boolean!(is_liquid, "isLiquid");
+        boolean!(crush_fragile, "crushFragile");
+        boolean!(unit_move_breakable, "unitMoveBreakable");
+        boolean!(team_passable, "teamPassable");
+        boolean!(always_replace, "alwaysReplace");
+        boolean!(privileged, "privileged");
+        boolean!(replaceable, "replaceable");
+        boolean!(quick_rotate, "quickRotate");
+        boolean!(commandable, "commandable");
+        boolean!(player_controllable, "playerControllable");
+        boolean!(use_color, "useColor");
+        false
+    }
+
+    /// Generic `BlockDef` field setter with the reset-on-unapply bookkeeping.
+    fn set_block_field<T: Clone + 'static>(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        field: &str,
+        get: impl FnOnce(&crate::content::BlockDef) -> T,
+        set: impl Fn(&mut crate::content::BlockDef, T) + Clone + 'static,
+        new: T,
+    ) {
+        if self.mark_used(reference, field) {
+            let Some(original) = registry.block(BlockId::new(reference.id)).map(get) else {
+                return;
+            };
+            let reset = set.clone();
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(reference.id)) {
+                        reset(block, original);
+                    }
+                }));
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(reference.id)) {
+            set(block, new);
         }
     }
 
@@ -2450,7 +2703,7 @@ fn is_index_map(map: &Map<String, Value>) -> bool {
 }
 
 /// Resolves a `unit.targetFlags` name to a [`BlockFlag`] keyword.
-fn resolve_block_flag(name: &str) -> Option<crate::content::registries::blocks::BlockFlag> {
+pub fn resolve_block_flag(name: &str) -> Option<crate::content::registries::blocks::BlockFlag> {
     use crate::content::registries::blocks::BlockFlag;
     Some(match name {
         "core" => BlockFlag::Core,
@@ -2502,6 +2755,62 @@ mod tests {
         patcher.unapply(&mut registry);
         assert_eq!(registry.block(id).expect("block").health, original);
         assert!(!patcher.is_applied());
+    }
+
+    /// #60: the patcher addresses the general `BlockDef` scalar surface (not
+    /// just the original ~8 fields) and `unapply` restores every value,
+    /// including `Option` fields whose original is `None`.
+    #[test]
+    fn block_scalar_field_surface() {
+        let mut registry = test_registry();
+        let id = registry.block_id("router").expect("router");
+        let original = registry.block(id).expect("block").clone();
+        assert_eq!(original.item_drop, None, "router drops nothing");
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{
+                        "block.router.fogRadius": 7,
+                        "block.router.canOverdrive": false,
+                        "block.router.squareSprite": true,
+                        "block.router.region": "custom-router",
+                        "block.router.itemDrop": "copper",
+                        "block.router.priority": 3.5,
+                        "block.router.playerControllable": false,
+                        "block.router.insulated": true,
+                        "block.router.depositCooldown": 12.5,
+                        "block.router.replaceable": false
+                    }"#,
+                )],
+            )
+            .expect("apply");
+        let block = registry.block(id).expect("block");
+        assert_eq!(block.fog_radius, 7);
+        assert!(!block.can_overdrive);
+        assert!(block.square_sprite);
+        assert_eq!(block.region, "custom-router");
+        assert_eq!(block.item_drop, registry.item_id("copper"));
+        assert_eq!(block.priority, 3.5);
+        assert!(!block.player_controllable);
+        assert!(block.insulated);
+        assert_eq!(block.deposit_cooldown, 12.5);
+        assert!(!block.replaceable);
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+
+        patcher.unapply(&mut registry);
+        let restored = registry.block(id).expect("block");
+        assert_eq!(restored.fog_radius, original.fog_radius);
+        assert_eq!(restored.can_overdrive, original.can_overdrive);
+        assert_eq!(restored.square_sprite, original.square_sprite);
+        assert_eq!(restored.region, original.region);
+        assert_eq!(restored.item_drop, original.item_drop);
+        assert_eq!(restored.priority, original.priority);
+        assert_eq!(restored.player_controllable, original.player_controllable);
+        assert_eq!(restored.insulated, original.insulated);
+        assert_eq!(restored.deposit_cooldown, original.deposit_cooldown);
+        assert_eq!(restored.replaceable, original.replaceable);
     }
 
     /// Plan 20 M3: `patch::nested_form_edits`.

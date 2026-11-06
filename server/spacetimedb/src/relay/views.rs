@@ -9,6 +9,7 @@ use spacetimedb::{ViewContext, view};
 
 // 2.10.1 view contexts use read-only accessor traits.
 use super::checksum::{MatchChecksum, match_checksum__view};
+use super::events::{MatchEvent, match_event__view};
 use super::plans::{
     MatchPlanChunk, MatchPlanState, match_plan_chunk__view, match_plan_state__view,
 };
@@ -23,7 +24,7 @@ use super::tables::{
     relay_member__view, sender_command_state__view,
 };
 use super::ui_events::{MatchUiEvent, match_ui_event__view};
-use crate::chat::{ChatKind, MatchChat, match_chat__view};
+use crate::chat::{MatchChat, chat_visible, match_chat__view};
 
 /// Every public, non-ended match for the server browser (plan §3.11).
 #[view(accessor = all_matches, public)]
@@ -194,20 +195,44 @@ fn my_match_ui_events(ctx: &ViewContext) -> Vec<MatchUiEvent> {
         .collect()
 }
 
-/// Chat visible to the caller: `All` + `System` + own `Team` (plan §6.2).
+/// Chat visible to the caller: `All` + `System` + own `Team` + `Admin` for
+/// admins, plus private (`target`) rows addressed to the caller (plan §6.2;
+/// GAPS #33/PAR-0125).
 #[view(accessor = my_match_chat, public)]
 fn my_match_chat(ctx: &ViewContext) -> Vec<MatchChat> {
     let Some(member) = active_member(ctx) else {
         return Vec::new();
     };
+    let viewer_admin = crate::admin::view_is_admin(ctx);
+    let viewer = ctx.sender();
     ctx.db
         .match_chat()
         .by_chat_match()
         .filter(member.match_id)
-        .filter(|chat| match chat.kind {
-            ChatKind::All | ChatKind::System => true,
-            ChatKind::Team => chat.team.is_some() && chat.team == member.team,
+        .filter(|chat| {
+            chat_visible(
+                chat.kind,
+                chat.team,
+                member.team,
+                viewer_admin,
+                chat.target,
+                viewer,
+            )
         })
+        .collect()
+}
+
+/// Server events for the caller's active match (GAPS #37). The client
+/// transport maps each row onto its `EventType` bus.
+#[view(accessor = my_match_events, public)]
+fn my_match_events(ctx: &ViewContext) -> Vec<MatchEvent> {
+    let Some(match_id) = active_match_id(ctx) else {
+        return Vec::new();
+    };
+    ctx.db
+        .match_event()
+        .by_match_event()
+        .filter(match_id)
         .collect()
 }
 

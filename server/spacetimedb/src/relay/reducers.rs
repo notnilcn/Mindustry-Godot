@@ -17,13 +17,16 @@ use super::tables::{
     RelayMatch, RelayMember, SenderCommandState, SetRule, SetRules, Visibility, match_command,
     match_state, relay_match, relay_member, sender_command_state,
 };
+use crate::admin::history;
 use crate::admin::{
     AdminIdentity, admin_identity as _, player_ban, server_config_or_default, whitelist_entry,
 };
+use crate::identity::tables::player;
 use crate::main::audit::audit;
 use crate::main::global::{DEFAULT_MAX_PLAYERS, MAX_RULES_JSON, PROTOCOL_VERSION};
 use crate::main::tables::AuditKind;
 use crate::mods::{MatchMod, check_mods, match_mod};
+use crate::relay::events::{EventKind, emit};
 
 /// Creates a lobby match and auto-joins the creator as host + player.
 #[reducer]
@@ -65,6 +68,28 @@ pub fn create_match(
     }
     let config = relay_config_or_default(ctx);
     let now = ctx.timestamp;
+    // GAPS #34: the host connects like any other player, so a ban/name-ban/kick
+    // cooldown applies before a match can be created (`NetServer.java:195-201`).
+    let creator_name = player_username(ctx);
+    let server_config = server_config_or_default(ctx);
+    let banned = ctx
+        .db
+        .player_ban()
+        .by_ban_identity()
+        .filter(ctx.sender())
+        .any(|ban| {
+            ban.expires_at
+                .map(|expiry| {
+                    expiry.to_micros_since_unix_epoch() > now.to_micros_since_unix_epoch()
+                })
+                .unwrap_or(true)
+        });
+    if banned || history::name_banned(&server_config.banned_name_patterns, &creator_name) {
+        return Err("You are banned from this server.".to_string());
+    }
+    if history::kick_cooldown_secs(ctx, ctx.sender()).is_some() {
+        return Err("You were recently kicked from this server.".to_string());
+    }
     let password_hash = password
         .as_deref()
         .filter(|pw| !pw.is_empty())
@@ -129,7 +154,13 @@ pub fn create_match(
     // Hosting grants the creator admin (`HostDialog.runHost` sets
     // `player.admin = true`; `J/ui/dialogs/HostDialog.java:96`), so the host's
     // global moderation actions (ban/grant) work like Java's (I08 T4/T9).
-    if ctx.db.admin_identity().identity().find(ctx.sender()).is_none() {
+    if ctx
+        .db
+        .admin_identity()
+        .identity()
+        .find(ctx.sender())
+        .is_none()
+    {
         ctx.db.admin_identity().insert(AdminIdentity {
             identity: ctx.sender(),
             granted_by: ctx.sender(),
@@ -141,6 +172,25 @@ pub fn create_match(
         Some(ctx.sender()),
         AuditKind::MatchCreate,
         format!("match {} `{}`", row.match_id, row.map_id),
+    );
+    // The creator is also the first member: seed its PlayerInfo history and
+    // publish the lifecycle/join events (GAPS #34/#37).
+    history::record_join(ctx, ctx.sender(), &creator_name);
+    emit(
+        ctx,
+        row.match_id,
+        EventKind::MatchCreate,
+        Some(ctx.sender()),
+        None,
+        row.map_id.clone(),
+    );
+    emit(
+        ctx,
+        row.match_id,
+        EventKind::PlayerJoin,
+        Some(ctx.sender()),
+        Some(ctx.sender()),
+        creator_name,
     );
     Ok(())
 }
@@ -205,6 +255,11 @@ pub fn join_match(
         .identity()
         .find(ctx.sender())
         .is_some();
+    // GAPS #34: name-ban regexes are enforced here (Java `isNameBanned`), and a
+    // recent kick blocks the rejoin until its cooldown lapses (`getKickTime`).
+    let name = player_username(ctx);
+    let name_banned = history::name_banned(&config.banned_name_patterns, &name);
+    let kicked_secs_left = history::kick_cooldown_secs(ctx, ctx.sender());
     let gate = JoinGate {
         banned,
         whitelist_enabled: config.whitelist_enabled,
@@ -213,6 +268,8 @@ pub fn join_match(
         max_players: row.max_players,
         stored_password_hash: row.password_hash,
         supplied_password: password,
+        name_banned,
+        kicked_secs_left,
     };
     validate_join(&gate)?;
 
@@ -232,6 +289,15 @@ pub fn join_match(
         player_count: row.player_count.saturating_add(1),
         ..row
     });
+    history::record_join(ctx, ctx.sender(), &name);
+    emit(
+        ctx,
+        match_id,
+        EventKind::PlayerJoin,
+        Some(ctx.sender()),
+        Some(ctx.sender()),
+        name,
+    );
     audit(
         ctx,
         Some(ctx.sender()),
@@ -271,6 +337,22 @@ pub fn leave_match(ctx: &ReducerContext, match_id: u64) -> Result<(), String> {
             AuditKind::MatchEnd,
             format!("host left match {match_id}; ended"),
         );
+        emit(
+            ctx,
+            match_id,
+            EventKind::PlayerLeave,
+            Some(ctx.sender()),
+            Some(ctx.sender()),
+            "host left",
+        );
+        emit(
+            ctx,
+            match_id,
+            EventKind::MatchEnd,
+            Some(ctx.sender()),
+            None,
+            "host left",
+        );
     } else {
         let count = ctx
             .db
@@ -287,6 +369,14 @@ pub fn leave_match(ctx: &ReducerContext, match_id: u64) -> Result<(), String> {
             Some(ctx.sender()),
             AuditKind::MatchLeave,
             format!("left match {match_id}"),
+        );
+        emit(
+            ctx,
+            match_id,
+            EventKind::PlayerLeave,
+            Some(ctx.sender()),
+            Some(ctx.sender()),
+            "",
         );
     }
     Ok(())
@@ -341,6 +431,14 @@ pub fn start_match(ctx: &ReducerContext, match_id: u64, force: bool) -> Result<(
         Some(ctx.sender()),
         AuditKind::MatchStart,
         format!("started match {match_id}"),
+    );
+    emit(
+        ctx,
+        match_id,
+        EventKind::MatchStart,
+        Some(ctx.sender()),
+        None,
+        "",
     );
     Ok(())
 }
@@ -454,6 +552,15 @@ pub(crate) fn send_match_command_impl(
         }
     }
     validate_kind(&kind, row.map_width_tiles, row.map_height_tiles)?;
+    // GAPS #34: persisted action filters + the built-in interaction-rate gate
+    // (`Administration.allowAction`) run before the command enters the log.
+    let server_config = server_config_or_default(ctx);
+    match crate::admin::actions::enforce_action_filters(ctx, &row, &kind, &server_config)? {
+        crate::admin::actions::ActionGate::Allow => {}
+        // Rate-gate denial: the warning/kick bookkeeping must commit, so the
+        // command is dropped without appending and the reducer returns `Ok`.
+        crate::admin::actions::ActionGate::Drop => return Ok(()),
+    }
     // Plan §3.12.1: campaign rows are written on the same ordered command.
     crate::campaign::persist_from_command(ctx, &row, &kind)?;
     let rules_update = rules_after_command(&kind, &row)?;
@@ -591,6 +698,17 @@ fn upsert_match_state_rules(
             });
         }
     }
+}
+
+/// The caller's current username, or a stub before `set_username` ran.
+fn player_username(ctx: &ReducerContext) -> String {
+    ctx.db
+        .player()
+        .identity()
+        .find(ctx.sender())
+        .map(|row| row.username)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "<unknown>".to_string())
 }
 
 #[cfg(test)]

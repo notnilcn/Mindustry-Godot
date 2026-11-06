@@ -288,6 +288,9 @@ pub enum BulletRef {
     Pre(usize),
     /// An inline bullet constructed at this point in the unit initializer.
     Inline(Box<BulletSpec>),
+    /// A named base bullet (`ContentParser`'s `field(Bullets.class, name)`):
+    /// `Bullets.<name>` referenced by a mod JSON string.
+    Named(crate::content::BulletId),
 }
 
 /// Generated weapon input record (`new Weapon(...){{...}}`).

@@ -25,10 +25,13 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
     validate_username(&username)?;
     match ctx.db.player().identity().find(ctx.sender()) {
         Some(player) => {
-            ctx.db
-                .player()
-                .identity()
-                .update(Player { username, ..player });
+            ctx.db.player().identity().update(Player {
+                username: username.clone(),
+                ..player
+            });
+            // GAPS #34: keep the per-identity name history current
+            // (`Administration.PlayerInfo.names`).
+            crate::admin::history::record_name(ctx, ctx.sender(), &username);
             Ok(())
         }
         None => {
@@ -44,7 +47,10 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
 pub fn set_color(ctx: &ReducerContext, color: u32) -> Result<(), String> {
     match ctx.db.player().identity().find(ctx.sender()) {
         Some(player) => {
-            ctx.db.player().identity().update(Player { color, ..player });
+            ctx.db
+                .player()
+                .identity()
+                .update(Player { color, ..player });
             Ok(())
         }
         None => {

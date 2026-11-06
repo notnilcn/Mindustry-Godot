@@ -4,6 +4,7 @@
 //! append-only ordered command log.
 
 pub mod checksum;
+pub mod events;
 pub mod methods;
 pub mod plans;
 pub mod player_state;

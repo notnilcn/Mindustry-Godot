@@ -10,6 +10,15 @@
 //! Under D2 there is no IP/subnet ban data source (OD-21-C): only STDB identity
 //! bans + whitelist. Wave/team/tile actions are emitted as ordered
 //! `match_command` rows so every peer applies them deterministically.
+//!
+//! GAPS #34 adds the remaining `Administration` surface: action filters
+//! ([`actions`]), PlayerInfo history / trace / name bans ([`history`]), the
+//! interaction rate gate and the new server-config knobs
+//! (`enable_votekick`, `interactRate*`, `messageRateLimit`/`messageSpamKick`,
+//! `uuidChange*`).
+
+pub mod actions;
+pub mod history;
 
 use spacetimedb::{
     Identity, ReducerContext, SpacetimeType, Table, TimeDuration, Timestamp, ViewContext, reducer,
@@ -52,6 +61,37 @@ pub struct ServerConfig {
     pub chat_retention_rows: u32,
     pub match_ttl_hours: u32,
     pub banned_name_patterns: Vec<String>,
+    /// Whether `/votekick` is enabled (Java `Config.enableVotekick`; default on).
+    #[default(true)]
+    pub enable_votekick: bool,
+    /// Whether the built-in anti-spam gates run (Java `Config.antiSpam`).
+    #[default(true)]
+    pub anti_spam: bool,
+    /// Interaction-rate window in seconds (Java `Config.interactRateWindow`).
+    #[default(6)]
+    pub interact_rate_window_secs: u32,
+    /// Interactions allowed per window (Java `Config.interactRateLimit`).
+    #[default(25)]
+    pub interact_rate_limit: u32,
+    /// Interactions in a window before a kick (Java `Config.interactRateKick`).
+    #[default(60)]
+    pub interact_rate_kick: u32,
+    /// Minimum seconds between messages, 0 = disabled (Java `messageRateLimit`).
+    #[default(0)]
+    pub message_rate_limit_secs: u32,
+    /// Spam infractions before a kick, 0 = disabled (Java `messageSpamKick`).
+    #[default(3)]
+    pub message_spam_kick: u32,
+    /// UUID changes allowed per address per period (Java `uuidChangeLimit`).
+    ///
+    /// No address source exists under D2 (OD-21-C), so this is stored and
+    /// surfaced for parity but not enforced; see the twin item note.
+    #[default(10)]
+    pub uuid_change_limit: u32,
+    /// Window for [`Self::uuid_change_limit`], in hours (Java
+    /// `uuidChangeTimePeriod`).
+    #[default(3)]
+    pub uuid_change_time_period_hours: u32,
 }
 
 /// Global admin grant (plan §6.1); bootstrap seed in [`super::main::seeds`].
@@ -118,6 +158,20 @@ pub enum AdminActionKind {
     AddChatFilter,
     /// Removed a chat filter.
     RemoveChatFilter,
+    /// Added a match-scoped chat filter (PAR-0125).
+    AddMatchChatFilter,
+    /// Removed a match-scoped chat filter.
+    RemoveMatchChatFilter,
+    /// Added a name-ban regex (GAPS #34).
+    BanName,
+    /// Removed a name-ban regex.
+    UnbanName,
+    /// Answered an `adminRequest(trace)` (GAPS #34).
+    RequestTrace,
+    /// Added a persisted action filter (GAPS #34).
+    AddActionFilter,
+    /// Removed a persisted action filter.
+    RemoveActionFilter,
 }
 
 impl AdminActionKind {
@@ -173,6 +227,15 @@ pub fn default_server_config() -> ServerConfig {
         chat_retention_rows: 500,
         match_ttl_hours: 24,
         banned_name_patterns: Vec::new(),
+        enable_votekick: true,
+        anti_spam: true,
+        interact_rate_window_secs: 6,
+        interact_rate_limit: 25,
+        interact_rate_kick: 60,
+        message_rate_limit_secs: 0,
+        message_spam_kick: 3,
+        uuid_change_limit: 10,
+        uuid_change_time_period_hours: 3,
     }
 }
 
@@ -208,7 +271,17 @@ pub fn admin_gate(admin: bool, host: bool, kind: AdminActionKind) -> Result<(), 
         | AdminActionKind::SetWhitelist
         | AdminActionKind::SetConfig
         | AdminActionKind::AddChatFilter
-        | AdminActionKind::RemoveChatFilter => admin,
+        | AdminActionKind::RemoveChatFilter
+        | AdminActionKind::BanName
+        | AdminActionKind::UnbanName
+        | AdminActionKind::RequestTrace
+        | AdminActionKind::AddActionFilter
+        | AdminActionKind::RemoveActionFilter => admin,
+        // Per-match filter management follows the match host as well: the room
+        // owner curates its own chat filters (PAR-0125).
+        AdminActionKind::AddMatchChatFilter | AdminActionKind::RemoveMatchChatFilter => {
+            admin || host
+        }
     };
     if allowed {
         Ok(())
@@ -255,6 +328,15 @@ pub fn known_server_config_field(field: &str) -> bool {
             | "command_retention_commands"
             | "chat_retention_rows"
             | "match_ttl_hours"
+            | "enable_votekick"
+            | "anti_spam"
+            | "interact_rate_window_secs"
+            | "interact_rate_limit"
+            | "interact_rate_kick"
+            | "message_rate_limit_secs"
+            | "message_spam_kick"
+            | "uuid_change_limit"
+            | "uuid_change_time_period_hours"
     )
 }
 
@@ -290,7 +372,7 @@ fn parse_u64(value: &str) -> Result<u64, String> {
 // ---- reducer plumbing -------------------------------------------------------
 
 /// Applies the per-identity admin rate window; `Err` rolls back the reducer.
-fn admin_rate_check(ctx: &ReducerContext) -> Result<(), String> {
+pub(crate) fn admin_rate_check(ctx: &ReducerContext) -> Result<(), String> {
     let now = ctx.timestamp;
     let now_micros = now.to_micros_since_unix_epoch();
     let identity = ctx.sender();
@@ -327,7 +409,7 @@ fn admin_rate_check(ctx: &ReducerContext) -> Result<(), String> {
 }
 
 /// Records one committed admin action + audit line.
-fn record(
+pub(crate) fn record(
     ctx: &ReducerContext,
     kind: AdminActionKind,
     target: Option<Identity>,
@@ -366,27 +448,10 @@ pub fn admin_kick(
     if target == ctx.sender() {
         return Err("cannot kick yourself".to_string());
     }
-    let member = ctx
-        .db
-        .relay_member()
-        .by_match_identity()
-        .filter((match_id, target))
-        .next()
-        .ok_or_else(|| "target is not a member of this match".to_string())?;
     admin_rate_check(ctx)?;
-    ctx.db.relay_member().member_id().update(RelayMemberRow {
-        kicked_reason: Some(reason.clone()),
-        connected: false,
-        ..member
-    });
-    ctx.db.match_kick().insert(MatchKick {
-        kick_id: 0,
-        match_id,
-        target,
-        reason: reason.clone(),
-        by: ctx.sender(),
-        at: ctx.timestamp,
-    });
+    // No cooldown: Java's plain `adminRequest(kick)` calls `kick(KickReason)`
+    // with duration 0; only vote/filter kicks carry one.
+    history::apply_kick(ctx, match_id, target, ctx.sender(), &reason, 0)?;
     record(
         ctx,
         AdminActionKind::Kick,
@@ -445,7 +510,19 @@ pub fn admin_ban(
             by: ctx.sender(),
             at: ctx.timestamp,
         });
+        crate::relay::events::emit(
+            ctx,
+            member.match_id,
+            crate::relay::events::EventKind::PlayerBan,
+            Some(ctx.sender()),
+            Some(target),
+            reason.clone(),
+        );
     }
+    // Java `Player.kick` runs `Administration.handleKicked`, which bumps
+    // `timesKicked` even for a duration-0 ban kick; the cooldown stays unset
+    // because the ban row is the enforcement.
+    history::record_kick(ctx, target, 0);
     record(ctx, AdminActionKind::Ban, Some(target), None, reason);
     Ok(())
 }
@@ -617,6 +694,42 @@ pub fn admin_set_config(ctx: &ReducerContext, field: String, value: String) -> R
             match_ttl_hours: parse_u32(&value)?,
             ..config
         },
+        "enable_votekick" => ServerConfig {
+            enable_votekick: parse_bool(&value)?,
+            ..config
+        },
+        "anti_spam" => ServerConfig {
+            anti_spam: parse_bool(&value)?,
+            ..config
+        },
+        "interact_rate_window_secs" => ServerConfig {
+            interact_rate_window_secs: parse_u32(&value)?,
+            ..config
+        },
+        "interact_rate_limit" => ServerConfig {
+            interact_rate_limit: parse_u32(&value)?,
+            ..config
+        },
+        "interact_rate_kick" => ServerConfig {
+            interact_rate_kick: parse_u32(&value)?,
+            ..config
+        },
+        "message_rate_limit_secs" => ServerConfig {
+            message_rate_limit_secs: parse_u32(&value)?,
+            ..config
+        },
+        "message_spam_kick" => ServerConfig {
+            message_spam_kick: parse_u32(&value)?,
+            ..config
+        },
+        "uuid_change_limit" => ServerConfig {
+            uuid_change_limit: parse_u32(&value)?,
+            ..config
+        },
+        "uuid_change_time_period_hours" => ServerConfig {
+            uuid_change_time_period_hours: parse_u32(&value)?,
+            ..config
+        },
         _ => return Err(format!("unknown server config field `{field}`")),
     };
     ctx.db.server_config().id().update(updated);
@@ -630,7 +743,7 @@ pub fn admin_set_config(ctx: &ReducerContext, field: String, value: String) -> R
     Ok(())
 }
 
-/// Adds a global chat filter (admin only).
+/// Adds a database-global chat filter (admin only).
 #[reducer]
 pub fn admin_add_chat_filter(
     ctx: &ReducerContext,
@@ -649,6 +762,7 @@ pub fn admin_add_chat_filter(
         mute,
         added_by: ctx.sender(),
         added_at: ctx.timestamp,
+        match_id: None,
     });
     record(
         ctx,
@@ -660,13 +774,58 @@ pub fn admin_add_chat_filter(
     Ok(())
 }
 
+/// Adds a chat filter scoped to one match (admin or match host; PAR-0125).
+#[reducer]
+pub fn admin_add_match_chat_filter(
+    ctx: &ReducerContext,
+    match_id: u64,
+    pattern: String,
+    mute: bool,
+) -> Result<(), String> {
+    let row = require_match(ctx, match_id)?;
+    admin_gate(
+        is_admin(ctx),
+        row.host == ctx.sender(),
+        AdminActionKind::AddMatchChatFilter,
+    )?;
+    let pattern = pattern.trim().to_lowercase();
+    if pattern.is_empty() || pattern.chars().count() > MAX_CHAT_FILTER_LEN {
+        return Err(format!("filter must be 1-{MAX_CHAT_FILTER_LEN} characters"));
+    }
+    admin_rate_check(ctx)?;
+    ctx.db.chat_filter().insert(ChatFilter {
+        filter_id: 0,
+        pattern: pattern.clone(),
+        mute,
+        added_by: ctx.sender(),
+        added_at: ctx.timestamp,
+        match_id: Some(match_id),
+    });
+    record(
+        ctx,
+        AdminActionKind::AddMatchChatFilter,
+        None,
+        Some(match_id),
+        format!("{pattern} mute={mute}"),
+    );
+    Ok(())
+}
+
 /// Removes a chat filter by id (admin only).
 #[reducer]
 pub fn admin_remove_chat_filter(ctx: &ReducerContext, filter_id: u64) -> Result<(), String> {
     admin_gate(is_admin(ctx), false, AdminActionKind::RemoveChatFilter)?;
     admin_rate_check(ctx)?;
-    if ctx.db.chat_filter().filter_id().find(filter_id).is_none() {
-        return Err(format!("unknown chat filter {filter_id}"));
+    let filter = ctx
+        .db
+        .chat_filter()
+        .filter_id()
+        .find(filter_id)
+        .ok_or_else(|| format!("unknown chat filter {filter_id}"))?;
+    if let Some(match_id) = filter.match_id {
+        return Err(format!(
+            "filter {filter_id} is scoped to match {match_id}; use admin_remove_match_chat_filter"
+        ));
     }
     ctx.db.chat_filter().filter_id().delete(filter_id);
     record(
@@ -674,6 +833,36 @@ pub fn admin_remove_chat_filter(ctx: &ReducerContext, filter_id: u64) -> Result<
         AdminActionKind::RemoveChatFilter,
         None,
         None,
+        format!("filter {filter_id}"),
+    );
+    Ok(())
+}
+
+/// Removes a match-scoped chat filter by id (admin or that match's host).
+#[reducer]
+pub fn admin_remove_match_chat_filter(ctx: &ReducerContext, filter_id: u64) -> Result<(), String> {
+    let filter = ctx
+        .db
+        .chat_filter()
+        .filter_id()
+        .find(filter_id)
+        .ok_or_else(|| format!("unknown chat filter {filter_id}"))?;
+    let match_id = filter.match_id.ok_or_else(|| {
+        format!("filter {filter_id} is database-global; use admin_remove_chat_filter")
+    })?;
+    let row = require_match(ctx, match_id)?;
+    admin_gate(
+        is_admin(ctx),
+        row.host == ctx.sender(),
+        AdminActionKind::RemoveMatchChatFilter,
+    )?;
+    admin_rate_check(ctx)?;
+    ctx.db.chat_filter().filter_id().delete(filter_id);
+    record(
+        ctx,
+        AdminActionKind::RemoveMatchChatFilter,
+        None,
+        Some(match_id),
         format!("filter {filter_id}"),
     );
     Ok(())
@@ -940,8 +1129,9 @@ fn my_admin_actions(ctx: &ViewContext) -> Vec<AdminActionLog> {
         .collect()
 }
 
-/// View-safe admin check (mirrors [`is_admin`]).
-fn view_is_admin(ctx: &ViewContext) -> bool {
+/// View-safe admin check (mirrors [`is_admin`]); shared with the chat/action
+/// admin-gated views.
+pub(crate) fn view_is_admin(ctx: &ViewContext) -> bool {
     ctx.db
         .admin_identity()
         .identity()

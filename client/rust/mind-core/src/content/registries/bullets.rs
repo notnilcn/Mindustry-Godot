@@ -47,6 +47,23 @@ pub const DAMAGE_LIGHTNING_AIR: BulletId = BulletId::new(3);
 /// `hittable = false`) — H09 T7's explosion fireball.
 pub const FIREBALL: BulletId = BulletId::new(4);
 
+/// Resolves a `Bullets.java` static-field name (`ContentParser`'s
+/// `field(Bullets.class, name)` string reference) to the ported base bullet.
+///
+/// Upstream reflects every `BulletType` field; the port only models the base
+/// content bullets it registers (`Bullets.java:55-120`), so unknown names
+/// resolve to `None` and the caller errors like an unknown field.
+pub fn bullet_by_java_name(name: &str) -> Option<BulletId> {
+    Some(match name {
+        "placeholder" => PLACEHOLDER,
+        "damageLightning" => DAMAGE_LIGHTNING,
+        "damageLightningGround" => DAMAGE_LIGHTNING_GROUND,
+        "damageLightningAir" => DAMAGE_LIGHTNING_AIR,
+        "fireball" => FIREBALL,
+        _ => return None,
+    })
+}
+
 /// Bullet class tag (`BulletType` hierarchy; content ABI, append-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BulletKind {
@@ -1410,7 +1427,30 @@ impl BulletDef {
             heal_percent,
             show_stats,
             set_defaults,
+            despawn_unit_count,
+            despawn_unit_chance,
+            despawn_unit_radius,
+            face_outwards,
+            hit_under,
         );
+        // `BulletType.spawnUnit`/`despawnUnit` content references resolve at
+        // load time; the spawn range mirrors the spawned unit's life/speed
+        // (`BulletType.estimateDPS`/`range`).
+        if let Some(name) = spec.spawn_unit_name {
+            let id = registry
+                .unit_id(name)
+                .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?;
+            bullet.spawn_unit = Some(id);
+            if let Some(unit) = registry.unit(id) {
+                bullet.spawn_unit_range = Some((unit.lifetime, unit.speed));
+            }
+        }
+        if let Some(name) = spec.despawn_unit_name {
+            let id = registry
+                .unit_id(name)
+                .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?;
+            bullet.despawn_unit = Some(id);
+        }
         if let Some(effect) = &spec.hit_effect {
             bullet.hit_effect = effect.clone();
         }
@@ -1883,6 +1923,20 @@ pub struct BulletSpec {
     pub puddle_liquid: Option<&'static str>,
     /// Spawn unit (inline `MissileUnitType` construction).
     pub spawn_unit: Option<Box<UnitSpec>>,
+    /// Spawn unit by content name (`BulletType.spawnUnit` in mod JSON).
+    pub spawn_unit_name: Option<&'static str>,
+    /// Despawn unit by content name (`BulletType.despawnUnit`).
+    pub despawn_unit_name: Option<&'static str>,
+    /// `BulletType.despawnUnitCount`.
+    pub despawn_unit_count: Option<i32>,
+    /// `BulletType.despawnUnitChance`.
+    pub despawn_unit_chance: Option<f32>,
+    /// `BulletType.despawnUnitRadius`.
+    pub despawn_unit_radius: Option<f32>,
+    /// `BulletType.faceOutwards`.
+    pub face_outwards: Option<bool>,
+    /// `BulletType.hitUnder`.
+    pub hit_under: Option<bool>,
     /// Suppression range.
     pub suppression_range: Option<f32>,
     /// Suppression duration.

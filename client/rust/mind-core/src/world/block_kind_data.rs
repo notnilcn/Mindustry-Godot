@@ -47,7 +47,7 @@ pub enum BlockFamily {
 }
 
 /// `GenericCrafter` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CrafterDef {
     /// `GenericCrafter.craftTime` (ticks).
     pub craft_time: f32,
@@ -61,6 +61,20 @@ pub struct CrafterDef {
     pub liquid_output_directions: Vec<i8>,
     /// `ignoreLiquidFullness`.
     pub ignore_liquid_fullness: bool,
+}
+
+impl Default for CrafterDef {
+    fn default() -> Self {
+        // `GenericCrafter.java:35-39` field initializers (the class defaults a
+        // mod block inherits when its JSON omits them).
+        Self {
+            craft_time: 80.0,
+            output_items: Vec::new(),
+            output_liquids: Vec::new(),
+            liquid_output_directions: vec![-1],
+            ignore_liquid_fullness: false,
+        }
+    }
 }
 
 /// `AttributeCrafter` family knobs.
@@ -137,9 +151,11 @@ impl Default for DrillDef {
         // `Drill.java:38,40`: `liquidBoostIntensity = 1.6f`,
         // `warmupSpeed = 0.015f`.
         Self {
-            drill_time: 0.0,
+            // `Drill.java:28,34,36`: `hardnessDrillMultiplier = 50f`,
+            // `tier = 0`, `drillTime = 300f`.
+            drill_time: 300.0,
             tier: 0,
-            hardness_drill_multiplier: 0.0,
+            hardness_drill_multiplier: 50.0,
             drill_multipliers: Vec::new(),
             blocked_items: Vec::new(),
             wall_drill: false,
@@ -150,7 +166,7 @@ impl Default for DrillDef {
 }
 
 /// `BurstDrill` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BurstDrillDef {
     /// Base drill knobs.
     pub drill: DrillDef,
@@ -162,8 +178,25 @@ pub struct BurstDrillDef {
     pub drill_multiplier: f32,
 }
 
+impl Default for BurstDrillDef {
+    fn default() -> Self {
+        // `BurstDrill.java:32-54` constructor: it "does not drill in the
+        // traditional sense", so `hardnessDrillMultiplier = 0`; `invertedTime`
+        // keeps the `BurstDrill.java:26` field initializer 200.
+        Self {
+            drill: DrillDef {
+                hardness_drill_multiplier: 0.0,
+                ..DrillDef::default()
+            },
+            burst_time: 0.0,
+            inverted_time: 200.0,
+            drill_multiplier: 1.0,
+        }
+    }
+}
+
 /// `BeamDrill` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BeamDrillDef {
     /// `BeamDrill.range`.
     pub range: i32,
@@ -175,15 +208,34 @@ pub struct BeamDrillDef {
     pub blocked_items: Vec<u16>,
 }
 
+impl Default for BeamDrillDef {
+    fn default() -> Self {
+        // `BeamDrill.java:38-41` field initializers.
+        Self {
+            range: 5,
+            drill_time: 200.0,
+            tier: 1,
+            blocked_items: Vec::new(),
+        }
+    }
+}
+
 /// `Pump` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PumpDef {
     /// `Pump.pumpAmount`.
     pub pump_amount: f32,
 }
 
+impl Default for PumpDef {
+    fn default() -> Self {
+        // `Pump.java:20`: `pumpAmount = 0.2f`.
+        Self { pump_amount: 0.2 }
+    }
+}
+
 /// `SolidPump` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolidPumpDef {
     /// `SolidPump.pumpAmount`.
     pub pump_amount: f32,
@@ -193,8 +245,20 @@ pub struct SolidPumpDef {
     pub base_efficiency: f32,
 }
 
+impl Default for SolidPumpDef {
+    fn default() -> Self {
+        // `Pump.java:20` (`pumpAmount = 0.2f`, inherited) and
+        // `SolidPump.java:26` (`baseEfficiency = 1f`; `attribute` null).
+        Self {
+            pump_amount: 0.2,
+            attribute: String::new(),
+            base_efficiency: 1.0,
+        }
+    }
+}
+
 /// `Fracker` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FrackerDef {
     /// `Fracker.itemUseTime`.
     pub item_use_time: f32,
@@ -206,6 +270,20 @@ pub struct FrackerDef {
     pub attribute: String,
     /// `SolidPump.baseEfficiency`.
     pub base_efficiency: f32,
+}
+
+impl Default for FrackerDef {
+    fn default() -> Self {
+        // `Fracker.java:8` (`itemUseTime = 100f`) on top of the `SolidPump`
+        // defaults; `result` inherits `Liquids.water` (`SolidPump.java:22`).
+        Self {
+            item_use_time: 100.0,
+            pump_amount: 0.2,
+            result: Some(crate::content::LiquidId::WATER.raw()),
+            attribute: String::new(),
+            base_efficiency: 1.0,
+        }
+    }
 }
 
 /// `WallCrafter` family knobs.
@@ -303,10 +381,19 @@ pub struct DoorDef {
 }
 
 /// `Radar` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RadarDef {
     /// `Radar.discoveryTime`.
     pub discovery_time: f32,
+}
+
+impl Default for RadarDef {
+    fn default() -> Self {
+        // `Radar.java:18`: `discoveryTime = 60f * 10f`.
+        Self {
+            discovery_time: 600.0,
+        }
+    }
 }
 
 /// `Thruster` family knobs.
@@ -487,12 +574,23 @@ impl Default for LandingPadDef {
 }
 
 /// `LaunchPad` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LaunchPadDef {
     /// `LaunchPad.launchTime` (ticks).
     pub launch_time: f32,
     /// `LaunchPad.acceptMultipleItems` (false: one item type at a time).
     pub accept_multiple_items: bool,
+}
+
+impl Default for LaunchPadDef {
+    fn default() -> Self {
+        // `LaunchPad.java:32,40`: `launchTime = 1f`, `acceptMultipleItems =
+        // false` (the vanilla 1200/1800-tick pads override it in `Blocks.java`).
+        Self {
+            launch_time: 1.0,
+            accept_multiple_items: false,
+        }
+    }
 }
 
 /// `LegacyBlock` marker data (replacement content id, when defined).
@@ -527,12 +625,22 @@ impl Default for LogicBlockDef {
 }
 
 /// `MemoryBlock` family knobs (`MemoryBlock.memoryCapacity`).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemoryDef {
     /// `MemoryBlock.memoryCapacity`.
     pub capacity: i32,
     /// Whether this is the privileged `world-cell`.
     pub privileged: bool,
+}
+
+impl Default for MemoryDef {
+    fn default() -> Self {
+        // `MemoryBlock.java:17`: `memoryCapacity = 32`.
+        Self {
+            capacity: 32,
+            privileged: false,
+        }
+    }
 }
 
 /// `SwitchBlock` family data (privileged flag for `world-switch`).
@@ -543,7 +651,7 @@ pub struct SwitchDef {
 }
 
 /// `MessageBlock` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MessageDef {
     /// `MessageBlock.maxTextLength`.
     pub max_text: i32,
@@ -553,8 +661,19 @@ pub struct MessageDef {
     pub privileged: bool,
 }
 
+impl Default for MessageDef {
+    fn default() -> Self {
+        // `MessageBlock.java:29-30`.
+        Self {
+            max_text: 400,
+            max_newlines: 24,
+            privileged: false,
+        }
+    }
+}
+
 /// `LogicDisplay` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DisplayDef {
     /// `LogicDisplay.displaySize`.
     pub display_size: i32,
@@ -562,8 +681,18 @@ pub struct DisplayDef {
     pub scale_factor: f32,
 }
 
+impl Default for DisplayDef {
+    fn default() -> Self {
+        // `LogicDisplay.java:53-54`: `displaySize = 64`, `scaleFactor = 1`.
+        Self {
+            display_size: 64,
+            scale_factor: 1.0,
+        }
+    }
+}
+
 /// `TileableLogicDisplay` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TileableDisplayDef {
     /// Per-tile `displaySize`.
     pub display_size: i32,
@@ -573,8 +702,20 @@ pub struct TileableDisplayDef {
     pub max_dimensions: i32,
 }
 
+impl Default for TileableDisplayDef {
+    fn default() -> Self {
+        // `TileableLogicDisplay.java:27-37`: `maxDisplayDimensions = 16`,
+        // `frameSize = 6`, `displaySize = 32` (constructor).
+        Self {
+            display_size: 32,
+            frame_size: 6,
+            max_dimensions: 16,
+        }
+    }
+}
+
 /// `CanvasBlock` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CanvasDef {
     /// `CanvasBlock.canvasSize`.
     pub canvas_size: i32,
@@ -585,6 +726,28 @@ pub struct CanvasDef {
     /// `CanvasBlock.palette` (RGBA8888; 8 entries for `canvas`, the 16-colour
     /// woodspark palette for `large-canvas`, `Blocks.java:6965-6983`).
     pub palette: Vec<u32>,
+}
+
+impl Default for CanvasDef {
+    fn default() -> Self {
+        // `CanvasBlock.java:22-26` field initializers (the 8-colour default
+        // palette; `bitsPerPixel = 0` until a colour count is set).
+        Self {
+            canvas_size: 8,
+            padding: 0.0,
+            bits_per_pixel: 0,
+            palette: vec![
+                0x3629_44ff,
+                0xc45d_9fff,
+                0xe39a_acff,
+                0xf0da_b1ff,
+                0x6461_c2ff,
+                0x2ba9_b4ff,
+                0x93d4_b5ff,
+                0xf0f6_e8ff,
+            ],
+        }
+    }
 }
 
 /// Typed family data for one block (plan 07 §6.1).
@@ -740,15 +903,25 @@ impl BlockKindData {
             BlockKind::GenericCrafter | BlockKind::HeatCrafter | BlockKind::HeatProducer => {
                 // `HeatProducer` extends `GenericCrafter` (`HeatProducer.java:1`);
                 // the kind data carries its craft loop exactly like a heat
-                // crafter (T1: oxidation-chamber's oxide output).
+                // crafter (T1: oxidation-chamber's oxide output). A zero
+                // `craft_time` means the content did not override it, so the
+                // class default applies (mod blocks/patches inherit it).
                 BlockKindData::Crafter(CrafterDef {
-                    craft_time: def.craft_time,
+                    craft_time: if def.craft_time > 0.0 {
+                        def.craft_time
+                    } else {
+                        CrafterDef::default().craft_time
+                    },
                     ..CrafterDef::default()
                 })
             }
             BlockKind::AttributeCrafter => BlockKindData::AttributeCrafter(AttributeCrafterDef {
                 crafter: CrafterDef {
-                    craft_time: def.craft_time,
+                    craft_time: if def.craft_time > 0.0 {
+                        def.craft_time
+                    } else {
+                        CrafterDef::default().craft_time
+                    },
                     ..CrafterDef::default()
                 },
                 ..AttributeCrafterDef::default()
@@ -760,7 +933,12 @@ impl BlockKindData {
             BlockKind::SolidPump => BlockKindData::SolidPump(SolidPumpDef::default()),
             BlockKind::Fracker => BlockKindData::Fracker(FrackerDef::default()),
             BlockKind::WallCrafter => BlockKindData::WallCrafter(WallCrafterDef::default()),
-            BlockKind::Separator => BlockKindData::Separator(SeparatorDef::default()),
+            BlockKind::Separator => BlockKindData::Separator(SeparatorDef {
+                // `Separator extends Block` (not `GenericCrafter`), so its
+                // `craftTime` is content data, not a class default.
+                craft_time: def.craft_time,
+                ..SeparatorDef::default()
+            }),
             BlockKind::Incinerator | BlockKind::ItemIncinerator => {
                 BlockKindData::Incinerator(IncineratorDef::default())
             }
@@ -859,12 +1037,6 @@ impl BlockKindData {
             ignore_liquid_fullness: ignore,
         };
         match name {
-            // `Radar.java:18`: `discoveryTime = 60f * 10f` (10 s at 60 Hz).
-            "radar" => {
-                if let BlockKindData::Radar(def) = self {
-                    def.discovery_time = 600.0;
-                }
-            }
             // `Blocks.java:1759-1772`: phase walls deflect bullets
             // (`chanceDeflect = 10f; flashHit = true`).
             "phase-wall" | "phase-wall-large" => {
@@ -1176,17 +1348,9 @@ impl BlockKindData {
                     def.privileged = true;
                 }
             }
-            "message" | "reinforced-message" => self.set_message(400, 24, false),
             "world-message" => self.set_message(400, 24, true),
             "logic-display" => self.set_display(80, 1.0),
             "large-logic-display" => self.set_display(176, 1.0),
-            "tile-logic-display" => {
-                if let BlockKindData::TileableDisplay(def) = self {
-                    def.display_size = 32;
-                    def.frame_size = 6;
-                    def.max_dimensions = 16;
-                }
-            }
             "canvas" => self.set_canvas(12, 3.5, 3, &crate::logic::blocks::canvas::PALETTE),
             // `Blocks.java:6965-6983`: the woodspark 16-colour palette
             // (`setPaletteFromString`).
@@ -1223,9 +1387,9 @@ impl BlockKindData {
             BlockKindData::AttributeCrafter(def) => &mut def.crafter,
             _ => return,
         };
-        // The real plan-02 `craft_time` wins when present; the overlay supplies
-        // the upstream value for the factories whose generated data omits it.
-        if target.craft_time != 0.0 {
+        // An explicit overlay `craft_time` wins; the `craft()` helper's `0.0`
+        // means "keep the class default / content value".
+        if crafter.craft_time <= 0.0 {
             crafter.craft_time = target.craft_time;
         }
         *target = crafter;
@@ -1400,6 +1564,117 @@ mod tests {
             BlockKindData::Crafter(def) => def,
             BlockKindData::AttributeCrafter(def) => &def.crafter,
             other => panic!("not a crafter: {other:?}"),
+        }
+    }
+
+    /// #56: a mod block of a vanilla class inherits the class field
+    /// initializers (`X.java`), so it no longer needs a name-keyed
+    /// `apply_vanilla_knobs` entry to be functional.
+    #[test]
+    fn class_defaults_apply_to_mod_blocks() {
+        let content = test_registry();
+        let base = content.block_by_name("router").expect("router").clone();
+        let kind_data = |kind: BlockKind| {
+            let mut def = base.clone();
+            def.name = String::from("mod-test-block");
+            def.kind = kind;
+            def.craft_time = 0.0;
+            BlockKindData::from_def(&def)
+        };
+
+        match kind_data(BlockKind::GenericCrafter) {
+            BlockKindData::Crafter(def) => {
+                assert_eq!(def.craft_time, 80.0, "GenericCrafter.craftTime");
+                assert_eq!(def.liquid_output_directions, vec![-1]);
+            }
+            other => panic!("expected crafter, got {other:?}"),
+        }
+        match kind_data(BlockKind::AttributeCrafter) {
+            BlockKindData::AttributeCrafter(def) => {
+                assert_eq!(def.crafter.craft_time, 80.0);
+                assert_eq!(def.base_efficiency, 1.0);
+                assert_eq!(def.boost_scale, 1.0);
+                assert_eq!(def.min_efficiency, -1.0);
+                assert_eq!(def.max_boost, 1.0);
+            }
+            other => panic!("expected attribute crafter, got {other:?}"),
+        }
+        match kind_data(BlockKind::Drill) {
+            BlockKindData::Drill(def) => {
+                assert_eq!(def.drill_time, 300.0, "Drill.drillTime");
+                assert_eq!(def.hardness_drill_multiplier, 50.0);
+                assert_eq!(def.liquid_boost_intensity, 1.6);
+            }
+            other => panic!("expected drill, got {other:?}"),
+        }
+        match kind_data(BlockKind::BurstDrill) {
+            BlockKindData::BurstDrill(def) => {
+                assert_eq!(def.drill.hardness_drill_multiplier, 0.0);
+                assert_eq!(def.inverted_time, 200.0);
+            }
+            other => panic!("expected burst drill, got {other:?}"),
+        }
+        match kind_data(BlockKind::BeamDrill) {
+            BlockKindData::BeamDrill(def) => {
+                assert_eq!((def.range, def.drill_time, def.tier), (5, 200.0, 1));
+            }
+            other => panic!("expected beam drill, got {other:?}"),
+        }
+        match kind_data(BlockKind::Pump) {
+            BlockKindData::Pump(def) => assert_eq!(def.pump_amount, 0.2),
+            other => panic!("expected pump, got {other:?}"),
+        }
+        match kind_data(BlockKind::Fracker) {
+            BlockKindData::Fracker(def) => {
+                assert_eq!(def.item_use_time, 100.0);
+                assert_eq!(def.pump_amount, 0.2);
+                assert_eq!(def.base_efficiency, 1.0);
+                assert_eq!(def.result, Some(crate::content::LiquidId::WATER.raw()));
+            }
+            other => panic!("expected fracker, got {other:?}"),
+        }
+        match kind_data(BlockKind::Radar) {
+            BlockKindData::Radar(def) => assert_eq!(def.discovery_time, 600.0),
+            other => panic!("expected radar, got {other:?}"),
+        }
+        match kind_data(BlockKind::MemoryBlock) {
+            BlockKindData::Memory(def) => assert_eq!(def.capacity, 32),
+            other => panic!("expected memory, got {other:?}"),
+        }
+        match kind_data(BlockKind::MessageBlock) {
+            BlockKindData::Message(def) => {
+                assert_eq!((def.max_text, def.max_newlines), (400, 24));
+            }
+            other => panic!("expected message, got {other:?}"),
+        }
+        match kind_data(BlockKind::LogicDisplay) {
+            BlockKindData::Display(def) => {
+                assert_eq!((def.display_size, def.scale_factor), (64, 1.0));
+            }
+            other => panic!("expected display, got {other:?}"),
+        }
+        match kind_data(BlockKind::TileableLogicDisplay) {
+            BlockKindData::TileableDisplay(def) => {
+                assert_eq!(
+                    (def.display_size, def.frame_size, def.max_dimensions),
+                    (32, 6, 16)
+                );
+            }
+            other => panic!("expected tileable display, got {other:?}"),
+        }
+        match kind_data(BlockKind::CanvasBlock) {
+            BlockKindData::Canvas(def) => {
+                assert_eq!((def.canvas_size, def.bits_per_pixel), (8, 0));
+                assert_eq!(def.palette.len(), 8);
+            }
+            other => panic!("expected canvas, got {other:?}"),
+        }
+        match kind_data(BlockKind::LaunchPad) {
+            BlockKindData::LaunchPad(def) => {
+                assert_eq!(def.launch_time, 1.0);
+                assert!(!def.accept_multiple_items);
+            }
+            other => panic!("expected launch pad, got {other:?}"),
         }
     }
 

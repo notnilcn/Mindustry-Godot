@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 
 use super::planet::{Planet, SectorNeighborhood};
 use super::rules::{BASE_INVASION_CHANCE, INVASION_GRACE_PERIOD, TURN_DURATION_TICKS};
+use super::schematics::Schematics;
 use super::sector::Sector;
 use super::stats::CampaignStats;
 use crate::content::{ContentRegistry, PlanetId};
@@ -159,6 +160,49 @@ impl Universe {
     /// `Universe.getLoadout` file name for a core type.
     pub fn get_loadout(&self, settings: &SettingsStore, core_name: &str) -> String {
         settings.get_string(&format!("lastloadout-{core_name}"), "")
+    }
+
+    /// Resolves [`Universe::get_loadout`] to a `Schematics.all` index
+    /// (`Universe.java:135-148`): the last loadout used for `core_name`, found
+    /// by file stem in `Schematics.getLoadouts(core)`; the core's first
+    /// loadout when the stored name matches nothing (Java `all.first()`), and
+    /// `None` when the core has no loadouts at all (Java `null`).
+    ///
+    /// The stored value is compared by file stem, so a profile written by the
+    /// pre-PAR-0508 port (which persisted the full schematic path instead of
+    /// `File.nameWithoutExtension()`) still restores its loadout.
+    pub fn get_loadout_index(
+        &self,
+        settings: &SettingsStore,
+        schematics: &Schematics,
+        registry: &ContentRegistry,
+        core_name: &str,
+    ) -> Option<usize> {
+        let core = registry.block_id(core_name)?;
+        let file = self.get_loadout(settings, core_name);
+        let all = schematics.get_loadouts(core);
+        let found = all.iter().copied().find(|index| {
+            let Some(schematic) = schematics.all.get(*index) else {
+                return false;
+            };
+            let Some(path) = schematic.file.as_deref() else {
+                // Java requires `s.file != null` for a match.
+                return false;
+            };
+            !file.is_empty() && file_stem(path) == file_stem(&file)
+        });
+        found.or_else(|| all.first().copied())
+    }
+}
+
+/// `File.nameWithoutExtension()`: the final path segment without its
+/// extension (`"a/b/c.msch"` -> `"c"`). Values that already look like a stem
+/// (`"basicNucleus"`) pass through.
+pub fn file_stem(path: &str) -> &str {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match name.rsplit_once('.') {
+        Some((stem, _extension)) if !stem.is_empty() => stem,
+        _ => name,
     }
 }
 
@@ -848,6 +892,7 @@ mod tests {
 
     use super::*;
     use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::game::schematic::Schematic;
     use crate::io::json::rules::ExportStat;
 
     fn make_campaign() -> (ContentRegistry, Campaign) {
@@ -909,6 +954,71 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "launch-resources-seq removed"
+        );
+    }
+
+    /// PAR-0508: `Universe.getLoadout(CoreBlock)` (`Universe.java:135-148`)
+    /// seeds `LaunchLoadoutDialog` from the last loadout used for the
+    /// launcher's core (`lastloadout-<core>`), not the core's first/default
+    /// one. Before the port the stored name was written but never read back.
+    #[test]
+    fn get_loadout_index_restores_the_last_used_schematic() {
+        let (registry, _) = make_campaign();
+        let core = registry.block_id("core-nucleus").expect("core-nucleus");
+        let mut schematics = Schematics::new();
+        // Two nucleus loadouts: the first is the fallback, the second the
+        // stored `lastloadout-core-nucleus`.
+        for (name, file) in [
+            ("first", "firstNucleus"),
+            ("last", "myNucleus"),
+            ("other", "otherNucleus"),
+        ] {
+            let mut schematic = Schematic::single_core(core, 5);
+            schematic.tags.insert("name".to_owned(), name.to_owned());
+            schematic.file = Some(format!("/schematics/{file}.msch"));
+            let index = schematics.all.len();
+            schematics.all.push(schematic);
+            schematics
+                .loadouts
+                .entry(core.raw())
+                .or_default()
+                .push(index);
+        }
+        let mut settings = SettingsStore::new();
+        let mut universe = Universe::new();
+
+        // Nothing stored yet: the core's first loadout (`all.first()`).
+        assert_eq!(
+            universe.get_loadout_index(&settings, &schematics, &registry, "core-nucleus"),
+            Some(0)
+        );
+
+        // `updateLoadout` stores the file stem; `getLoadout` resolves it.
+        universe.update_loadout(&mut settings, "core-nucleus", Some("myNucleus"));
+        assert_eq!(
+            universe.get_loadout_index(&settings, &schematics, &registry, "core-nucleus"),
+            Some(1)
+        );
+
+        // A profile written before PAR-0508 stored the full path: stem match.
+        settings.put_string("lastloadout-core-nucleus", "/schematics/otherNucleus.msch");
+        assert_eq!(
+            universe.get_loadout_index(&settings, &schematics, &registry, "core-nucleus"),
+            Some(2)
+        );
+
+        // A stale name (deleted schematic) falls back to the first loadout,
+        // like Java's `schem == null ? all.first() : schem`.
+        settings.put_string("lastloadout-core-nucleus", "gone");
+        assert_eq!(
+            universe.get_loadout_index(&settings, &schematics, &registry, "core-nucleus"),
+            Some(0)
+        );
+
+        // An unknown core has no loadouts (Java `null`).
+        assert_eq!(
+            universe.get_loadout_index(&settings, &schematics, &registry, "core-nope"),
+            None
         );
     }
 

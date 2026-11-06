@@ -2735,65 +2735,6 @@ fn planet_open_launch_loadout(
     dialog.open_dialog("launch_loadout", &json_stringify(&context));
 }
 
-/// The `Schematics.all` row for a loadout index.
-fn planet_find_loadout_row(
-    dialog: &mut MindDialog,
-    st: &mut PlanetState,
-    index: i64,
-) -> VarDictionary {
-    let planet_name = st.selected_planet.clone();
-    let views = planet_ensure_views(dialog, st, &planet_name);
-    for loadout in row_rows(&views, "loadouts") {
-        if row_i64_or(&loadout, "index", -1) == index {
-            return loadout;
-        }
-    }
-    VarDictionary::new()
-}
-
-/// `playSelected` launch cost: requirements + staged launch resources.
-fn planet_loadout_launch_stacks(
-    row: &VarDictionary,
-    resources: &VarDictionary,
-) -> Vec<VarDictionary> {
-    let mut totals: Vec<(String, i64)> = Vec::new();
-    let add = |item: &str, amount: i64, totals: &mut Vec<(String, i64)>| {
-        if item.is_empty() {
-            return;
-        }
-        if let Some(entry) = totals.iter_mut().find(|entry| entry.0 == item) {
-            entry.1 += amount;
-        } else {
-            totals.push((item.to_string(), amount));
-        }
-    };
-    for requirement in row_arr(row, "requirements").iter_shared() {
-        let Ok(requirement) = requirement.try_to::<VarArray>() else {
-            continue;
-        };
-        let mut values = requirement.iter_shared();
-        let item = values
-            .next()
-            .and_then(|value| value.try_to::<GString>().ok())
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let amount = values.next().map(|value| variant_i64(&value)).unwrap_or(0);
-        add(&item, amount, &mut totals);
-    }
-    for key in resources.keys_array().iter_shared() {
-        let item = key
-            .try_to::<GString>()
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let amount = resources
-            .get(item.as_str())
-            .map(|value| variant_i64(&value))
-            .unwrap_or(0);
-        add(&item, amount, &mut totals);
-    }
-    planet_stacks_of(&totals)
-}
-
 /// `[{item, amount}]` stacks from an ordered totals list.
 fn planet_stacks_of(totals: &[(String, i64)]) -> Vec<VarDictionary> {
     totals
@@ -2854,6 +2795,15 @@ fn planet_launch_resource_totals(dialog: &mut MindDialog) -> VarDictionary {
     parse_object(&text.to_string())
 }
 
+/// `PlanetDialog.playSelected` (`PlanetDialog.java:1396-1403,1449`): the
+/// stored loadout + launch resources are dropped **only** by the free-launch
+/// branch (`mode == look`, no base, `findLauncher == null`). A resume/go entry
+/// (`control.playSector(sector)`, `:1449`) and a launcher launch keep them, so
+/// resuming a base no longer wipes the player's configured loadout (PAR-0507).
+fn planet_launch_clears_loadout(resume: bool, launcher_id: i64, loadout: i64) -> bool {
+    !resume && launcher_id < 0 && loadout < 0
+}
+
 /// `_launch`: enters the sector, either resuming, via a loadout, or free.
 fn planet_launch(
     dialog: &mut MindDialog,
@@ -2888,17 +2838,28 @@ fn planet_launch(
 
     let mut launcher_id = -1i64;
     let mut launch_resources = VarDictionary::new();
-    let mut launch_row = VarDictionary::new();
+    let mut launch_core = String::new();
     let mut launch_cost: Vec<VarDictionary> = Vec::new();
     if loadout >= 0 && !resume {
         launcher_id = planet_sector_launch_from(dialog, st, planet_name, sector_id);
+        // `PlanetDialog.java:1409-1410` charges
+        // `loadout.requirements() + universe.getLaunchResources()` for the
+        // loadout the picker actually selected. `launch_dialog_json` reports
+        // that `total` as `launch_cost` from the selected schematic row — the
+        // old path looked the index up in the planet-default core's loadout
+        // list, which is empty for a larger-core schematic, so its block cost
+        // was never charged (PAR-0489).
         let plan = planet_launch_plan(dialog, planet_name, launcher_id, sector_id, loadout);
         launch_resources = row_dict(&plan, "resources");
         if launch_resources.is_empty() {
             launch_resources = planet_launch_resource_totals(dialog);
         }
-        launch_row = planet_find_loadout_row(dialog, st, loadout);
-        launch_cost = planet_loadout_launch_stacks(&launch_row, &launch_resources);
+        launch_core = row_str(&plan, "core");
+        launch_cost = row_rows(&plan, "launch_cost");
+        if launch_cost.is_empty() {
+            // No plan (the facade is absent): charge the staged resources.
+            launch_cost = planet_stacks_of(&planet_dict_totals(&launch_resources));
+        }
     }
 
     // `PlanetDialog.playSelected`'s "save before launch"
@@ -2945,18 +2906,10 @@ fn planet_launch(
 
     let mut started = false;
     if let Some(campaign) = campaign.as_mut() {
-        if resume && campaign.has_method("play_sector") {
-            started = campaign
-                .call(
-                    "play_sector",
-                    &[
-                        GString::from(planet_name).to_variant(),
-                        sector_id.to_variant(),
-                    ],
-                )
-                .try_to::<bool>()
-                .unwrap_or(false);
-        } else if loadout >= 0 && campaign.has_method("start_sector_with_loadout") {
+        // `MindCampaign` has no `play_sector` binding: `start_sector` picks the
+        // resume/launch branch itself from the sector record
+        // (`start_sector_with_loadout`'s `has_save` decision).
+        if loadout >= 0 && campaign.has_method("start_sector_with_loadout") {
             if launcher_id >= 0 {
                 let _ = campaign.call(
                     "remove_sector_items",
@@ -2969,10 +2922,7 @@ fn planet_launch(
             }
             let core_stacks = planet_stacks_of(&planet_dict_totals(&launch_resources));
             let mut payload = VarDictionary::new();
-            payload.set(
-                "core",
-                &GString::from(row_str(&launch_row, "core").as_str()),
-            );
+            payload.set("core", &GString::from(launch_core.as_str()));
             payload.set("schematic", loadout);
             payload.set("stacks", &planet_stacks_array(&core_stacks).to_variant());
             payload.set("origin", launcher_id);
@@ -2988,7 +2938,14 @@ fn planet_launch(
                 .try_to::<bool>()
                 .unwrap_or(false);
         } else if campaign.has_method("start_sector") {
-            if campaign.has_method("clear_loadout_info") {
+            // `PlanetDialog.java:1396-1403` clears the stored loadout +
+            // launch resources only on the *free* launch branch (no launcher
+            // sector). A resume/go entry and a launcher launch keep them
+            // (PAR-0507); the resume branch previously cleared them because
+            // `play_sector` is not a bound method.
+            if planet_launch_clears_loadout(resume, launcher_id, loadout)
+                && campaign.has_method("clear_loadout_info")
+            {
                 let _ = campaign.call("clear_loadout_info", &[]);
             }
             started = campaign
@@ -3582,4 +3539,27 @@ fn planet_over_ui(dialog: &mut MindDialog, st: &PlanetState, point: Vector2) -> 
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PAR-0507: `PlanetDialog.playSelected` clears the stored loadout and
+    /// launch resources only on the free-launch branch (`PlanetDialog.java:1396-1403`);
+    /// a resume of a base (`:1449`) and a launcher launch keep them. The old
+    /// code cleared on every plain `start_sector`, so resuming a base wiped
+    /// `launch-resources-seq` and `lastloadout-<core>`.
+    #[test]
+    fn only_a_free_launch_clears_the_stored_loadout() {
+        // Free launch: no launcher sector, no loadout, not a resume.
+        assert!(planet_launch_clears_loadout(false, -1, -1));
+        // Resume / go of a sector with a base.
+        assert!(!planet_launch_clears_loadout(true, -1, -1));
+        // Launcher launch with a picker selection.
+        assert!(!planet_launch_clears_loadout(false, 42, 7));
+        // `sectors.go` on a base while the launcher lookup returned nothing:
+        // still a resume branch (Java `sector.hasBase()` -> playSector).
+        assert!(!planet_launch_clears_loadout(true, 0, 7));
+    }
 }

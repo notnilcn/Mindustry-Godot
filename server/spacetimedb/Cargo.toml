@@ -16,3 +16,6 @@ crate-type = ["cdylib"]
 [dependencies]
 spacetimedb = "=2.10.1"
 log = "0.4"
+# Name-ban patterns are Java regexes (`Administration.addNameBan`, compiled
+# CASE_INSENSITIVE); the crate supports wasm32-unknown-unknown.
+regex = "=1.13.1"

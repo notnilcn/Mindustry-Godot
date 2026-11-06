@@ -2997,9 +2997,12 @@ fn launch_rows(
         let st = state.borrow();
         st.plan.clone()
     };
-    let rows = row_rows(&plan, "loadouts");
-    if !rows.is_empty() {
-        return rows;
+    // A live plan's row list is authoritative: with `allowLaunchSchematics`
+    // false Java renders no grid at all (`LaunchLoadoutDialog.java:167-196`),
+    // so an empty list must stay empty instead of falling back to the planet
+    // default core's loadouts (PAR-0509).
+    if !plan.is_empty() {
+        return row_rows(&plan, "loadouts");
     }
     dialog
         .campaign_section("loadouts")
@@ -3008,11 +3011,19 @@ fn launch_rows(
         .collect()
 }
 
-/// The default core of the selected planet, read from the live loadout rows.
+/// The picker's core (`PlanetDialog.java:1405`), read from the live plan.
 fn launch_selected_core(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<LaunchLoadoutState>>,
 ) -> String {
+    let plan = {
+        let st = state.borrow();
+        st.plan.clone()
+    };
+    let core = row_str(&plan, "core");
+    if !core.is_empty() {
+        return core;
+    }
     for loadout in launch_rows(dialog, state) {
         let core = row_str(&loadout, "core");
         if !core.is_empty() {
@@ -3094,9 +3105,20 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
         list.bind_mut().row();
     }
     if loadouts.is_empty() {
-        let label = factory::label(&kit::t("@none").to_string());
-        list.bind_mut().add(&label).pad(8.0);
-        list.bind_mut().row();
+        // `LaunchLoadoutDialog.java:167-196,204-210`: with schematics forbidden
+        // the dialog has no grid at all; Java then shows the destination
+        // preset's description pane (nothing when the preset has none).
+        let description = row_str(&plan, "preset_description");
+        if !description.is_empty() {
+            let label = factory::label(&kit::markup_text(&description).to_string());
+            let mut description_rich = rich(&label);
+            description_rich.set_autowrap_mode(AutowrapMode::WORD_SMART);
+            let mut minimum = description_rich.get_custom_minimum_size();
+            minimum.x = 420.0;
+            description_rich.set_custom_minimum_size(minimum);
+            list.bind_mut().add(&label).grow_x().pad(10.0);
+            list.bind_mut().row();
+        }
     } else {
         // `LaunchLoadoutDialog.java:160-190`: `cols = max(screenW / 230, 1)`
         // image toggles (`Styles.togglet` + `SchematicImage`, 200 px, pad 4).
@@ -3354,18 +3376,31 @@ fn launch_confirm(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
     // `Universe.updateLoadout(core, selected)` (`LaunchLoadoutDialog.java:150-152`):
     // record the chosen schematic's file for the core before the planet dialog
     // reads it back for the launch. A file-less schematic records the empty
-    // string (Java `schem.file == null ? ""`).
+    // string (Java `schem.file == null ? ""`), and Java stores
+    // `schem.file.nameWithoutExtension()` — never the full path — so the
+    // seeded `lastloadout-<core>` resolves again on the next launch
+    // (PAR-0508). The plan carries the picker's core and selected file even
+    // when the destination forbids schematics (no grid rows).
+    let plan = {
+        let st = state.borrow();
+        st.plan.clone()
+    };
     let row = launch_find_selected_row(dialog, state);
+    let mut core_name = row_str(&row, "core");
+    if core_name.is_empty() {
+        core_name = row_str(&plan, "core");
+    }
+    let mut file_name = row_str(&row, "file");
+    if file_name.is_empty() {
+        file_name = row_str(&plan, "selected_file");
+    }
+    let file_name = mind_core::game::universe::file_stem(&file_name).to_owned();
     if let Some(mut campaign) = dialog.campaign_node()
         && campaign.has_method("update_loadout")
     {
-        let file_name = row_str(&row, "file");
         let _ = campaign.call(
             "update_loadout",
-            &[
-                gs(row_str(&row, "core")).to_variant(),
-                gs(file_name).to_variant(),
-            ],
+            &[gs(core_name).to_variant(), gs(file_name).to_variant()],
         );
     }
     dialog

@@ -11,6 +11,7 @@
 use spacetimedb::{ReducerContext, ScheduleAt, Table, TimeDuration, reducer, table};
 
 use super::checksum::match_checksum;
+use super::events::match_event;
 use super::plans::{match_plan_chunk, match_plan_state};
 use super::player_state::{match_player_state, match_player_state_rate};
 use super::snapshot::{
@@ -21,12 +22,16 @@ use super::tables::{
     sender_command_state,
 };
 use super::ui_events::match_ui_event;
+use crate::admin::actions::{action_filter, action_rate};
+use crate::admin::history::player_trace;
 use crate::admin::{player_ban, server_config_or_default};
-use crate::chat::{chat_rate, match_chat};
+use crate::chat::vote::{delete_match_votes, expire_votes, sweep_votes};
+use crate::chat::{chat_rate, match_chat, match_chat_state};
 use crate::identity::tables::player_session;
 use crate::main::global::{
-    CHECKSUM_RETENTION_SECS, IDLE_ROW_TTL_SECS, MEMBER_GRACE_SECS, PLAN_GROUP_TIMEOUT_SECS,
-    PLAYER_SESSION_TTL_SECS, SWEEP_INTERVAL_SECS, UI_EVENT_RETENTION_SECS,
+    CHECKSUM_RETENTION_SECS, IDLE_ROW_TTL_SECS, MATCH_EVENT_RETENTION_SECS, MEMBER_GRACE_SECS,
+    PLAN_GROUP_TIMEOUT_SECS, PLAYER_SESSION_TTL_SECS, PLAYER_TRACE_RETENTION_SECS,
+    SWEEP_INTERVAL_SECS, UI_EVENT_RETENTION_SECS,
 };
 use crate::mods::match_mod;
 
@@ -71,11 +76,16 @@ pub fn tick_maintenance(
     sweep_ended_matches(ctx, now_micros, u64::from(config.match_ttl_hours) * 3600);
     sweep_chat(ctx, config.chat_retention_rows as usize);
     sweep_ui_events(ctx, now_micros);
+    // PAR-0121: fail expired votekick sessions, then drop finished ones.
+    expire_votes(ctx);
+    sweep_votes(ctx, now_micros);
+    sweep_match_events(ctx, now_micros);
     sweep_checksums(ctx, now_micros);
     sweep_snapshots(ctx);
     sweep_plan_groups(ctx, now_micros);
     sweep_idle_rows(ctx, now_micros);
     sweep_player_sessions(ctx, now_micros);
+    sweep_player_traces(ctx, now_micros);
     Ok(())
 }
 
@@ -212,6 +222,35 @@ fn delete_match_children(ctx: &ReducerContext, match_id: u64) {
     {
         ctx.db.match_chat().chat_id().delete(row.chat_id);
     }
+    // Per-match chat state / action policy / votes / events (PAR-0121/0125/#37).
+    for row in ctx
+        .db
+        .match_chat_state()
+        .by_chat_state()
+        .filter(match_id)
+        .collect::<Vec<_>>()
+    {
+        ctx.db.match_chat_state().state_id().delete(row.state_id);
+    }
+    for row in ctx
+        .db
+        .action_filter()
+        .iter()
+        .filter(|filter| filter.match_id == Some(match_id))
+        .collect::<Vec<_>>()
+    {
+        ctx.db.action_filter().filter_id().delete(row.filter_id);
+    }
+    for row in ctx
+        .db
+        .match_event()
+        .by_match_event()
+        .filter(match_id)
+        .collect::<Vec<_>>()
+    {
+        ctx.db.match_event().event_id().delete(row.event_id);
+    }
+    delete_match_votes(ctx, match_id);
     for row in ctx
         .db
         .match_ui_event()
@@ -362,6 +401,27 @@ fn sweep_ui_events(ctx: &ReducerContext, now_micros: i64) {
     }
 }
 
+/// Drops published match events past [`MATCH_EVENT_RETENTION_SECS`] (GAPS #37).
+fn sweep_match_events(ctx: &ReducerContext, now_micros: i64) {
+    let ttl_micros = i64::try_from(MATCH_EVENT_RETENTION_SECS).unwrap_or(i64::MAX) * 1_000_000;
+    for event in ctx.db.match_event().iter().collect::<Vec<_>>() {
+        if now_micros.saturating_sub(event.at.to_micros_since_unix_epoch()) > ttl_micros {
+            ctx.db.match_event().event_id().delete(event.event_id);
+        }
+    }
+}
+
+/// Drops old trace responses and keeps `player_info` bounded by one row per
+/// identity (GAPS #34).
+fn sweep_player_traces(ctx: &ReducerContext, now_micros: i64) {
+    let ttl_micros = i64::try_from(PLAYER_TRACE_RETENTION_SECS).unwrap_or(i64::MAX) * 1_000_000;
+    for trace in ctx.db.player_trace().iter().collect::<Vec<_>>() {
+        if now_micros.saturating_sub(trace.requested_at.to_micros_since_unix_epoch()) > ttl_micros {
+            ctx.db.player_trace().trace_id().delete(trace.trace_id);
+        }
+    }
+}
+
 fn sweep_checksums(ctx: &ReducerContext, now_micros: i64) {
     let ttl_micros = i64::try_from(CHECKSUM_RETENTION_SECS).unwrap_or(i64::MAX) * 1_000_000;
     for row in ctx.db.match_checksum().iter().collect::<Vec<_>>() {
@@ -454,6 +514,17 @@ fn sweep_idle_rows(ctx: &ReducerContext, now_micros: i64) {
     for row in ctx.db.chat_rate().iter().collect::<Vec<_>>() {
         if now_micros.saturating_sub(row.window_start.to_micros_since_unix_epoch()) > ttl_micros {
             ctx.db.chat_rate().identity().delete(row.identity);
+        }
+    }
+    // Per-match chat state / interaction-rate windows (PAR-0125, GAPS #34).
+    for row in ctx.db.match_chat_state().iter().collect::<Vec<_>>() {
+        if now_micros.saturating_sub(row.updated_at.to_micros_since_unix_epoch()) > ttl_micros {
+            ctx.db.match_chat_state().state_id().delete(row.state_id);
+        }
+    }
+    for row in ctx.db.action_rate().iter().collect::<Vec<_>>() {
+        if now_micros.saturating_sub(row.updated_at.to_micros_since_unix_epoch()) > ttl_micros {
+            ctx.db.action_rate().rate_id().delete(row.rate_id);
         }
     }
     for row in ctx.db.sender_command_state().iter().collect::<Vec<_>>() {
