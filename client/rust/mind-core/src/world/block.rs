@@ -11,7 +11,9 @@
 
 use std::sync::Arc;
 
+use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
+use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::content::{
@@ -20,7 +22,7 @@ use crate::content::{
 
 use super::behavior::{BehaviorRegistry, BuildingBehavior, BuildingKind, resolve_behavior};
 use super::block_kind_data::BlockKindData;
-use super::config::{ConfigHandlers, ConfigKind};
+use super::config::{ConfigHandlers, ConfigKind, ConfigValue};
 use super::consumers::Consumers;
 use super::draw::DrawSpec;
 
@@ -184,6 +186,58 @@ impl BlockInstance {
     /// Consumer count.
     pub fn consumer_count(&self) -> usize {
         self.consumers.len()
+    }
+
+    /// `Block.planRotation` (`Block.java:1653-1655`): `!rotate && lockRotation ?
+    /// 0 : rot` (`lockRotation` defaults true and no ported block flips it).
+    pub fn plan_rotation(&self, rotation: u8) -> u8 {
+        if self.rotate { rotation } else { 0 }
+    }
+
+    /// `Block.invertFlip` (`Block.java:144`; only `electrolyzer` sets it,
+    /// `Blocks.java:1363`).
+    pub fn invert_flip(&self) -> bool {
+        self.name == "electrolyzer"
+    }
+
+    /// `Block.flipRotation(req, x)` (`Block.java:1657-1661`): flips the plan
+    /// rotation by two when the flip axis matches the block's orientation.
+    pub fn flip_rotation(&self, rotation: u8, x: bool) -> u8 {
+        let even = rotation.is_multiple_of(2);
+        if (x == even) != self.invert_flip() {
+            self.plan_rotation((rotation + 2) % 4)
+        } else {
+            rotation
+        }
+    }
+
+    /// `Block.getPlanConfigs(options)` (`Block.java:1663-1671`): the plan
+    /// config selects a content class when the block's `configurations` has
+    /// `Item.class`/`Liquid.class`.
+    pub fn plan_configs(&self) -> SmallVec<[ConfigKind; 2]> {
+        let kinds = self.behavior.config_kinds();
+        let mut out = SmallVec::new();
+        if kinds.contains(&ConfigKind::Item) {
+            out.push(ConfigKind::Item);
+        }
+        if kinds.contains(&ConfigKind::Liquid) {
+            out.push(ConfigKind::Liquid);
+        }
+        out
+    }
+
+    /// `Block.placeEnded(tile, builder, rotation, config)` (`Block.java:1083-1085`):
+    /// dispatches the completion hook to the block's behavior.
+    pub fn place_ended(
+        &self,
+        world: &mut World,
+        e: Entity,
+        builder: Option<Entity>,
+        rotation: u8,
+        config: &ConfigValue,
+    ) {
+        self.behavior
+            .place_ended(world, e, builder, rotation, config);
     }
 }
 
@@ -620,6 +674,47 @@ mod tests {
         assert_eq!(view.health(), 320);
         assert!(!view.rotate());
         assert_eq!(view.offset(), 0.0);
+    }
+
+    /// GAPS #62: `Block.flipRotation`/`planRotation`/`invertFlip` and
+    /// `getPlanConfigs` on the runtime instance.
+    #[test]
+    fn block_plan_helpers_match_java() {
+        use crate::content::BlockKind;
+        let (content, table) = table();
+        // A rotating block: a horizontal flip of an even rotation flips it.
+        let belt = table
+            .instance(content.block_id("conveyor").unwrap())
+            .unwrap();
+        assert!(belt.rotate);
+        assert_eq!(belt.plan_rotation(3), 3);
+        // `(x == (rotation % 2 == 0)) != invertFlip` (`Block.java:1658`).
+        assert_eq!(belt.flip_rotation(1, true), 1);
+        assert_eq!(belt.flip_rotation(1, false), 3);
+        assert_eq!(belt.flip_rotation(2, true), 0);
+        assert_eq!(belt.flip_rotation(2, false), 2);
+        // Walls do not rotate: `planRotation` locks the rotation to 0.
+        let wall = table
+            .instance(content.block_id("copper-wall").unwrap())
+            .unwrap();
+        assert!(!wall.rotate);
+        assert_eq!(wall.plan_rotation(2), 0);
+        // `electrolyzer` is the only `invertFlip` block (`Blocks.java:1363`).
+        let electrolyzer = table
+            .instance(content.block_id("electrolyzer").unwrap())
+            .unwrap();
+        assert!(electrolyzer.invert_flip());
+        assert_eq!(electrolyzer.flip_rotation(1, true), 3);
+        assert_eq!(electrolyzer.flip_rotation(1, false), 1);
+        // Plan config classes come from the behavior's `configurations`.
+        let sorter = table.instance(content.block_id("sorter").unwrap()).unwrap();
+        assert!(sorter.plan_configs().contains(&ConfigKind::Item));
+        assert!(!sorter.plan_configs().contains(&ConfigKind::Liquid));
+        let wall = table
+            .instance(content.block_id("copper-wall").unwrap())
+            .unwrap();
+        assert!(wall.plan_configs().is_empty());
+        let _ = BlockKind::Wall;
     }
 
     #[test]

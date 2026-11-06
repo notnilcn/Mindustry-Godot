@@ -12,7 +12,7 @@
 use crate::content::{BlockDef, BlockId, ContentRegistry};
 use crate::game::team::Team;
 use crate::render::commands::Blend;
-use crate::render::draw_desc::{DrawState, execute_extras, vanilla_chain};
+use crate::render::draw_desc::{DrawState, execute_extras};
 use crate::render::ids::{RegionId, RegionIdTable};
 use crate::render::layer::Layer;
 use crate::render::list::{FORMAT, RenderEntry, build_entries, sort_entries};
@@ -190,10 +190,13 @@ pub fn build_layers(
                 });
                 seq += 1;
             }
-            let Some(chain) = vanilla_chain(&def.name) else {
-                continue;
-            };
-            descriptors += 1;
+            // GAPS #57: a parsed drawer (mod/JSON block) converts to the
+            // descriptor chain; vanilla blocks keep the hand-written table.
+            let explicit = crate::render::draw_desc::has_explicit_chain(def);
+            let chain = crate::render::draw_desc::chain_for(def);
+            if explicit {
+                descriptors += 1;
+            }
             let mut state = DrawState::new(center_x, center_y, 0, def.size);
             state.warmup = 1.0;
             state.power_status = 1.0;

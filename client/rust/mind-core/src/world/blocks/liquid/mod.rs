@@ -13,10 +13,10 @@ pub mod behavior;
 pub mod bridge;
 pub mod movement;
 
-pub use behavior::register;
 pub use behavior::{
     LiquidConduitBehavior, LiquidConduitState, LiquidJunctionBehavior, LiquidRouterBehavior,
 };
+pub use behavior::{class_default, register};
 
 use bevy_ecs::component::Component;
 use bevy_ecs::prelude::Resource;

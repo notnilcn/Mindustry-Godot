@@ -20,7 +20,9 @@
 //! cross-platform stable.
 
 use crate::config::TILESIZE;
-use crate::content::Rgba;
+use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+use crate::content::registries::units::parts::DrawPartSpec;
+use crate::content::{BlockDef, Rgba};
 use crate::math::ArcRand;
 use crate::render::commands::{Blend, DrawCmd, FillKind, LineKind, ShapeKind};
 use crate::render::ids::{RegionId, RegionIdTable};
@@ -682,6 +684,17 @@ pub enum DrawDesc {
         /// `(liquid name, liquidOutputDirections[i])` per output, in
         /// `outputLiquids` order.
         outputs: &'static [(&'static str, i8)],
+    },
+    /// `DrawPumpLiquid` (GAPS #57): the `-liquid` region filled from the pump's
+    /// drop amount (`DrawPumpLiquid.java:9-23`); the suffix is always `-liquid`
+    /// (`DrawPumpLiquid.load`, `:20-22`).
+    PumpLiquid,
+    /// `DrawBlockParts` (GAPS #57): the block's `parts` tree
+    /// (`DrawBlockParts.parts`, `DrawBlockParts.java:9-13`), executed through
+    /// the plan-17 `DrawPart` compiler.
+    BlockParts {
+        /// `DrawBlockParts.parts`.
+        parts: Vec<DrawPartSpec>,
     },
     /// `DrawMulti`.
     Multi(Vec<DrawDesc>),
@@ -1806,12 +1819,209 @@ pub fn execute(
                 ));
             }
         }
+        DrawDesc::PumpLiquid => {
+            // `DrawPumpLiquid.draw` (`DrawPumpLiquid.java:13-17`):
+            // `Drawf.liquid(liquid, x, y, liquids.get(drop)/capacity, drop.color)`.
+            let r = region(name, "-liquid", ids);
+            let frac = clamp(
+                state.liquid_amount / state.liquid_capacity.max(f32::EPSILON),
+                0.0,
+                1.0,
+            );
+            let h = quad * frac;
+            let y = state.y - quad / 2.0 + h / 2.0;
+            out.push(DescDraw::sprite(
+                state.layer,
+                Blend::Normal,
+                r,
+                state.x,
+                y,
+                quad,
+                h,
+                0.0,
+                state.liquid_color,
+            ));
+        }
+        DrawDesc::BlockParts { parts } => {
+            if parts.is_empty() {
+                return;
+            }
+            // `DrawBlockParts.draw` (`DrawBlockParts.java:39-51`): params from
+            // `build.warmup()` and `1 - progress`, then every part in order.
+            let mut params = crate::fx::parts::params::PartParams::default();
+            params.set(
+                state.warmup,
+                1.0 - state.progress,
+                1.0 - state.progress,
+                0.0,
+                0.0,
+                0.0,
+                state.x,
+                state.y,
+                state.rotdeg,
+            );
+            let lookup = crate::fx::parts::draw::AllRegions::new(32.0);
+            let mut program = crate::render::draw::DrawProgram::new();
+            crate::fx::parts::draw::draw_named_parts(
+                &mut program,
+                parts,
+                &params,
+                &lookup,
+                state.time,
+                name,
+            );
+            for prim in &program.prims {
+                if let Some(cmd) = draw_cmd_for_prim(prim, ids) {
+                    out.push(DescDraw {
+                        z: prim.z,
+                        blend: to_blend(prim.blend),
+                        cmd,
+                    });
+                }
+            }
+        }
         DrawDesc::Multi(list) => {
             for d in list {
                 execute(d, name, state, ids, out);
             }
         }
     }
+}
+
+/// `Blending` -> command buffer `Blend`.
+fn to_blend(blend: crate::render::draw::Blending) -> Blend {
+    use crate::render::draw::Blending as B;
+    match blend {
+        B::Normal => Blend::Normal,
+        B::Additive => Blend::Additive,
+        B::Multiply => Blend::Multiply,
+    }
+}
+
+/// Maps one plan-17 `DrawPrim` onto the block command buffer (GAPS #57
+/// `DrawBlockParts` bridge). Primitives with no plan-16 equivalent (light,
+/// shader, noise) are dropped.
+fn draw_cmd_for_prim(
+    prim: &crate::render::draw::DrawPrim,
+    ids: &mut RegionIdTable,
+) -> Option<DrawCmd> {
+    use crate::render::draw::PrimKind as P;
+    Some(match &prim.kind {
+        P::Region {
+            region,
+            x,
+            y,
+            w,
+            h,
+            rotation_deg,
+            origin,
+            color,
+            ..
+        } => DrawCmd::Sprite {
+            region: ids.intern_str(region.0),
+            x: *x,
+            y: *y,
+            w: *w,
+            h: *h,
+            ox: origin.0,
+            oy: origin.1,
+            rot: *rotation_deg,
+            color: color.to_rgba8888(),
+            blend: to_blend(prim.blend),
+        },
+        P::Rect { x, y, w, h, color } => DrawCmd::Fill {
+            kind: FillKind::Rect,
+            params: [*x, *y, *w, *h, 0.0, 0.0],
+            color: color.to_rgba8888(),
+        },
+        P::Circle {
+            x,
+            y,
+            r,
+            fill,
+            stroke,
+            color,
+        } => {
+            if *fill {
+                DrawCmd::Fill {
+                    kind: FillKind::Circle,
+                    params: [*x, *y, *r, 0.0, 0.0, 0.0],
+                    color: color.to_rgba8888(),
+                }
+            } else {
+                DrawCmd::Shape {
+                    kind: ShapeKind::CircleOutline,
+                    params: [*x, *y, *r, *stroke, 0.0, 0.0, 0.0, 0.0],
+                    color: color.to_rgba8888(),
+                }
+            }
+        }
+        P::Poly {
+            x,
+            y,
+            sides,
+            r,
+            rotation_deg,
+            fill,
+            stroke,
+            color,
+        } => {
+            if *fill {
+                DrawCmd::Fill {
+                    kind: FillKind::Poly,
+                    params: [*x, *y, *sides as f32, *r, *rotation_deg, 0.0],
+                    color: color.to_rgba8888(),
+                }
+            } else {
+                DrawCmd::Shape {
+                    kind: ShapeKind::Poly,
+                    params: [*x, *y, *sides as f32, *r, *rotation_deg, *stroke, 0.0, 0.0],
+                    color: color.to_rgba8888(),
+                }
+            }
+        }
+        P::Tri {
+            x,
+            y,
+            w,
+            h,
+            rotation_deg,
+            color,
+        } => DrawCmd::Fill {
+            kind: FillKind::Triangle,
+            params: [*x, *y, *w, *h, *rotation_deg, 0.0],
+            color: color.to_rgba8888(),
+        },
+        P::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            stroke,
+            color,
+            ..
+        } => DrawCmd::Lines {
+            kind: LineKind::Line,
+            params: [*x1, *y1, *x2, *y2, 0.0, 0.0, 0.0, 0.0],
+            color: color.to_rgba8888(),
+            stroke: *stroke,
+        },
+        P::Arc {
+            x,
+            y,
+            r,
+            start_deg,
+            sweep_deg,
+            stroke,
+            color,
+        } => DrawCmd::Lines {
+            kind: LineKind::Arc,
+            params: [*x, *y, *r, *start_deg, *sweep_deg, 0.0, 0.0, 0.0],
+            color: color.to_rgba8888(),
+            stroke: *stroke,
+        },
+        _ => return None,
+    })
 }
 
 /// Splits a `Block.draw` chain at its `DrawDefault` part (`DrawMulti` draws its
@@ -2176,6 +2386,376 @@ pub fn global_layer_markers(ids: &mut RegionIdTable, out: &mut Vec<DescDraw>) {
     }
 }
 
+/// Interns a content-derived drawer suffix (`DrawRegion.suffix`, …) into the
+/// `&'static str` descriptor slots. Names are bounded (one per content block),
+/// so each distinct name is leaked exactly once — the same pattern as
+/// [`crate::fx::parts::draw::intern_region`] (plan 17 §3.15).
+fn intern(suffix: &str) -> &'static str {
+    crate::fx::parts::draw::intern_region(suffix).0
+}
+
+/// `Rgba` -> RGBA8888 for a parsed drawer color.
+fn drawer_color(color: Rgba) -> u32 {
+    color.to_rgba8888()
+}
+
+/// A known-valid `Color.valueOf` literal (`world/draw/*.java`) as RGBA8888.
+fn hex(hex: &str) -> u32 {
+    Rgba::from_hex(hex)
+        .map(|color| color.to_rgba8888())
+        .unwrap_or(0xffff_ffff)
+}
+
+/// Converts one parsed `Block.drawer` tree ([`DrawerSpec`], GAPS #57) into the
+/// executable [`DrawDesc`] body.
+///
+/// `DrawerSpec` captures the JSON-overridable drawer fields; every field the
+/// parsed record does not carry keeps the Java class field initializer
+/// (`world/draw/*.java`), cited in the arms. Turret/weapon drawers are owned by
+/// the turret renderer and map to [`DrawDesc::Default`]; `DrawRegion.name` (an
+/// explicit region override) and `DrawTurret.basePrefix`/`DrawLiquidRegion`'s
+/// `drawLiquid` selection have no descriptor slot and fall back to the suffix /
+/// current-liquid color.
+pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
+    match spec.kind {
+        DrawerKind::Block | DrawerKind::Default => DrawDesc::Default,
+        DrawerKind::Multi => DrawDesc::Multi(spec.children.iter().map(from_drawer).collect()),
+        DrawerKind::Region | DrawerKind::RegionSpin => DrawDesc::Region {
+            suffix: intern(&spec.suffix),
+            rotate_speed: spec.rotate_speed,
+            rotation: spec.rotation,
+            spin: spec.spin_sprite || spec.kind == DrawerKind::RegionSpin,
+            building_rotate: spec.building_rotate,
+            layer: spec.layer,
+            color: spec.color.map(drawer_color),
+            x: spec.x,
+            y: spec.y,
+        },
+        DrawerKind::SideRegion => DrawDesc::SideRegion {
+            top1: "-top1",
+            top2: "-top2",
+        },
+        // `DrawFrames.java:11-15`.
+        DrawerKind::Frames => DrawDesc::Frames {
+            frames: 3,
+            interval: 5.0,
+            sine: true,
+        },
+        // `DrawWarmupRegion.java:13-14`.
+        DrawerKind::WarmupRegion => DrawDesc::WarmupRegion {
+            color: hex("ff9b59"),
+            sin_mag: 0.6,
+            sin_scl: 8.0,
+        },
+        DrawerKind::Fade => DrawDesc::Fade {
+            suffix: intern(if spec.suffix.is_empty() {
+                "-top"
+            } else {
+                &spec.suffix
+            }),
+            alpha: spec.alpha,
+            scale: spec.scale,
+        },
+        DrawerKind::LiquidRegion => DrawDesc::LiquidRegion {
+            suffix: intern(&spec.suffix),
+            alpha: spec.alpha,
+        },
+        DrawerKind::LiquidTile => DrawDesc::LiquidTile {
+            padding: 0.0,
+            alpha: spec.alpha,
+        },
+        // `DrawPower.java:14-24`.
+        DrawerKind::Power => DrawDesc::Power {
+            suffix: intern(&spec.suffix),
+            mixcol: true,
+            empty: hex("f8c266"),
+            full: hex("fb9567"),
+            layer: spec.layer,
+        },
+        // `DrawHeatRegion.java:13-18`.
+        DrawerKind::HeatRegion => DrawDesc::HeatRegion {
+            suffix: intern(&spec.suffix),
+            color: Rgba::new(1.0, 0.22, 0.22, 0.8).to_rgba8888(),
+            pulse: spec.pulse,
+            pulse_scl: spec.pulse_scl,
+            layer: spec.layer,
+        },
+        // `DrawHeatInput.java:15-17`.
+        DrawerKind::HeatInput => DrawDesc::HeatInput {
+            suffix: intern(&spec.suffix),
+            color: Rgba::new(1.0, 0.22, 0.22, 0.8).to_rgba8888(),
+            pulse: spec.pulse,
+            pulse_scl: spec.pulse_scl,
+        },
+        // `DrawHeatOutput.java:15-21`.
+        DrawerKind::HeatOutput => DrawDesc::HeatOutput {
+            color: Rgba::new(1.0, 0.22, 0.22, 0.8).to_rgba8888(),
+            pulse: spec.pulse,
+            pulse_scl: spec.pulse_scl,
+            glow_mult: 1.2,
+            rot_offset: 0,
+            draw_glow: true,
+        },
+        // `DrawGlowRegion.java:12-18`.
+        DrawerKind::GlowRegion => DrawDesc::GlowRegion {
+            suffix: intern(&spec.suffix),
+            color: spec
+                .color
+                .map(drawer_color)
+                .unwrap_or_else(|| Rgba::new(1.0, 0.0, 0.0, 1.0).to_rgba8888()),
+            alpha: spec.alpha,
+            glow_scale: 10.0,
+            glow_intensity: 0.5,
+            rotate_speed: spec.rotate_speed,
+            rotate: false,
+            layer: spec.layer,
+        },
+        // `DrawPistons.java:12-14`.
+        DrawerKind::Pistons => DrawDesc::Pistons {
+            sin_mag: 4.0,
+            sin_scl: 6.0,
+            sin_offset: 50.0,
+            side_offset: 0.0,
+            len_offset: -1.0,
+            hori_offset: 0.0,
+            angle_offset: 0.0,
+            sides: 4,
+            suffix: intern(if spec.suffix.is_empty() {
+                "-piston"
+            } else {
+                &spec.suffix
+            }),
+        },
+        // `DrawFlame.java:13-17`.
+        DrawerKind::Flame => DrawDesc::Flame {
+            flame_color: spec
+                .flame_color
+                .or(spec.color)
+                .map(drawer_color)
+                .unwrap_or_else(|| hex("ffc999")),
+            flame_radius: spec.flame_radius,
+            flame_radius_in: 1.9,
+            flame_radius_scl: 5.0,
+            flame_radius_mag: 2.0,
+            flame_radius_in_mag: 1.0,
+        },
+        // `DrawParticles.java:11-20`.
+        DrawerKind::Particles => DrawDesc::Particles {
+            color: spec
+                .color
+                .map(drawer_color)
+                .unwrap_or_else(|| hex("f2d585")),
+            sides: 12,
+            particles: 30,
+            particle_life: 70.0,
+            particle_rad: 7.0,
+            particle_size: 3.0,
+            fade_margin: 0.4,
+            rotate_scl: 3.0,
+            reverse: false,
+            poly: false,
+        },
+        // `DrawSoftParticles.java:15-20`.
+        DrawerKind::SoftParticles => DrawDesc::SoftParticles {
+            color: hex("e3ae6f"),
+            color2: hex("d04d46"),
+            particles: 30,
+            particle_life: 70.0,
+            particle_rad: 7.0,
+            particle_size: 3.0,
+            fade_margin: 0.4,
+            rotate_scl: 1.5,
+        },
+        // `DrawPulseShape.java:14-18` (`Pal.accent`).
+        DrawerKind::PulseShape => DrawDesc::PulseShape {
+            color: hex("ffd37f"),
+            stroke: 2.0,
+            time_scl: 100.0,
+            min_stroke: 0.2,
+            radius_scl: 1.0,
+            square: true,
+            layer: spec.layer,
+        },
+        // `DrawShape.java:9-12` (`Pal.accent`).
+        DrawerKind::Shape => DrawDesc::Shape {
+            color: hex("ffd37f"),
+            sides: 4,
+            radius: 2.0,
+            time_scl: 1.0,
+            use_warmup_radius: false,
+            layer: spec.layer,
+        },
+        // `DrawSpikes.java:8-12`.
+        DrawerKind::Spikes => DrawDesc::Spikes {
+            color: hex("7457ce"),
+            amount: 10,
+            layers: 1,
+            stroke: 2.0,
+            rotate_speed: 0.8,
+            radius: 6.0,
+            length: 4.0,
+            layer_speed: -1.0,
+        },
+        // `DrawCells.java:15-18`.
+        DrawerKind::Cells => DrawDesc::Cells {
+            color: 0xffff_ffff,
+            particles: 12,
+            range: 4.0,
+            recurrence: 2.0,
+            radius: 1.8,
+            lifetime: 180.0,
+        },
+        // `DrawBubbles.java:10-15`.
+        DrawerKind::Bubbles => DrawDesc::Bubbles {
+            color: hex("7457ce"),
+            amount: 12,
+            sides: 8,
+            stroke_min: 0.2,
+            spread: 3.0,
+            time_scl: 30.0,
+            recurrence: 6.0,
+            radius: 3.0,
+            fill: false,
+        },
+        // `DrawArcSmelt.java:10-15`.
+        DrawerKind::ArcSmelt => DrawDesc::ArcSmelt {
+            flame_color: spec
+                .flame_color
+                .or(spec.color)
+                .map(drawer_color)
+                .unwrap_or_else(|| hex("f58349")),
+            mid_color: hex("f2d585"),
+            flame_rad: 1.0,
+            circle_space: 2.0,
+            flame_radius_scl: 3.0,
+            flame_radius_mag: 0.3,
+            circle_stroke: 1.5,
+            alpha: spec.alpha,
+            particles: 25,
+            particle_life: 40.0,
+            particle_rad: 7.0,
+            particle_stroke: 1.1,
+            particle_len: 3.0,
+        },
+        // `DrawCrucibleFlame.java:11-15`.
+        DrawerKind::CrucibleFlame => DrawDesc::CrucibleFlame {
+            flame_color: spec
+                .flame_color
+                .or(spec.color)
+                .map(drawer_color)
+                .unwrap_or_else(|| hex("f58349")),
+            mid_color: hex("f2d585"),
+            flame_rad: 1.0,
+            circle_space: 2.0,
+            flame_radius_scl: 10.0,
+            flame_radius_mag: 0.6,
+            circle_stroke: 1.5,
+            alpha: spec.alpha,
+            particles: 30,
+            particle_life: 70.0,
+            particle_rad: 7.0,
+            particle_size: 3.0,
+            fade_margin: 0.4,
+        },
+        // `DrawCultivator.java:12-18`.
+        DrawerKind::Cultivator => DrawDesc::Cultivator {
+            plant_color: hex("5541b1"),
+            plant_color_light: hex("7457ce"),
+            bottom_color: hex("474747"),
+            bubbles: 12,
+            sides: 8,
+            stroke_min: 0.2,
+            spread: 3.0,
+            time_scl: 70.0,
+            recurrence: 6.0,
+            radius: 3.0,
+        },
+        // `DrawBlurSpin.java:11-12`.
+        DrawerKind::BlurSpin => DrawDesc::BlurSpin {
+            suffix: intern(&spec.suffix),
+            rotate_speed: if spec.rotate_speed == 0.0 {
+                1.0
+            } else {
+                spec.rotate_speed
+            },
+            blur_thresh: 0.7,
+        },
+        // `DrawMultiWeave.java:12-15`.
+        DrawerKind::MultiWeave => DrawDesc::MultiWeave {
+            glow_color: Rgba::new(1.0, 0.4, 0.4, 0.8).to_rgba8888(),
+            weave_color: 0xffff_ffff,
+            rotate_speed: 1.0,
+            rotate_speed2: -0.9,
+            fade_weave: false,
+            pulse: if spec.pulse == 0.0 { 0.3 } else { spec.pulse },
+            pulse_scl: if spec.pulse_scl == 1.0 {
+                10.0
+            } else {
+                spec.pulse_scl
+            },
+        },
+        // `DrawPlasma.java:13-18`.
+        DrawerKind::Plasma => DrawDesc::Plasma {
+            plasma1: hex("ffd06b"),
+            plasma2: hex("ff361b"),
+            plasmas: 4,
+            suffix: intern(if spec.suffix.is_empty() {
+                "-plasma-"
+            } else {
+                &spec.suffix
+            }),
+        },
+        DrawerKind::Weave => DrawDesc::Weave,
+        // `DrawCircles.java:10-14`.
+        DrawerKind::Circles => DrawDesc::Circles {
+            color: hex("7457ce"),
+            amount: 5,
+            sides: 15,
+            stroke_min: 0.2,
+            stroke_max: 2.0,
+            time_scl: 160.0,
+            radius: 12.0,
+        },
+        // `DrawLiquidOutputs` regions are derived from the block's
+        // `outputLiquids` (content data, not the drawer spec): the descriptor
+        // emits nothing until the parser carries the outputs (GAPS #56 note).
+        DrawerKind::LiquidOutputs => DrawDesc::LiquidOutputs { outputs: &[] },
+        DrawerKind::PumpLiquid => DrawDesc::PumpLiquid,
+        DrawerKind::BlockParts => DrawDesc::BlockParts {
+            parts: spec.parts.clone(),
+        },
+        // Turret/weapon drawers are executed by the turret renderer (parts +
+        // ammo parts), and `DrawArc`/`DrawParticle`/`DrawSoftShadow` have no
+        // headless body yet: fall back to the base sprite only.
+        DrawerKind::Turret
+        | DrawerKind::Weapon
+        | DrawerKind::Arc
+        | DrawerKind::Particle
+        | DrawerKind::SoftShadow => DrawDesc::Default,
+    }
+}
+
+/// The `Block.draw` chain for a content block (GAPS #57).
+///
+/// An explicit parsed drawer wins (mod/JSON parity: `DrawerKind` ->
+/// [`DrawDesc`]); otherwise the hand-written vanilla table
+/// ([`vanilla_chain`]) applies; a block with neither draws its base sprite
+/// ([`DrawDesc::Default`], upstream `Block`'s default `DrawDefault`).
+/// Whether a block has an explicit draw chain (a parsed drawer or the
+/// hand-written vanilla table) rather than the bare `DrawDefault` fallback.
+pub fn has_explicit_chain(def: &BlockDef) -> bool {
+    def.drawer.kind != DrawerKind::Default
+        || !def.drawer.children.is_empty()
+        || vanilla_chain(&def.name).is_some()
+}
+
+pub fn chain_for(def: &BlockDef) -> Vec<DrawDesc> {
+    if def.drawer.kind != DrawerKind::Default || !def.drawer.children.is_empty() {
+        return vec![from_drawer(&def.drawer)];
+    }
+    vanilla_chain(&def.name).unwrap_or_else(|| vec![DrawDesc::Default])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2502,5 +3082,181 @@ mod tests {
         let (under, over) = split_chain_at_default(std::slice::from_ref(&top));
         assert!(under.is_empty());
         assert_eq!(over, vec![top.clone()]);
+    }
+
+    /// GAPS #57: a parsed `DrawMulti` drawer converts to the descriptor tree
+    /// (`DrawerSpec` fields win, Java class defaults fill the rest).
+    #[test]
+    fn parsed_drawer_converts_to_desc_chain() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+        use crate::content::registries::units::parts::DrawPartKind;
+        let mut multi = DrawerSpec::for_kind(DrawerKind::Multi);
+        let mut flame = DrawerSpec::for_kind(DrawerKind::Flame);
+        flame.flame_color = Rgba::from_hex("ff0000");
+        let mut pump = DrawerSpec::for_kind(DrawerKind::PumpLiquid);
+        pump.suffix = String::from("-liquid");
+        let mut parts = DrawerSpec::for_kind(DrawerKind::BlockParts);
+        parts.parts.push(DrawPartSpec::shape());
+        multi.children = vec![
+            DrawerSpec::for_kind(DrawerKind::Default),
+            flame,
+            pump,
+            parts,
+        ];
+        let desc = from_drawer(&multi);
+        let DrawDesc::Multi(children) = desc else {
+            panic!("expected DrawMulti");
+        };
+        assert_eq!(children.len(), 4);
+        assert_eq!(children[0], DrawDesc::Default);
+        let DrawDesc::Flame { flame_color, .. } = &children[1] else {
+            panic!("expected DrawFlame");
+        };
+        assert_eq!(*flame_color, hex("ff0000"));
+        assert_eq!(children[2], DrawDesc::PumpLiquid);
+        let DrawDesc::BlockParts { parts } = &children[3] else {
+            panic!("expected DrawBlockParts");
+        };
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].kind, DrawPartKind::ShapePart);
+    }
+
+    /// GAPS #57: an explicit parsed drawer wins over the hand-written vanilla
+    /// table; a block with neither falls back to `DrawDefault`.
+    #[test]
+    fn chain_for_prefers_parsed_drawer() {
+        use crate::content::test_support::test_registry;
+        let content = test_registry();
+        let base = content
+            .block_id("silicon-smelter")
+            .and_then(|id| content.block(id))
+            .expect("silicon-smelter")
+            .clone();
+        // Registry blocks keep the default drawer: the vanilla table applies.
+        assert_eq!(
+            chain_for(&base),
+            vanilla_chain("silicon-smelter").expect("table")
+        );
+        let mut parsed = base.clone();
+        parsed.drawer = crate::content::registries::blocks::drawer::DrawerSpec::for_kind(
+            crate::content::registries::blocks::drawer::DrawerKind::Region,
+        );
+        parsed.drawer.suffix = String::from("-custom");
+        assert_eq!(
+            chain_for(&parsed),
+            vec![DrawDesc::Region {
+                suffix: "-custom",
+                rotate_speed: 0.0,
+                rotation: 0.0,
+                spin: false,
+                building_rotate: false,
+                layer: -1.0,
+                color: None,
+                x: 0.0,
+                y: 0.0,
+            }]
+        );
+        let mut unknown = base;
+        unknown.name = String::from("mod-unknown");
+        assert_eq!(chain_for(&unknown), vec![DrawDesc::Default]);
+    }
+
+    /// GAPS #57: `DrawPumpLiquid` fills the `-liquid` region from the module.
+    #[test]
+    fn pump_liquid_fills_by_liquid_fraction() {
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut st = state();
+        st.liquid_capacity = 10.0;
+        st.liquid_amount = 5.0;
+        execute(&DrawDesc::PumpLiquid, "pump", &st, &mut ids, &mut out);
+        assert_eq!(out.len(), 1);
+        let DrawCmd::Sprite { region, h, .. } = out[0].cmd else {
+            panic!("expected sprite");
+        };
+        assert_eq!(ids.name(region), Some("pump-liquid"));
+        assert_eq!(h, 2.0 * TILESIZE as f32 * 0.5);
+    }
+
+    /// GAPS #57: `DrawBlockParts` runs the plan-17 part compiler and maps its
+    /// primitives back onto the block command buffer.
+    #[test]
+    fn block_parts_executes_the_part_tree() {
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut st = state();
+        st.warmup = 1.0;
+        let parts = vec![DrawPartSpec::shape(), DrawPartSpec::region("-blade")];
+        execute(
+            &DrawDesc::BlockParts { parts },
+            "mod-block",
+            &st,
+            &mut ids,
+            &mut out,
+        );
+        assert!(!out.is_empty(), "part compiler emitted no primitives");
+        assert!(
+            out.iter().any(|d| matches!(
+                d.cmd,
+                DrawCmd::Fill { .. } | DrawCmd::Shape { .. } | DrawCmd::Sprite { .. }
+            )),
+            "expected fill/shape/sprite primitives from the parts"
+        );
+    }
+
+    /// GAPS #57: every `DrawerKind` converts without panicking and round-trips
+    /// the class tag for the classes with a headless body.
+    #[test]
+    fn every_drawer_kind_converts() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+        for kind in [
+            DrawerKind::Block,
+            DrawerKind::Default,
+            DrawerKind::Multi,
+            DrawerKind::ArcSmelt,
+            DrawerKind::Bubbles,
+            DrawerKind::Cells,
+            DrawerKind::Circles,
+            DrawerKind::CrucibleFlame,
+            DrawerKind::Cultivator,
+            DrawerKind::Fade,
+            DrawerKind::Flame,
+            DrawerKind::Frames,
+            DrawerKind::HeatInput,
+            DrawerKind::HeatOutput,
+            DrawerKind::HeatRegion,
+            DrawerKind::LiquidOutputs,
+            DrawerKind::LiquidRegion,
+            DrawerKind::LiquidTile,
+            DrawerKind::MultiWeave,
+            DrawerKind::Particles,
+            DrawerKind::Pistons,
+            DrawerKind::Plasma,
+            DrawerKind::Power,
+            DrawerKind::PulseShape,
+            DrawerKind::PumpLiquid,
+            DrawerKind::SoftParticles,
+            DrawerKind::Spikes,
+            DrawerKind::Weave,
+            DrawerKind::BlockParts,
+            DrawerKind::Region,
+            DrawerKind::RegionSpin,
+            DrawerKind::Turret,
+            DrawerKind::Weapon,
+            DrawerKind::SideRegion,
+            DrawerKind::GlowRegion,
+            DrawerKind::Arc,
+            DrawerKind::BlurSpin,
+            DrawerKind::Particle,
+            DrawerKind::Shape,
+            DrawerKind::SoftShadow,
+            DrawerKind::WarmupRegion,
+        ] {
+            let spec = DrawerSpec::for_kind(kind);
+            let desc = from_drawer(&spec);
+            let mut ids = RegionIdTable::new();
+            let mut out = Vec::new();
+            execute(&desc, "probe", &state(), &mut ids, &mut out);
+        }
     }
 }

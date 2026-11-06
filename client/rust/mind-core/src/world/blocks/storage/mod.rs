@@ -13,8 +13,8 @@ pub mod unloader;
 
 use std::sync::Arc;
 
-use crate::content::ContentRegistry;
-use crate::world::behavior::BehaviorRegistry;
+use crate::content::{BlockKind, ContentRegistry};
+use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
 
 pub use core_block::{
     CoreBehavior, CoreBuild, CoreCampaignHooks, CoreHooks, NoopCoreCampaignHooks,
@@ -22,8 +22,30 @@ pub use core_block::{
 pub use storage_block::{StorageBehavior, StorageBuild};
 pub use unloader::{ContainerStat, UnloaderBehavior, UnloaderBuild};
 
+/// Class-default behavior for a storage [`BlockKind`] (GAPS #55).
+///
+/// `StorageBlock`/`CoreBlock`/`Unloader` dispatch by Java class upstream, so a
+/// mod block of either class gets the family loop instead of `NoopBehavior`.
+pub fn class_default(kind: BlockKind) -> Option<Arc<dyn BuildingBehavior>> {
+    Some(match kind {
+        BlockKind::StorageBlock => Arc::new(StorageBehavior),
+        BlockKind::CoreBlock => Arc::new(CoreBehavior),
+        BlockKind::Unloader => Arc::new(UnloaderBehavior::VANILLA),
+        _ => return None,
+    })
+}
+
 /// Registers the storage-family behaviors available at this milestone.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
+    for kind in [
+        BlockKind::StorageBlock,
+        BlockKind::CoreBlock,
+        BlockKind::Unloader,
+    ] {
+        if let Some(behavior) = class_default(kind) {
+            registry.register_kind(kind, behavior);
+        }
+    }
     for name in [
         "container",
         "vault",

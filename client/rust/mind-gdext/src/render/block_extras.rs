@@ -22,9 +22,7 @@ use godot::obj::{Base, NewGd};
 use godot::prelude::*;
 
 use mind_core::render::commands::{Blend, DrawCmd, FillKind, LineKind, ShapeKind};
-use mind_core::render::draw_desc::{
-    DescDraw, execute_extras, split_chain_at_default, vanilla_chain,
-};
+use mind_core::render::draw_desc::{DescDraw, execute_extras, split_chain_at_default};
 use mind_core::render::drawf;
 use mind_core::render::ids::RegionIdTable;
 use mind_core::render::scan::{CameraView, visible_blocks};
@@ -177,9 +175,8 @@ impl INode2D for BlockExtras {
                 {
                     continue;
                 }
-                let Some(chain) = vanilla_chain(&def.name) else {
-                    continue;
-                };
+                // GAPS #57: parsed drawers convert to a descriptor chain too.
+                let chain = mind_core::render::draw_desc::chain_for(def);
                 let Some(state) = host.block_draw_state(tile.x, tile.y) else {
                     continue;
                 };

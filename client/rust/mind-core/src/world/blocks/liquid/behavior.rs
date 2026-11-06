@@ -553,8 +553,46 @@ impl BuildingBehavior for DirectionLiquidBridgeBehavior {
     }
 }
 
+/// Class-default behavior for a liquid [`BlockKind`] (GAPS #55).
+///
+/// Upstream dispatch is by Java class (`ConduitBuild`/`LiquidRouterBuild`/…),
+/// so a mod/JSON block tagged `Conduit` runs the conduit loop instead of
+/// falling back to `NoopBehavior`. Vanilla blocks keep their exact name
+/// registrations in [`register`].
+pub fn class_default(kind: BlockKind) -> Option<Arc<dyn BuildingBehavior>> {
+    Some(match kind {
+        BlockKind::Conduit => Arc::new(LiquidConduitBehavior {
+            leakable: true,
+            armored: false,
+        }),
+        BlockKind::ArmoredConduit => Arc::new(LiquidConduitBehavior {
+            leakable: false,
+            armored: true,
+        }),
+        BlockKind::LiquidRouter => Arc::new(LiquidRouterBehavior),
+        BlockKind::LiquidJunction => Arc::new(LiquidJunctionBehavior),
+        // `ItemBridge.range` default is 4 (`ItemBridge.java:20`); the
+        // phase-conduit range (12) is a name registration below.
+        BlockKind::LiquidBridge => Arc::new(LiquidBridgeBehavior { range: 4 }),
+        BlockKind::DirectionLiquidBridge => Arc::new(DirectionLiquidBridgeBehavior { range: 4 }),
+        _ => return None,
+    })
+}
+
 /// Registers the vanilla conduit/router/junction blocks.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
+    for kind in [
+        BlockKind::Conduit,
+        BlockKind::ArmoredConduit,
+        BlockKind::LiquidRouter,
+        BlockKind::LiquidJunction,
+        BlockKind::LiquidBridge,
+        BlockKind::DirectionLiquidBridge,
+    ] {
+        if let Some(behavior) = class_default(kind) {
+            registry.register_kind(kind, behavior);
+        }
+    }
     for name in ["conduit", "pulse-conduit"] {
         registry.register_named(
             name,

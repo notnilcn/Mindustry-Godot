@@ -11,39 +11,69 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-/// `ControlBlock` — blocks that can control a unit.
+/// `ControlBlock` (`world/blocks/ControlBlock.java`) — a block with a proxy
+/// unit a player can control.
+///
+/// Implemented by [`crate::world::blocks::distribution::RouterBehavior`]
+/// (`Router.java:30-53`); the turret families own the same interface in
+/// `blocks/defense/turrets/**` (`Turret.java:283`).
 pub trait ControlBlock {
-    /// The controlled unit, if any.
-    fn unit(&self, _world: &World, _e: Entity) -> Option<Entity> {
+    /// `ControlBlock.unit()`: the proxy unit, if created.
+    fn unit(&self, world: &World, e: Entity) -> Option<Entity> {
+        let _ = (world, e);
         None
     }
-    /// Whether a unit is being controlled.
-    fn is_controlled(&self, _world: &World, _e: Entity) -> bool {
-        false
+    /// `ControlBlock.isControlled()`: `unit().isPlayer()` (`ControlBlock.java:9-11`).
+    fn is_controlled(&self, world: &World, e: Entity) -> bool {
+        self.unit(world, e)
+            .is_some_and(|unit| world.get::<crate::entities::comp::Player>(unit).is_some())
     }
-    /// Whether `unit` may be controlled.
-    fn can_control(&self, _world: &World, _e: Entity, _unit: Entity) -> bool {
-        false
+    /// `ControlBlock.canControl()` (`ControlBlock.java:13-15`).
+    fn can_control(&self) -> bool {
+        true
     }
-    /// Whether the block should auto-target.
-    fn should_auto_target(&self, _world: &World, _e: Entity) -> bool {
+    /// `ControlBlock.shouldAutoTarget()` (`ControlBlock.java:17-19`).
+    fn should_auto_target(&self) -> bool {
         true
     }
 }
 
-/// `RotBlock` — overrides effective build rotation (e.g. mirrored rotors).
+/// `RotBlock` (`world/blocks/RotBlock.java`) — a block that has 360-degree
+/// build rotation.
+///
+/// Every upstream implementor returns the build rotation unchanged except
+/// `BuildTurretBuild` (the controlled unit's rotation,
+/// `BuildTurret.java:108-110`), which needs the per-entity unit and therefore
+/// belongs to the turret behavior. The port's shared behavior instance sees only
+/// the raw rotation, so the identity body is the exact class behavior for
+/// `BaseTurret`/`MassDriver`/`PayloadMassDriver`/`RepairTurret`.
 pub trait RotBlock {
-    /// Effective rotation for a raw build rotation.
-    fn build_rotation(&self, _rotation: u8, _size: i32) -> u8 {
-        _rotation
+    /// `RotBlock.buildRotation()`.
+    fn build_rotation(&self, rotation: u8) -> u8 {
+        rotation
     }
 }
 
-/// `UnitTetherBlock` — tracks a spawned unit by id (`spawned(id)`).
+/// Component recording the raw unit id a `UnitTetherBlock` was told about
+/// (`UnitTetherBlock.spawned(int id)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bevy_ecs::component::Component)]
+pub struct UnitTetherTarget {
+    /// Raw unit id (`readUnitId`), resolved on the next client update.
+    pub unit_id: u32,
+}
+
+/// `UnitTetherBlock` (`world/blocks/UnitTetherBlock.java`) — a block whose
+/// spawned unit is read back from a save (`UnitFactory`, `UnitCargoLoader`,
+/// `TargetDummy`).
+///
+/// The live port tracks the tether by entity
+/// ([`crate::entities::comp::unit::comp::UnitTetherComp`]); this hook records
+/// the raw id so the save-read path can resolve it.
 pub trait UnitTetherBlock {
-    /// Whether `id` is the currently tethered unit.
-    fn spawned(&self, _id: u32) -> bool {
-        false
+    /// `UnitTetherBlock.spawned(int id)`: called after the block's unit is
+    /// read from a save.
+    fn spawned(&self, world: &mut World, e: Entity, id: u32) {
+        world.entity_mut(e).insert(UnitTetherTarget { unit_id: id });
     }
 }
 
@@ -63,57 +93,40 @@ pub trait LaunchAnimator {
     }
 }
 
-/// `ExplosionShield` — absorbs explosions over a radius.
+/// `ExplosionShield` (`world/blocks/ExplosionShield.java`) — absorbs
+/// explosions over a radius.
+///
+/// Implemented by [`crate::world::blocks::defense::behaviors::ForceProjectorBehavior`]
+/// (`ForceProjector.java:165`, `:270-278`).
 pub trait ExplosionShield {
-    /// Whether an explosion at `(x, y)` is absorbed.
-    fn absorb_explosion(&self, _x: f32, _y: f32) -> bool {
+    /// `ExplosionShield.absorbExplosion(ex, ey, damage)`: whether the blast at
+    /// `(x, y)` was absorbed (applying the damage to the shield when true).
+    fn absorb_explosion(&self, world: &mut World, e: Entity, x: f32, y: f32, damage: f32) -> bool {
+        let _ = (world, e, x, y, damage);
         false
-    }
-    /// Tile radius protected.
-    fn shield_radius(&self) -> i32 {
-        0
     }
 }
 
 /// `Block.consumesItem(item)` over the lowered generic consumers
-/// (`ConsumeItems` stacks; `Block.itemFilter`).
+/// (`ConsumeItems` stacks plus the GAPS #58 filter kinds; `Block.itemFilter`).
 pub fn block_consumes_item(world: &World, e: Entity, item: crate::content::ItemId) -> bool {
-    use crate::world::consumers::ConsumeInstanceKind;
     instance(world, e).is_some_and(|inst| {
-        inst.consumers.all.iter().any(|consumer| {
-            matches!(&consumer.kind, ConsumeInstanceKind::Items(stacks)
-                if stacks.iter().any(|stack| stack.item == item))
-        })
+        inst.consumers.consumes_item(
+            item,
+            world.get_resource::<crate::world::consumers::ItemTraits>(),
+        )
     })
 }
 
 /// `Block.consumesLiquid(liquid)` over the lowered generic consumers
-/// (`ConsumeLiquid`/`ConsumeLiquids`/`ConsumeCoolant`; `Block.liquidFilter`).
+/// (`ConsumeLiquid`/`ConsumeLiquids`/`ConsumeCoolant` plus the GAPS #58 filter
+/// kinds; `Block.liquidFilter`).
 pub fn block_consumes_liquid(world: &World, e: Entity, liquid: crate::content::LiquidId) -> bool {
-    use crate::world::consumers::ConsumeInstanceKind;
     instance(world, e).is_some_and(|inst| {
-        inst.consumers
-            .all
-            .iter()
-            .any(|consumer| match &consumer.kind {
-                ConsumeInstanceKind::Liquid { liquid: wanted, .. } => *wanted == liquid,
-                ConsumeInstanceKind::Liquids(stacks) => {
-                    stacks.iter().any(|stack| stack.liquid == liquid)
-                }
-                // `ConsumeCoolant`'s stat filter needs per-liquid traits
-                // (`ConsumeCoolant.java:9`); without the resource nothing is
-                // coolant-eligible.
-                ConsumeInstanceKind::Coolant {
-                    allow_liquid,
-                    allow_gas,
-                    ..
-                } => world
-                    .get_resource::<crate::world::modules::LiquidTraits>()
-                    .is_some_and(|traits| {
-                        traits.coolant_accepts(liquid, *allow_liquid, *allow_gas)
-                    }),
-                _ => false,
-            })
+        inst.consumers.consumes_liquid(
+            liquid,
+            world.get_resource::<crate::world::modules::LiquidTraits>(),
+        )
     })
 }
 
@@ -208,10 +221,25 @@ mod tests {
 
     #[test]
     fn default_helper_traits_are_inert() {
-        assert_eq!(IdentityRot.build_rotation(2, 2), 2);
+        assert_eq!(IdentityRot.build_rotation(2), 2);
         struct NoShield;
         impl ExplosionShield for NoShield {}
-        assert!(!NoShield.absorb_explosion(0.0, 0.0));
-        assert_eq!(NoShield.shield_radius(), 0);
+        let mut world = World::new();
+        let e = world.spawn_empty().id();
+        assert!(!NoShield.absorb_explosion(&mut world, e, 0.0, 0.0, 10.0));
+        struct NoControl;
+        impl ControlBlock for NoControl {}
+        assert!(!NoControl.is_controlled(&world, e));
+        assert!(NoControl.can_control());
+        assert!(NoControl.should_auto_target());
+        struct Tether;
+        impl UnitTetherBlock for Tether {}
+        Tether.spawned(&mut world, e, 7);
+        assert_eq!(
+            world
+                .get::<UnitTetherTarget>(e)
+                .map(|target| target.unit_id),
+            Some(7)
+        );
     }
 }

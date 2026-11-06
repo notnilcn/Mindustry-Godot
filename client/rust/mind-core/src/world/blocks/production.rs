@@ -42,4 +42,22 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             ),
         );
     }
+    // GAPS #55: class-keyed defaults. A mod drill/bore (no content-name
+    // registration) still needs the item-hardness table `Drill.getDrillTime`
+    // and `BeamDrill`'s wall-ore scan read; the class default keeps them off
+    // `NoopBehavior` and on the same content lookup as the vanilla blocks.
+    use crate::content::BlockKind;
+    use std::sync::Arc;
+    registry.register_kind(
+        BlockKind::Drill,
+        Arc::new(crate::world::behavior::production::DrillBehavior::from_content(content)),
+    );
+    registry.register_kind(
+        BlockKind::BurstDrill,
+        Arc::new(crate::world::behavior::production::DrillBehavior::from_content(content)),
+    );
+    registry.register_kind(
+        BlockKind::BeamDrill,
+        Arc::new(crate::world::behavior::production::BeamDrillBehavior::from_content(content)),
+    );
 }

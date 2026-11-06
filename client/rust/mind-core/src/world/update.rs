@@ -517,124 +517,29 @@ fn set_efficiency(
 }
 
 /// Consumer `efficiency(build)` for one lowered consumer.
+///
+/// GAPS #58: the generic kind dispatch lives in
+/// [`super::consumers::runtime_efficiency`] so every `Consume` subclass
+/// (including the extended filter/payload/power kinds) has one runtime body.
 fn consumer_efficiency(
     world: &World,
     entity: Entity,
     consumer: &super::consumers::ConsumeInstance,
     pass_delta: f32,
 ) -> f32 {
-    use super::consumers::ConsumeInstanceKind as K;
-    match &consumer.kind {
-        K::Items(stacks) => {
-            let Some(module) = world.get::<ItemModule>(entity) else {
-                return 0.0;
-            };
-            for stack in stacks {
-                if module.get(stack.item) < stack.amount {
-                    return 0.0;
-                }
-            }
-            1.0
-        }
-        K::Liquid { liquid, amount } => {
-            if pass_delta <= 0.000_000_1 {
-                return 0.0;
-            }
-            let Some(module) = world.get::<LiquidModule>(entity) else {
-                return 0.0;
-            };
-            (module.get(*liquid) / (amount * pass_delta)).min(1.0)
-        }
-        K::Liquids(stacks) => {
-            if pass_delta <= 0.000_000_1 {
-                return 0.0;
-            }
-            let Some(module) = world.get::<LiquidModule>(entity) else {
-                return 0.0;
-            };
-            let mut min = 1.0f32;
-            for stack in stacks {
-                min = min.min(module.get(stack.liquid) / (stack.amount * pass_delta));
-            }
-            min.min(1.0)
-        }
-        K::Power { .. } => world
-            .get::<PowerModule>(entity)
-            .map(|module| module.status)
-            .unwrap_or(0.0),
-        K::Coolant {
-            amount,
-            allow_liquid,
-            allow_gas,
-        } => {
-            if pass_delta <= 0.000_000_1 {
-                return 0.0;
-            }
-            let Some(module) = world.get::<LiquidModule>(entity) else {
-                return 0.0;
-            };
-            let traits = world.get_resource::<crate::world::modules::LiquidTraits>();
-            let consumed = consumed_liquid(module, &|liquid| {
-                traits
-                    .is_some_and(|traits| traits.coolant_accepts(liquid, *allow_liquid, *allow_gas))
-            });
-            match consumed {
-                Some(liquid) => (module.get(liquid) / (amount * pass_delta)).min(1.0),
-                None => 0.0,
-            }
-        }
-    }
+    super::consumers::runtime_efficiency(world, entity, consumer, pass_delta, None)
 }
 
 /// Consumer `update(build)` for one lowered consumer.
+///
+/// GAPS #58: see [`super::consumers::runtime_update`].
 fn consumer_update(
     world: &mut World,
     entity: Entity,
     consumer: &super::consumers::ConsumeInstance,
     edelta: f32,
 ) {
-    use super::consumers::ConsumeInstanceKind as K;
-    match &consumer.kind {
-        // `ConsumeItems` has no per-tick update (it triggers on craft).
-        K::Items(_) | K::Power { .. } => {}
-        K::Liquid { liquid, amount } => {
-            if let Some(mut module) = world.get_mut::<LiquidModule>(entity) {
-                module.remove(*liquid, amount * edelta);
-            }
-        }
-        K::Liquids(stacks) => {
-            if let Some(mut module) = world.get_mut::<LiquidModule>(entity) {
-                for stack in stacks {
-                    module.remove(stack.liquid, stack.amount * edelta);
-                }
-            }
-        }
-        K::Coolant {
-            amount,
-            allow_liquid,
-            allow_gas,
-        } => {
-            // Pick under an immutable borrow first (the traits resource and
-            // the module cannot be borrowed at once), then remove.
-            let consumed = {
-                let Some(module) = world.get::<LiquidModule>(entity) else {
-                    return;
-                };
-                consumed_liquid(module, &|liquid| {
-                    world
-                        .get_resource::<crate::world::modules::LiquidTraits>()
-                        .is_some_and(|traits| {
-                            traits.coolant_accepts(liquid, *allow_liquid, *allow_gas)
-                        })
-                })
-            };
-            if let (Some(liquid), Some(mut module)) =
-                (consumed, world.get_mut::<LiquidModule>(entity))
-            {
-                module.remove(liquid, amount * edelta);
-            }
-        }
-    }
+    super::consumers::runtime_update(world, entity, consumer, edelta, None);
 }
 
 /// `ConsumeLiquidFilter.getConsumed` (`ConsumeLiquidFilter.java:57-71`): the

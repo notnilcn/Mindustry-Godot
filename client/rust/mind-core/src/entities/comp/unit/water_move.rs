@@ -45,6 +45,48 @@ pub fn water_solid(
         || !crate::world::behavior::environment::floor_is_liquid(table, tile.floor)
 }
 
+/// `UnderwaterMoveComp.collisionLayer()` (`UnderwaterMoveComp.java:19-22`):
+/// `PhysicsProcess.layerUnderwater` (3).
+pub const UNDERWATER_COLLISION_LAYER: i32 = 3;
+
+/// `UnderwaterMoveComp.hittable()` (`UnderwaterMoveComp.java:24-27`): always
+/// false upstream (`return false && type.hittable(self())`).
+pub const UNDERWATER_HITTABLE: bool = false;
+
+/// `UnderwaterMoveComp.targetable(team)` (`UnderwaterMoveComp.java:29-32`):
+/// always false upstream (`return false && type.targetable(...)`).
+pub const UNDERWATER_TARGETABLE: bool = false;
+
+/// `WaterCrawlComp.solidity()` (`WaterCrawlComp.java:20-23`): flying or
+/// solid-ignoring units collide with nothing; otherwise `waterSolid`.
+pub fn water_crawl_solid(flying: bool, ignore_solids: bool) -> bool {
+    !(flying || ignore_solids)
+}
+
+/// `WaterCrawlComp.onSolid()` (`WaterCrawlComp.java:25-28`):
+/// `EntityCollisions.waterSolid(tileX(), tileY())`.
+pub fn water_crawl_on_solid(
+    grid: &WorldGrid,
+    table: &BlockTable,
+    content: &crate::content::ContentRegistry,
+    x: i32,
+    y: i32,
+) -> bool {
+    water_solid(grid, content, table, x, y)
+}
+
+/// `WaterCrawlComp.floorSpeedMultiplier()` (`WaterCrawlComp.java:30-33`):
+/// `(on.shallow ? 1f : 1.3f) * speedMultiplier` (`on` = `air` when flying).
+pub fn water_crawl_floor_speed_multiplier(shallow: bool, speed_multiplier: f32) -> f32 {
+    (if shallow { 1.0 } else { 1.3 }) * speed_multiplier
+}
+
+/// `WaterCrawlComp.onLiquid()` (`WaterCrawlComp.java:35-38`): the tile floor is
+/// a liquid.
+pub fn water_crawl_on_liquid(grid: &WorldGrid, table: &BlockTable, x: i32, y: i32) -> bool {
+    on_liquid(grid, table, x, y)
+}
+
 /// `WaterMoveComp.onLiquid()`: the tile under the unit is a liquid floor.
 pub fn on_liquid(grid: &WorldGrid, table: &BlockTable, x: i32, y: i32) -> bool {
     grid.tiles.in_bounds(x, y)

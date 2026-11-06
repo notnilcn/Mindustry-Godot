@@ -42,6 +42,14 @@ pub enum AbilityKind {
     LiquidExplode = 10,
     /// `LiquidRegenAbility` (Neoplasm preset).
     LiquidRegen = 11,
+    /// `ArmorPlateAbility` (`ArmorPlateAbility.java`; mod-only).
+    ArmorPlate = 12,
+    /// `MoveLightningAbility` (`MoveLightningAbility.java`; mod-only).
+    MoveLightning = 13,
+    /// `UnitSpawnAbility` (`UnitSpawnAbility.java`; mod-only).
+    UnitSpawn = 14,
+    /// `EmptyDataAbility` (`EmptyDataAbility.java`; the type-IO placeholder).
+    EmptyData = 15,
 }
 
 impl AbilityKind {
@@ -60,6 +68,10 @@ impl AbilityKind {
             AbilityKind::Regen => "RegenAbility",
             AbilityKind::LiquidExplode => "LiquidExplodeAbility",
             AbilityKind::LiquidRegen => "LiquidRegenAbility",
+            AbilityKind::ArmorPlate => "ArmorPlateAbility",
+            AbilityKind::MoveLightning => "MoveLightningAbility",
+            AbilityKind::UnitSpawn => "UnitSpawnAbility",
+            AbilityKind::EmptyData => "EmptyDataAbility",
         }
     }
 }
@@ -189,6 +201,30 @@ pub struct AbilitySpec {
     pub liquid: Option<&'static str>,
     /// `LiquidRegenAbility.slurpEffect`.
     pub slurp_effect: EffectId,
+    // --- mod-only kinds (GAPS #61) ---
+    /// `ArmorPlateAbility.healthMultiplier` (incoming-damage divisor while
+    /// shooting, `ArmorPlateAbility.java:30`).
+    pub health_multiplier: f32,
+    /// `MoveLightningAbility.chance` (per-tick spawn chance at max speed,
+    /// `MoveLightningAbility.java:14`).
+    pub chance: f32,
+    /// `MoveLightningAbility.length` (`<= 0` disables the bolt,
+    /// `MoveLightningAbility.java:16`).
+    pub length: i32,
+    /// `MoveLightningAbility.minSpeed`/`maxSpeed` (`:18-19`).
+    pub min_speed: f32,
+    /// `MoveLightningAbility.maxSpeed`.
+    pub max_speed: f32,
+    /// `MoveLightningAbility.y` spawn offset (`:21`).
+    pub spawn_offset: f32,
+    /// `MoveLightningAbility.alternate` (`:25`).
+    pub alternate: bool,
+    /// `UnitSpawnAbility.spawnTime` (`UnitSpawnAbility.java:19`).
+    pub spawn_time: f32,
+    /// `UnitSpawnAbility.spawnX`/`spawnY` (`:19`).
+    pub spawn_x: f32,
+    /// `UnitSpawnAbility.spawnY`.
+    pub spawn_y: f32,
 }
 
 impl AbilitySpec {
@@ -253,6 +289,16 @@ impl AbilitySpec {
             percent_amount: 0.0,
             liquid: None,
             slurp_effect: EffectId::HEAL,
+            health_multiplier: 1.0,
+            chance: 0.15,
+            length: 12,
+            min_speed: 0.8,
+            max_speed: 1.2,
+            spawn_offset: 0.0,
+            alternate: true,
+            spawn_time: 60.0,
+            spawn_x: 0.0,
+            spawn_y: 0.0,
         };
         match kind {
             AbilityKind::ShieldRegenField | AbilityKind::RepairField => {}
@@ -286,6 +332,25 @@ impl AbilitySpec {
                 spec.liquid = Some("water");
             }
             AbilityKind::LiquidRegen => {}
+            AbilityKind::ArmorPlate => {
+                // `ArmorPlateAbility.healthMultiplier = 0.2f` (`:30`).
+                spec.health_multiplier = 0.2;
+            }
+            AbilityKind::MoveLightning => {
+                // `MoveLightningAbility` field initializers (`:12-25`).
+                spec.amount = 35.0;
+                spec.chance = 0.15;
+                spec.length = 12;
+                spec.min_speed = 0.8;
+                spec.max_speed = 1.2;
+                spec.spawn_offset = 0.0;
+                spec.alternate = true;
+            }
+            AbilityKind::UnitSpawn => {
+                // `UnitSpawnAbility.spawnTime = 60f` (`:19`).
+                spec.spawn_time = 60.0;
+            }
+            AbilityKind::EmptyData => {}
         }
         spec
     }
@@ -401,5 +466,46 @@ impl AbilitySpec {
         spec.liquid = Some(liquid);
         spec.slurp_effect = slurp_effect;
         spec
+    }
+
+    /// `new ArmorPlateAbility()` (`ArmorPlateAbility.java:9-35`).
+    pub fn armor_plate() -> Self {
+        Self::for_kind(AbilityKind::ArmorPlate)
+    }
+
+    /// `new MoveLightningAbility(damage, length, chance, y, minSpeed, maxSpeed,
+    /// color)` (`MoveLightningAbility.java:35-45`).
+    pub fn move_lightning(
+        damage: f32,
+        length: i32,
+        chance: f32,
+        y: f32,
+        min_speed: f32,
+        max_speed: f32,
+    ) -> Self {
+        let mut spec = Self::for_kind(AbilityKind::MoveLightning);
+        spec.amount = damage;
+        spec.length = length;
+        spec.chance = chance;
+        spec.spawn_offset = y;
+        spec.min_speed = min_speed;
+        spec.max_speed = max_speed;
+        spec
+    }
+
+    /// `new UnitSpawnAbility(unit, spawnTime, spawnX, spawnY)`
+    /// (`UnitSpawnAbility.java:30-35`).
+    pub fn unit_spawn(unit: &'static str, spawn_time: f32, spawn_x: f32, spawn_y: f32) -> Self {
+        let mut spec = Self::for_kind(AbilityKind::UnitSpawn);
+        spec.unit = Some(unit);
+        spec.spawn_time = spawn_time;
+        spec.spawn_x = spawn_x;
+        spec.spawn_y = spawn_y;
+        spec
+    }
+
+    /// `new EmptyDataAbility()` (`EmptyDataAbility.java`).
+    pub fn empty_data() -> Self {
+        Self::for_kind(AbilityKind::EmptyData)
     }
 }

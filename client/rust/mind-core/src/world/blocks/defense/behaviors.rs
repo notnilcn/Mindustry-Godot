@@ -864,6 +864,27 @@ impl BuildingBehavior for BaseShieldBehavior {
     }
 }
 
+/// `ForceBuild implements ExplosionShield` (`ForceProjector.java:165`):
+/// `absorbExplosion` is the polygon containment + buildup body already ported
+/// on [`ForceProjectorState`] (`ForceProjector.java:270-278`).
+impl crate::world::behavior::helpers::ExplosionShield for ForceProjectorBehavior {
+    fn absorb_explosion(&self, world: &mut World, e: Entity, x: f32, y: f32, damage: f32) -> bool {
+        let Some(center) = world.get::<Pos>(e).map(|pos| (pos.x, pos.y)) else {
+            return false;
+        };
+        let Some(mut state) = world.get_mut::<ForceProjectorState>(e) else {
+            return false;
+        };
+        state.absorb_explosion(center.0, center.1, x, y, damage)
+    }
+}
+
+/// `TargetDummyBuild implements UnitTetherBlock` (`TargetDummy.java:82`,
+/// `:165-170`): the dummy unit id read from a save is recorded so the next
+/// update resolves the tether (the live path uses
+/// [`crate::entities::comp::unit::comp::UnitTetherComp`]).
+impl crate::world::behavior::helpers::UnitTetherBlock for TargetDummyDefenseBehavior {}
+
 /// The 28 vanilla turrets + `build-tower` (`Blocks.java` turret region).
 pub const TURRET_BLOCKS: &[&str] = &[
     "duo",
@@ -907,6 +928,125 @@ fn ammo_in_content(config: &super::turrets::TurretConfig, content: &ContentRegis
         TurretAmmo::Liquid(entries) => entries.iter().all(|entry| valid(entry.bullet)),
         TurretAmmo::Power(ammo) => valid(ammo.bullet),
         TurretAmmo::Payload(entries) => entries.iter().all(|entry| valid(entry.bullet)),
+    }
+}
+
+/// Class defaults for a **mod/JSON turret** of `kind` (GAPS #55).
+///
+/// Upstream every turret subclass inherits field initializers from
+/// `BaseTurret`/`ReloadTurret`/`Turret` (`BaseTurret.java:21-34`,
+/// `ReloadTurret.java:10`, `Turret.java:38-158`) plus the subclass constructor
+/// overrides (`LiquidTurret.java:22-29`, `PowerTurret.java:11-15`,
+/// `ContinuousTurret.java:16-27`, `LaserTurret.java:16-25`,
+/// `PointDefenseTurret.java:36-44`, `TractorBeamTurret.java:42-48`).
+///
+/// The ammo table starts empty: `ContentParser` turrets fill it from
+/// `ammoTypes`/`shootType` in the content half, so a class-default turret is
+/// inert (`TurretAmmo::Item(vec![])` keeps `hasAmmo()` false) but still gets a
+/// `TurretState`, the block-unit control proxy and the full turret update loop
+/// instead of falling back to [`crate::world::behavior::NoopBehavior`].
+pub fn class_default_turret(kind: super::turrets::TurretKind) -> super::turrets::TurretConfig {
+    use super::turrets::TurretKind;
+    use super::turrets::advanced::base_config;
+    let turret_kind = kind;
+    let ammo = match turret_kind {
+        TurretKind::Liquid => super::turrets::TurretAmmo::Liquid(Vec::new()),
+        // `PowerTurret.shootType` / `ContinuousTurret.shootType` are null until
+        // the parser lowers them; an empty item table is the inert stand-in.
+        _ => super::turrets::TurretAmmo::Item(Vec::new()),
+    };
+    let mut config = base_config(turret_kind, ammo);
+    // `BaseTurret`/`ReloadTurret`/`Turret` field initializers.
+    config.range = 80.0;
+    config.reload = 10.0;
+    config.rotate_speed = 5.0;
+    config.shoot_cone = 8.0;
+    config.recoil = 1.0;
+    config.recoil_time = -1.0;
+    config.cooldown_time = 20.0;
+    config.coolant_multiplier = 5.0;
+    config.target_under_blocks = true;
+    // Per-class constructor overrides.
+    match turret_kind {
+        TurretKind::Liquid => {
+            // `LiquidTurret.java:22-29`: `shootSound = none`,
+            // `smokeEffect/shootEffect = none`, `extinguish = true`.
+            config.shoot_sound = crate::content::registries::sound_meta::SoundId::NONE;
+            config.liquid_consumed = 1.0 / 60.0;
+        }
+        TurretKind::Power => {
+            // `PowerTurret.java:11-15`: `hasPower = true` (module half).
+        }
+        TurretKind::Continuous => {
+            config.coolant_multiplier = 1.0;
+        }
+        TurretKind::Laser => {
+            config.coolant_multiplier = 1.0;
+            config.firing_move_fract = 0.25;
+            config.shoot_duration = 100.0;
+        }
+        TurretKind::PointDefense => {
+            // `PointDefenseTurret.java:36-44`.
+            config.rotate_speed = 20.0;
+            config.reload = 30.0;
+            config.coolant_multiplier = 2.0;
+            config.shoot_cone = 5.0;
+            config.shoot_length = 3.0;
+            config.bullet_damage = 10.0;
+        }
+        TurretKind::TractorBeam => {
+            // `TractorBeamTurret.java:20-36` (targets air only by default).
+            config.rotate_speed = 10.0;
+            config.coolant_multiplier = 1.0;
+            config.shoot_cone = 6.0;
+            config.shoot_length = 5.0;
+            config.force = 0.3;
+            config.target_ground = false;
+            config.status_duration = 300.0;
+            config.status_chance = 1.0;
+        }
+        TurretKind::Item | TurretKind::PayloadAmmo | TurretKind::Build => {}
+    }
+    config
+}
+
+/// Registers the class-default behavior for every turret [`crate::content::BlockKind`]
+/// (GAPS #55): a mod turret with no name registration still gets the turret
+/// update loop. Vanilla turrets keep their content-resolved name registration.
+fn register_turret_class_defaults(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
+    use super::turrets::TurretKind;
+    let block_unit = content
+        .unit_id("block")
+        .and_then(|id| content.unit(id))
+        .map(|def| Arc::new(def.clone()));
+    for (block_kind, turret_kind) in [
+        (crate::content::BlockKind::ItemTurret, TurretKind::Item),
+        (crate::content::BlockKind::LiquidTurret, TurretKind::Liquid),
+        (crate::content::BlockKind::PowerTurret, TurretKind::Power),
+        (
+            crate::content::BlockKind::ContinuousTurret,
+            TurretKind::Continuous,
+        ),
+        (
+            crate::content::BlockKind::ContinuousLiquidTurret,
+            TurretKind::Continuous,
+        ),
+        (crate::content::BlockKind::LaserTurret, TurretKind::Laser),
+        (
+            crate::content::BlockKind::PointDefenseTurret,
+            TurretKind::PointDefense,
+        ),
+        (
+            crate::content::BlockKind::TractorBeamTurret,
+            TurretKind::TractorBeam,
+        ),
+        (crate::content::BlockKind::BuildTurret, TurretKind::Build),
+    ] {
+        let mut behavior = TurretBehavior::new(class_default_turret(turret_kind));
+        if let Some(def) = block_unit.clone() {
+            behavior = behavior.with_block_unit(def);
+        }
+        registry.register_kind(block_kind, Arc::new(behavior));
     }
 }
 
@@ -1071,6 +1211,9 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             }
         }
     }
+    // GAPS #55: class-keyed defaults so a mod turret (no name registration)
+    // resolves the turret behavior instead of `NoopBehavior`.
+    register_turret_class_defaults(registry, content);
 }
 
 #[cfg(test)]
@@ -1588,3 +1731,90 @@ mod tests {
 // Java bodies: ForceProjector.java:342-359, MendProjector.java:167-178,
 // OverdriveProjector.java:162-173, BaseShield.java:149-169 (version 1),
 // ShieldWall.java:120-130.
+
+/// GAPS #62 helper-trait tests (kept out of the main test module so the save-IO
+/// section above stays contiguous).
+#[cfg(test)]
+mod helper_trait_tests {
+    use super::*;
+    use crate::world::BuildHarness;
+    use crate::world::behavior::helpers::{ExplosionShield, UnitTetherTarget};
+
+    /// `ForceBuild implements ExplosionShield` (`ForceProjector.java:165,270-278`):
+    /// a blast inside the polygon is absorbed and feeds `buildup`.
+    #[test]
+    fn force_projector_absorbs_explosions() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let block = harness
+            .content()
+            .block_id("force-projector")
+            .expect("block");
+        assert!(harness.place(7, 7, block, 0, true));
+        let e = harness.build_at(7, 7).expect("build");
+        let inst = harness.table().instance(block).expect("instance");
+        let behavior = inst.behavior.clone();
+        let force = (&*behavior as &dyn std::any::Any)
+            .downcast_ref::<ForceProjectorBehavior>()
+            .expect("ForceProjectorBehavior")
+            .clone();
+        // A freshly placed projector's shield radius ramps with `warmup` /
+        // `radscl` (`ForceProjector.java:198,216`); open it fully.
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(e) {
+            state.broken = false;
+            state.warmup = 1.0;
+            state.radscl = 1.0;
+        }
+        let (x, y) = harness
+            .world
+            .get::<Pos>(e)
+            .map(|pos| (pos.x, pos.y))
+            .expect("pos");
+        assert!(
+            <ForceProjectorBehavior as ExplosionShield>::absorb_explosion(
+                &force,
+                &mut harness.world,
+                e,
+                x + 10.0,
+                y,
+                100.0
+            )
+        );
+        let buildup = harness.world.get::<ForceProjectorState>(e).unwrap().buildup;
+        assert!(buildup > 0.0, "absorbed blast adds buildup");
+        // Far outside the 101.7-unit polygon: not absorbed.
+        assert!(
+            !<ForceProjectorBehavior as ExplosionShield>::absorb_explosion(
+                &force,
+                &mut harness.world,
+                e,
+                x + 500.0,
+                y,
+                100.0
+            )
+        );
+    }
+
+    /// `TargetDummyBuild implements UnitTetherBlock` (`TargetDummy.java:82`):
+    /// `spawned(id)` records the read unit id.
+    #[test]
+    fn target_dummy_records_spawned_unit_id() {
+        use crate::world::behavior::helpers::UnitTetherBlock;
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let block = harness.content().block_id("target-dummy").expect("block");
+        assert!(harness.place(7, 7, block, 0, true));
+        let e = harness.build_at(7, 7).expect("build");
+        let inst = harness.table().instance(block).expect("instance");
+        let behavior = inst.behavior.clone();
+        let dummy = (&*behavior as &dyn std::any::Any)
+            .downcast_ref::<TargetDummyDefenseBehavior>()
+            .expect("TargetDummyDefenseBehavior");
+        dummy.spawned(&mut harness.world, e, 42);
+        assert_eq!(
+            harness
+                .world
+                .get::<UnitTetherTarget>(e)
+                .map(|target| target.unit_id),
+            Some(42)
+        );
+    }
+}

@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T16:09:28Z",
+  "updated": "2026-11-06T16:27:31Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1235,6 +1235,42 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib legacy; ... missile_shooter; ... crawler_crushes",
       "expected": "full lib 3004 pass",
       "risk": "legacy sweep before darkness could shift map darkness; StatusApplier needed for shootStatus; legs clone per tick",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-162731",
+      "created_at": "2026-11-06T16:27:31Z",
+      "agent": "hx-wave-f",
+      "branch": "main",
+      "head": "bbb17a6b",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src,client/rust/mind-stdb",
+      "summary": "Audio #54 remainder hooks + music fade; achievements/stats; STDB bindings regen",
+      "files": [
+        "client/rust/mind-core/src/world/behavior/campaign.rs",
+        "client/rust/mind-core/src/world/behavior/production.rs",
+        "client/rust/mind-core/src/audio/ambient.rs",
+        "client/rust/mind-core/src/audio/music.rs",
+        "client/rust/mind-core/src/game/achievements.rs",
+        "client/rust/mind-core/src/game/service.rs",
+        "client/rust/mind-core/src/game/runtime.rs",
+        "client/rust/mind-gdext/src/fx.rs",
+        "client/rust/mind-gdext/src/audio/mod.rs",
+        "client/rust/mind-stdb/src/module_bindings/",
+        "client/rust/mind-stdb/src/chat.rs",
+        "client/rust/mind-stdb/src/events.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "stdb-bindings"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib achievement; ... -p mind-stdb --lib",
+      "expected": "achievement 6, service 8, stdb 65; full lib passes",
+      "risk": "CampaignRuntime new field; clock polls; STDB header CLI 2.10.1 pin",
       "status": "pending"
     }
   ]

@@ -126,6 +126,12 @@ pub enum UnitComponent {
     TimedKill,
     /// `Crawlc`.
     Crawl,
+    /// `WaterCrawlComp` (`WaterCrawlc`; mod-only, GAPS #61).
+    WaterCrawl,
+    /// `UnderwaterMoveComp` (`WaterMovec` subclass; mod-only, GAPS #61).
+    UnderwaterMove,
+    /// `ShielderComp` (`Shielderc`; mod-only, GAPS #61).
+    Shielder,
 }
 
 impl UnitComponent {
@@ -144,6 +150,9 @@ impl UnitComponent {
             UnitComponent::Tank => "Tankc",
             UnitComponent::TimedKill => "TimedKillc",
             UnitComponent::Crawl => "Crawlc",
+            UnitComponent::WaterCrawl => "WaterCrawlc",
+            UnitComponent::UnderwaterMove => "UnderwaterMovec",
+            UnitComponent::Shielder => "Shielderc",
         }
     }
 }

@@ -276,6 +276,16 @@ pub fn insert_kind_components(
             ..CrawlComp::default()
         });
     }
+    if has(UnitComponent::WaterCrawl) {
+        // `WaterCrawlComp` replaces the crawl predicates in place.
+        world.entity_mut(entity).insert(WaterCrawlComp);
+    }
+    if has(UnitComponent::UnderwaterMove) {
+        world.entity_mut(entity).insert(UnderwaterMoveComp);
+    }
+    if has(UnitComponent::Shielder) {
+        world.entity_mut(entity).insert(ShielderComp::default());
+    }
     if has(UnitComponent::ElevationMove) {
         world.entity_mut(entity).insert(ElevationMoveComp {
             flying: unit.flying,

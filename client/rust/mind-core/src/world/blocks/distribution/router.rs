@@ -75,6 +75,20 @@ impl RouterBehavior {
     pub const VANILLA: RouterBehavior = RouterBehavior { speed: 8.0 };
 }
 
+impl crate::world::behavior::helpers::ControlBlock for RouterBehavior {
+    fn unit(&self, world: &World, e: Entity) -> Option<Entity> {
+        // `RouterBuild.unit()` (`Router.java:35-44`): the `block` proxy created
+        // on first use by `Sim::control_block_unit_id`.
+        world
+            .get::<RouterBuild>(e)
+            .and_then(|router| router.block_unit)
+    }
+
+    fn is_controlled(&self, world: &World, e: Entity) -> bool {
+        router_controlled_unit(world, e).is_some()
+    }
+}
+
 impl BuildingBehavior for RouterBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<RouterBuild>(e).is_none() {
@@ -367,5 +381,33 @@ mod tests {
             counts.iter().all(|count| *count > 0) && max - min <= 2,
             "router outputs: {counts:?}"
         );
+    }
+
+    /// GAPS #62: `RouterBuild implements ControlBlock` (`Router.java:30-53`):
+    /// `unit()` is the block proxy and `isControlled()` is `unit().isPlayer()`.
+    #[test]
+    fn router_control_block_tracks_the_proxy_unit() {
+        use crate::world::behavior::helpers::ControlBlock;
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let router = harness.content().block_id("router").expect("router");
+        assert!(harness.place(3, 3, router, 0, true));
+        let e = harness.build_at(3, 3).expect("router build");
+        let behavior = RouterBehavior::VANILLA;
+        assert!(behavior.can_control());
+        assert!(behavior.unit(&harness.world, e).is_none());
+        assert!(!behavior.is_controlled(&harness.world, e));
+
+        // A proxy unit with no player is not controlled; adding the player
+        // marker flips `isControlled` (Java `unit().isPlayer()`).
+        harness.world.get_mut::<RouterBuild>(e).unwrap().block_unit =
+            Some(harness.world.spawn_empty().id());
+        assert!(behavior.unit(&harness.world, e).is_some());
+        assert!(!behavior.is_controlled(&harness.world, e));
+        let proxy = behavior.unit(&harness.world, e).unwrap();
+        harness
+            .world
+            .entity_mut(proxy)
+            .insert(crate::entities::comp::Player);
+        assert!(behavior.is_controlled(&harness.world, e));
     }
 }

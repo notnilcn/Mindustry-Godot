@@ -345,6 +345,9 @@ pub fn kind_of(component: UnitComponent) -> ComponentKind {
         UnitComponent::Tank => ComponentKind::Tank,
         UnitComponent::TimedKill => ComponentKind::TimedKill,
         UnitComponent::Crawl => ComponentKind::Crawl,
+        UnitComponent::WaterCrawl => ComponentKind::WaterCrawl,
+        UnitComponent::UnderwaterMove => ComponentKind::UnderwaterMove,
+        UnitComponent::Shielder => ComponentKind::Shielder,
     }
 }
 

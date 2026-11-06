@@ -27,7 +27,7 @@ use crate::combat::damage::{apply_status, damage_entity, heal_health};
 use crate::combat::puddles::{self, PuddleState};
 use crate::content::registries::units::UnitTypeDef;
 use crate::content::registries::units::ability::{AbilityKind, AbilitySpec};
-use crate::content::{ContentRegistry, LiquidId};
+use crate::content::{ContentRegistry, LiquidId, Rgba};
 use crate::determinism::{RngStream, SimRng};
 use crate::entities::comp::unit::comp::{
     HitboxComp, PhysicsComp, ShieldComp, UnitCore, UnitTypeComp,
@@ -81,6 +81,9 @@ pub struct AbilityState {
     pub health_change: f32,
     /// Deterministic per-ability random state (deflection chance rolls).
     pub rng: u64,
+    /// `ArmorPlateAbility.warmup` (lerps toward `isShooting`,
+    /// `ArmorPlateAbility.java:33-36`).
+    pub warmup: f32,
 }
 
 /// Per-ability runtime states, index-aligned with `UnitType.abilities`
@@ -127,6 +130,51 @@ pub fn init_unit_abilities(world: &mut World, entity: Entity, def: &UnitTypeDef)
     }
     world.entity_mut(entity).insert(comp);
 }
+
+/// One deferred `MoveLightningAbility` bolt (`Lightning.create` needs a
+/// `CombatCtx`; the ability pass owns only `World`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PendingLightningStrike {
+    /// Caster team.
+    pub team: u8,
+    /// `MoveLightningAbility.color`.
+    pub color: Rgba,
+    /// `MoveLightningAbility.damage`.
+    pub damage: f32,
+    /// Bolt origin x.
+    pub x: f32,
+    /// Bolt origin y.
+    pub y: f32,
+    /// Bolt direction in degrees.
+    pub rotation: f32,
+    /// Bolt length (`<= 0` = no bolt).
+    pub length: i32,
+}
+
+/// Deferred `MoveLightningAbility` bolts, drained by the combat pass
+/// ([`crate::world::behavior::PendingShockMineTriggers`] pattern).
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct PendingMoveLightning(pub Vec<PendingLightningStrike>);
+
+/// One deferred `UnitSpawnAbility` spawn (`Units.canCreate` and the entity
+/// sequencer live in the unit runtime, which the ability pass does not own).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PendingAbilityUnitSpawn {
+    /// Unit content name (`UnitSpawnAbility.unit`).
+    pub unit: &'static str,
+    /// Caster team.
+    pub team: u8,
+    /// Spawn x (already rotated by the caller).
+    pub x: f32,
+    /// Spawn y (already rotated by the caller).
+    pub y: f32,
+    /// Spawn rotation (caster rotation).
+    pub rotation: f32,
+}
+
+/// Deferred `UnitSpawnAbility` spawns, drained by the unit runtime pass.
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct PendingAbilityUnitSpawns(pub Vec<PendingAbilityUnitSpawn>);
 
 /// Returns the unit's `(x, y, team, hit_size, flying)` if it is still valid.
 fn unit_frame(world: &World, entity: Entity) -> Option<(f32, f32, u8, f32, bool)> {
@@ -418,6 +466,91 @@ fn update_ability(
                 liquid_regen_tick(world, entity, liquid.id, x, y, hit_size, flying);
             }
         }
+        // `ArmorPlateAbility.update` (`ArmorPlateAbility.java:32-36`):
+        // `warmup = Mathf.lerpDelta(warmup, isShooting ? 1 : 0, 0.1);
+        //  unit.healthMultiplier += warmup * healthMultiplier;`
+        // `healthMultiplier` is `StatusComp.healthMultiplier`, reset by the
+        // status pass and read by the damage path (`ShieldComp.rawDamage`).
+        AbilityKind::ArmorPlate => {
+            let target = if device_is_shooting(world, entity) {
+                1.0
+            } else {
+                0.0
+            };
+            state.warmup += (target - state.warmup) * 0.1;
+            let add = state.warmup * spec.health_multiplier;
+            if let Some(mut status) =
+                world.get_mut::<crate::entities::comp::unit::comp::StatusComp>(entity)
+            {
+                status.health_multiplier += add;
+            }
+        }
+        // `MoveLightningAbility.update` (`MoveLightningAbility.java:70-90`):
+        // speed-scaled chance, then a bolt at the rotated offset. The bolt is
+        // deferred because `Lightning.create` needs a `CombatCtx`.
+        AbilityKind::MoveLightning => {
+            let speed = world
+                .get::<Vel>(entity)
+                .map(|vel| vel.x.hypot(vel.y))
+                .unwrap_or(0.0);
+            let scl = if spec.max_speed > spec.min_speed {
+                ((speed - spec.min_speed) / (spec.max_speed - spec.min_speed)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let chance = spec.chance * scl;
+            if chance > 0.0 && ability_chance(state) < chance {
+                let (ox, oy) =
+                    rotate_offset(x, y, spec.spawn_offset, 0.0, unit_rotation(world, entity));
+                let rotation = unit_rotation(world, entity);
+                if !world.contains_resource::<PendingMoveLightning>() {
+                    world.insert_resource(PendingMoveLightning::default());
+                }
+                if let Some(mut pending) = world.get_resource_mut::<PendingMoveLightning>() {
+                    pending.0.push(PendingLightningStrike {
+                        team,
+                        color: Rgba::new(0.66, 0.85, 1.0, 1.0),
+                        damage: spec.amount,
+                        x: ox,
+                        y: oy,
+                        rotation,
+                        length: spec.length,
+                    });
+                }
+                // `if(alternate) side *= -1f;` — the next strike alternates its
+                // offset along the caster's facing.
+                state.aux = if state.aux > 0.0 { -1.0 } else { 1.0 };
+            }
+        }
+        // `UnitSpawnAbility.update` (`UnitSpawnAbility.java:46-62`): accumulate
+        // the spawn timer and queue the unit for the runtime pass.
+        AbilityKind::UnitSpawn => {
+            let build_speed = crate::game::runtime::rules_of(world)
+                .map_or(1.0, |rules| rules.unit_build_speed(team));
+            state.timer += build_speed;
+            if state.timer >= spec.spawn_time.max(0.001) {
+                if let Some(unit) = spec.unit {
+                    let rotation = unit_rotation(world, entity);
+                    let (ox, oy) = rotate_offset(x, y, spec.spawn_y, -spec.spawn_x, rotation);
+                    if !world.contains_resource::<PendingAbilityUnitSpawns>() {
+                        world.insert_resource(PendingAbilityUnitSpawns::default());
+                    }
+                    if let Some(mut pending) = world.get_resource_mut::<PendingAbilityUnitSpawns>()
+                    {
+                        pending.0.push(PendingAbilityUnitSpawn {
+                            unit,
+                            team,
+                            x: ox,
+                            y: oy,
+                            rotation,
+                        });
+                    }
+                }
+                state.timer = 0.0;
+            }
+        }
+        // `EmptyDataAbility` has no update (`EmptyDataAbility.java`).
+        AbilityKind::EmptyData => {}
         // View-only (`MoveEffectAbility.update` returns in headless) or handled
         // by the death hook (`SpawnDeath`, `LiquidExplode`).
         AbilityKind::MoveEffect | AbilityKind::SpawnDeath | AbilityKind::LiquidExplode => {}
@@ -1430,6 +1563,145 @@ mod tests {
         assert!(
             health > 50.0,
             "LiquidRegenAbility slurped the neoplasm puddle (50 -> {health})"
+        );
+    }
+
+    fn set_abilities(harness: &mut UnitHarness, unit: Entity, count: usize) {
+        harness.build.world.entity_mut(unit).insert(AbilityComp {
+            states: vec![AbilityState::default(); count],
+        });
+    }
+
+    /// GAPS #61: `ArmorPlateAbility.update` lerps `warmup` and adds
+    /// `warmup * healthMultiplier` to `StatusComp.healthMultiplier`.
+    #[test]
+    fn armor_plate_boosts_health_multiplier() {
+        let mut harness = UnitHarness::new(16, 16, 7);
+        let unit = harness.spawn("alpha", 0, 64.0, 64.0, 0.0).expect("alpha");
+        set_abilities(&mut harness, unit, 1);
+        let spec = AbilitySpec::armor_plate();
+        harness
+            .build
+            .world
+            .get_mut::<StatusComp>(unit)
+            .unwrap()
+            .health_multiplier = 1.0;
+        // `isShooting` is false, so `lerpDelta(1, 0, 0.1)` lands at 0.9.
+        let mut state = AbilityState {
+            warmup: 1.0,
+            ..AbilityState::default()
+        };
+        update_ability(
+            &mut harness.build.world,
+            &harness.build.content,
+            unit,
+            &spec,
+            &mut state,
+        );
+        let multiplier = harness
+            .build
+            .world
+            .get::<StatusComp>(unit)
+            .unwrap()
+            .health_multiplier;
+        assert!(
+            (multiplier - 1.18).abs() < 1e-5,
+            "healthMultiplier 1 + 0.9 * 0.2, got {multiplier}"
+        );
+    }
+
+    /// GAPS #61: `MoveLightningAbility.update` rolls a speed-scaled chance and
+    /// queues the bolt for the combat pass.
+    #[test]
+    fn move_lightning_queues_a_bolt_at_speed() {
+        let mut harness = UnitHarness::new(16, 16, 7);
+        let unit = harness.spawn("alpha", 0, 64.0, 64.0, 90.0).expect("alpha");
+        set_abilities(&mut harness, unit, 1);
+        harness.build.world.get_mut::<Vel>(unit).unwrap().x = 2.0;
+        let spec = AbilitySpec::move_lightning(35.0, 12, 0.15, 0.0, 0.8, 1.2);
+        let mut state = AbilityState::default();
+        for _ in 0..200 {
+            update_ability(
+                &mut harness.build.world,
+                &harness.build.content,
+                unit,
+                &spec,
+                &mut state,
+            );
+            if harness
+                .build
+                .world
+                .get_resource::<PendingMoveLightning>()
+                .is_some_and(|pending| !pending.0.is_empty())
+            {
+                break;
+            }
+        }
+        let pending = harness
+            .build
+            .world
+            .get_resource::<PendingMoveLightning>()
+            .expect("queued bolts");
+        assert_eq!(pending.0.len(), 1, "bolt queue");
+        assert_eq!(pending.0[0].length, 12);
+        assert_eq!(pending.0[0].damage, 35.0);
+        assert_eq!(pending.0[0].team, 0);
+    }
+
+    /// GAPS #61: `UnitSpawnAbility.update` accumulates the spawn timer and
+    /// queues the unit for the runtime pass.
+    #[test]
+    fn unit_spawn_queues_after_spawn_time() {
+        let mut harness = UnitHarness::new(16, 16, 7);
+        let unit = harness.spawn("alpha", 0, 64.0, 64.0, 0.0).expect("alpha");
+        set_abilities(&mut harness, unit, 1);
+        let spec = AbilitySpec::unit_spawn("dagger", 5.0, 0.0, 0.0);
+        let mut state = AbilityState::default();
+        for _ in 0..5 {
+            update_ability(
+                &mut harness.build.world,
+                &harness.build.content,
+                unit,
+                &spec,
+                &mut state,
+            );
+        }
+        let pending = harness
+            .build
+            .world
+            .get_resource::<PendingAbilityUnitSpawns>()
+            .expect("queued spawns");
+        assert_eq!(pending.0.len(), 1);
+        assert_eq!(pending.0[0].unit, "dagger");
+        assert_eq!(pending.0[0].team, 0);
+    }
+
+    /// GAPS #61: `EmptyDataAbility` has no update body.
+    #[test]
+    fn empty_data_ability_is_inert() {
+        let mut harness = UnitHarness::new(16, 16, 7);
+        let unit = harness.spawn("alpha", 0, 64.0, 64.0, 0.0).expect("alpha");
+        set_abilities(&mut harness, unit, 1);
+        let spec = AbilitySpec::empty_data();
+        let mut state = AbilityState::default();
+        update_ability(
+            &mut harness.build.world,
+            &harness.build.content,
+            unit,
+            &spec,
+            &mut state,
+        );
+        assert!(
+            !harness
+                .build
+                .world
+                .contains_resource::<PendingMoveLightning>()
+        );
+        assert!(
+            !harness
+                .build
+                .world
+                .contains_resource::<PendingAbilityUnitSpawns>()
         );
     }
 }

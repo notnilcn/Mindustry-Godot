@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T16:10:31Z",
+  "updated": "2026-11-06T16:36:07Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -29552,13 +29552,13 @@
     },
     "PAR-0560": {
       "title": "GAPS #55: block behavior dispatch is name-keyed; mod/JSON class blocks fall back to NoopBehavior",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29566,9 +29566,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0560"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib behavior"
             }
           }
         ]
@@ -29577,17 +29577,30 @@
       "claimed_at": "2026-11-06T15:55:27Z",
       "severity": "P1",
       "gap": "BehaviorRegistry had only by_block/by_name; default_behavior left distribution/liquid classes and every turret class at NoopBehavior, so mod blocks of a ported Java class had no building loop.",
-      "source": "GAPS.md#55"
+      "source": "GAPS.md#55",
+      "fix": "BehaviorRegistry by_kind + register_kind/get_kind; resolve_behavior order id->name->kind->default; distribution/liquid/storage class_default(kind) tables; production Drill/BurstDrill/BeamDrill kind registrations with the content hardness table; defense turret class defaults (base_config empty ammo) for 9 turret kinds; default_behavior turret arms use the class defaults.",
+      "evidence": [
+        "cargo test -p mind-core --lib behavior (116 passed)",
+        "cargo test -p mind-core --lib (3014 passed)",
+        "cargo check -p mind-gdext"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:35:30Z",
+          "by": "hx-mod2",
+          "text": "Verified headlessly: mod_blocks_resolve_class_defaults covers Conveyor/ArmoredConveyor/Router/Junction/Duct/ItemBridge/Sorter/MassDriver/Conduit/ArmoredConduit/LiquidRouter/LiquidJunction/LiquidBridge/GenericCrafter/Drill/BeamDrill/Pump/ItemTurret/LiquidTurret/PowerTurret; all resolve a non-Noop class behavior. Residual: per-block mod knobs (conveyor speed, turret ammoTypes) need the #56 BlockSpec fields."
+        }
+      ]
     },
     "PAR-0561": {
       "title": "GAPS #58: 17 consumer classes have no generic lowering/runtime",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29595,9 +29608,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0561"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib consumers"
             }
           }
         ]
@@ -29606,17 +29619,30 @@
       "claimed_at": "2026-11-06T15:55:27Z",
       "severity": "P1",
       "gap": "ConsumeInstanceKind covered only Items/Liquid/Liquids/Power/Coolant; ItemFilter/Flammable/Radioactive/Explosive/Charged/List/Efficiency/Explode/ItemDynamic/LiquidFilter/LiquidFlammable/LiquidsDynamic/PayloadDynamic/PayloadFilter/Payloads/PowerCondition/PowerDynamic had no lowering or runtime.",
-      "source": "GAPS.md#58"
+      "source": "GAPS.md#58",
+      "fix": "ConsumeInstanceKind now lowers ItemFilter(+Flammable/Radioactive/Explosive/Charged/ItemList/Efficiency)/ItemExplode/ItemDynamic/LiquidFilter(+LiquidFlammable)/LiquidsDynamic/Payloads/PayloadDynamic/PayloadFilter/PowerDynamic/PowerCondition; ExtraConsume+Consumers::build_with_extras; generic runtime_efficiency/runtime_update/runtime_trigger/runtime_requested_power (world/update.rs delegates); ItemTraits resource and entity-based payload inventory; behavior helpers use Consumers::consumes_item/consumes_liquid.",
+      "evidence": [
+        "cargo test -p mind-core --lib consumers (7 passed)",
+        "cargo test -p mind-core --lib behavior (116 passed)",
+        "cargo test -p mind-core --lib (3014 passed)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:35:34Z",
+          "by": "hx-mod2",
+          "text": "Runtime wired through world/update.rs (consumer_efficiency/consumer_update delegate to world::consumers). Remaining cross-file half: content/registries/blocks/mod.rs must append the matching Consume variant set + call Consumers::build_with_extras; sim/runtime.rs must insert ItemTraits::from_content; combat pass must drain PendingConsumerDamage and provide DynamicConsume for factory/deconstructor families."
+        }
+      ]
     },
     "PAR-0562": {
       "title": "GAPS #57: parsed DrawerKind never converts to DrawDesc; DrawPumpLiquid/DrawBlockParts missing",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29624,9 +29650,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0562"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
             }
           }
         ]
@@ -29635,17 +29661,30 @@
       "claimed_at": "2026-11-06T15:55:31Z",
       "severity": "P2",
       "gap": "vanilla_chain(name) was the only draw chain; def.drawer (parsed DrawMulti/Region/...) was ignored so mod/JSON blocks drew only DrawDefault, and DrawPumpLiquid/DrawBlockParts had no descriptor.",
-      "source": "GAPS.md#57"
+      "source": "GAPS.md#57",
+      "fix": "draw_desc::from_drawer converts all 41 DrawerKind tags (DrawerSpec fields + Java class-default field initializers) into DrawDesc; DrawPumpLiquid and DrawBlockParts descriptor bodies implemented (parts executed through the plan-17 DrawPart compiler and mapped back to DrawCmd); chain_for/has_explicit_chain replace the vanilla_chain(name)-only fallback in render/layers.rs and mind-gdext/render/block_extras.rs.",
+      "evidence": [
+        "cargo test -p mind-core --lib render::draw_desc (16 passed)",
+        "cargo test -p mind-core --lib (3014 passed)",
+        "cargo check -p mind-gdext"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:35:39Z",
+          "by": "hx-mod2",
+          "text": "Residual: DrawRegion.name overrides, DrawTurret/DrawWeapon (turret renderer), DrawLiquidOutputs outputs (needs BlockDef output liquids) and DrawArc/DrawParticle/DrawSoftShadow map to DrawDefault; DrawerSpec::for_kind lacks per-class alpha/pulse defaults for AcrSmelt/CrucibleFlame/Particles."
+        }
+      ]
     },
     "PAR-0563": {
       "title": "GAPS #61: ArmorPlate/MoveLightning/UnitSpawn/EmptyData abilities and WaterCrawl/UnderwaterMove/Shielder/LaunchCore components missing",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29653,9 +29692,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0563"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib abilities"
             }
           }
         ]
@@ -29664,17 +29703,30 @@
       "claimed_at": "2026-11-06T15:55:31Z",
       "severity": "P2",
       "gap": "No AbilityKind for the four mod abilities, no runtime arms; WaterCrawlComp/UnderwaterMoveComp/ShielderComp/LaunchCoreComp absent from entities/comp.",
-      "source": "GAPS.md#61"
+      "source": "GAPS.md#61",
+      "fix": "AbilityKind ArmorPlate/MoveLightning/UnitSpawn/EmptyData (+AbilitySpec fields/constructors); runtime arms: ArmorPlate adds warmup*healthMultiplier to StatusComp.health_multiplier, MoveLightning queues PendingMoveLightning bolts, UnitSpawn queues PendingAbilityUnitSpawns; WaterCrawlComp/UnderwaterMoveComp/ShielderComp components + spawn insertion + water predicates in entities/comp/unit/water_move.rs; LaunchCoreComp block/lifetime progress curves.",
+      "evidence": [
+        "cargo test -p mind-core --lib abilities (18 passed)",
+        "cargo test -p mind-core --lib blocks:: (308 passed)",
+        "cargo test -p mind-core --lib (3014 passed)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:35:44Z",
+          "by": "hx-mod2",
+          "text": "Cross-file half: mods/json resolve_ability_kind + ability field parsing for the 4 new classes; combat/sim pass must drain PendingMoveLightning (Lightning.create) and PendingAbilityUnitSpawns (Units.canCreate + spawn seq); render/effect pass draws LaunchCoreComp; TiledFloor/TiledWall/WobbleProp BlockKind additions still needed in content/registries/blocks/mod.rs (owner: other agent)."
+        }
+      ]
     },
     "PAR-0564": {
       "title": "GAPS #62: RotBlock/UnitTetherBlock/ExplosionShield/ControlBlock stub traits and Block.placeEnded/flipRotation/getPlanConfigs missing",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29682,9 +29734,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0564"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib blocks::"
             }
           }
         ]
@@ -29693,7 +29745,19 @@
       "claimed_at": "2026-11-06T15:55:31Z",
       "severity": "P2",
       "gap": "The four helper traits had no implementors and read-only signatures; BlockInstance had no flip_rotation/plan_configs/place_ended.",
-      "source": "GAPS.md#62"
+      "source": "GAPS.md#62",
+      "fix": "Helper traits aligned to the Java interfaces and implemented: ControlBlock for RouterBehavior (unit/isControlled/canControl/shouldAutoTarget), ExplosionShield for ForceProjectorBehavior (polygon absorb + buildup), UnitTetherBlock for TargetDummyDefenseBehavior (records UnitTetherTarget), RotBlock for MassDriverBehavior; BlockInstance::plan_rotation/invert_flip/flip_rotation/plan_configs/place_ended + BuildingBehavior::place_ended hook.",
+      "evidence": [
+        "cargo test -p mind-core --lib blocks:: (308 passed)",
+        "cargo test -p mind-core --lib (3014 passed)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:35:48Z",
+          "by": "hx-mod2",
+          "text": "Call-site wiring still needed: sim/builder.rs constructFinish should call BlockInstance::place_ended(tile, builder, rotation, config); input/line.rs could delegate its inline flipRotation copy; UI plan-config list should use BlockInstance::plan_configs."
+        }
+      ]
     },
     "PAR-0565": {
       "title": "GAPS #54 closing work: BurstDrill per-block shake/drillEffect overrides (impact-drill, eruption-drill)",

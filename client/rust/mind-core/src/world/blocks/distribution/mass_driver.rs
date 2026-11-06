@@ -314,6 +314,10 @@ fn deliver_bolt(world: &mut World, data_entity: Entity) {
     handle_payload(world, to, data_entity);
 }
 
+/// `MassDriverBuild implements RotBlock` (`MassDriver.java:121-132`):
+/// `buildRotation()` returns the build rotation unchanged.
+impl crate::world::behavior::helpers::RotBlock for MassDriverBehavior {}
+
 impl BuildingBehavior for MassDriverBehavior {
     fn logic_sense(
         &self,

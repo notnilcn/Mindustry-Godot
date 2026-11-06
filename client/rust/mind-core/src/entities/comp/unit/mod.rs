@@ -27,8 +27,9 @@ pub mod weapon_mount;
 pub use comp::{
     BlockUnitComp, BuilderComp, BuildingTetherComp, ChildComp, CrawlComp, ElevationMoveComp,
     HitboxComp, ItemsComp, Leg, LegsComp, MechComp, MinerComp, OwnerComp, PayloadComp, PhysicsComp,
-    SegmentComp, ShieldComp, StatusComp, StatusEntry, TankComp, TargetDummyComp, TimedComp,
-    TimedKillComp, UnitCore, UnitTetherComp, UnitTypeComp, WaterMoveComp,
+    SegmentComp, ShieldComp, ShielderComp, StatusComp, StatusEntry, TankComp, TargetDummyComp,
+    TimedComp, TimedKillComp, UnderwaterMoveComp, UnitCore, UnitTetherComp, UnitTypeComp,
+    WaterCrawlComp, WaterMoveComp,
 };
 pub use defs::{
     ALL_KINDS, BASE_CLOSURE, ComponentKind, KIND_COUNT, UNIT_DEFS, UnitDefSpec, def_by_name,
@@ -65,6 +66,79 @@ mod tests {
         assert!(harness.build.world.get::<PayloadComp>(mega).is_some());
 
         assert_eq!(harness.unit_count(), 3);
+    }
+
+    /// GAPS #61: `WaterCrawl`/`UnderwaterMove`/`Shielder` component kinds now
+    /// spawn their runtime components (the water-crawl predicates live in
+    /// [`crate::entities::comp::unit::water_move`]).
+    #[test]
+    fn aquatic_and_shielder_components_spawn() {
+        use crate::content::registries::units::{UnitComponent, UnitTypeDef};
+        use crate::entities::comp::unit::lifecycle::spawn_unit_def;
+
+        let mut harness = UnitHarness::new(32, 32, 11);
+        let extra: &'static [UnitComponent] = Box::leak(
+            vec![
+                UnitComponent::Unit,
+                UnitComponent::Crawl,
+                UnitComponent::WaterCrawl,
+                UnitComponent::UnderwaterMove,
+                UnitComponent::Shielder,
+            ]
+            .into_boxed_slice(),
+        );
+        let mut def: UnitTypeDef = harness
+            .content()
+            .unit_by_name("latum")
+            .expect("latum")
+            .clone();
+        def.entity_def.components = extra;
+        let entity = spawn_unit_def(&mut harness.build.world, 700, &def, 0, 64.0, 64.0, 0.0);
+        assert!(harness.build.world.get::<CrawlComp>(entity).is_some());
+        assert!(harness.build.world.get::<WaterCrawlComp>(entity).is_some());
+        assert!(
+            harness
+                .build
+                .world
+                .get::<UnderwaterMoveComp>(entity)
+                .is_some()
+        );
+        let mut shielder = harness
+            .build
+            .world
+            .get::<ShielderComp>(entity)
+            .copied()
+            .expect("ShielderComp");
+        shielder.absorb();
+        assert_eq!(shielder.absorbed, 0.0);
+
+        // `WaterCrawlComp.floorSpeedMultiplier`/`UnderwaterMoveComp` class
+        // constants (`WaterCrawlComp.java:30-33`, `UnderwaterMoveComp.java:19-32`).
+        assert_eq!(
+            crate::entities::comp::unit::water_move::water_crawl_floor_speed_multiplier(true, 1.0),
+            1.0
+        );
+        assert_eq!(
+            crate::entities::comp::unit::water_move::water_crawl_floor_speed_multiplier(false, 1.0),
+            1.3
+        );
+        assert!(
+            !crate::entities::comp::unit::water_move::UNDERWATER_HITTABLE
+                && !crate::entities::comp::unit::water_move::UNDERWATER_TARGETABLE
+                && crate::entities::comp::unit::water_move::UNDERWATER_COLLISION_LAYER == 3
+        );
+    }
+
+    /// GAPS #61: `LaunchCoreComp` carries the launched block plus the Java
+    /// progress curves (`LaunchCoreComp.java:31,57,84-90`).
+    #[test]
+    fn launch_core_progress_curves() {
+        use crate::entities::comp::building::LaunchCoreComp;
+        let core = LaunchCoreComp { block: 3 };
+        assert_eq!(LaunchCoreComp::alpha(0.0), 1.0);
+        assert_eq!(LaunchCoreComp::alpha(1.0), 0.0);
+        assert!(core.cy(0.0, 1.0) >= 85.0);
+        assert!(core.cx(0.0, 1.0) >= 10.0);
     }
 
     #[test]

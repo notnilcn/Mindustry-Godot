@@ -297,6 +297,49 @@ pub struct LandingPadState {
     pub wants_landing: bool,
 }
 
+/// `LaunchCoreComp` (`LaunchCoreComp.java:14`): the launch-pad "core flying
+/// up" effect entity (`@EntityDef(LaunchCorec, serialize = false)`; spawned by
+/// the campaign launch path with `lifetime = 120f`). The draw body and the
+/// smoke interval are renderer/effect hooks; this component carries the
+/// lifetime curve the renderer reads.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct LaunchCoreComp {
+    /// Launched block content id (`LaunchCoreComp.block`).
+    pub block: u16,
+}
+
+impl LaunchCoreComp {
+    /// `fin(Interp.pow5Out)` vertical progress (`LaunchCoreComp.java:57-59`).
+    pub fn fin_pow5_out(progress: f32) -> f32 {
+        let p = progress.clamp(0.0, 1.0);
+        1.0 - (1.0 - p).powi(5)
+    }
+
+    /// `fout(Interp.pow5Out)` alpha (`LaunchCoreComp.java:31-32`: `1 - fout`).
+    pub fn alpha(progress: f32) -> f32 {
+        1.0 - Self::fin_pow5_out(progress)
+    }
+
+    /// `cx()` (`LaunchCoreComp.java:84-86`): x drift with `pow2In`
+    /// (`12f + Mathf.randomSeedRange(id + 3, 4f)`; the seed-range draw is
+    /// `random_seed_int` here because Arc's float variant is not ported).
+    pub fn cx(&self, x: f32, progress: f32) -> f32 {
+        let p = progress.clamp(0.0, 1.0);
+        let jitter =
+            crate::math::rand_arc::random_seed_int(u64::from(self.block) + 3, -2, 2) as f32;
+        x + p * p * (12.0 + jitter)
+    }
+
+    /// `cy()` (`LaunchCoreComp.java:88-90`): y rise with `pow5In`
+    /// (`100f + Mathf.randomSeedRange(id + 2, 30f)`).
+    pub fn cy(&self, y: f32, progress: f32) -> f32 {
+        let p = progress.clamp(0.0, 1.0);
+        let jitter =
+            crate::math::rand_arc::random_seed_int(u64::from(self.block) + 2, -15, 15) as f32;
+        y + p.powi(5) * (100.0 + jitter)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -15,7 +15,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use indexmap::IndexMap;
 
-use crate::content::{BlockDef, BlockId, ItemId, LiquidId};
+use crate::content::{BlockDef, BlockId, BlockKind, ItemId, LiquidId};
 use crate::io::entity::{EntityReader, EntityWriter};
 
 use super::block::BlockInstance;
@@ -279,6 +279,22 @@ pub trait BuildingBehavior: Send + Sync + std::any::Any {
     /// `Building.placed()`.
     fn placed(&self, world: &mut World, e: Entity) {
         let _ = (world, e);
+    }
+
+    /// `Block.placeEnded(tile, builder, rotation, config)`
+    /// (`Block.java:1083-1085`): construction of this block finished.
+    ///
+    /// `config` is the plan's config value (Java `@Nullable Object config`);
+    /// `builder` is the unit that finished the build, if any.
+    fn place_ended(
+        &self,
+        world: &mut World,
+        e: Entity,
+        builder: Option<Entity>,
+        rotation: u8,
+        config: &ConfigValue,
+    ) {
+        let _ = (world, e, builder, rotation, config);
     }
 
     /// `Building.dropped()` (payload drop).
@@ -584,10 +600,20 @@ pub struct NoopBehavior;
 impl BuildingBehavior for NoopBehavior {}
 
 /// Per-block behavior override registry (mods and later plans).
+///
+/// Three key spaces are supported (GAPS #55):
+///
+/// 1. `by_block` — an exact content id (per-block overrides);
+/// 2. `by_name` — a content name (vanilla registrations);
+/// 3. `by_kind` — **class defaults**. Upstream dispatch is by Java class:
+///    a mod/JSON block of class `Conveyor` runs `ConveyorBuild` no matter what
+///    its content name is. A block with no id/name override now resolves the
+///    behavior registered for its [`BlockKind`] instead of [`NoopBehavior`].
 #[derive(Default)]
 pub struct BehaviorRegistry {
     by_block: IndexMap<BlockId, Arc<dyn BuildingBehavior>>,
     by_name: IndexMap<String, Arc<dyn BuildingBehavior>>,
+    by_kind: IndexMap<BlockKind, Arc<dyn BuildingBehavior>>,
 }
 
 impl std::fmt::Debug for BehaviorRegistry {
@@ -595,6 +621,7 @@ impl std::fmt::Debug for BehaviorRegistry {
         f.debug_struct("BehaviorRegistry")
             .field("blocks", &self.by_block.len())
             .field("names", &self.by_name.len())
+            .field("kinds", &self.by_kind.len())
             .finish()
     }
 }
@@ -618,6 +645,20 @@ impl BehaviorRegistry {
         true
     }
 
+    /// Registers the **class default** behavior for a [`BlockKind`].
+    ///
+    /// A block with no id/name override falls back to this entry, mirroring
+    /// upstream's dispatch by Java class (`Block.newBuilding()`): mod and JSON
+    /// blocks of a supported class no longer fall back to [`NoopBehavior`].
+    /// Kind registrations must therefore be stateless, or state that is safe to
+    /// share by every block of the class (per-entity state belongs in
+    /// `create_state`).
+    pub fn register_kind(&mut self, kind: BlockKind, behavior: Arc<dyn BuildingBehavior>) {
+        if self.by_kind.insert(kind, behavior).is_some() {
+            log::debug!("class default for `{}` was replaced", kind.name());
+        }
+    }
+
     /// Lookup by block id.
     pub fn get(&self, block: BlockId) -> Option<Arc<dyn BuildingBehavior>> {
         self.by_block.get(&block).cloned()
@@ -628,6 +669,11 @@ impl BehaviorRegistry {
         self.by_name.get(name).cloned()
     }
 
+    /// Lookup by class tag (class defaults; GAPS #55).
+    pub fn get_kind(&self, kind: BlockKind) -> Option<Arc<dyn BuildingBehavior>> {
+        self.by_kind.get(&kind).cloned()
+    }
+
     /// Whether a block has an override.
     pub fn contains(&self, block: BlockId) -> bool {
         self.by_block.contains_key(&block)
@@ -635,21 +681,25 @@ impl BehaviorRegistry {
 
     /// Number of registered overrides.
     pub fn len(&self) -> usize {
-        self.by_block.len() + self.by_name.len()
+        self.by_block.len() + self.by_name.len() + self.by_kind.len()
     }
 
     /// Whether the registry is empty.
     pub fn is_empty(&self) -> bool {
-        self.by_block.is_empty() && self.by_name.is_empty()
+        self.by_block.is_empty() && self.by_name.is_empty() && self.by_kind.is_empty()
     }
 }
 
-/// Resolves a block's behavior, preferring a registered override.
+/// Resolves a block's behavior, preferring the most specific registration:
+/// block id → content name → class tag (`BlockKind`) → built-in default.
 pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn BuildingBehavior> {
     if let Some(behavior) = registry.get(def.id) {
         return behavior;
     }
     if let Some(behavior) = registry.get_named(&def.name) {
+        return behavior;
+    }
+    if let Some(behavior) = registry.get_kind(def.kind) {
         return behavior;
     }
     default_behavior(def)
@@ -658,6 +708,16 @@ pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn 
 /// Built-in behavior for a block with no registered override (plan 07 §3.12).
 pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
     use crate::content::BlockKind as K;
+    // Class-default families own their kind table (GAPS #55).
+    if let Some(behavior) = crate::world::blocks::distribution::class_default(def.kind) {
+        return behavior;
+    }
+    if let Some(behavior) = crate::world::blocks::liquid::class_default(def.kind) {
+        return behavior;
+    }
+    if let Some(behavior) = crate::world::blocks::storage::class_default(def.kind) {
+        return behavior;
+    }
     match def.kind {
         // Construct blocks: IO only (`ConstructBuild.write`/`read`, PAR-0098 §2d).
         K::ConstructBlock => Arc::new(construct::ConstructBehavior),
@@ -712,14 +772,8 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
                 state: crate::world::blocks::defense::projectors::BaseShieldState::default(),
             },
         ),
-        // Liquid bridges (`world/blocks/liquid/bridge.rs`); the phase-conduit
-        // range (12) is installed by `liquid::register`.
-        K::LiquidBridge => {
-            Arc::new(crate::world::blocks::liquid::behavior::LiquidBridgeBehavior { range: 4 })
-        }
-        K::DirectionLiquidBridge => Arc::new(
-            crate::world::blocks::liquid::behavior::DirectionLiquidBridgeBehavior { range: 4 },
-        ),
+        // Item distribution and liquid class defaults are owned by their
+        // family modules (GAPS #55) and resolved before this match.
         // Power nodes: construction inserts the `PowerNodeConfig` the graph
         // linker reads; exact knobs are installed by `power::register`.
         K::PowerNode | K::LongPowerNode => {
@@ -730,17 +784,26 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
                 same_block_connection: false,
             })
         }
-        // Turret ammo configs need the content bullet fixtures; they are
-        // installed by `defense::register` when the fixture map is present.
-        K::ItemTurret
-        | K::LiquidTurret
-        | K::PowerTurret
-        | K::ContinuousTurret
-        | K::ContinuousLiquidTurret
-        | K::LaserTurret
-        | K::PointDefenseTurret
-        | K::TractorBeamTurret
-        | K::BuildTurret => Arc::new(NoopBehavior),
+        // Turret class defaults (GAPS #55). Vanilla turrets are registered by
+        // name with their content-resolved ammo tables in `defense::register`;
+        // a mod turret of the same class falls back to the empty-ammo class
+        // default here (see `defense::behaviors::class_default_turret`).
+        K::ItemTurret => turret_default(crate::world::blocks::defense::turrets::TurretKind::Item),
+        K::LiquidTurret => {
+            turret_default(crate::world::blocks::defense::turrets::TurretKind::Liquid)
+        }
+        K::PowerTurret => turret_default(crate::world::blocks::defense::turrets::TurretKind::Power),
+        K::ContinuousTurret | K::ContinuousLiquidTurret => {
+            turret_default(crate::world::blocks::defense::turrets::TurretKind::Continuous)
+        }
+        K::LaserTurret => turret_default(crate::world::blocks::defense::turrets::TurretKind::Laser),
+        K::PointDefenseTurret => {
+            turret_default(crate::world::blocks::defense::turrets::TurretKind::PointDefense)
+        }
+        K::TractorBeamTurret => {
+            turret_default(crate::world::blocks::defense::turrets::TurretKind::TractorBeam)
+        }
+        K::BuildTurret => turret_default(crate::world::blocks::defense::turrets::TurretKind::Build),
         K::GenericCrafter | K::HeatCrafter | K::AttributeCrafter | K::Separator => {
             Arc::new(production::CrafterBehavior)
         }
@@ -787,6 +850,17 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
     }
 }
 
+/// Class-default turret behavior (empty ammo table; GAPS #55).
+fn turret_default(
+    kind: crate::world::blocks::defense::turrets::TurretKind,
+) -> Arc<dyn BuildingBehavior> {
+    Arc::new(
+        crate::world::blocks::defense::turrets::behavior::TurretBehavior::new(
+            crate::world::blocks::defense::behaviors::class_default_turret(kind),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -806,6 +880,86 @@ mod tests {
         registry.register_named("copper-wall", Arc::new(NoopBehavior));
         assert!(registry.get_named("copper-wall").is_some());
         assert!(!registry.is_empty());
+    }
+
+    #[test]
+    fn registry_overrides_by_kind() {
+        let mut registry = BehaviorRegistry::new();
+        registry.register_kind(BlockKind::Conveyor, Arc::new(NoopBehavior));
+        assert!(registry.get_kind(BlockKind::Conveyor).is_some());
+        assert!(registry.get_kind(BlockKind::Router).is_none());
+        assert_eq!(registry.len(), 1);
+        assert!(!registry.is_empty());
+    }
+
+    /// GAPS #55: a mod/JSON block (a name no registry entry knows) of a ported
+    /// Java class resolves the class behavior, not [`NoopBehavior`].
+    #[test]
+    fn mod_blocks_resolve_class_defaults() {
+        use crate::content::test_support::test_registry;
+
+        fn is_noop(behavior: &Arc<dyn BuildingBehavior>) -> bool {
+            std::any::Any::type_id(&**behavior) == std::any::TypeId::of::<NoopBehavior>()
+        }
+
+        let content = test_registry();
+        let registry = crate::world::blocks::default_registry(&content);
+        let cases = [
+            ("conveyor", "mod-conveyor", BlockKind::Conveyor),
+            (
+                "armored-conveyor",
+                "mod-armored-conveyor",
+                BlockKind::ArmoredConveyor,
+            ),
+            ("router", "mod-router", BlockKind::Router),
+            ("junction", "mod-junction", BlockKind::Junction),
+            ("duct", "mod-duct", BlockKind::Duct),
+            ("bridge-conveyor", "mod-item-bridge", BlockKind::ItemBridge),
+            ("sorter", "mod-sorter", BlockKind::Sorter),
+            ("mass-driver", "mod-mass-driver", BlockKind::MassDriver),
+            ("conduit", "mod-conduit", BlockKind::Conduit),
+            (
+                "plated-conduit",
+                "mod-armored-conduit",
+                BlockKind::ArmoredConduit,
+            ),
+            (
+                "liquid-router",
+                "mod-liquid-router",
+                BlockKind::LiquidRouter,
+            ),
+            (
+                "liquid-junction",
+                "mod-liquid-junction",
+                BlockKind::LiquidJunction,
+            ),
+            (
+                "phase-conduit",
+                "mod-liquid-bridge",
+                BlockKind::LiquidBridge,
+            ),
+            ("silicon-smelter", "mod-crafter", BlockKind::GenericCrafter),
+            ("mechanical-drill", "mod-drill", BlockKind::Drill),
+            ("plasma-bore", "mod-bore", BlockKind::BeamDrill),
+            ("water-extractor", "mod-pump", BlockKind::Pump),
+            ("duo", "mod-turret", BlockKind::ItemTurret),
+            ("wave", "mod-liquid-turret", BlockKind::LiquidTurret),
+            ("fuse", "mod-power-turret", BlockKind::PowerTurret),
+        ];
+        for (base, mod_name, kind) in cases {
+            let mut def = content
+                .block_id(base)
+                .and_then(|id| content.block(id))
+                .unwrap_or_else(|| panic!("base block `{base}` missing"))
+                .clone();
+            def.name = mod_name.to_owned();
+            def.kind = kind;
+            let behavior = resolve_behavior(&def, &registry);
+            assert!(
+                !is_noop(&behavior),
+                "mod block `{mod_name}` (kind {kind:?}) fell back to NoopBehavior"
+            );
+        }
     }
 
     /// Ported `ApplicationTests.allBlockTest` (update half): every block in this

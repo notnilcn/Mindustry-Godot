@@ -661,6 +661,31 @@ pub struct UnitTetherComp {
     pub spawner: Option<Entity>,
 }
 
+/// `WaterCrawlComp` (`WaterCrawlComp.java:12`): a crawler that walks shallow
+/// water — replaces the solidity/`onSolid`/floor-speed predicates of
+/// [`CrawlComp`] with the water variants (GAPS #61).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component, Default)]
+pub struct WaterCrawlComp;
+
+/// `UnderwaterMoveComp` (`UnderwaterMoveComp.java`): underwater-only movement
+/// (collision layer 3; never hittable/targetable, `:16-27`, GAPS #61).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component, Default)]
+pub struct UnderwaterMoveComp;
+
+/// `ShielderComp` (`ShielderComp.java:8-13`): damage-absorb marker whose
+/// `absorb()` hook the shield module overrides (GAPS #61).
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct ShielderComp {
+    /// Damage absorbed by this unit's shield this tick (`absorb()` override
+    /// state; `0` = idle).
+    pub absorbed: f32,
+}
+
+impl ShielderComp {
+    /// `ShielderComp.absorb()` (empty base body, `ShielderComp.java:11-13`).
+    pub fn absorb(&mut self) {}
+}
+
 /// Parent link for segmented/child units (`ChildComp`).
 #[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
 pub struct ChildComp {
