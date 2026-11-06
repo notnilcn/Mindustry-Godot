@@ -23,9 +23,11 @@ pub mod socket;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use mind_core::content::boot::{ModBootReport, build_registry_with_mods, collect_boot_content};
 use mind_core::content::{ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content};
-use mind_core::io::fs::{NativeFs, Paths};
-use mind_core::io::settings::SettingValue;
+use mind_core::io::fs::{FileSystem, NativeFs, Paths};
+use mind_core::io::settings::{SettingValue, SettingsStore};
+use mind_core::mods::Mods;
 
 use config::ServerConfig;
 use console::ConsoleState;
@@ -102,6 +104,24 @@ pub struct ServerState {
     /// `--match-config` handed over by the `serve` shape
     /// (`config/match.json`; defaults when `server` was launched directly).
     pub match_config: dedicated::MatchConfig,
+    /// Loaded mods (`Vars.mods`): the set `mods`/`mod` report and
+    /// `reloadassets` refreshes.
+    pub mods: Mods,
+    /// `mod-<name>-enabled` settings the mod load reads (in-memory: the server
+    /// has no settings dialog; Java's `Core.settings` is client-shaped).
+    pub mod_settings: SettingsStore,
+    /// Mod content failures/patch warnings from the last registry build.
+    pub mod_report: ModBootReport,
+    /// Mod content files the last registry build consumed.
+    pub mod_files: usize,
+    /// Autosave clock in fixed ticks since the world loaded (`autosaveCount`).
+    pub autosave_clock: u64,
+    /// Autosave clock at the last write (`autosaveCount.last`).
+    pub autosave_last: u64,
+    /// Most recent autosave path.
+    pub last_autosave: Option<PathBuf>,
+    /// Server-side chat-command engine (`NetClient.sendChatMessage` dispatch).
+    pub chat: commands::ChatEngine,
 }
 
 impl ServerState {
@@ -155,13 +175,90 @@ impl ServerState {
         Ok(path)
     }
 
+    /// Re-loads the mod directory and rebuilds the host content registry
+    /// (`reloadassets`). The running world keeps its cloned content snapshot;
+    /// the next `host`/`load`/map rotation uses the refreshed registry.
+    pub fn reload_content(&mut self) -> Result<(usize, usize), String> {
+        let fs = self.fs();
+        let boot = boot_content_with_mods(&fs, &mut self.mods, &mut self.mod_settings)?;
+        let mod_count = self.mods.list().len();
+        self.host.set_registry(boot.registry);
+        self.mod_report = boot.report;
+        self.mod_files = boot.files;
+        let warnings = self.mod_report.patch_warnings.clone();
+        for warning in warnings {
+            self.warn(&warning);
+        }
+        Ok((mod_count, self.mod_files))
+    }
+
+    /// Advances the autosave clock by `ticks` and writes when the interval
+    /// elapsed (Java `Trigger.update` + `autosaveCount.get(spacing * 60)`).
+    ///
+    /// The clock only advances while a world is hosted; a world load resets it
+    /// (`WorldLoadEvent` → `autosaveCount.reset(0, spacing * 60)`).
+    pub fn advance_autosave(&mut self, ticks: u64) {
+        if !self.host.is_hosting() {
+            return;
+        }
+        self.autosave_clock = self.autosave_clock.saturating_add(ticks);
+        if !self.config.get_bool("autosave") {
+            return;
+        }
+        let spacing = self.config.get_i32("autosaveSpacing").max(1) as u64;
+        if !autosave::should_autosave(
+            self.autosave_clock,
+            self.autosave_last,
+            autosave::spacing_ticks(spacing),
+        ) {
+            return;
+        }
+        self.autosave_last = self.autosave_clock;
+        self.autosave();
+    }
+
+    /// Writes one `auto_<map>_<MM-dd-yyyy_HH-mm-ss>.msav` and rotates the
+    /// directory down to `autosaveAmount` files (`ServerControl.java:288-319`).
+    pub fn autosave(&mut self) -> Option<PathBuf> {
+        let map = self
+            .host
+            .status()
+            .map
+            .unwrap_or_else(|| "unknown".to_owned());
+        let dir = self.paths.saves();
+        let path = autosave::autosave_path(&dir, &map, &autosave::timestamp_now());
+        self.info("Autosaving...");
+        let fs = self.fs();
+        match self.host.save(&fs, &path) {
+            Ok(()) => {
+                self.info("Autosave completed.");
+                let keep = self.config.get_i32("autosaveAmount").max(1) as usize;
+                let deleted = autosave::rotate(&dir, keep);
+                if !deleted.is_empty() {
+                    log::info!("[autosave] rotated {} old autosave(s)", deleted.len());
+                }
+                self.last_autosave = Some(path.clone());
+                Some(path)
+            }
+            Err(error) => {
+                self.error(&format!("Autosave failed: {error}"));
+                None
+            }
+        }
+    }
+
+    /// Connected players from the live roster (`status`/`players`).
+    pub fn player_views(&self) -> Vec<host::PlayerView> {
+        self.net.players()
+    }
+
     /// Broadcasts a server `System` chat message to the live match (`say`,
     /// the game-over notice). Offline hosts only log it.
     pub fn broadcast(&mut self, message: &str) {
-        if self.net.is_online() {
-            if let Err(error) = self.net.say(message) {
-                self.warn(&format!("could not send server message: {error}"));
-            }
+        if self.net.is_online()
+            && let Err(error) = self.net.say(message)
+        {
+            self.warn(&format!("could not send server message: {error}"));
         }
     }
 
@@ -180,7 +277,12 @@ impl ServerState {
         self.host.set_players(players);
         // Clamp a long stall so a suspended server does not burn a minute of
         // simulation in one frame.
-        self.host.tick(ticks.min(TICKS_PER_SECOND * 10));
+        let advance = ticks.min(TICKS_PER_SECOND * 10);
+        self.host.tick(advance);
+        // `ServerControl`'s update listener: autosave and the votekick timer
+        // run on the same fixed-step pump as the world.
+        self.advance_autosave(advance);
+        commands::tick_chat(self, advance);
         self.drain_host_events();
         self.sync_pause();
     }
@@ -197,6 +299,9 @@ impl ServerState {
         for event in events {
             match event {
                 HostEvent::Hosted { map, mode } => {
+                    // `Events.on(WorldLoadEvent.class, ...)` resets the timer.
+                    self.autosave_clock = 0;
+                    self.autosave_last = 0;
                     self.info(&format!("Map loaded: {map} ({mode})."));
                 }
                 HostEvent::WaveStarted { wave } => {
@@ -236,10 +341,12 @@ impl ServerState {
     }
 }
 
-/// Boots the dedicated server and runs `options.commands` (then stdin unless
-/// `exit` was issued). Returns the process exit code.
-pub fn run(options: ServerOptions) -> i32 {
-    let started = Instant::now();
+/// Boots the dedicated server state without running it: config, rules,
+/// content + mods, logging and the command socket (`ServerControl`'s
+/// constructor; startup commands and the host loop stay in [`run`]).
+///
+/// Returns the process exit code on a fatal boot failure.
+pub fn boot_state(options: &ServerOptions, started: Instant) -> Result<ServerState, i32> {
     let fs = NativeFs;
     let config_dir = if options.config_dir.as_os_str().is_empty() {
         PathBuf::from("config")
@@ -250,6 +357,7 @@ pub fn run(options: ServerOptions) -> i32 {
         config_dir.clone(),
         Paths::new(&config_dir).saves(),
         Paths::new(&config_dir).maps(),
+        config_dir.join("mods"),
     ] {
         let _ = std::fs::create_dir_all(&dir);
     }
@@ -270,18 +378,23 @@ pub fn run(options: ServerOptions) -> i32 {
         Ok(logger) => logger,
         Err(error) => {
             eprintln!("mind-headless server: could not open log file: {error}");
-            return 2;
+            return Err(2);
         }
     };
 
-    // 3. Content (plan 02) — Godot-free base content.
-    let registry = match boot_content() {
-        Ok(registry) => Box::leak(Box::new(registry)),
+    // 3. Content (plan 02) + mod content (plan 20): the same boot path the
+    //    client uses (`createBaseContent` -> `createModContent` -> `init` ->
+    //    `loadModPatches`).
+    let mut mods = Mods::new(true, config_dir.join("mods"));
+    let mut mod_settings = SettingsStore::new();
+    let boot = match boot_content_with_mods(&fs, &mut mods, &mut mod_settings) {
+        Ok(boot) => boot,
         Err(error) => {
             eprintln!("| &ly[@] {error}");
-            return 1;
+            return Err(1);
         }
     };
+    let (registry, mod_report, mod_files) = (boot.registry, boot.report, boot.files);
 
     // 4. Socket.
     let mut socket = CommandSocket::disabled();
@@ -341,6 +454,14 @@ pub fn run(options: ServerOptions) -> i32 {
         last_frame: Instant::now(),
         frame_accum: 0.0,
         match_config,
+        mods,
+        mod_settings,
+        mod_report,
+        mod_files,
+        autosave_clock: 0,
+        autosave_last: 0,
+        last_autosave: None,
+        chat: commands::ChatEngine::default(),
     };
 
     state.info(&format!(
@@ -352,6 +473,23 @@ pub fn run(options: ServerOptions) -> i32 {
     } else {
         state.info("STDB mode: offline (admin/ban/whitelist JSON mirror active)");
     }
+    state.info(&format!(
+        "Loaded {} mod(s) ({} content file(s)).",
+        state.mods.list().len(),
+        state.mod_files
+    ));
+
+    Ok(state)
+}
+
+/// Boots the dedicated server and runs `options.commands` (then stdin unless
+/// `exit` was issued). Returns the process exit code.
+pub fn run(options: ServerOptions) -> i32 {
+    let started = Instant::now();
+    let mut state = match boot_state(&options, started) {
+        Ok(state) => state,
+        Err(code) => return code,
+    };
 
     // 5. Startup commands: argv, then `config startCommands`.
     let mut startup: Vec<String> = Vec::new();
@@ -399,10 +537,11 @@ pub fn run(options: ServerOptions) -> i32 {
     }
 
     // 7. Shutdown: persist settings, force rules, run the socket down.
+    let fs = state.fs();
     if let Err(error) = state.config.force_save(&fs) {
         state.error(&format!("could not save settings.json: {error}"));
     }
-    write_settings_json(&state.config, &config_dir.join("settings.json"));
+    write_settings_json(&state.config, &state.config_dir.join("settings.json"));
     let _ = std::fs::write(state.config_dir.join("rules.hjson"), state.rules.to_text());
     state.info("Server closed.");
     state.exit = true;
@@ -496,7 +635,7 @@ fn spawn_stdin_reader() -> Option<std::sync::mpsc::Receiver<String>> {
         .map(|_| rx)
 }
 
-/// Boots base content (plan 02), the headless server path.
+/// Boots base content (plan 02) only — the host test fixture path.
 pub fn boot_content() -> Result<ContentRegistry, String> {
     let bundle = MemoryBundle::new();
     let store = MemoryUnlockStore::new();
@@ -506,6 +645,46 @@ pub fn boot_content() -> Result<ContentRegistry, String> {
     registry.post_init().map_err(|error| error.to_string())?;
     registry.load().map_err(|error| error.to_string())?;
     Ok(registry)
+}
+
+/// One registry boot: the content plus the mod failures the dialog/log
+/// surface consumes, and how many mod content files were read.
+pub struct ModBoot {
+    /// Built registry (base + enabled mod content + patches).
+    pub registry: ContentRegistry,
+    /// Per-mod content failures and patch warnings.
+    pub report: ModBootReport,
+    /// Mod content files consumed.
+    pub files: usize,
+}
+
+/// Boots base content plus the enabled mods' JSON content and data patches
+/// through the same path the live client uses (`ClientLauncher.java:166-189`:
+/// `mods.load` → `loadScripts` → `createModContent` → `init`/`postInit` →
+/// `loadModPatches`).
+pub fn boot_content_with_mods(
+    fs: &dyn FileSystem,
+    mods: &mut Mods,
+    settings: &mut SettingsStore,
+) -> Result<ModBoot, String> {
+    let dir = mods.mod_directory().to_path_buf();
+    mods.load(fs, &dir, settings)
+        .map_err(|error| format!("mod load: {error}"))?;
+    mods.load_scripts(fs);
+    let boot = collect_boot_content(mods, fs);
+    let files = boot.files.len();
+    let (registry, report) = build_registry_with_mods(
+        &MemoryBundle::new(),
+        &MemoryUnlockStore::new(),
+        true,
+        &boot,
+        &[],
+    )?;
+    Ok(ModBoot {
+        registry,
+        report,
+        files,
+    })
 }
 
 /// Resolves the server data root (`--config-dir`, else `./config`).
@@ -546,6 +725,161 @@ fn setting_json(value: &SettingValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Copies one `parity/mod_fixtures/<name>` directory into `mods/<name>`.
+    fn install_fixture(root: &Path, name: &str) -> std::path::PathBuf {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../parity/mod_fixtures")
+            .join(name);
+        let target = root.join("mods").join(name);
+        copy_tree(&source, &target);
+        target
+    }
+
+    fn copy_tree(source: &Path, target: &Path) {
+        std::fs::create_dir_all(target).expect("create mod dir");
+        for entry in std::fs::read_dir(source).expect("read fixture") {
+            let entry = entry.expect("entry");
+            let to = target.join(entry.file_name());
+            if entry.file_type().expect("type").is_dir() {
+                copy_tree(&entry.path(), &to);
+            } else {
+                std::fs::copy(entry.path(), &to).expect("copy fixture file");
+            }
+        }
+    }
+
+    fn boot_offline(root: &Path) -> ServerState {
+        let options = ServerOptions {
+            config_dir: root.to_path_buf(),
+            offline: true,
+            ..ServerOptions::default()
+        };
+        boot_state(&options, Instant::now()).expect("boot state")
+    }
+
+    #[test]
+    fn boot_loads_mod_content_into_the_host_registry() {
+        let root = std::env::temp_dir().join(format!("mind-srv-mods-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create");
+        install_fixture(&root, "basic");
+        let mut state = boot_offline(&root);
+        assert_eq!(state.mods.list().len(), 1, "mod not loaded");
+        assert_eq!(state.mod_files, 2, "content files not collected");
+        assert!(
+            state
+                .host
+                .registry()
+                .block_id("basic-mod-test-wall")
+                .is_some(),
+            "mod block missing from the host registry"
+        );
+        assert!(
+            state
+                .host
+                .registry()
+                .item_id("basic-mod-test-ingot")
+                .is_some(),
+            "mod item missing from the host registry"
+        );
+        // `mods`/`mod` report the loaded set (no re-scan).
+        commands::execute(&mut state, "mods");
+        commands::execute(&mut state, "mod basic-mod");
+        let log = std::fs::read_to_string(root.join("logs").join("log-0.txt")).expect("log");
+        assert!(log.contains("Mods:"), "mods command did not list: {log}");
+        assert!(log.contains("Basic Mod"), "display name missing: {log}");
+        assert!(
+            log.contains("Internal Name: basic-mod"),
+            "mod detail missing: {log}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reloadassets_picks_up_new_mod_content() {
+        let root = std::env::temp_dir().join(format!("mind-srv-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create");
+        let mut state = boot_offline(&root);
+        assert!(state.mods.list().is_empty());
+        assert!(
+            state
+                .host
+                .registry()
+                .block_id("basic-mod-test-wall")
+                .is_none()
+        );
+        install_fixture(&root, "basic");
+        commands::execute(&mut state, "reloadassets");
+        assert_eq!(state.mods.list().len(), 1);
+        assert_eq!(state.mod_files, 2);
+        assert!(
+            state
+                .host
+                .registry()
+                .block_id("basic-mod-test-wall")
+                .is_some(),
+            "reloadassets did not rebuild the registry"
+        );
+        let log = std::fs::read_to_string(root.join("logs").join("log-0.txt")).expect("log");
+        assert!(
+            log.contains("Reloaded 2 content file(s) from 1 mod(s)."),
+            "reloadassets summary missing: {log}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn autosave_fires_from_the_host_clock_and_writes_auto_file() {
+        let root = std::env::temp_dir().join(format!("mind-srv-auto-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create");
+        let mut state = boot_offline(&root);
+        commands::execute(&mut state, "host synthetic survival");
+        commands::execute(&mut state, "config autosave true");
+        commands::execute(&mut state, "config autosaveSpacing 1");
+        commands::execute(&mut state, "config autosaveAmount 2");
+        // Not hosting yet (before `host`) is covered by the second half.
+        let spacing = autosave::spacing_ticks(1);
+        state.advance_autosave(spacing.saturating_sub(1));
+        assert!(
+            autosave::rotation_order(&state.paths.saves()).is_empty(),
+            "autosaved before the interval elapsed"
+        );
+        state.advance_autosave(1);
+        let files = autosave::rotation_order(&state.paths.saves());
+        assert_eq!(files.len(), 1, "autosave not written: {files:?}");
+        let name = files[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("auto_synthetic_"), "name: {name}");
+        assert!(name.ends_with(".msav"), "name: {name}");
+        assert!(state.last_autosave.is_some());
+        let log = std::fs::read_to_string(root.join("logs").join("log-0.txt")).expect("log");
+        assert!(log.contains("Autosaving..."), "no autosave log: {log}");
+        assert!(
+            log.contains("Autosave completed."),
+            "no completion log: {log}"
+        );
+        // A second interval writes the next backup (same second overwrites the
+        // first file, so the count is 1, not 2, until the clock crosses a
+        // second boundary).
+        state.advance_autosave(spacing);
+        assert!(state.autosave_clock >= spacing * 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn autosave_is_skipped_without_a_hosted_world() {
+        let root = std::env::temp_dir().join(format!("mind-srv-auto2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create");
+        let mut state = boot_offline(&root);
+        commands::execute(&mut state, "config autosave true");
+        state.advance_autosave(autosave::spacing_ticks(1));
+        assert!(autosave::rotation_order(&state.paths.saves()).is_empty());
+        assert_eq!(state.autosave_clock, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn boot_content_and_config_roundtrip() {

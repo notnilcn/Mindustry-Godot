@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T22:22:08Z",
+  "updated": "2026-11-06T22:53:17Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1397,6 +1397,42 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib consume; ... ability_queue; ... place_ended",
       "expected": "42 + 4 + 1 pass; full lib 3066",
       "risk": "inert until content Consume variants land; legacy generator ItemExplode may double-run; per-Sim schedule registration",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-225317",
+      "created_at": "2026-11-06T22:53:17Z",
+      "agent": "hx-wave-j",
+      "branch": "main",
+      "head": "179144d7",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-stdb,client/rust/mind-gdext/src",
+      "summary": "Net protocol TypeIO/Remote/EventType + input plan/minimap/mobile + host service/planet bodies + clippy",
+      "files": [
+        "client/rust/mind-stdb/src/typeio.rs",
+        "client/rust/mind-stdb/src/call_packet.rs",
+        "client/rust/mind-stdb/src/event_type.rs",
+        "client/rust/mind-stdb/src/events.rs",
+        "client/rust/mind-gdext/src/net/mod.rs",
+        "client/rust/mind-gdext/src/net/call.rs",
+        "client/rust/mind-core/src/world/block.rs",
+        "client/rust/mind-gdext/src/input/desktop.rs",
+        "client/rust/mind-gdext/src/ui/kit/widgets/minimap.rs",
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/fx.rs",
+        "client/rust/mind-gdext/src/sim_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "stdb-bindings"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib; ... -p mind-core --lib input; ... -p mind-gdext --lib campaign",
+      "expected": "stdb 89; input 161; campaign service/planet tests; full lib",
+      "risk": "stale bindings header (CLI 2.13 vs 2.10.1); render/light.rs fmt blank line fixed; pre-existing ui FFI test failures",
       "status": "pending"
     }
   ]

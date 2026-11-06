@@ -14,19 +14,22 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use godot::classes::canvas_item_material::BlendMode;
 use godot::classes::mesh::PrimitiveType;
 use godot::classes::{
-    ArrayMesh, CanvasItemMaterial, Mesh, MeshInstance2D, Node2D, SurfaceTool, Texture2D, Time,
+    ArrayMesh, CanvasItemMaterial, Material, Mesh, MeshInstance2D, Node2D, Shader, ShaderMaterial,
+    SurfaceTool, Texture2D, Time,
 };
 use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::content::registries::fx_meta::{EffectId, effect_by_name};
+use mind_core::content::registries::units::ability::AbilityKind;
+use mind_core::render::ability_draw;
 use mind_core::render::unit_draw::{
     self, CrawlDrawParams, CrawlLayer, UnitFxInput, UnitViewState, ViewEffect, crawl_draw_ops,
 };
 use mind_core::render::{block_region_candidates, cell_color};
 
-use crate::sim_host::{MindSimHost, PayloadDraw};
+use crate::sim_host::{MindSimHost, PayloadDraw, UnitAbilityDraw};
 
 use super::atlas_bind::{RegionResolver, color_from};
 
@@ -45,6 +48,11 @@ const SOFT_SHADOW_Z: f32 = -0.01;
 /// `drawSoftShadow` radius factor (`UnitType.java:1676-1678`): the quad is
 /// `1.6` times the body region's larger side.
 const SOFT_SHADOW_RAD: f32 = 1.6;
+/// Unit-ability overlays draw after the body/weapons in `UnitType.draw`
+/// (`UnitType.java:1250-1253`), i.e. at the unit's own z but above it.
+const ABILITY_OVERLAY_Z: f32 = 0.001;
+/// `Drawf.construct`'s `Shaders.build` port source.
+const CONSTRUCT_SHADER_PATH: &str = "res://shaders/unitbuild.gdshader";
 
 /// Unit sprite counters forwarded to the renderer stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -122,6 +130,14 @@ pub struct UnitRenderer {
     flash_nodes: HashMap<(usize, i32), Gd<MeshInstance2D>>,
     /// Shared additive material for every flash node.
     flash_material: Gd<CanvasItemMaterial>,
+    /// `Shaders.build` source for `UnitSpawnAbility.draw` constructs
+    /// (`Drawf.construct`; loaded on first use).
+    construct_shader: Option<Gd<Shader>>,
+    /// Whether the construct shader load was attempted.
+    construct_shader_loaded: bool,
+    /// Pooled construct node + material per `(ability entity id, slot)`
+    /// (`UnitSpawnAbility.draw`).
+    construct_nodes: HashMap<(u64, usize), (Gd<MeshInstance2D>, Gd<ShaderMaterial>)>,
     /// Per-unit view state (hit flash from health drops; T5).
     view: HashMap<u64, UnitViewState>,
     /// `Fx.unitLand` id (resolved once; H03 T10).
@@ -154,6 +170,9 @@ impl UnitRenderer {
             nodes: HashMap::new(),
             flash_nodes: HashMap::new(),
             flash_material,
+            construct_shader: None,
+            construct_shader_loaded: false,
+            construct_nodes: HashMap::new(),
             view: HashMap::new(),
             unit_land: effect_by_name("unitLand").unwrap_or(EffectId::NONE),
             ripple: effect_by_name("ripple").unwrap_or(EffectId::NONE),
@@ -175,6 +194,27 @@ impl UnitRenderer {
     /// ripples) for the caller to forward to `MindFx`.
     pub fn update(&mut self) -> Vec<ViewEffect> {
         let draws = self.host.clone().bind().unit_draws_full();
+        // L04 T2 residual: `MoveLightningAbility.draw` and
+        // `UnitSpawnAbility.draw` run at the unit's own z (Java draws the
+        // ability list at the end of `UnitType.draw`), so the unit pass owns
+        // them. `ArmorPlateAbility` lands at `Layer.effect` and stays with the
+        // field pass.
+        let abilities = self.host.clone().bind().unit_ability_draws();
+        // Which art band each drawn unit belongs to (`UnitSpawnAbility.draw`
+        // attaches its construct to the caster's band).
+        let unit_buckets: HashMap<u64, usize> = draws
+            .iter()
+            .map(|unit| {
+                let bucket = if unit.low_altitude {
+                    1
+                } else if unit.flying {
+                    2
+                } else {
+                    0
+                };
+                (unit.id, bucket)
+            })
+            .collect();
         let ticks = Time::singleton().get_ticks_msec() as f32 * 0.06;
         let delta_ticks = (ticks - self.last_tick).max(0.0);
         self.last_tick = ticks;
@@ -1001,6 +1041,47 @@ impl UnitRenderer {
 
         self.view.retain(|id, _| live_units.contains(id));
 
+        // `MoveLightningAbility.draw` (`MoveLightningAbility.java:89-98`):
+        // the heat sprite through additive blending at the unit's z, jittered
+        // by `Mathf.range(scl / 2)` per axis (a per-frame view random, like
+        // Java's global `Mathf.random`).
+        for row in &abilities {
+            if row.kind != AbilityKind::MoveLightning {
+                continue;
+            }
+            let Some(&bucket) = unit_buckets.get(&row.id) else {
+                continue;
+            };
+            let Some(region) = self
+                .resolver
+                .resolve(ability_draw::MOVE_LIGHTNING_HEAT_REGION)
+            else {
+                continue;
+            };
+            let quad = move_lightning_quad(
+                row.x,
+                row.y,
+                row.rotation,
+                row.vel_len,
+                row.spec.min_speed,
+                row.spec.max_speed,
+                region.w * self.sprite_scale,
+                region.h * self.sprite_scale,
+                region.uv,
+                godot::global::randf() as f32,
+                godot::global::randf() as f32,
+            );
+            if let Some(quad) = quad {
+                let entry = flash_groups
+                    .entry((bucket, region.page))
+                    .or_insert((region.texture.clone(), Vec::new()));
+                entry.1.push(quad);
+                sprites += 1;
+            }
+        }
+        // `UnitSpawnAbility.draw` constructs are separate shader nodes.
+        self.sync_spawn_constructs(&abilities, &unit_buckets);
+
         let live: HashSet<(usize, i32)> = groups.keys().copied().collect();
         for (key, node) in self.nodes.iter_mut() {
             if !live.contains(key) {
@@ -1073,6 +1154,194 @@ impl UnitRenderer {
         self.stats.sprites = sprites;
         self.stats.missing_regions = self.resolver.missing();
         effects
+    }
+
+    /// `UnitSpawnAbility.draw` (`UnitSpawnAbility.java:64-71`): while
+    /// `Units.canCreate(unit.team, this.unit)` holds, `Drawf.construct` of the
+    /// spawned unit's `fullIcon` at the rotated `(spawnX, spawnY)` offset with
+    /// `progress = timer / spawnTime` and `time = timer`.
+    ///
+    /// The construct needs `Shaders.build`, so each live row is a pooled
+    /// `MeshInstance2D` + `ShaderMaterial` child of the caster's unit band
+    /// (the port's immediate-mode canvases cannot switch shaders per draw).
+    fn sync_spawn_constructs(
+        &mut self,
+        abilities: &[UnitAbilityDraw],
+        buckets: &HashMap<u64, usize>,
+    ) {
+        // `UnitSpawnAbility.draw`'s outer gate (`:66`).
+        let mut slots: HashMap<u64, usize> = HashMap::new();
+        let mut live: HashSet<(u64, usize)> = HashSet::new();
+        let mut rows: Vec<((u64, usize), &UnitAbilityDraw)> = Vec::new();
+        for row in abilities {
+            if row.kind != AbilityKind::UnitSpawn || !row.can_create {
+                continue;
+            }
+            let slot = slots.entry(row.id).or_insert(0);
+            let key = (row.id, *slot);
+            *slot += 1;
+            live.insert(key);
+            rows.push((key, row));
+        }
+        if rows.is_empty() {
+            for (node, _) in self.construct_nodes.values_mut() {
+                node.set_visible(false);
+            }
+            return;
+        }
+        if !self.construct_shader_loaded {
+            self.construct_shader_loaded = true;
+            self.construct_shader = super::canvas::load_canvas_shader(CONSTRUCT_SHADER_PATH);
+            if self.construct_shader.is_none() {
+                log::warn!("[E] [shaders] missing `unitbuild`; unit spawn constructs skipped");
+            }
+        }
+        let Some(shader) = self.construct_shader.clone() else {
+            return;
+        };
+        for (key, row) in rows {
+            let Some(&bucket) = buckets.get(&row.id) else {
+                continue;
+            };
+            let Some(spawn_name) = row.spec.unit else {
+                continue;
+            };
+            let Some(region) = self
+                .resolver
+                .find(&ability_draw::unit_full_icon_region(spawn_name))
+            else {
+                continue;
+            };
+            let Some(texture) = region.texture.clone() else {
+                continue;
+            };
+            let (dx, dy) =
+                ability_draw::unit_spawn_offset(row.rotation, row.spec.spawn_x, row.spec.spawn_y);
+            let quad = construct_quad(
+                row.x + dx,
+                row.y + dy,
+                row.rotation,
+                region.w * self.sprite_scale,
+                region.h * self.sprite_scale,
+                region.uv,
+            );
+            let Some(mesh) = build_unit_mesh(&[quad]) else {
+                continue;
+            };
+            if !self.construct_nodes.contains_key(&key) {
+                let Some(mut band) = self.bands.get(bucket).and_then(|band| band.clone()) else {
+                    continue;
+                };
+                let mut node = MeshInstance2D::new_alloc();
+                let mut material = ShaderMaterial::new_gd();
+                material.set_shader(&shader);
+                node.set_material(&material.clone().upcast::<Material>());
+                // Above the band's unit meshes: Java draws the construct
+                // inside the unit's own `UnitType.draw`, after the body.
+                node.set_z_index(1);
+                // code-instantiated: one construct node per live
+                // `UnitSpawnAbility` row; count is content-driven.
+                band.add_child(&node);
+                self.construct_nodes.insert(key, (node, material));
+            }
+            let Some((node, material)) = self.construct_nodes.get_mut(&key) else {
+                continue;
+            };
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            node.set_texture(&texture);
+            node.set_visible(true);
+            let [u0, v0, u1, v1] = region.uv;
+            material.set_shader_parameter("u_texture", &texture.to_variant());
+            material.set_shader_parameter(
+                "u_texsize",
+                &Vector2::new(
+                    texture.get_width().max(1) as f32,
+                    texture.get_height().max(1) as f32,
+                )
+                .to_variant(),
+            );
+            material.set_shader_parameter("u_uv", &Vector2::new(u0, v0).to_variant());
+            material.set_shader_parameter("u_uv2", &Vector2::new(u1, v1).to_variant());
+            // `Drawf.construct(x, y, fullIcon, rotation - 90, timer / spawnTime,
+            // 1f, timer)` (`UnitSpawnAbility.java:68`, `Drawf.java:440-452`).
+            material.set_shader_parameter(
+                "u_progress",
+                &ability_draw::unit_spawn_progress(row.state.timer, row.spec.spawn_time)
+                    .to_variant(),
+            );
+            material.set_shader_parameter(
+                "u_time",
+                &ability_draw::construct_shader_time(row.state.timer).to_variant(),
+            );
+            material.set_shader_parameter(
+                "u_color",
+                &color_from(ability_draw::construct_color().to_rgba8888()).to_variant(),
+            );
+        }
+        self.construct_nodes.retain(|key, (node, _)| {
+            if live.contains(key) {
+                true
+            } else {
+                node.set_visible(false);
+                false
+            }
+        });
+    }
+}
+
+/// `MoveLightningAbility.draw` (`MoveLightningAbility.java:89-98`) heat quad:
+/// `scl = clamp((|vel| - minSpeed) / (maxSpeed - minSpeed))`, additive haze at
+/// `alpha = scl / 2`, jittered `Mathf.range(scl / 2)` on both axes and drawn at
+/// `rotation - 90`. Returns `None` while the unit is slower than `minSpeed`
+/// (`scl <= 0.00001f`) or when the sprite is not found upstream.
+#[allow(clippy::too_many_arguments)] // the row fields + resolved region
+fn move_lightning_quad(
+    cx: f32,
+    cy: f32,
+    rotation: f32,
+    vel_len: f32,
+    min_speed: f32,
+    max_speed: f32,
+    w: f32,
+    h: f32,
+    uv: [f32; 4],
+    roll_x: f32,
+    roll_y: f32,
+) -> Option<ZQuad> {
+    let scl = ability_draw::move_lightning_scale(vel_len, min_speed, max_speed);
+    if !ability_draw::move_lightning_visible(scl) {
+        return None;
+    }
+    let (jx, jy) = ability_draw::move_lightning_jitter(scl, roll_x, roll_y);
+    let alpha = (ability_draw::move_lightning_alpha(scl).clamp(0.0, 1.0) * 255.0).round() as u32;
+    let color = (ability_draw::MOVE_LIGHTNING_COLOR.to_rgba8888() & 0xffff_ff00) | alpha;
+    Some(ZQuad {
+        z: ABILITY_OVERLAY_Z,
+        quad: UnitQuad {
+            cx: cx + jx,
+            cy: cy + jy,
+            w,
+            h,
+            rot: rotation - 90.0,
+            uv,
+            color,
+        },
+    })
+}
+
+/// `Drawf.construct`'s icon quad (`Drawf.java:440-452`): the spawned unit's
+/// `fullIcon` at the spawn point, rotated `unit.rotation - 90`, tinted
+/// `Pal.accent` at alpha `1f`; the shader applies `u_progress`/`u_time`/region
+/// UVs per node.
+fn construct_quad(cx: f32, cy: f32, rotation: f32, w: f32, h: f32, uv: [f32; 4]) -> UnitQuad {
+    UnitQuad {
+        cx,
+        cy,
+        w,
+        h,
+        rot: rotation - 90.0,
+        uv,
+        color: ability_draw::construct_color().to_rgba8888(),
     }
 }
 
@@ -1241,9 +1510,9 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PAYLOAD_SHADOW_Z, PAYLOAD_Z, SOFT_SHADOW_Z, UnitQuad, ZQuad, payload_heading,
-        soft_shadow_size, sort_unit_quads, weapon_heat_quad, weapon_outline_quad,
-        weapon_shadow_quad,
+        ABILITY_OVERLAY_Z, PAYLOAD_SHADOW_Z, PAYLOAD_Z, SOFT_SHADOW_Z, UnitQuad, ZQuad,
+        construct_quad, move_lightning_quad, payload_heading, soft_shadow_size, sort_unit_quads,
+        weapon_heat_quad, weapon_outline_quad, weapon_shadow_quad,
     };
     use mind_core::content::Rgba;
 
@@ -1430,5 +1699,63 @@ mod tests {
             "payload draws under the carrier soft shadow"
         );
         assert_eq!(PAYLOAD_SHADOW_Z, PAYLOAD_Z - 0.01);
+    }
+
+    /// PAR-0366 residual (`MoveLightningAbility.draw`,
+    /// `MoveLightningAbility.java:89-98`): invisible at/below `minSpeed`,
+    /// alpha `scl / 2` at full speed, jitter `Mathf.range(scl / 2)` and
+    /// `rotation - 90` sprite rotation, above the body quad.
+    #[test]
+    fn move_lightning_quad_follows_the_speed_curve() {
+        let uv = [0.0, 0.0, 1.0, 1.0];
+        // `vel <= minSpeed` -> `scl = 0` -> no draw.
+        assert!(
+            move_lightning_quad(0.0, 0.0, 0.0, 0.8, 0.8, 1.2, 4.0, 4.0, uv, 0.5, 0.5).is_none()
+        );
+        // Mid speed: scl = 0.5 -> alpha 0.25; `roll 0.5` = zero jitter.
+        let Some(mid) =
+            move_lightning_quad(10.0, 20.0, 30.0, 1.0, 0.8, 1.2, 4.0, 4.0, uv, 0.5, 0.5)
+        else {
+            panic!("mid-speed haze");
+        };
+        let alpha = mid.quad.color & 0xff;
+        assert!((alpha as i32 - 64).abs() <= 1, "alpha {alpha}");
+        assert_eq!((mid.quad.cx, mid.quad.cy), (10.0, 20.0));
+        assert_eq!(mid.quad.rot, -60.0);
+        assert_eq!(mid.z, ABILITY_OVERLAY_Z);
+        assert_eq!(
+            mid.quad.color >> 8,
+            Rgba::from_rgba8888(0xa9d8ffff).to_rgba8888() >> 8
+        );
+        // Full speed: alpha 127.5 -> 128; `range(scl/2)` = ±0.5 at the rolls.
+        let Some(fast) = move_lightning_quad(0.0, 0.0, 0.0, 1.2, 0.8, 1.2, 4.0, 4.0, uv, 0.0, 1.0)
+        else {
+            panic!("full-speed haze");
+        };
+        assert_eq!(fast.quad.color & 0xff, 128);
+        assert!(
+            (fast.quad.cx + 0.5).abs() < 1e-5,
+            "jitter x {}",
+            fast.quad.cx
+        );
+        assert!(
+            (fast.quad.cy - 0.5).abs() < 1e-5,
+            "jitter y {}",
+            fast.quad.cy
+        );
+    }
+
+    /// PAR-0366 residual (`UnitSpawnAbility.draw`,
+    /// `UnitSpawnAbility.java:68`): the construct quad is the spawned unit's
+    /// full icon at `unit.rotation - 90`, tinted `Pal.accent` at alpha 1 (the
+    /// shader applies `progress`/`time`).
+    #[test]
+    fn construct_quad_is_the_accent_icon_at_unit_rotation() {
+        let quad = construct_quad(64.0, 32.0, 90.0, 8.0, 4.0, [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!((quad.cx, quad.cy), (64.0, 32.0));
+        assert_eq!(quad.rot, 0.0);
+        assert_eq!((quad.w, quad.h), (8.0, 4.0));
+        assert_eq!(quad.uv, [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(quad.color, 0xffd3_7fff);
     }
 }

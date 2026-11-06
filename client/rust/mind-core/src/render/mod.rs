@@ -10,6 +10,7 @@
 //! never feeds simulation state (HLP §2.4 / D8); the Godot-facing half lives in
 //! `mind-gdext::render`.
 
+pub mod ability_draw;
 pub mod autotile;
 pub mod bands;
 pub mod block_cache;

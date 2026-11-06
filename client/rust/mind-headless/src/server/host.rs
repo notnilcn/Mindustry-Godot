@@ -341,7 +341,7 @@ impl HostWorld {
             .session
             .teams
             .get_or_null(TeamId(team))
-            .map(|data| data.cores.iter().copied().collect())
+            .map(|data| data.cores.clone())
             .unwrap_or_default();
         if cores.is_empty() {
             self.sim.ecs.0.insert_resource(runtime);
@@ -490,7 +490,7 @@ struct Restart {
 
 /// A local, Godot-free host over a live `mind_core::sim::Sim`.
 pub struct LocalHost {
-    registry: &'static ContentRegistry,
+    registry: ContentRegistry,
     maps_dir: PathBuf,
     world: Option<HostWorld>,
     map: Option<String>,
@@ -519,10 +519,7 @@ impl std::fmt::Debug for LocalHost {
 
 impl LocalHost {
     /// Creates a host over `registry` that looks for map files in `maps_dir`.
-    pub fn new(
-        registry: &'static ContentRegistry,
-        maps_dir: impl Into<std::path::PathBuf>,
-    ) -> Self {
+    pub fn new(registry: ContentRegistry, maps_dir: impl Into<std::path::PathBuf>) -> Self {
         let maps_dir = maps_dir.into();
         Self {
             registry,
@@ -542,8 +539,14 @@ impl LocalHost {
     }
 
     /// The loaded content registry.
-    pub fn registry(&self) -> &'static ContentRegistry {
-        self.registry
+    pub fn registry(&self) -> &ContentRegistry {
+        &self.registry
+    }
+
+    /// Replaces the content registry (`reloadassets`): the next world load
+    /// uses the refreshed content; a running world keeps its cloned snapshot.
+    pub fn set_registry(&mut self, registry: ContentRegistry) {
+        self.registry = registry;
     }
 
     /// Whether a world is loaded.
@@ -678,7 +681,7 @@ impl LocalHost {
         let mut sim = self.new_sim(1, 1)?;
         // A bare session so the save's rules/wave/stats are restored by the
         // load (`SimIoHandler::load` updates the installed `CampaignRuntime`).
-        let campaign = Campaign::from_registry(self.registry, &EmptyNeighborhood);
+        let campaign = Campaign::from_registry(&self.registry, &EmptyNeighborhood);
         sim.ecs.0.insert_resource(CampaignRuntime::new(
             PlaySession::new(Rules::default()),
             campaign,
@@ -730,7 +733,7 @@ impl LocalHost {
     /// Builds the sim shell, the live building runtime and the save engine.
     fn new_sim(&self, width: i32, height: i32) -> Result<Sim, HostError> {
         let mut sim = Sim::new(self.seed, width, height, BlockId::AIR, BlockId::AIR);
-        sim.install_block_runtime_from(SimRuntimeConfig::default(), (*self.registry).clone())
+        sim.install_block_runtime_from(SimRuntimeConfig::default(), self.registry.clone())
             .map_err(|error| HostError::World(format!("live runtime install failed: {error}")))?;
         let handler = SimIoHandler::boot()
             .map_err(|error| HostError::World(format!("save engine boot failed: {error}")))?;
@@ -743,7 +746,7 @@ impl LocalHost {
         let mut session = PlaySession::new(rules.clone());
         let mut epoch = RulesEpoch::new();
         let _ = play_map(&mut session, rules, None, |_| false, &mut epoch);
-        let campaign = Campaign::from_registry(self.registry, &EmptyNeighborhood);
+        let campaign = Campaign::from_registry(&self.registry, &EmptyNeighborhood);
         sim.ecs
             .0
             .insert_resource(CampaignRuntime::new(session, campaign));
@@ -752,7 +755,7 @@ impl LocalHost {
 
     /// Registers the live cores into the session teams (GAP-9 bridge).
     fn sync_cores(&self, sim: &mut Sim, apply_loadout: bool) -> Result<(), HostError> {
-        let spawns = count_spawns(sim, self.registry);
+        let spawns = count_spawns(sim, &self.registry);
         let mut runtime = sim
             .ecs
             .0
@@ -761,7 +764,7 @@ impl LocalHost {
         let _ = sync_session_with_sim(
             &mut runtime.session,
             &mut sim.ecs.0,
-            self.registry,
+            &self.registry,
             spawns,
             apply_loadout,
         );
@@ -805,8 +808,10 @@ impl LocalHost {
         if name == "synthetic" {
             let mut sim = self.new_sim(64, 64)?;
             sim.grid.fill(BlockId::AIR, BlockId::AIR);
-            let mut rules = Rules::default();
-            rules.waves = true;
+            let mut rules = Rules {
+                waves: true,
+                ..Rules::default()
+            };
             gamemode.apply(&mut rules);
             self.install_session(&mut sim, rules);
             // A core so the synthetic fixture is a playable survival map.
@@ -861,7 +866,7 @@ impl LocalHost {
                 .ok_or_else(|| HostError::NeedsWorldLoader(name.to_owned()))?;
             let sector = preset.sector;
             let generated =
-                generate_sector(&planet, sector, self.registry, SectorGenExtras::default())
+                generate_sector(&planet, sector, &self.registry, SectorGenExtras::default())
                     .ok_or_else(|| HostError::NeedsWorldLoader(name.to_owned()))?;
             let mind_core::maps::planet::GeneratedSector {
                 grid,
@@ -882,7 +887,7 @@ impl LocalHost {
             }
             // Launch loadout (`Universe.getLastLoadout`): the player core.
             let mut schematics = mind_core::game::schematics::Schematics::new();
-            schematics.load_loadouts(self.registry);
+            schematics.load_loadouts(&self.registry);
             let shard = self.registry.block_id("core-shard");
             let copper = self.registry.item_id("copper");
             let loadout = shard.and_then(|shard| {
@@ -897,7 +902,7 @@ impl LocalHost {
             {
                 let mut ctx = mind_core::maps::generators::planet::StructureCtx {
                     sim: &mut sim,
-                    content: self.registry,
+                    content: &self.registry,
                     bases: None,
                     loadout: loadout.as_ref(),
                     rules: &mut rules,
@@ -1042,7 +1047,7 @@ impl LocalHost {
             _ => Team::get(1).id,
         };
         let world = self.world.as_mut().ok_or(HostError::NoWorld)?;
-        world.fill_items(self.registry, team)
+        world.fill_items(&self.registry, team)
     }
 }
 
@@ -1147,10 +1152,8 @@ fn path_stem(path: &Path) -> String {
 mod tests {
     use super::*;
 
-    fn registry() -> &'static ContentRegistry {
-        Box::leak(Box::new(
-            crate::server::boot_content().expect("content boot"),
-        ))
+    fn registry() -> ContentRegistry {
+        crate::server::boot_content().expect("content boot")
     }
 
     fn scratch(tag: &str) -> PathBuf {

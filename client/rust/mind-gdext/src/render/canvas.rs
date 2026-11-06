@@ -17,7 +17,8 @@
 use std::collections::HashMap;
 
 use godot::builtin::{Color, PackedVector2Array, Rect2, Vector2};
-use godot::classes::{Node2D, Texture2D};
+use godot::classes::{FileAccess, Node2D, Shader, Texture2D};
+use godot::obj::NewGd;
 use godot::prelude::*;
 
 use mind_core::render::drawf;
@@ -336,6 +337,24 @@ pub(crate) fn color_u32(rgba: u32) -> Color {
 /// `[f32; 4]` RGBA (0..1) → `Color`.
 pub(crate) fn color_f4(c: [f32; 4]) -> Color {
     Color::from_rgba(c[0], c[1], c[2], c[3])
+}
+
+/// Loads a canvas shader from a committed `res://shaders/*.gdshader` source.
+///
+/// Mirrors `render/shaders.rs`'s load path (`FileAccess` + `Shader::set_code`)
+/// so passes that cannot reach `ShaderRegistry` (the unit/ability passes) get
+/// the same source with no resource-import step — required for headless runs.
+pub(crate) fn load_canvas_shader(path: &str) -> Option<Gd<Shader>> {
+    if !FileAccess::file_exists(path) {
+        return None;
+    }
+    let code = FileAccess::get_file_as_string(path);
+    if code.is_empty() {
+        return None;
+    }
+    let mut shader = Shader::new_gd();
+    shader.set_code(&code);
+    Some(shader)
 }
 
 /// Name → `AtlasTexture` cache over `/root/MindAssets` (`find_region`).

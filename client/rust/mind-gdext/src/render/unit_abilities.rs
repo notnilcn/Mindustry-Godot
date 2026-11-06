@@ -9,31 +9,49 @@
 //! shape-only, so one node per layer draws them from the host's
 //! `unit_ability_draws` rows. ForceField/ShieldArc are drawn by the shield
 //! pass because they share `Layer.shields` and its group material.
+//!
+//! `ArmorPlateAbility.draw` (`ArmorPlateAbility.java:36-56`) also lands at
+//! `Layer.effect`, so the suppression node owns it: the `<unit>-armor` region
+//! goes through `Shaders.armor` (`client/shaders/unitarmor.gdshader`) twice —
+//! once untinted, once tinted `d1efff` — with `progress = warmup` and the
+//! moving scan band. Immediate-mode canvas draws cannot switch shaders, so the
+//! plate is a pooled child `MeshInstance2D` + `ShaderMaterial` updated in
+//! `process` (L04 T2 residual).
 
 use godot::builtin::Color;
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, Node2D};
-use godot::obj::Base;
+use godot::classes::{INode2D, Material, MeshInstance2D, Node2D, Shader, ShaderMaterial};
+use godot::obj::{Base, NewGd};
 use godot::prelude::*;
 
 use mind_core::content::Rgba;
 use mind_core::content::registries::pal;
 use mind_core::content::registries::units::ability::AbilityKind;
 use mind_core::math::interp::Interp;
+use mind_core::render::ability_draw;
 
-use crate::sim_host::MindSimHost;
+use crate::sim_host::{MindSimHost, UnitAbilityDraw};
 
+use super::atlas_bind::RegionResolver;
 use super::canvas;
+use super::units::{UnitQuad, build_unit_mesh};
+
+/// `Shaders.armor`'s committed port source (`render/shaders.rs` loads the same
+/// `res://shaders/<name>.gdshader`).
+const ARMOR_SHADER_PATH: &str = "res://shaders/unitarmor.gdshader";
 
 /// One stroked polyline `(points, width, color)`.
 type Stroke = (Vec<(f32, f32)>, f32, Color);
+
+/// One pooled armor-plate plate: the mesh node plus its shader material.
+type ArmorNode = (Gd<MeshInstance2D>, Gd<ShaderMaterial>);
 
 /// Which ability family this node draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbilityFieldMode {
     /// `EnergyFieldAbility` (bullet layer, below bullets).
     EnergyField,
-    /// `SuppressionFieldAbility` (effect layer).
+    /// `SuppressionFieldAbility` + `ArmorPlateAbility` (effect layer).
     SuppressionField,
 }
 
@@ -45,6 +63,14 @@ pub struct AbilityFieldRenderer {
     host: Option<Gd<MindSimHost>>,
     /// Ability family.
     pub(crate) mode: AbilityFieldMode,
+    /// Atlas resolver for the `<unit>-armor` plate regions.
+    resolver: RegionResolver,
+    /// `Shaders.armor` (`None` until an armor-plate row appears).
+    armor_shader: Option<Gd<Shader>>,
+    /// Whether the shader load was attempted (a miss is logged once).
+    armor_shader_loaded: bool,
+    /// Pooled plate nodes, one per live armor plate.
+    armor_nodes: Vec<ArmorNode>,
 }
 
 #[godot_api]
@@ -54,6 +80,10 @@ impl INode2D for AbilityFieldRenderer {
             base,
             host: None,
             mode: AbilityFieldMode::EnergyField,
+            resolver: RegionResolver::new(None),
+            armor_shader: None,
+            armor_shader_loaded: false,
+            armor_nodes: Vec::new(),
         }
     }
 
@@ -69,6 +99,10 @@ impl INode2D for AbilityFieldRenderer {
 
     fn process(&mut self, _delta: f64) {
         if self.host.is_some() {
+            // `ArmorPlateAbility.draw` shares this node's z (Layer.effect).
+            if self.mode == AbilityFieldMode::SuppressionField {
+                self.sync_armor_plates();
+            }
             // All fields animate with `Time.time`.
             self.base_mut().queue_redraw();
         }
@@ -208,7 +242,116 @@ impl AbilityFieldRenderer {
         self.host = self
             .base()
             .try_get_node_as::<MindSimHost>("/root/Spine/SimHost");
+        let assets = self
+            .base()
+            .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets");
+        self.resolver = RegionResolver::new(assets);
+        for (mut node, _) in self.armor_nodes.drain(..) {
+            node.queue_free();
+        }
+        self.armor_shader = None;
+        self.armor_shader_loaded = false;
         self.base_mut().queue_redraw();
+    }
+
+    /// Updates the pooled `ArmorPlateAbility.draw` plates
+    /// (`ArmorPlateAbility.java:36-56`).
+    ///
+    /// Runs in `process`, not `draw`: it adds/moves child nodes and retunes
+    /// shader uniforms, which cannot happen inside a `CanvasItem` draw.
+    fn sync_armor_plates(&mut self) {
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let draws = host.bind().unit_ability_draws();
+        let time = host.bind().get_tick() as f32 / 60.0;
+        let rows: Vec<UnitAbilityDraw> = draws
+            .into_iter()
+            .filter(|row| row.kind == AbilityKind::ArmorPlate)
+            .collect();
+        if rows.is_empty() {
+            for (node, _) in &mut self.armor_nodes {
+                node.set_visible(false);
+            }
+            return;
+        }
+        // `Shaders.armor`: load the committed `unitarmor` source on first use.
+        if !self.armor_shader_loaded {
+            self.armor_shader_loaded = true;
+            self.armor_shader = canvas::load_canvas_shader(ARMOR_SHADER_PATH);
+            if self.armor_shader.is_none() {
+                log::warn!("[E] [shaders] missing `unitarmor`; armor plates skipped");
+            }
+        }
+        let Some(shader) = self.armor_shader.clone() else {
+            return;
+        };
+        while self.armor_nodes.len() < rows.len() {
+            let mut node = MeshInstance2D::new_alloc();
+            let mut material = ShaderMaterial::new_gd();
+            material.set_shader(&shader);
+            node.set_material(&material.clone().upcast::<Material>());
+            self.base_mut().add_child(&node);
+            self.armor_nodes.push((node, material));
+        }
+        let armor_time = ability_draw::armor_shader_time(time);
+        let tint = ability_draw::ARMOR_PLATE_COLOR.to_rgba8888();
+        for (index, row) in rows.iter().enumerate() {
+            let Some(alpha) = ability_draw::armor_plate_alpha(row.state.warmup) else {
+                self.armor_nodes[index].0.set_visible(false);
+                continue;
+            };
+            let region = ability_draw::armor_region_candidates(&row.name)
+                .into_iter()
+                .find_map(|name| self.resolver.find(&name))
+                .or_else(|| self.resolver.resolve(&row.name));
+            let Some(region) = region else {
+                self.armor_nodes[index].0.set_visible(false);
+                continue;
+            };
+            let Some(texture) = region.texture.clone() else {
+                self.armor_nodes[index].0.set_visible(false);
+                continue;
+            };
+            // `Draw.rect(region, unit.x, unit.y, unit.rotation - 90)` twice:
+            // untinted, then through `Draw.color(d1efff)`; both quads share
+            // one mesh/material because only the vertex colour differs.
+            let quad = |color: u32| UnitQuad {
+                cx: row.x,
+                cy: row.y,
+                w: region.w * 0.25,
+                h: region.h * 0.25,
+                rot: row.rotation - 90.0,
+                uv: region.uv,
+                color,
+            };
+            let Some(mesh) = build_unit_mesh(&[quad(0xffff_ffff), quad(tint)]) else {
+                self.armor_nodes[index].0.set_visible(false);
+                continue;
+            };
+            let (node, material) = &mut self.armor_nodes[index];
+            node.set_mesh(&mesh.upcast::<godot::classes::Mesh>());
+            node.set_texture(&texture);
+            node.set_visible(true);
+            let [u0, v0, u1, v1] = region.uv;
+            material.set_shader_parameter("u_texture", &texture.to_variant());
+            material.set_shader_parameter(
+                "u_texsize",
+                &Vector2::new(
+                    texture.get_width().max(1) as f32,
+                    texture.get_height().max(1) as f32,
+                )
+                .to_variant(),
+            );
+            material.set_shader_parameter("u_uv", &Vector2::new(u0, v0).to_variant());
+            material.set_shader_parameter("u_uv2", &Vector2::new(u1, v1).to_variant());
+            // `Shaders.armor.progress = warmup`, `time = -Time.time / 20f`.
+            material.set_shader_parameter("u_progress", &alpha.to_variant());
+            material.set_shader_parameter("u_time", &armor_time.to_variant());
+        }
+        for (node, _) in self.armor_nodes.iter_mut().skip(rows.len()) {
+            node.set_visible(false);
+        }
     }
 }
 

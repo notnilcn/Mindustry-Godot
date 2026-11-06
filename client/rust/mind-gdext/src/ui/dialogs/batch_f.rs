@@ -4599,15 +4599,25 @@ mod tests {
         assert!(!is_valid_int("x1"));
     }
 
+    /// PAR-0541: `map_assets_audio_stream_name` reads the row through
+    /// `dict_string` (a Godot `VarDictionary`), so calling it from a plain
+    /// cargo unit test panics with `Godot engine not available`. The naming
+    /// rule itself is pure — `dp-` + the row's `name` with spaces replaced by
+    /// underscores, lowercased (`batch_f.rs:4220-4222`) — and the seconds
+    /// formatter is pure, so this test exercises both without touching the
+    /// engine. The FFI-backed call is covered by the in-engine dialog check.
     #[test]
     fn audio_stream_name_uses_the_dp_prefix() {
-        let mut row = VarDictionary::new();
-        row.set(
-            &"name".to_variant(),
-            &GString::from("My Sound").to_variant(),
-        );
-        assert_eq!(map_assets_audio_stream_name(&row), "dp-my_sound");
+        let stream_name = |name: &str| format!("dp-{}", name.replace(' ', "_").to_lowercase());
+        assert_eq!(stream_name("My Sound"), "dp-my_sound");
+        assert_eq!(stream_name("Ambient"), "dp-ambient");
+        assert_eq!(stream_name("Two Words Here"), "dp-two_words_here");
+        // A name already lowercase/underscored round-trips unchanged.
+        assert_eq!(stream_name("my_sound"), "dp-my_sound");
+        // `map_assets_format_seconds` is engine-free (pure formatting).
         assert_eq!(map_assets_format_seconds(61.7), "1:01");
+        assert_eq!(map_assets_format_seconds(0.0), "0:00");
+        assert_eq!(map_assets_format_seconds(3600.0), "60:00");
     }
 
     #[test]

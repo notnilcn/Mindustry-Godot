@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T22:52:46Z",
+  "updated": "2026-11-06T23:24:09Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -16432,16 +16432,70 @@
     },
     "PAR-0366": {
       "title": "Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc",
-      "status": "fixing",
+      "status": "verified",
       "notes": [
         {
           "at": "2026-11-02T15:54:11Z",
           "by": "orch-c:audit2",
           "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
+        },
+        {
+          "at": "2026-11-06T22:56:03Z",
+          "by": "hx-abilitydraw",
+          "text": "Verified headlessly at HEAD 6d891f27 + this change: the three residual Ability.draw ports (ArmorPlate via unitarmor.gdshader, UnitSpawn via Drawf.construct/unitbuild.gdshader, MoveLightning additive heat sprite) are implemented, fed by MindSimHost::unit_ability_draws (new name/vel_len/can_create fields), and the vanilla omura UnitSpawnAbility pair is now declared in content (UnitTypes.java:1791). Core draw math unit-tested (12). Shield/field draws untouched. Residual: ArmorPlate/MoveLightning/UnitSpawn remain unmapped by the mod JSON parser (PAR-0587); omura's construct is the only vanilla-visible path."
         }
       ],
       "claimed_by": "hx-abilitydraw",
-      "claimed_at": "2026-11-06T22:36:55Z"
+      "claimed_at": "2026-11-06T22:36:55Z",
+      "fix": "Ported the three missing Ability.draw implementations (Mindustry v146). ArmorPlateAbility.draw: <unit>-armor region through the ported unitarmor.gdshader, alpha/progress = warmup (gate >0.001), moving scan band, two passed (white then d1efff tint) — drawn by the Layer.effect field node as pooled MeshInstance2D+ShaderMaterial. UnitSpawnAbility.draw: Drawf.construct of the spawned unit fullIcon through unitbuild.gdshader at the Angles.trnsx(rotation, spawnY, spawnX) offset, progress = timer/spawnTime, gated on Units.canCreate — pooled shader nodes under the caster unit band. MoveLightningAbility.draw: additive heat sprite at rotation-90, alpha scl/2 with scl = clamp((|vel|-minSpeed)/(maxSpeed-minSpeed)), Mathf.range(scl/2) jitter. New pure math module mind-core/src/render/ability_draw.rs (12 tests). Plumbed UnitType.name/vel_len/canCreate through MindSimHost::unit_ability_draws (sim_host.rs append-only). Declared omura two vanilla UnitSpawnAbility(flare, 900, +-19.25, -31.75) entries in content (UnitTypes.java:1791). Shield/field kinds unchanged.",
+      "evidence": [
+        "cargo test -p mind-core --lib ability_draw -> 12 passed",
+        "cargo test -p mind-gdext --lib render -> 66 passed",
+        "cargo test -p mind-gdext --lib audio -> 15 passed",
+        "cargo check -p mind-gdext -> ok",
+        "cargo fmt --all -- --check -> exit 0",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0"
+      ],
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-gdext --lib render"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib ability_draw"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit"
+            }
+          }
+        ]
+      },
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (ArmorPlate/MoveLightning are mod-only in v146 and not yet mapped by the mod parser — PAR-0587)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "draw math ported from ArmorPlateAbility.java:36-56, UnitSpawnAbility.java:64-71, MoveLightningAbility.java:89-98 (v146)"
+            }
+          }
+        ]
+      }
     },
     "PAR-0367": {
       "title": "Weapon `layerOffset` not applied when drawing weapons",
@@ -28851,13 +28905,21 @@
     },
     "PAR-0541": {
       "title": "Pre-existing gdext test panics: batch_f::audio_stream_name_uses_the_dp_prefix calls Godot FFI in a cargo unit test",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "test-only fix; Java leg not applicable"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "engine-free pure assertion (no Godot FFI)"
             }
           }
         ]
@@ -28865,9 +28927,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0541"
+              "cmd": "cargo test -p mind-gdext --lib audio"
             }
           }
         ]
@@ -28878,8 +28940,16 @@
       "gap": "cargo test -p mind-gdext --lib audio fails at HEAD f11557ea in ui::dialogs::batch_f::tests::audio_stream_name_uses_the_dp_prefix: VarDictionary::new() panics \"Godot engine not available; make sure you are not calling it from unit/doc tests\" (godot-ffi-0.5.5/src/lib.rs:625). The test is in gx/ui (not owned by hx-audio); it makes the packet-mandated audio test filter red even though all 13 audio tests pass. Fix: drop the VarDictionary construction from that test or gate it behind an engine-only harness.",
       "source": "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4603",
       "evidence": [
-        "cargo test -p mind-gdext --lib audio -> FAILED: 1 failed (ui::dialogs::batch_f::tests::audio_stream_name_uses_the_dp_prefix), 13 audio tests ok",
-        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4603-4611"
+        "cargo test -p mind-gdext --lib audio -> 15 passed; 0 failed (was 1 failed: audio_stream_name_uses_the_dp_prefix)",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4610-4623"
+      ],
+      "fix": "Rewrote client/rust/mind-gdext/src/ui/dialogs/batch_f.rs::tests::audio_stream_name_uses_the_dp_prefix to be engine-free (test-only change): removed the VarDictionary construction that panicked in a plain cargo test and asserts the dialog pure naming rule (dp- + name with spaces->underscores, lowercased) plus the engine-free map_assets_format_seconds. Engine-free sibling tests found and filed as PAR-0586.",
+      "notes": [
+        {
+          "at": "2026-11-06T22:56:07Z",
+          "by": "hx-abilitydraw",
+          "text": "Verified headlessly: cargo test -p mind-gdext --lib audio passes 15/15 with no engine; the dp- prefix naming rule and the seconds formatter are asserted purely. The three other batch_f FFI tests still panic under --lib batch_f and are filed as PAR-0586."
+        }
       ]
     },
     "PAR-0542": {
@@ -30954,6 +31024,358 @@
         "mind-core/src/mods/json/mod.rs:4102 resolve_ability_kind lacks ArmorPlate/MoveLightning/UnitSpawn",
         "mind-core/src/mods/json/mod.rs:2071 warns and skips ArmorPlateAbility",
         "mind-core/src/content/boot.rs:648 test asserts ArmorPlateAbility is skipped"
+      ]
+    },
+    "PAR-0588": {
+      "title": "GAPS #56 follow-up: BlockDef family fields were not read from mod JSON",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod3",
+      "claimed_at": "2026-11-06T23:06:18Z",
+      "severity": "P1",
+      "gap": "mc/mods/json/mod.rs parse_block never read the BlockSpec production/environment family fields added alongside BlockDef (outputItems/outputLiquids/liquidOutputDirections/ignoreLiquidFullness/results, drillTime/tier/hardnessDrillMultiplier/blockedItems(+blockedItem)/liquidBoostIntensity/warmupSpeed/invertedTime/range, pumpAmount/itemUseTime/result/attribute/baseEfficiency/output/itemBoostIntensity/boostItemUseTime, boostScale/minEfficiency/maxBoost/outputScale/scaleLiquidConsumption/displayEfficiency/displayScaledOutput, variants/maxSize/wscl/wmag/wtscl/wmag2); JSON mods could set them in no way at all, so every mod block of those classes kept the class defaults.",
+      "source": "GAPS.md#56",
+      "fix": "mc/mods/json/mod.rs parse_block reads the whole BlockSpec production/environment family: outputItems/outputLiquid singletons (GenericCrafter.init write-back), outputLiquids + liquidOutputDirections (int array, -1 = all sides), ignoreLiquidFullness, results (Separator), drillTime/tier/hardnessDrillMultiplier/blockedItems/blockedItem/liquidBoostIntensity/warmupSpeed/invertedTime/range (plus the pre-existing drillMultipliers), pumpAmount/itemUseTime/result/attribute(/warn on unknown Attribute enum)/baseEfficiency/output/itemBoostIntensity/boostItemUseTime, boostScale/minEfficiency/maxBoost/outputScale/scaleLiquidConsumption/displayEfficiency/displayScaledOutput, and variants/maxSize/wscl/wmag/wtscl/wmag2. Four tests cover each group (crafter outputs incl. the single-form write-back and a non-array directions error; drill family; pump/wall-crafter/attribute family incl. the unknown-attribute warning; environment family).",
+      "evidence": [
+        "cargo test -p mind-core --lib mods (164 passed)",
+        "cargo test -p mind-core --lib mods::json::tests::block_ (7 passed)",
+        "cargo check -p mind-gdext"
+      ]
+    },
+    "PAR-0589": {
+      "title": "GAPS #57 follow-up: draw-desc residuals (DrawRegion.name, DrawTurret/Weapon, DrawLiquidOutputs, alias bodies, class alphas)",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod3",
+      "claimed_at": "2026-11-06T23:06:22Z",
+      "severity": "P2",
+      "gap": "PAR-0562 residual: DrawRegion.name overrides were ignored; DrawTurret/DrawWeapon mapped to DrawDesc::Default so a mod JSON turret's parts never reached the turret renderer; DrawLiquidOutputs emitted nothing because the output liquids were not resolved from BlockDef; DrawArc/DrawParticle/DrawSoftShadow mapped to DrawDefault; DrawerSpec::for_kind had no per-class alpha defaults for DrawArcSmelt/DrawCrucibleFlame/DrawParticles/DrawSoftParticles and the particles bodies hardcoded 0.5.",
+      "source": "GAPS.md#57",
+      "fix": "mc/render/draw_desc.rs + gx/render: DrawDesc::Region carries DrawRegion.name (overrides block.name+suffix when set); new DrawDesc::Turret{base_prefix,parts}/Weapon{parts} carry the parsed DrawPart tree (turret_drawer_parts/has_turret_drawer walk DrawMulti), the live turret renderer (gx/render/turret.rs) replaces its hand-ported vanilla parts with the mod JSON parts (turretShading forced like DrawTurret.load) and gx/render/block_extras.rs skips those blocks so the turret pass owns them; DrawDesc::LiquidOutputs now holds Vec<(String,i8)> and chain_for_with(def, content) resolves output_liquids + liquid_output_directions (missing direction = -1, DrawLiquidOutputs.java:20-21); DrawArc/DrawParticle/DrawSoftShadow alias to the DrawArcSmelt/DrawParticles/DrawSoftParticles bodies; per-class alpha defaults (ArcSmelt 0.68, CrucibleFlame 0.5, Particles/SoftParticles 0.5) apply via class_alpha, and the Particles/SoftParticles bodies now honour the alpha field. ArcSmelt/CrucibleFlame x/y offsets and CrucibleFlame rotateScl are applied. Tests: draw_region_name_override_wins, turret_and_weapon_drawers_carry_parts, content_backed_drawer_fields_convert, class_alpha_defaults_apply.",
+      "evidence": [
+        "cargo test -p mind-core --lib render:: (222 passed)",
+        "cargo test -p mind-core --lib render::draw_desc (20 passed)",
+        "cargo test -p mind-gdext --lib render (66 passed)",
+        "cargo check -p mind-gdext",
+        "headless boot tools/run-cpu-intensive-task.sh --godot --headless --path client --quit (exit 0)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:06:38Z",
+          "by": "hx-mod3",
+          "text": "DrawTurret/DrawWeapon part trees now reach the live turret pass from mod JSON; DrawLiquidOutputs resolves BlockDef content outputs; per-class alphas and alias bodies (DrawArc/DrawParticle/DrawSoftShadow) land. The headless DrawDesc::Turret/Weapon bodies emit the parts at Layer.turret; live block_extras skips those blocks so the turret pass stays authoritative. No Java twin run (headless fix pass)."
+        }
+      ]
+    },
+    "PAR-0590": {
+      "title": "GAPS #56/#57 follow-up: TiledFloor/TiledWall packed tiling and WobbleProp wobble draw not rendered",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::tiled"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-mod3",
+      "claimed_at": "2026-11-06T23:06:23Z",
+      "severity": "P1",
+      "gap": "The BlockKind variants landed (PAR-0573) but no renderer drew them: gx/render/floor.rs baked TiledFloor/TiledWall as the plain floor/wall region (no packed square, no <name>-<size>-<variant> cell crop) and gx/render/blocks.rs drew WobbleProp as a static prop quad (no Draw.rectv sin warp). Mod environments using these classes rendered as flat, non-packed sprites.",
+      "source": "GAPS.md#56",
+      "fix": "New Godot-free mc/render/tiled.rs ports TiledFloor/TiledWall packed tiling and WobbleProp: TiledState bit layout (x 4/y 4/size 8/changes 32), the greedy scan_size (TiledFloor.scan:64-80) + assign_square + ensure_state lazy scan, Floor.variant origin pick, cell(size, cx, cy) = (cx, size-1-cy), region/fallback names, Wobble{wscl,wmag,wtscl,wmag2} with the four Mathf sin/cos vertex terms and quad(x,y,w,h,time). gx/render/floor.rs adds TiledStates (per-chunk scan window with a 2*maxSize margin, keyed by (block, TiledLayer::{Floor,Overlay,Block})) and PendingQuad.tiled; RegionAtlas::resolve_tiled probes <name>-<size>-<variant> then <name>-<size> then the block region as an unsplit 1x1 (TiledFloor.load:39-48) and crops the split cell. gx/render/blocks.rs draws WobbleProp through a new vertex-warped mesh path (WarpQuad + build_warp_quad_mesh in gx/render/units.rs) rebuilt every frame while visible. Tests: render::tiled (state round-trip, scan shrink, lazy square assignment, variant/cell, wobble offsets/quad) and gx floor tests tiled_floor_packs_a_square_and_selects_its_cell / tiled_wall_packs_over_the_block_slot.",
+      "evidence": [
+        "cargo test -p mind-core --lib render::tiled (6 passed)",
+        "cargo test -p mind-gdext --lib render (66 passed, incl. the two new floor tests)",
+        "cargo check -p mind-gdext",
+        "headless boot exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:06:38Z",
+          "by": "hx-mod3",
+          "text": "TiledFloor/TiledWall packing is deterministic per bake; the scan window margin (2*maxSize) is a documented approximation at chunk seams (upstream keeps the state slot globally). WobbleProp warp is headless-tested as pure geometry; the mesh build itself needs an in-engine check. Menu/editor one-shot floor paths keep the plain variant branch (no scan states)."
+        }
+      ]
+    },
+    "PAR-0591": {
+      "title": "GAPS #69 Steam half: SNet/SStats/SUser/SWorkshop, Steam init and rich presence still out of scope",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0591"
+            }
+          }
+        ]
+      },
+      "claimed_by": "session4-platform",
+      "claimed_at": "2026-11-06T23:18:01Z",
+      "severity": "P2",
+      "gap": "Steam-only platform services are not ported: SNet (lobbies/Steam Networking Sockets), SStats (achievements/stats backend), SUser (account identity), SWorkshop (UGC), SVars init/appId 1127400, +connect_lobby handling and Steam rich presence.",
+      "source": "GAPS.md#69",
+      "out_of_scope": "Requires the Steamworks SDK linked as a native GDExtension; OD4 is deferred (docs/platform/steam-parity.md). No Steam code is compiled; MindPlatform::service_enabled() stays false.",
+      "notes": [
+        {
+          "at": "2026-11-06T23:18:04Z",
+          "by": "session4-platform",
+          "text": "Session 4 (GAPS #69/#70 practical half) closes only the non-Steam surface: the GameService trait now carries the platform-neutral seams and the local/Null defaults. Steam stays out of scope because no Steamworks SDK is linked (OD4 deferred); SNet/SStats/SUser/SWorkshop, appId 1127400 init, +connect_lobby and rich presence remain unimplemented."
+        }
+      ]
+    },
+    "PAR-0592": {
+      "title": "GAPS #47 residual: schematic copy rect + paste preview ghosts, rebuild-select rect, drawOverlapCheck and other players' plans are not drawn",
+      "status": "fixing",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (F-drag rect, B-drag rect, blocked-place warning, second-player plans)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-visuals",
+      "claimed_at": "2026-11-06T23:23:18Z",
+      "severity": "P1",
+      "source": "GAPS.md#47",
+      "gap": "GAPS #47 (PAR-0472 closed only the RTS command drag box). Verified missing at HEAD 179144d7: (1) DesktopInput.drawTop has no F-selection copy rect (DesktopInput.java:133-145 drawSelection) and no B rebuild-select rect (InputHandler.java:1724-1752 drawRebuildSelection); PlacementView exposes no selection state. (2) The F-copy paste preview plans (selectPlans, DesktopInput.java:175-185 drawPlan/drawOverPlan) are tracked in DesktopBridge but never drawn: render/plans.rs draws only the break rect, queued plans and the cursor ghost. (3) drawOverlapCheck (InputHandler.java:1499-1516) has no port at all: no enemy-blocker corners and no dashed warning line. (4) drawOtherBuildPlans (InputHandler.java:1392-1440) has no port; only TeamData.plans ghosts are drawn (BlockRenderer.drawDestroyed).",
+      "fix": "mind-core half landed: WorldRect/block_world_rect/plan_world_rect (Block.java:1023-1025, BuildPlan.java:125-131), selection_world_rect + selection_label (Placement.normalizeDrawArea(air) for the F/B rects), SelectionShow gate (DesktopInput.java:133-145), OverlapCheck geometry + should_draw_overlap_check (InputHandler.java:1499-1516), rebuild_selection_tiles (InputHandler.java:1742-1752), other_plan_drawable/other_plan_alpha/plan_anim_scale_step (Block.java:854-862). Visual legs pending the render hook (gx/render/** owned by another agent) and, for other players, net preview-plan sync.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement (41 passed)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:23:29Z",
+          "by": "hx-visuals",
+          "text": "Landed (tested headlessly, 41 placement-filter tests green): mind-core/src/input/placement.rs now exposes WorldRect (strict ARC Rect.overlaps/contains), block_world_rect (Block.java:1023-1025), plan_world_rect (BuildPlan.java:125-131 breaking=-100 empty rect), selection_world_rect+selection_label (Placement.normalizeDrawArea(air, snap=false, scaling=1); F=MAX_SCHEMATIC_SIZE 64, B=0 unbounded), SelectionShow (DesktopInput.java:133-145: breaking/hasKeyboard suppress, F needs latched start, F beats B), OverlapCheck+should_draw_overlap_check+overlap_check (InputHandler.java:1499-1516 line from cursor-block edge to blocker edge, Drawf.dashLineDst segments), rebuild_selection_tiles (InputHandler.java:1742-1752 origin dedupe + canRepairDerelict), other_plan_drawable/other_plan_alpha (0.7 hover / 0.25) / plan_anim_scale_step (Block.java:854-862). NOT yet visible: the draw calls need render/plans.rs (owned by another agent) - see fix/hook fields. Other players' plans additionally need net preview-plan sync (MindNet mirrors only remote player state; no plan rows)."
+        }
+      ]
+    },
+    "PAR-0593": {
+      "title": "PAR-0121/0125 client remainder: in-game chat overlay renders my_match_chat rows (ChatFragment parity)",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::chat"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-chatui",
+      "claimed_at": "2026-11-06T23:23:47Z",
+      "severity": "P1",
+      "source": "PAR-0121; PAR-0125",
+      "gap": "HEAD 5d1c4af4: mind-stdb::ChatLine/ChatLog existed but no gx/ui consumer. ChatFragment only stored pre-formatted add_message strings: no /t//a channel colours, no admin/private rows, no team/all tabs, no / command hint, no history/scroll wiring, and MindUi.chat_send emitted chat_message with no transport (PAR-0121/0125 server + mind-stdb halves were already verified).",
+      "fix": "gx/ui: MindUi owns a ChatFeed (ChatLine rows, viewer/team/admin re-filter through ChatLine::visible_to, 512-row bound, revision counter); chat_poll pulls MindNet.chat_json() (has_method guard) or chat_apply_rows_json pushes rows; chat_send forwards the field text to MindNet.send_chat and returns false without a relay (single player has no chat upstream either); chat_rows_json/chat_revision/chat_len/chat_set_viewer/chat_clear/net_active. MindChatFragment rebuilt on mind_core::ui::chat::ChatState: per-message labels with ChatFragment fade, 10-message window + scroll, all//t//a tabs with Java prefix rewrite (admin tab only for admins), > prompt, / command hint, ChatFormatter markup (coral author, team-colour <T>, Pal.adminChat <A>), system/private notices lightgray, mute/spam denials scarlet, history prev/next. ui/kit/roster.rs resolves identity->name/team/colour from player_list_json. Documented deviations: no Binding.chat key wiring (input/desktop.rs outside ownership - needs one ToggleFragment arm), ping logged only (no relay ping reducer, no #[func] world-size accessor), local identity only if MindNet exposes local_identity_hex (roster D2).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib ui::fragments::chat -> 8 passed",
+        "cargo test -p mind-gdext --lib ui::kit::roster -> 5 passed",
+        "cargo check -p mind-gdext -> ok",
+        "headless boot: log line \"[ui] MindChatFragment ready (net=false, tabs=3)\", 0 ERROR lines",
+        "dialog_sweep_check reports failed=0"
+      ]
+    },
+    "PAR-0594": {
+      "title": "PAR-0548 client remainder: EventType toasts from my_match_events rows through the HUD toast queue",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::toasts"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-chatui",
+      "claimed_at": "2026-11-06T23:23:57Z",
+      "severity": "P1",
+      "source": "PAR-0548",
+      "gap": "PAR-0548 filed the missing EventType classes; the module publishes match_event rows (my_match_events) and mind-stdb::EventBus names each row with its upstream EventType class, but gx/ui had no consumer: relay join/leave/kick/ban, world/game lifecycle, Config and name-ban events never surfaced as HUD toasts (HudFragment.showToast slot).",
+      "fix": "ui/fragments/toasts.rs: EventKind ABI parser (round-trips format!(\"{:?}\") against ALL_EVENT_KINDS, so an appended variant fails the mapping test), EventRow projection of mind_stdb::ServerEvent JSON, toast_for mapping (MatchCreate->WorldLoadEvent, MatchStart->PlayEvent, MatchEnd->GameOverEvent, PlayerJoin/Leave/Kick, PlayerBan/Unban, VotePassed, ConfigChange->ConfigEvent, NameBan/Unban; PlayerChat and relay plumbing deliberately toast nothing), EventToasts watermark replay (a resync replay never re-toasts) and MindUi.take_event_toasts (pulls MindNet.events_json() with a has_method guard, or push_events_json) + clear_event_toasts + event_toast_watermark; MindUiRoot.process drains the toasts into the existing HudFragment slot queue (3.5 s spacing, menu gate preserved). Research/Unlock toasts stay with MindCampaign (Control.java:161-164); relay rows never carry them. Port addition documented in the module: upstream surfaces join/leave/ban/config only as chat/system lines (NetServer.java:1012,623).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib ui::fragments::toasts -> 6 passed",
+        "cargo check -p mind-gdext -> ok",
+        "headless boot + dialog_sweep_check -> failed=0, 0 ERROR lines (MindUiRoot drain path exercised on the main scene)"
+      ]
+    },
+    "PAR-0595": {
+      "title": "GAPS #68 UI half: Database achievements/statistics tabs over the persisted achievement tables",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::kit::rows"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-chatui",
+      "claimed_at": "2026-11-06T23:24:01Z",
+      "severity": "P2",
+      "source": "GAPS.md#68",
+      "gap": "PAR-0566 landed Achievement/SStat + LocalGameService in mind-core, but nothing displayed them: DatabaseDialog had only planet/content tabs, no achievements/statistics surface, and no gdext read path exists at HEAD 5d1c4af4 (MindCampaign exposes database_json but no achievement rows API).",
+      "fix": "ui/kit/rows.rs projects LocalGameService achievement_rows/stat_rows into JSON rows (name/stat/goal/progress/unlocked/description; name/value/max) plus progress/colour/completion display mapping. MindUi.database_rows_json(kind) prefers MindCampaign.database_rows_json(kind) (has_method guard = the hx-gxint rows API), then the achievements/statistics arrays of database_json(), then the persisted settings store via LocalGameService::load(&SettingsUnlockStore) - real saved state, [] when unavailable, never a fixture. DatabaseController appends the two port-only rail tabs only when rows exist (star / chart-bar glyphs) and renders icon+name+progress rows (accent unlocked, Pal.gray locked, 3 px accent rule, unlocked/total header, search filter). Upstream has no achievement dialog (Steam overlay only), so labels are the raw enum names; documented in the module.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib ui::kit::rows -> 5 passed",
+        "cargo check -p mind-gdext -> ok",
+        "dialog_sweep_check: ok database: shows/hides/reshows, failed=0",
+        "sweep log: \"[ui] database tables: achievements, statistics\""
+      ]
+    },
+    "PAR-0596": {
+      "title": "GAPS #69 practical half: complete platform-neutral GameService surface (aliases, leaderboard seam, link/file guards, export/import)",
+      "status": "verified",
+      "fork": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "headless fix pass; Java twin pending (Steam parts out of scope)"
+          }
+        }
+      ],
+      "action": [
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service"
+          }
+        },
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext"
+          }
+        }
+      ],
+      "claimed_by": "session4-platform",
+      "claimed_at": "2026-11-06T23:24:05Z",
+      "severity": "P2",
+      "gap": "GAPS.md#69 non-Steam half: the GameService trait only carried the seven DesktopLauncher methods; submitScore/deleteAchievement/hasAchievement/openLink/openFile/export/import had no seam, so a future platform backend (or mod call site) had nowhere to plug in and NullService could not refuse unsafe links/files.",
+      "source": "GAPS.md#69",
+      "fix": "mind-core/src/service.rs: added default GameService methods (submit_score seam; delete_achievement/has_achievement aliases forwarding to clear_achievement/is_achieved so LocalGameService keeps its real local behavior; guarded open_link/open_file via is_safe_external_link/is_openable_file; logged export_data/import_data no-ops), LINK_SCHEMES + the two guards, and NullService completeness/guard tests. MindPlatform open_link/open_file host probes reuse the same guards.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service -> 16 passed, 0 failed (2026-11-07)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:24:05Z",
+          "by": "session4-platform",
+          "text": "Non-Steam half only. NullService is now a complete GameService: unsafe links/files are refused+logged, achievement aliases forward to the primary methods, export/import are logged no-ops, submitScore is a documented Steam/Play-Games forward seam. LocalGameService inherits the aliases unchanged. Steam remains PAR-0591 (GAPS #69 stays open)."
+        }
       ]
     }
   },

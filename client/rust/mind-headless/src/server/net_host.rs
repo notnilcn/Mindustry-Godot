@@ -29,6 +29,7 @@ use mind_stdb::{
 use spacetimedb_sdk::Identity;
 
 use super::admin::{AdminMirror, BanEntry, BanKind};
+use super::commands::fix_name;
 use super::host::{AdminError, Admins, HostControl, HostError, HostStatus, PlayerView};
 
 /// The plan-21-backed host (the `serve` mode's networked control).
@@ -213,6 +214,40 @@ impl NetHost {
         self.players.values().cloned().collect()
     }
 
+    /// Sends one chat message on an explicit channel (`/t`, `/a`).
+    pub fn say_kind(&mut self, kind: ChatKind, message: &str) -> Result<(), AdminError> {
+        if !self.online {
+            return Err(AdminError::Unsupported(
+                "team/admin chat requires a live match (plan 21)".to_owned(),
+            ));
+        }
+        let match_id = self.match_id.ok_or(AdminError::NoMatch)?;
+        self.connector
+            .send_chat(match_id, kind, message)
+            .map_err(|error| AdminError::Connector(error.to_string()))
+    }
+
+    /// Pushes the dedicated server's config gates to the module's
+    /// `server_config` row (`admin_set_config`): `enable_votekick`,
+    /// `interact_rate_*`, `*_rate*`, `whitelist_enabled`, `auto_pause`, ….
+    ///
+    /// Offline/no-match calls are a no-op (`0`). Java `Config.*` is one global
+    /// object; under D2 the reducer-side relay enforces its own copy, so the
+    /// dedicated host is the writer that keeps them in sync.
+    pub fn push_server_config(&mut self, fields: &[(&str, String)]) -> usize {
+        if !self.online || self.match_id.is_none() {
+            return 0;
+        }
+        let mut pushed = 0;
+        for (field, value) in fields {
+            match self.connector.admin_set_config(field, value) {
+                Ok(()) => pushed += 1,
+                Err(error) => log::warn!("server_config `{field}` push failed: {error}"),
+            }
+        }
+        pushed
+    }
+
     /// `NetServer.kickAll(reason)` (`NetServer.java:1096-1100`): kicks every
     /// connected member and forgets them. Returns the number of kicks sent.
     pub fn kick_all(&mut self, reason: &str) -> usize {
@@ -309,7 +344,10 @@ impl NetHost {
             match change {
                 RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
                     let identity = row.identity.to_hex().to_string();
-                    let name = self.admin.name_for(&identity).unwrap_or("").to_owned();
+                    // `NetServer.java:267`: every arriving name goes through
+                    // `fixName` (trims tabs/newlines, strips transparent colour
+                    // tags, caps the UTF-8 length) before it reaches the roster.
+                    let name = fix_name(self.admin.name_for(&identity).unwrap_or(""));
                     let admin = self.admin.is_admin(&identity);
                     self.players.insert(
                         identity.clone(),
@@ -424,15 +462,7 @@ impl HostControl for NetHost {
 
 impl Admins for NetHost {
     fn say(&mut self, message: &str) -> Result<(), AdminError> {
-        if !self.online {
-            return Err(AdminError::Unsupported(
-                "`say` requires a live match (plan 21)".to_owned(),
-            ));
-        }
-        let match_id = self.match_id.ok_or(AdminError::NoMatch)?;
-        self.connector
-            .send_chat(match_id, ChatKind::System, message)
-            .map_err(|error| AdminError::Connector(error.to_string()))
+        self.say_kind(ChatKind::System, message)
     }
 
     fn kick(&mut self, target: &str) -> Result<(), AdminError> {

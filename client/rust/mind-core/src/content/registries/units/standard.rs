@@ -2293,6 +2293,12 @@ fn omura(sink: &mut dyn UnitSink) -> Result<(), ContentError> {
             weapon.eject_effect = Some(EffectRef::Named(EffectId::NONE));
             weapon
         });
+        // `UnitTypes.java:1791`: `spawnTime = 60f * 15f` and two
+        // `new UnitSpawnAbility(flare, spawnTime, ±19.25f, -31.75f)`.
+        unit.abilities
+            .push(AbilitySpec::unit_spawn("flare", 900.0, 19.25, -31.75));
+        unit.abilities
+            .push(AbilitySpec::unit_spawn("flare", 900.0, -19.25, -31.75));
         unit
     })
 }

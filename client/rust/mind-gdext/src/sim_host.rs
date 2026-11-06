@@ -229,6 +229,15 @@ pub struct UnitAbilityDraw {
     pub shield: f32,
     /// `EntitySeq.0` (deterministic suppression particle seed).
     pub id: u64,
+    /// `UnitType.name` (`ArmorPlateAbility`'s `<name>-armor` region and the
+    /// `UnitSpawnAbility` full-icon lookup; L04 T2 residual).
+    pub name: String,
+    /// `unit.vel().len()` (`MoveLightningAbility.draw` speed scale, `:90`).
+    pub vel_len: f32,
+    /// `Units.canCreate(unit.team, this.unit)` at draw time — the
+    /// `UnitSpawnAbility.draw` gate (`UnitSpawnAbility.java:65`). `false` for
+    /// every other kind.
+    pub can_create: bool,
 }
 
 /// One live weapon mount (`Weapon.draw` inputs).
@@ -7513,8 +7522,10 @@ impl MindSimHost {
     }
 
     /// Live unit abilities with a `draw(Unit)` override (L04 T2): ForceField,
-    /// EnergyField, SuppressionField and ShieldArc. Mod-only ArmorPlate/
-    /// UnitSpawn/MoveLightning kinds are not modelled in the content registry.
+    /// EnergyField, SuppressionField, ShieldArc, ArmorPlate, UnitSpawn and
+    /// MoveLightning. The shield pass owns ForceField/ShieldArc, the field pass
+    /// owns EnergyField/SuppressionField/ArmorPlate and the unit pass owns
+    /// MoveLightning/UnitSpawn (their Java z is the unit's own layer).
     pub fn unit_ability_draws(&self) -> Vec<UnitAbilityDraw> {
         use mind_core::combat::abilities::AbilityComp;
         use mind_core::content::registries::units::ability::AbilityKind;
@@ -7552,6 +7563,11 @@ impl MindSimHost {
                 .get::<mind_core::ecs::EntitySeq>()
                 .map(|seq| seq.0)
                 .unwrap_or(0);
+            // `MoveLightningAbility.draw` reads `unit.vel().len()` (`:101`).
+            let vel_len = entity
+                .get::<mind_core::entities::comp::Vel>()
+                .map(|vel| vel.x.hypot(vel.y))
+                .unwrap_or(0.0);
             for (spec, state) in def.abilities.iter().zip(&comp.states) {
                 if matches!(
                     spec.kind,
@@ -7559,7 +7575,26 @@ impl MindSimHost {
                         | AbilityKind::EnergyField
                         | AbilityKind::SuppressionField
                         | AbilityKind::ShieldArc
+                        | AbilityKind::ArmorPlate
+                        | AbilityKind::MoveLightning
+                        | AbilityKind::UnitSpawn
                 ) {
+                    // `UnitSpawnAbility.draw` only draws while
+                    // `Units.canCreate(unit.team, this.unit)`
+                    // (`UnitSpawnAbility.java:65`).
+                    let can_create = if spec.kind == AbilityKind::UnitSpawn {
+                        spec.unit
+                            .and_then(|name| content.unit_by_name(name))
+                            .is_some_and(|spawn| {
+                                mind_core::entities::comp::unit::queries::can_create_unit(
+                                    &self.sim.ecs.0,
+                                    team,
+                                    spawn,
+                                )
+                            })
+                    } else {
+                        false
+                    };
                     out.push(UnitAbilityDraw {
                         kind: spec.kind,
                         x: pos.x,
@@ -7570,6 +7605,9 @@ impl MindSimHost {
                         state: *state,
                         shield,
                         id,
+                        name: def.name.clone(),
+                        vel_len,
+                        can_create,
                     });
                 }
             }
