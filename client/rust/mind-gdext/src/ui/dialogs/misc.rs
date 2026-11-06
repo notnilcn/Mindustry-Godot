@@ -28,6 +28,31 @@ fn variant_text(value: &Variant) -> String {
     String::new()
 }
 
+/// `Planet.localizedName` (`planet.<name>.name`) for the completion banner.
+fn planet_localized(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+    let key = format!("planet.{name}.name");
+    let localized = kit::t(&format!("@{key}")).to_string();
+    if localized.is_empty() || localized == key {
+        name.to_string()
+    } else {
+        localized
+    }
+}
+
+/// Reads a JSON-derived number as an integer (JSON numbers are `FLOAT`).
+fn variant_i64(value: &Variant) -> i64 {
+    if let Ok(integer) = value.try_to::<i64>() {
+        return integer;
+    }
+    value
+        .try_to::<f64>()
+        .map(|number| number as i64)
+        .unwrap_or(0)
+}
+
 /// The dialog controllers in this batch.
 pub fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
     match id {
@@ -336,18 +361,22 @@ impl DialogController for CampaignCompleteDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.should_pause = true;
         self.table = Some(dialog.content_table());
-        dialog.add_close_button(210.0);
+        // `CampaignCompleteDialog.java:20-28`: `@menu` then `@continue`, both
+        // 210x64, and no visible back button (`addCloseListener` only listens
+        // for Escape/back).
         if let Some(mut row) = dialog.buttons_row() {
-            let mut continue_button = factory::button(&kit::t("@continue").to_string());
-            let callable = dialog.to_gd().callable("hide_dialog");
-            continue_button.connect("pressed", &callable);
-            row.add_child(&continue_button);
             let mut menu = factory::button(&kit::t("@menu").to_string());
+            menu.set_custom_minimum_size(Vector2::new(210.0, 64.0));
             let callable = Callable::from_fn("exit_to_menu", |_args: &[&Variant]| {
                 exit_to_menu();
             });
             menu.connect("pressed", &callable);
             row.add_child(&menu);
+            let mut continue_button = factory::button(&kit::t("@continue").to_string());
+            continue_button.set_custom_minimum_size(Vector2::new(210.0, 64.0));
+            let callable = dialog.to_gd().callable("hide_dialog");
+            continue_button.connect("pressed", &callable);
+            row.add_child(&continue_button);
         }
     }
 
@@ -378,6 +407,10 @@ impl DialogController for CampaignCompleteDialog {
             .or_else(|| view.get("planet"))
             .map(|value| value.to::<GString>())
             .unwrap_or_default();
+        // `Planet.localizedName` (`planet.<name>.name`): the campaign read
+        // model falls back to the raw content name when the registry's bundle
+        // is the empty memory bundle, so resolve the live bundle here.
+        let planet = planet_localized(&planet.to_string());
         let color = view
             .get("color")
             .map(|value| value.to::<GString>())
@@ -393,9 +426,12 @@ impl DialogController for CampaignCompleteDialog {
         rich(&message).set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
         table.bind_mut().add(&message).grow_x().pad(8.0);
         table.bind_mut().row();
+        // The campaign read models carry JSON numbers, which are FLOAT
+        // variants: `to::<i64>()` panics on the type mismatch and aborted the
+        // build before the playtime row (`CampaignCompleteDialog.java:37-40`).
         let playtime = view
             .get("playtime_ms")
-            .map(|value| value.to::<i64>())
+            .map(|value| variant_i64(&value))
             .unwrap_or(0);
         if playtime > 0 {
             let time = MindDialog::format_time_ms(playtime);

@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T07:47:03Z",
+  "updated": "2026-11-06T08:57:09Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -628,6 +628,113 @@
       "repro": "cargo test -p mind-gdext core_items_json",
       "expected": "2 core_items_json tests pass; HUD JSON is the player team's first core (empty when that team has no core)",
       "risk": "core_items_json now team-filtered; check HUD core display on attack/two-team maps and the campaign research seam that shares the core-item read path",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-083016",
+      "created_at": "2026-11-06T08:30:16Z",
+      "agent": "camp-globe",
+      "branch": "main",
+      "head": "ac61b268",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 6,
+      "area": "client/rust/mind-core/src/ui,client/rust/mind-gdext/src/ui",
+      "summary": "Campaign globe: played-sector attacked flag (PAR-0503) + projection arcs/current-sector fill (PAR-0493)",
+      "files": [
+        "client/rust/mind-core/src/ui/campaign.rs",
+        "client/rust/mind-gdext/src/ui/planet.rs",
+        "client/rust/mind-gdext/src/campaign.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib ui::campaign",
+      "expected": "25 ui::campaign tests pass (incl. globe_arc_sector_views and played_sector_attack_flag_uses_live_rules); tools/build.sh clean; in-engine twin pair shows Under attack!/Threat: Low and the current-sector fill",
+      "risk": "CampaignViews::from_campaign gained a playing_rules parameter (all call sites updated); SectorView gained five serialized fields (append-only); planet.rs adds a per-frame SectorArcs mesh rebuild - watch the planet page frame rate under llvmpipe",
+      "notes": "Twin evidence: runs/PAR-0503/20261106-182924-run.md (93.0), runs/PAR-0493/20261106-182940-run.md (58.2).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-084532",
+      "created_at": "2026-11-06T08:45:32Z",
+      "agent": "camp-globe",
+      "branch": "main",
+      "head": "ac61b268",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 9,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Campaign globe arcs: Godot-free arc_ribbon Bezier helper + unit test (PAR-0493)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/planet.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-gdext --lib arc_ribbon",
+      "expected": "1 passed: arc_ribbon_walks_the_bezier (25 strips x 6 vertices, shell endpoints, midpoint lift, gradient phase, antipodal guard)",
+      "risk": "mind-gdext unit tests cannot call Godot builtins (Color::lerp panics on the FFI); keep arc_ribbon on plain [f32;N] arrays and convert at the append_arc call site",
+      "notes": "Companion to CP-20261106-083016; the arc mesh path itself is only code-verified (no reachable vanilla state in the session).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-085709",
+      "created_at": "2026-11-06T08:57:09Z",
+      "agent": "camp-loadout",
+      "branch": "main",
+      "head": "ac61b268",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 13,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Fix Configure Loadout resource-editor round-trip + launch carry (PAR-0488)",
+      "files": [
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "ui-widgets-check",
+        "dialog-sweep"
+      ],
+      "repro": "cargo clippy -p mind-gdext --all-targets -- -D warnings; in-engine LaunchLoadoutDialog @resources -> + -> MindCampaign.get_launch_resource_stacks",
+      "expected": "295/700 -> 395/700 and parent rows 1295/1395 (395 + 1000); launch carries 295/700 into sector 64",
+      "risk": "Variant INT/FLOAT parsing, seed zeroing, launch-confirm re-entrancy (close before page bind)",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-085709-2",
+      "created_at": "2026-11-06T08:57:09Z",
+      "agent": "camp-loadout",
+      "branch": "main",
+      "head": "ac61b268",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 13,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Campaign-complete overlay 2 s after MindCampaign.campaign_complete (PAR-0491)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/root.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/misc.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "ui-widgets-check",
+        "dialog-sweep"
+      ],
+      "repro": "emit MindCampaign.campaign_complete; 2 s later campaign_complete.is_shown()",
+      "expected": "overlay shown, planet page closed, banner + playtime + Menu/Continue",
+      "risk": "root.rs signal wiring + one-shot SceneTreeTimer; FLOAT playtime parsing",
       "status": "pending"
     }
   ]

@@ -67,6 +67,12 @@ const CRUX: Color = Color::from_rgba(0.949, 0.333, 0.333, 1.0);
 const DERELICT: Color = Color::from_rgba(0.302, 0.306, 0.345, 1.0);
 /// `PlanetRenderer.shadowColor`.
 const SHADOW: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
+/// `Pal.place` (`Pal.java:85`, `6335f8`) — the export-arc start colour.
+const PLACE: Color = Color::from_rgba(0.388, 0.208, 0.973, 1.0);
+/// Arc `Color.gray` (`Color.java:14`, `7f7f7fff`) — the import-arc start colour.
+const ARC_GRAY: Color = Color::from_rgba(0.498, 0.498, 0.498, 1.0);
+/// `PlanetDialog.java:506-508`: the launch/sector arcs use 25 curve points.
+const ARC_POINTS: i32 = 25;
 
 const PLANET_SHADER: &str = "res://shaders/planet.gdshader";
 const CLOUDS_SHADER: &str = "res://shaders/clouds.gdshader";
@@ -82,6 +88,24 @@ const GRID_PATH: &str = "ViewportContainer/SubViewport/Grid";
 const SELECTION_PATH: &str = "ViewportContainer/SubViewport/Selection";
 const HOVER_PATH: &str = "ViewportContainer/SubViewport/Hover";
 const OUTLINE_PATH: &str = "ViewportContainer/SubViewport/Outline";
+
+/// One `Planet.drawArc`/`Planet.drawArcLine` curve
+/// (`Planet.java:641-690`) between two sector tiles.
+#[derive(Debug, Clone)]
+struct ArcSpec {
+    /// Start/end grid tile indices (`sector.tile.v`).
+    a: i32,
+    b: i32,
+    /// Arc gradient start/end (`Color.lerp` along the curve, animated).
+    from: Color,
+    to: Color,
+    /// Curve height factor (`length`) and colour-cycle period in ticks.
+    length: f32,
+    time_scale: f32,
+    /// Ribbon half-width (`drawArcLine` `stroke`); `0` = the 1 px
+    /// `Gl.lineStrip` variant, rendered as a thin ribbon here.
+    stroke: f32,
+}
 
 /// `PlanetView` — the campaign globe layer.
 #[derive(GodotClass)]
@@ -162,6 +186,12 @@ pub struct MindPlanetView {
     /// Per-sector status layer (`renderSectors` fills/rings +
     /// `renderProjections` icons), rebuilt from the sector rows.
     markers: Option<Gd<Node3D>>,
+    /// `renderOverProjections` arc layer (shield/attack/import/export arcs),
+    /// a single depth-tested mesh re-filled every frame because the arc colour
+    /// phase animates with `Time.globalTime`.
+    arcs: Option<Gd<MeshInstance3D>>,
+    /// Arc geometry resolved from the sector rows in the last marker rebuild.
+    arc_specs: Vec<ArcSpec>,
     sectors: VarArray,
     /// `PlanetRenderer.renderOrbit` loop meshes (one per system planet with a
     /// parent); the shared material's alpha tracks `uiAlpha`.
@@ -215,6 +245,8 @@ impl IControl for MindPlanetView {
             sector_icon_preset: GString::new(),
             sector_icon: None,
             markers: None,
+            arcs: None,
+            arc_specs: Vec::new(),
             sectors: VarArray::new(),
             orbits: None,
             orbit_material: None,
@@ -303,6 +335,11 @@ impl IControl for MindPlanetView {
             self.rebuild_highlight();
         }
         self.global_time += delta * 60.0;
+        // `Planet.drawArc*` cycles the gradient with `Time.globalTime`
+        // (`Planet.java:655,677`); Java redraws the arcs every frame.
+        if !self.arc_specs.is_empty() {
+            self.rebuild_arcs();
+        }
         self.update_clouds();
     }
 }
@@ -1188,7 +1225,169 @@ impl MindPlanetView {
             }
             self.add_icon(sector, tile);
         }
+        // `PlanetDialog.java:481-486`: the sector being played is filled with
+        // `hoverColor` (`Pal.accent` at 50%) at `-0.001f`.
+        let current_fill =
+            Color::from_rgba(ACCENT.r, ACCENT.g, ACCENT.b, faded_alpha(0.5, ui_alpha));
+        for sector in &sectors {
+            if !row_bool(sector, "being_played") {
+                continue;
+            }
+            let tile = self.view_tile(sector.clone());
+            if tile < 0 || tile as usize >= self.tile_corners.len() {
+                continue;
+            }
+            self.append_fill(&mut verts, &mut colors, tile, arad - 0.002, current_fill);
+        }
+        self.arc_specs = self.build_arc_specs(&sectors, ui_alpha);
+        if !verts.is_empty() {
+            let mut arrays = new_arrays();
+            arrays.set(
+                ArrayType::VERTEX.ord() as usize,
+                &PackedVector3Array::from(verts).to_variant(),
+            );
+            arrays.set(
+                ArrayType::COLOR.ord() as usize,
+                &PackedColorArray::from(colors).to_variant(),
+            );
+            let mut mesh = ArrayMesh::new_gd();
+            mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
+            let mut instance = MeshInstance3D::new_alloc();
+            instance.set_mesh(&mesh);
+            let mut fill_material = overlay_material();
+            // Depth-tested so the globe disc hides the far hemisphere.
+            fill_material.set_flag(Flags::DISABLE_DEPTH_TEST, false);
+            fill_material.set_render_priority(5);
+            instance.set_material_override(&fill_material);
+            if let Some(mut markers) = self.markers.clone() {
+                markers.add_child(&instance);
+            }
+        }
+        self.rebuild_arcs();
+    }
+
+    /// `PlanetDialog.renderOverProjections` (`PlanetDialog.java:519-543`): the
+    /// shield arc, the `sectorInvasion` attack arcs and the selected sector's
+    /// import/export arcs, all in the mesh frame the port renders in.
+    fn build_arc_specs(&self, sectors: &[VarDictionary], ui_alpha: f32) -> Vec<ArcSpec> {
+        let mut specs = Vec::new();
+        if ui_alpha <= 0.001 {
+            return specs;
+        }
+        let tile_of = |id: i64| -> Option<i32> {
+            let row = sectors.iter().find(|row| row_i64(row, "id", -1) == id)?;
+            let tile = self.view_tile(row.clone());
+            (tile >= 0).then_some(tile)
+        };
+        let selected_id = sectors
+            .iter()
+            .find(|row| self.view_tile((*row).clone()) == self.selected_tile)
+            .map(|row| row_i64(row, "id", -1))
+            .filter(|id| *id >= 0);
+        let selected_row =
+            selected_id.and_then(|id| sectors.iter().find(|row| row_i64(row, "id", -1) == id));
+        let selected_has_base = selected_row.is_some_and(|row| row_bool(row, "has_base"));
+        let selected_destination =
+            selected_row.and_then(|row| row_opt_i64(row, "export_destination"));
+        let selected_exports = selected_row.is_some_and(|row| row_bool(row, "any_exports"));
+        for row in sectors {
+            let id = row_i64(row, "id", -1);
+            let Some(tile) = tile_of(id) else {
+                continue;
+            };
+            // `PlanetDialog.java:519-521`: `Team.crux.color` fading to half
+            // alpha, height 0.3, 110-tick cycle, stroke 0.006.
+            if let Some(target) = row_opt_i64(row, "shield_arc")
+                && let Some(target_tile) = tile_of(target)
+            {
+                specs.push(ArcSpec {
+                    a: tile,
+                    b: target_tile,
+                    from: with_alpha(CRUX, ui_alpha),
+                    to: with_alpha(CRUX, ui_alpha * 0.5),
+                    length: 0.3,
+                    time_scale: 110.0,
+                    stroke: 0.006,
+                });
+            }
+            if !row_bool(row, "has_base") {
+                continue;
+            }
+            // `PlanetDialog.java:525-531`: crux to clear, height 0.24, stroke
+            // 0.005.
+            for source in row_i64_array(row, "attack_sources") {
+                let Some(source_tile) = tile_of(source) else {
+                    continue;
+                };
+                specs.push(ArcSpec {
+                    a: source_tile,
+                    b: tile,
+                    from: with_alpha(CRUX, ui_alpha),
+                    to: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+                    length: 0.24,
+                    time_scale: 110.0,
+                    stroke: 0.005,
+                });
+            }
+            // `PlanetDialog.java:534-542`: imports into the selected sector
+            // (`Color.gray` -> accent) and exports from it (`Pal.place` ->
+            // accent), height 0.4, 90-tick cycle.
+            let Some(selected) = selected_id.filter(|selected| *selected != id) else {
+                continue;
+            };
+            if !selected_has_base {
+                continue;
+            }
+            if row_bool(row, "any_exports")
+                && row_opt_i64(row, "export_destination") == Some(selected)
+                && let Some(selected_tile) = tile_of(selected)
+            {
+                specs.push(ArcSpec {
+                    a: tile,
+                    b: selected_tile,
+                    from: with_alpha(ARC_GRAY, ui_alpha),
+                    to: with_alpha(ACCENT, ui_alpha),
+                    length: 0.4,
+                    time_scale: 90.0,
+                    stroke: 0.0,
+                });
+            }
+            if selected_exports
+                && selected_destination == Some(id)
+                && let Some(selected_tile) = tile_of(selected)
+            {
+                specs.push(ArcSpec {
+                    a: selected_tile,
+                    b: tile,
+                    from: with_alpha(PLACE, ui_alpha),
+                    to: with_alpha(ACCENT, ui_alpha),
+                    length: 0.4,
+                    time_scale: 90.0,
+                    stroke: 0.0,
+                });
+            }
+        }
+        specs
+    }
+
+    /// Rebuilds the arc mesh with the current `Time.globalTime` phase
+    /// (`Planet.drawArc*` animates the gradient every frame).
+    fn rebuild_arcs(&mut self) {
+        let Some(mut instance) = self.ensure_arcs() else {
+            return;
+        };
+        if self.arc_specs.is_empty() {
+            instance.set_mesh(Gd::<Mesh>::null_arg());
+            return;
+        }
+        let time = self.global_time as f32;
+        let mut verts: Vec<Vector3> = Vec::new();
+        let mut colors: Vec<Color> = Vec::new();
+        for spec in &self.arc_specs {
+            self.append_arc(&mut verts, &mut colors, spec, time);
+        }
         if verts.is_empty() {
+            instance.set_mesh(Gd::<Mesh>::null_arg());
             return;
         }
         let mut arrays = new_arrays();
@@ -1202,16 +1401,65 @@ impl MindPlanetView {
         );
         let mut mesh = ArrayMesh::new_gd();
         mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
-        let mut instance = MeshInstance3D::new_alloc();
+        let mut material = overlay_material();
+        // Depth-tested so the far hemisphere/behind-the-globe arcs are hidden.
+        material.set_flag(Flags::DISABLE_DEPTH_TEST, false);
+        material.set_render_priority(6);
         instance.set_mesh(&mesh);
-        let mut fill_material = overlay_material();
-        // Depth-tested so the globe disc hides the far hemisphere.
-        fill_material.set_flag(Flags::DISABLE_DEPTH_TEST, false);
-        fill_material.set_render_priority(5);
-        instance.set_material_override(&fill_material);
-        if let Some(mut markers) = self.markers.clone() {
-            markers.add_child(&instance);
+        instance.set_material_override(&material);
+    }
+
+    fn ensure_arcs(&mut self) -> Option<Gd<MeshInstance3D>> {
+        if self.arcs.is_none() {
+            // code-instantiated: one dynamic mesh for the projection arcs.
+            let mut instance = MeshInstance3D::new_alloc();
+            instance.set_name("SectorArcs");
+            if let Some(mut viewport) = self.subviewport() {
+                viewport.add_child(&instance);
+            }
+            self.arcs = Some(instance);
         }
+        self.arcs.clone()
+    }
+
+    /// One quadratic-Bezier ribbon (`Planet.drawArcLine`, `Planet.java:663-690`)
+    /// between two sector tiles; the geometry/colour walk lives in
+    /// [`arc_ribbon`] so it is unit-testable without a Godot instance.
+    fn append_arc(
+        &self,
+        verts: &mut Vec<Vector3>,
+        colors: &mut Vec<Color>,
+        spec: &ArcSpec,
+        time: f32,
+    ) {
+        if spec.a < 0 || spec.b < 0 {
+            return;
+        }
+        let a = self.tile_vec(spec.a).normalized();
+        let b = self.tile_vec(spec.b).normalized();
+        if a.length_squared() < 1e-8 || b.length_squared() < 1e-8 {
+            return;
+        }
+        // The port renders the unit sphere, so `outlineRad * radius` is just
+        // the outline shell radius.
+        let outline = row_f32(&self.data, "outline", 1.17);
+        let (ribbon, rainbow) = arc_ribbon(
+            [a.x, a.y, a.z],
+            [b.x, b.y, b.z],
+            outline,
+            spec.length,
+            spec.time_scale,
+            spec.stroke,
+            [spec.from.r, spec.from.g, spec.from.b, spec.from.a],
+            [spec.to.r, spec.to.g, spec.to.b, spec.to.a],
+            time,
+        );
+        verts.extend(ribbon.iter().map(|v| Vector3::new(v[0], v[1], v[2])));
+        colors.extend(
+            rainbow
+                .iter()
+                .map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])),
+        );
     }
 
     /// `renderSectors` ring color (None = no ring).
@@ -1779,6 +2027,135 @@ fn load_shader(path: &str) -> Option<Gd<Shader>> {
     resource.try_cast::<Shader>().ok()
 }
 
+/// `Planet.drawArcLine`'s ribbon (`Planet.java:663-690`): quadratic Bezier
+/// `[b*r, midpoint, a*r]` with the midpoint height raised by
+/// `1 + length + dot*1.35` in the port's unit-sphere mesh frame, a per-point
+/// colour phase `(f + Time.globalTime / timeScale) % 1`, and a `±stroke`
+/// ribbon. Godot-free (plain arrays) so the walk is unit-testable without an
+/// engine instance and the hot loop never crosses the FFI for `Color::lerp`.
+#[allow(clippy::too_many_arguments)]
+fn arc_ribbon(
+    a: [f32; 3],
+    b: [f32; 3],
+    outline: f32,
+    length: f32,
+    time_scale: f32,
+    stroke: f32,
+    from: [f32; 4],
+    to: [f32; 4],
+    time: f32,
+) -> (Vec<[f32; 3]>, Vec<[f32; 4]>) {
+    let mut verts: Vec<[f32; 3]> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
+    let dot3 = |u: [f32; 3], v: [f32; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let len = |v: [f32; 3]| dot3(v, v).sqrt();
+    let normalize = |v: [f32; 3]| {
+        let l = len(v);
+        if l > 1e-8 {
+            [v[0] / l, v[1] / l, v[2] / l]
+        } else {
+            [0.0, 0.0, 0.0]
+        }
+    };
+    let a = normalize(a);
+    let b = normalize(b);
+    if len(a) < 1e-8 || len(b) < 1e-8 {
+        return (verts, colors);
+    }
+    let dot = 1.0 - (dot3(a, b) + 1.0) * 0.5;
+    let mut avg = [
+        (a[0] + b[0]) * 0.5,
+        (a[1] + b[1]) * 0.5,
+        (a[2] + b[2]) * 0.5,
+    ];
+    if len(avg) < 1e-6 {
+        // Antipodal tiles: Arc's `setLength(0)` yields a degenerate midpoint;
+        // pick any perpendicular so the curve stays defined.
+        let up = [0.0, 1.0, 0.0];
+        avg = [
+            a[1] * up[2] - a[2] * up[1],
+            a[2] * up[0] - a[0] * up[2],
+            a[0] * up[1] - a[1] * up[0],
+        ];
+        if len(avg) < 1e-8 {
+            let right = [1.0, 0.0, 0.0];
+            avg = [
+                a[1] * right[2] - a[2] * right[1],
+                a[2] * right[0] - a[0] * right[2],
+                a[0] * right[1] - a[1] * right[0],
+            ];
+        }
+    }
+    let p0 = [b[0] * outline, b[1] * outline, b[2] * outline];
+    let height = 1.0 + length + dot * 1.35;
+    let mid = normalize(avg);
+    let p1 = [mid[0] * height, mid[1] * height, mid[2] * height];
+    let p2 = [a[0] * outline, a[1] * outline, a[2] * outline];
+    let u = [p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]];
+    let v = [p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]];
+    let normal = normalize([
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ]);
+    if len(normal) < 1e-8 {
+        return (verts, colors);
+    }
+    // `drawArc` is a 1 px `Gl.lineStrip`; render it as a thin ribbon.
+    let stroke = stroke.max(0.0015);
+    let count = ARC_POINTS.max(1);
+    let lerp_color = |f: f32| {
+        let phase = (f + time / time_scale.max(1.0)) % 1.0;
+        [
+            from[0] + (to[0] - from[0]) * phase,
+            from[1] + (to[1] - from[1]) * phase,
+            from[2] + (to[2] - from[2]) * phase,
+            from[3] + (to[3] - from[3]) * phase,
+        ]
+    };
+    let mut prev_top = [0.0, 0.0, 0.0];
+    let mut prev_bottom = [0.0, 0.0, 0.0];
+    let mut prev_color = [0.0, 0.0, 0.0, 0.0];
+    for index in 0..=count {
+        let f = index as f32 / count as f32;
+        let t = 1.0 - f;
+        let point = [
+            p0[0] * (t * t) + p1[0] * (2.0 * t * f) + p2[0] * (f * f),
+            p0[1] * (t * t) + p1[1] * (2.0 * t * f) + p2[1] * (f * f),
+            p0[2] * (t * t) + p1[2] * (2.0 * t * f) + p2[2] * (f * f),
+        ];
+        let color = lerp_color(f);
+        let top = [
+            point[0] + normal[0] * stroke,
+            point[1] + normal[1] * stroke,
+            point[2] + normal[2] * stroke,
+        ];
+        let bottom = [
+            point[0] - normal[0] * stroke,
+            point[1] - normal[1] * stroke,
+            point[2] - normal[2] * stroke,
+        ];
+        if index > 0 {
+            verts.push(prev_top);
+            verts.push(prev_bottom);
+            verts.push(top);
+            colors.push(prev_color);
+            colors.push(prev_color);
+            colors.push(color);
+            verts.push(top);
+            verts.push(prev_bottom);
+            verts.push(bottom);
+            colors.push(color);
+            colors.push(prev_color);
+            colors.push(color);
+        }
+        prev_top = top;
+        prev_bottom = bottom;
+        prev_color = color;
+    }
+    (verts, colors)
+}
+
 /// `PlanetView._overlay_material()`: unshaded vertex-colour alpha overlay.
 fn overlay_material() -> Gd<StandardMaterial3D> {
     let mut overlay = StandardMaterial3D::new_gd();
@@ -1858,6 +2235,24 @@ fn row_i64(row: &VarDictionary, key: &str, default: i64) -> i64 {
     value(row, key)
         .and_then(|value| variant_i64(&value))
         .unwrap_or(default)
+}
+
+/// Optional id field of a read-model row (`null`/missing -> `None`).
+fn row_opt_i64(row: &VarDictionary, key: &str) -> Option<i64> {
+    value(row, key).and_then(|value| variant_i64(&value))
+}
+
+/// Integer-array field of a read-model row (`attack_sources`).
+fn row_i64_array(row: &VarDictionary, key: &str) -> Vec<i64> {
+    row_array(row, key)
+        .iter_shared()
+        .filter_map(|value| variant_i64(&value))
+        .collect()
+}
+
+/// `color` with its alpha replaced (`Color.write().a(alpha)`).
+fn with_alpha(color: Color, alpha: f32) -> Color {
+    Color::from_rgba(color.r, color.g, color.b, alpha.clamp(0.0, 1.0))
 }
 
 fn row_f32(row: &VarDictionary, key: &str, default: f32) -> f32 {
@@ -1940,7 +2335,7 @@ fn faded_alpha(base: f32, ui_alpha: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::faded_alpha;
+    use super::{ARC_POINTS, arc_ribbon, faded_alpha};
 
     /// Java's overlay alphas: `hoverColor = Pal.accent.a(0.5f)` and
     /// `borderColor = Pal.accent.a(0.3f)` (`PlanetRenderer.java:19`), the
@@ -1955,5 +2350,71 @@ mod tests {
         assert_eq!(faded_alpha(1.0, 0.25), 0.25);
         assert_eq!(faded_alpha(1.0, 2.0), 1.0);
         assert_eq!(faded_alpha(1.0, -1.0), 0.0);
+    }
+
+    /// PAR-0493: `Planet.drawArcLine`'s quadratic Bezier ribbon — ARC_POINTS
+    /// strips of 6 vertices, endpoints on the outline shell, the midpoint
+    /// raised by `1 + length + dot*1.35`, and the animated from/to gradient.
+    #[test]
+    fn arc_ribbon_walks_the_bezier() {
+        let from = [1.0, 0.0, 0.0, 1.0];
+        let to = [0.0, 0.0, 1.0, 0.0];
+        let (verts, colors) = arc_ribbon(
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            1.17,
+            0.3,
+            110.0,
+            0.006,
+            from,
+            to,
+            0.0,
+        );
+        assert_eq!(verts.len(), ARC_POINTS as usize * 6);
+        assert_eq!(colors.len(), verts.len());
+        let mean = verts.iter().fold([0.0_f32; 3], |acc, vertex| {
+            [acc[0] + vertex[0], acc[1] + vertex[1], acc[2] + vertex[2]]
+        });
+        let mean = [
+            mean[0] / verts.len() as f32,
+            mean[1] / verts.len() as f32,
+            mean[2] / verts.len() as f32,
+        ];
+        let mean_len = (mean[0] * mean[0] + mean[1] * mean[1] + mean[2] * mean[2]).sqrt();
+        assert!(mean_len > 1.17, "the curve arcs above the outline shell");
+        // a and b are symmetric, so the apex sits along their average direction.
+        assert!(
+            (mean[0] - mean[1]).abs() < 0.05,
+            "the apex lies between a and b"
+        );
+        let max_len = verts
+            .iter()
+            .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_len > 1.17 * 1.15,
+            "the midpoint control point lifts the curve above the shell"
+        );
+        assert_eq!(colors[0], from, "f=0 starts the gradient at `from`");
+        assert!(colors[3][2] > 0.0, "the phase lerps toward the end colour");
+        // Antipodal endpoints keep a finite ribbon (the degenerate-midpoint guard).
+        let (antipodal, antipodal_colors) = arc_ribbon(
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            1.17,
+            0.3,
+            110.0,
+            0.006,
+            from,
+            to,
+            0.0,
+        );
+        assert_eq!(antipodal.len(), ARC_POINTS as usize * 6);
+        assert_eq!(antipodal_colors.len(), antipodal.len());
+        assert!(
+            antipodal
+                .iter()
+                .all(|vertex| vertex.iter().all(|value| value.is_finite()))
+        );
     }
 }

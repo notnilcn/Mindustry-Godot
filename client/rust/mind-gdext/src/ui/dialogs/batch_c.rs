@@ -114,13 +114,20 @@ fn row_i64_or(row: &VarDictionary, key: &str, default: i64) -> i64 {
     else {
         return default;
     };
+    variant_i64(&value)
+}
+
+/// Reads a JSON-derived number as an integer: `JSON.parse_string` yields
+/// `Variant::FLOAT` for every number, and `try_to` only converts an exact type
+/// match, so a bare `try_to::<i64>` silently zeroes launch amounts (PAR-0488).
+fn variant_i64(value: &Variant) -> i64 {
     if let Ok(integer) = value.try_to::<i64>() {
         return integer;
     }
     value
         .try_to::<f64>()
-        .map(|value| value as i64)
-        .unwrap_or(default)
+        .map(|number| number as i64)
+        .unwrap_or(0)
 }
 
 /// Reads a JSON float field (`0.0` when missing).
@@ -2699,12 +2706,16 @@ fn planet_open_launch_loadout(
             .first()
             .and_then(|value| value.try_to::<i64>().ok())
             .unwrap_or(-1);
-        let mut bound = target.clone();
-        let mut bound = bound.bind_mut();
+        // Close the launch dialog BEFORE binding the page: `close_dialog`
+        // reveals the new stack top and calls its `is_shown`, which re-enters
+        // this same `MindDialog` and panics with `bind() failed, already bound`
+        // when the page is already borrowed (PAR-0488).
         let _ = ui_call(
             "close_dialog",
             &[GString::from("launch_loadout").to_variant()],
         );
+        let mut bound = target.clone();
+        let mut bound = bound.bind_mut();
         let mut st = state_for_choice.borrow_mut();
         let planet = st.selected_planet.clone();
         let sector = st.selected_sector;
@@ -2766,10 +2777,7 @@ fn planet_loadout_launch_stacks(
             .and_then(|value| value.try_to::<GString>().ok())
             .map(|value| value.to_string())
             .unwrap_or_default();
-        let amount = values
-            .next()
-            .and_then(|value| value.try_to::<i64>().ok())
-            .unwrap_or(0);
+        let amount = values.next().map(|value| variant_i64(&value)).unwrap_or(0);
         add(&item, amount, &mut totals);
     }
     for key in resources.keys_array().iter_shared() {
@@ -2779,7 +2787,7 @@ fn planet_loadout_launch_stacks(
             .unwrap_or_default();
         let amount = resources
             .get(item.as_str())
-            .and_then(|value| value.try_to::<i64>().ok())
+            .map(|value| variant_i64(&value))
             .unwrap_or(0);
         add(&item, amount, &mut totals);
     }
@@ -3020,7 +3028,7 @@ fn planet_dict_totals(dict: &VarDictionary) -> Vec<(String, i64)> {
             .unwrap_or_default();
         let amount = dict
             .get(item.as_str())
-            .and_then(|value| value.try_to::<i64>().ok())
+            .map(|value| variant_i64(&value))
             .unwrap_or(0);
         out.push((item, amount));
     }

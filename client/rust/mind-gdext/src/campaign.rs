@@ -13,7 +13,7 @@
 //! single-editor mutex; this class compiles and exposes the API surface today.
 
 use godot::builtin::{
-    PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, Vector3,
+    PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, VariantType, Vector3,
 };
 use godot::classes::notify::NodeNotification;
 use godot::classes::{FileAccess, INode, Node, ProjectSettings, Texture2D, Time};
@@ -3347,6 +3347,17 @@ impl MindCampaign {
         } else {
             self.session.sector
         };
+        // `Sector.isAttacked()`/`isCaptured()` read the live rules while the
+        // sector is being played (`Sector.java:129-131,181-184`), so the panel
+        // shows `Under attack!` and the stats dialog its `Threat:` row
+        // (PAR-0503). `gameOver` clears the "being played" state in Java too.
+        let playing_rules = if self.session.game_over {
+            None
+        } else {
+            self.session
+                .sector
+                .map(|_| (self.session.rules.waves, self.session.rules.attack_mode))
+        };
         // `loadout_of` reads the preset map header for the disallowed-loadout
         // branch, filtered to the destination planet's items.
         let loadout_of = |sector_id: u16| -> Vec<(String, i32)> {
@@ -3369,6 +3380,7 @@ impl MindCampaign {
             // No cheap core-size seam for the being-played `allowNumberedLaunch`
             // clause (G05 T3 deviation; `0` = unknown).
             0,
+            playing_rules,
             &loadout_of,
         );
         // T10: `SaveSlot.getPlayTime` (`Saves.java:385-386`) — the stats dialog
@@ -5368,10 +5380,14 @@ impl MindCampaign {
                 let Ok(name) = key.try_to::<GString>() else {
                     continue;
                 };
+                // The editor stores amounts as GDScript `int` variants
+                // (`amount.to_variant()`); a numeric read must accept INT as
+                // well as FLOAT, because `try_to::<f64>` rejects INT and
+                // silently zeroed every edited amount (PAR-0488).
                 let amount = amounts
                     .get(&key)
-                    .and_then(|value| value.try_to::<f64>().ok())
-                    .unwrap_or(0.0) as i64;
+                    .map(|value| variant_amount(&value))
+                    .unwrap_or(0);
                 amounts_by_name.push((name.to_string(), amount));
             }
             mind_core::ui::campaign::launch_resource_sequence(registry, &amounts_by_name)
@@ -6534,6 +6550,19 @@ fn sector_toast_name(
         return preset.clone();
     }
     format!("{planet_name}-{id}")
+}
+
+/// Reads a numeric `Variant` as an integer (`LoadoutDialog`'s amounts are
+/// GDScript `int`s; JSON-derived values are `float`s).
+fn variant_amount(value: &Variant) -> i64 {
+    match value.get_type() {
+        VariantType::INT => value.try_to::<i64>().unwrap_or_default(),
+        VariantType::FLOAT => value
+            .try_to::<f64>()
+            .map(|number| number as i64)
+            .unwrap_or_default(),
+        _ => 0,
+    }
 }
 
 /// Parses a launch-loadout payload: the dialog envelope

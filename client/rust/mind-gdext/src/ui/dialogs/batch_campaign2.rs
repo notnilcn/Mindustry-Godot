@@ -2552,47 +2552,24 @@ impl DialogController for LoadoutDialog {
 }
 
 /// Seeds the editor from the live launch resources, unioned with every loadout
-/// requirement item so all items can be stepped at least once.
+/// requirement item at zero so all relevant items can be stepped at least once.
+///
+/// `LoadoutDialog.reseed` (`LoadoutDialog.java:125-129`) copies the live
+/// launch-resource stacks and appends every remaining planet item at 0 — never
+/// the schematic requirement amounts (PAR-0488).
 fn loadout_seed(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
     let mut seed_amounts = VarDictionary::new();
     // `Universe.getLaunchResources()`: read the name-keyed stacks endpoint.
     // `get_launch_resources` returns the dense `PackedInt32Array`, which
     // `campaign_json`'s GString cast cannot parse (PAR-0488).
     let live = dialog.campaign_json("get_launch_resource_stacks", &[]);
-    let index = {
-        let st = state.borrow();
-        st.index
-    };
-    if !live.is_empty() {
-        for item in live.keys_array().iter_shared() {
-            let name = text_of(&item);
-            let amount = live
-                .get(&gs(name.as_str()))
-                .map(|value| int_of(&value))
-                .unwrap_or(0);
-            seed_amounts.set(&gs(name.as_str()), &amount.to_variant());
-        }
-    } else {
-        for loadout in dialog.campaign_section("loadouts").iter_shared() {
-            let Ok(loadout) = loadout.try_to::<VarDictionary>() else {
-                continue;
-            };
-            if index >= 0 && row_i64_or(&loadout, "index", -1) != index {
-                continue;
-            }
-            for requirement in row_arr(&loadout, "requirements").iter_shared() {
-                let Ok(requirement) = requirement.try_to::<VarArray>() else {
-                    continue;
-                };
-                let mut values = requirement.iter_shared();
-                let item = values
-                    .next()
-                    .map(|value| text_of(&value))
-                    .unwrap_or_default();
-                let amount = values.next().map(|value| int_of(&value)).unwrap_or(0);
-                seed_amounts.set(&gs(item), &amount.to_variant());
-            }
-        }
+    for item in live.keys_array().iter_shared() {
+        let name = text_of(&item);
+        let amount = live
+            .get(&gs(name.as_str()))
+            .map(|value| int_of(&value))
+            .unwrap_or(0);
+        seed_amounts.set(&gs(name.as_str()), &amount.to_variant());
     }
     for loadout in dialog.campaign_section("loadouts").iter_shared() {
         let Ok(loadout) = loadout.try_to::<VarDictionary>() else {
@@ -2816,9 +2793,23 @@ fn loadout_max_items(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>)
     loadout_rebuild(dialog, state);
 }
 
-/// `LoadoutDialog.@settings.reset`: re-seed from the live state.
+/// `LoadoutDialog.@settings.reset` (`LoadoutDialog.java:56-60`):
+/// `resetter.run()` clears the launch resources
+/// (`LaunchLoadoutDialog.java:138` passes `out::clear`), then `reseed()`
+/// rebuilds the rows at zero.
 fn loadout_reset(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
-    loadout_seed(dialog, state);
+    {
+        let mut st = state.borrow_mut();
+        let keys: Vec<String> = st
+            .amounts
+            .keys_array()
+            .iter_shared()
+            .map(|value| text_of(&value))
+            .collect();
+        for item in keys {
+            st.amounts.set(&gs(item.as_str()), &0i64.to_variant());
+        }
+    }
     loadout_apply(dialog, state);
     loadout_rebuild(dialog, state);
 }

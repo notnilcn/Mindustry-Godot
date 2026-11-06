@@ -56,6 +56,10 @@ const TOAST_SLOT_MS: f64 = 3500.0;
 /// `FadeInFragment.start` default duration (the former GDScript default).
 const BOOT_FADE_SECONDS: f64 = 0.5;
 
+/// `Control.java:177` `Time.run(60f * 2f, ...)`: 120 ticks at 60 Hz before the
+/// campaign-complete overlay opens.
+const CAMPAIGN_COMPLETE_DELAY_SECONDS: f64 = 2.0;
+
 thread_local! {
     /// Buttons that entered the tree while a `MindUiRoot` method was already
     /// bound, waiting for the next `process` drain (`UI.java:146` click sound).
@@ -250,6 +254,7 @@ impl IControl for MindUiRoot {
         self.bind_manifest();
         self.connect_prompts();
         self.connect_net();
+        self.connect_campaign();
         self.apply_ui_scale();
         self.boot();
         self.check_uiscale_changed();
@@ -1270,6 +1275,47 @@ impl MindUiRoot {
         connect_if(&mut join_dialog, "connect_requested", &connect);
         let join = self.base().callable("on_join_requested");
         connect_if(&mut join_dialog, "join_requested", &join);
+    }
+
+    /// Wires the campaign victory signal (`Control.java:175-181`): a first
+    /// final-sector capture opens the campaign-complete overlay two seconds
+    /// later, whether or not the planet page is open (PAR-0491).
+    fn connect_campaign(&mut self) {
+        let Some(campaign) = self.campaign.clone() else {
+            return;
+        };
+        let mut campaign: Gd<Node> = campaign.upcast();
+        let callable = self.base().callable("on_campaign_complete");
+        connect_if(&mut campaign, "campaign_complete", &callable);
+    }
+
+    /// `SectorCaptureEvent` -> `Time.run(60 * 2, ...)`: one-shot timer, never a
+    /// per-frame poll. `MindCampaign` emits `campaign_complete` from inside its
+    /// own `process` pump, so the dialog itself must open outside that borrow.
+    #[func]
+    fn on_campaign_complete(&mut self) {
+        let mut tree = self.base().get_tree();
+        let callable = self.base().callable("open_campaign_complete_now");
+        let mut timer = tree.create_timer(CAMPAIGN_COMPLETE_DELAY_SECONDS);
+        let _ = timer.connect("timeout", &callable);
+    }
+
+    /// `ui.campaignComplete.show(e.sector.planet)`: close the planet page when
+    /// it is open, then open the modal. `CampaignCompleteDialog` resolves the
+    /// planet/playtime view from the live campaign for an empty context.
+    #[func]
+    fn open_campaign_complete_now(&mut self) {
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        let _ = ui.call("close_dialog", &[GString::from("planet").to_variant()]);
+        let _ = ui.call(
+            "open_dialog",
+            &[
+                GString::from("campaign_complete").to_variant(),
+                GString::new().to_variant(),
+            ],
+        );
     }
 
     /// Installs the global click-sound hook (`UI.java:146`) on every

@@ -41,9 +41,9 @@ or an ordering-dependent inference).
 | 7 | Authored sector weather is overwritten on every fresh landing | **P1** | **REFUTED** — Java overwrites it too, PAR-0482 |
 | 8 | Core + adjacent container/vault is not one item pool; unloader layouts dead-end | **P1** | **FIXED** — verified in-engine, PAR-0484 (Java leg blocked) |
 | 9 | `SectorInfo.resources` is never computed (sector panel/core info rows empty) | **P2** | **FIXED** — twin-verified, PAR-0501 |
-| 10 | Configure Loadout manual resource editor is inert; launch cost priced from the wrong loadout list | **P1** | code-confirmed |
+| 10 | Configure Loadout manual resource editor is inert; launch cost priced from the wrong loadout list | **P1** | **PARTIAL** — loadout editor fixed (twin, PAR-0488); launch cost open (PAR-0489) |
 | 11 | Planet page "Resume" reloads the sector from disk instead of resuming the live world | **P1** | **FIXED** — twin-verified, PAR-0490 |
-| 12 | Campaign-complete overlay never appears at capture time | **P1** | code-confirmed |
+| 12 | Campaign-complete overlay never appears at capture time | **P1** | **FIXED** — twin-verified, PAR-0491 |
 | 13 | Timer objectives print ticks as `mm:ss` and never count down | **P1** | **FIXED** — in-engine verified, PAR-0492 (Java leg blocked) |
 | 14 | Core-items HUD/state read the first core in entity order, not the player's core | **P1** | **FIXED** — verified in-engine, PAR-0485 (Java leg blocked) |
 | 15 | A crash/unclean exit resumes with an empty core and wave 1 (sector record written only at autosave/quit) | **P1** | **FIXED** — twin-verified, PAR-0486 |
@@ -465,7 +465,7 @@ dependency-objective behaviour.
   `up/ui/dialogs/LoadoutDialog.java:76-83`.
 - **Verification.** Edit copper +10 in the resource editor, close; read
   `MindCampaign.get_launch_resources()` — unchanged in Godot.
-- **Status.** **Partially fixed at HEAD (2026-11-06) — editor wiring landed, not yet twin-verified (`PAR-0488` remains `seeded`).** `loadout_seed` now reads `get_launch_resource_stacks` instead of the `PackedInt32Array` that `campaign_json`'s `GString` cast cannot parse; a `set_launch_resources` facade + `launch_resource_sequence` helper/test landed; and `LaunchLoadoutDialog::shown` connects `loadout_changed` to rebuild the parent's rows/total. The in-engine edit→close→launch round trip still needs a paired verification.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0488` (similarity 84.1).** Five defects landed: `set_launch_resources` now accepts GDScript `int`/`float` amounts (was `try_to::<f64>` → all-zero), `loadout_seed` seeds the live stacks + zero union instead of requirement amounts, `loadout_reset` clears (Java `out::clear`), the launch path no longer zeroes JSON `FLOAT` amounts (`variant_i64`), and `planet_loadout_chosen` closes the launch dialog **before** binding the planet page (a `close_dialog → reveal_top → is_shown` re-entrancy panic aborted the real Launch click). Editor 295/700 → `+` copper → stacks `{copper:395,lead:700}`, parent rows 1295/1395 and 1500; Launch carries 295/700 into sector 64. Both clients recorded. See `runs/PAR-0488/`.
 
 ### CG-TECH-02 — Launch cost is priced from the planet's default-core loadout list — **P1**
 - **Symptom.** Once the launcher's best core is foundation/nucleus, the picker
@@ -566,7 +566,7 @@ dependency-objective behaviour.
 - **Verification.** Planet page with a base and a neighbouring enemy base: Java
   draws the red arc + gold current-sector fill; Godot draws none
   (`/root/Spine/Planet/PlanetView/SectorMarkers` has no arc child).
-- **Status.** Code-confirmed.
+- **Status.** **Partially fixed at HEAD (2026-11-06) — in-engine verified on Godot (`PAR-0493`, similarity 58.2); arcs code+unit-test verified only.** `SectorView` now exposes `being_played`, `shield_arc`, `attack_sources`, `export_destination`, `any_exports` (Java `allowLanding`/`allowNumberedLaunch` gates ported); `gx/ui/planet.rs` gained the `arc_ribbon`/`SectorArcs` arc primitive (Godot-free Bezier walk, depth-tested mesh, `globalTime` gradient), `build_arc_specs` for shield/attack/import/export selection, and the current-sector accent fill. Both clients fill the played Ground Zero cell (the recorded pair). The arcs themselves could not be visually staged on this host (the shield gate needs a size-≥4 core beside 246/244/242, `sectorInvasion` produced no `attack_sources`, and the launch core is size 3), so the ledger item is `verified`, not `twin-verified`. See `runs/PAR-0493/`.
 
 ### CG-UI-03 — Hovering an unlandable sector shows no reason — **P1**
 - **Symptom.** Hovering a locked numbered sector shows nothing; Java shows
@@ -598,7 +598,7 @@ dependency-objective behaviour.
   + slide/fade-in).
 - **Verification.** Capture the final sector; Godot shows nothing until the
   planet page is opened.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0491` (similarity 81.4).** `MindUiRoot::ready` connects `MindCampaign.campaign_complete`; the receiver schedules a one-shot `SceneTreeTimer` (2.0 s = Java `Time.run(120)`), closes the planet page if open, and opens `campaign_complete`. The dialog also gained the missing playtime row (JSON `FLOAT` was panicking in `to::<i64>()`), live bundle planet naming, and Java's `@menu`/`@continue` button row. Evidence: emit at the menu → overlay shown 2.7 s later; the Java real path (`Vars.logic.sectorCapture` on sector 217) shows the same overlay. See `runs/PAR-0491/`.
 
 ### CG-UI-05 — Loss on Normal never offers the difficulty guide — **P2**
 - `gx/ui/dialogs/batch_b.rs:1308` (`continue_pressed`) only closes the game-over
@@ -1002,12 +1002,12 @@ chains; `seeded` items carry the code evidence and a `source` anchor back here.
 |---|---|---|---|---|---|
 | CG-TUT-01 | PAR-0477 | twin-verified | CG-SAVE-01 | PAR-0486 | twin-verified |
 | CG-TUT-02 | PAR-0478 | twin-verified | CG-SAVE-02 | PAR-0487 | twin-verified |
-| CG-TUT-03 | PAR-0479 | twin-verified | CG-TECH-01 | PAR-0488 | seeded |
+| CG-TUT-03 | PAR-0479 | twin-verified | CG-TECH-01 | PAR-0488 | twin-verified |
 | CG-SECTOR-01 | PAR-0480 | twin-verified | CG-TECH-02 | PAR-0489 | seeded |
 | CG-SECTOR-02 | PAR-0481 | verified | CG-UI-01 | PAR-0490 | twin-verified |
-| CG-GEN-05 | PAR-0482 | verified (refuted) | CG-UI-04 | PAR-0491 | seeded |
+| CG-GEN-05 | PAR-0482 | verified (refuted) | CG-UI-04 | PAR-0491 | twin-verified |
 | CG-GEN-01 | PAR-0483 | twin-verified | CG-TUT-04 | PAR-0492 | verified |
-| CG-ECON-01 | PAR-0484 | verified | CG-UI-02 | PAR-0493 | seeded |
+| CG-ECON-01 | PAR-0484 | verified | CG-UI-02 | PAR-0493 | verified |
 | CG-ECON-02 | PAR-0485 | verified | CG-UI-03 | PAR-0494 | twin-verified |
 
 The other findings in §3–§9 remain doc-only (they need a Java leg or a deeper
@@ -1019,9 +1019,10 @@ save state to verify) and are the natural next batch for the twin queue.
 
 ## 13. Fix pass — 2026-11-06
 
-A fix pass ran after the survey and the first runtime verification. Every fixed
-item below has fresh Godot + Java frames and a canonical AVIF pair under
-`parity/twin/<PAR>/`; the ledger status lives in `TWIN-VERIFICATION.json` and the
+A fix pass ran after the survey and the first runtime verification. Every
+twin-verified item below has fresh Godot + Java frames and a canonical AVIF pair
+under `parity/twin/<PAR>/`; `verified` rows say in the Status column which leg
+was unreachable. The ledger status lives in `TWIN-VERIFICATION.json` and the
 full recipes in `runs/<PAR>/`.
 
 | CG | Twin item | Status | Fix | Evidence |
@@ -1047,23 +1048,20 @@ full recipes in `runs/<PAR>/`.
 | CG-UI-07 (P2) | PAR-0502 | twin-verified (57.7; planet-globe delta) | `planet_escape_step` ports Java's reveal-truncate → deselect → hide; first Escape keeps the page, second closes it | `runs/PAR-0502/`, `parity/twin/PAR-0502/` |
 | CG-ECON-01 (P1) | PAR-0484 | verified (Godot; Java custom-game builder blocked) | storage helpers resolve a linked storage through its core, `remove_stack` dispatches to the core, unloader provider/take use them; route-level equivalent of Java's module alias (no ECS alias) | `runs/PAR-0484/` |
 | CG-ECON-02 (P1) | PAR-0485 | verified (Godot; no Java two-core scene) | `core_items_json` filters the player team's core (`comp.team.0 == team`); probe returns the player's 125, not the first crux core's 777 | `runs/PAR-0485/` |
+| CG-TECH-01 (P1) | PAR-0488 | twin-verified (84.1) | five defects: `set_launch_resources` INT/FLOAT amounts, live-stack seed, `loadout_reset` clear, FLOAT-preserving launch totals, and close-before-page-bind re-entrancy; editor round-trips 295/700 → 395/700 and Launch carries it | `runs/PAR-0488/`, `parity/twin/PAR-0488/` |
+| CG-UI-04 (P1) | PAR-0491 | twin-verified (81.4) | `MindUiRoot` connects `campaign_complete` → one-shot 2 s timer → close planet page + open the overlay; dialog playtime/naming/buttons fixed | `runs/PAR-0491/`, `parity/twin/PAR-0491/` |
+| CG-UI-02 (P1) | PAR-0493 | verified (Godot; arcs staged only as code+unit tests — the shield/attack sectors are unreachable on this host) | `SectorView` arc/fill data + `arc_ribbon`/`SectorArcs` primitive + current-sector fill; both clients fill the played GZ cell | `runs/PAR-0493/`, `parity/twin/PAR-0493/` |
+| New: played sector not marked attacked (P2) | PAR-0503 | twin-verified (93.0) | `playing: Option<(bool,bool)>` threaded from the live rules; `attacked`/`captured`/`frozen` use the `is_*_(playing)` variants, so the panel shows `Under attack!` and stats `Threat: Low` | `runs/PAR-0503/`, `parity/twin/PAR-0503/` |
 
-Partial progress this pass: **CG-TECH-01 / PAR-0488** — the launch-loadout editor
-wiring landed (stacks endpoint read, `set_launch_resources` facade,
-`loadout_changed` listener) but the edit→close→launch round trip is not yet
-paired, so the ledger item stays `seeded`.
+Closed after this pass: **PAR-0503**'s `playing` threading also fixes the
+observed `captured=false` while a sector is being played (the old
+`Sector::is_captured(None)` path), recorded as a note on the item.
 
 New bugs recorded while fixing (still open in `TWIN-VERIFICATION.json`):
 
 - **PAR-0495** (P2, mismatch) — a mid-session sector reload leaves the world
   renderer blank until the process restarts (observed while staging PAR-0492;
   not investigated).
-- **PAR-0503** (P2, mismatch) — a played sector with waves is not marked
-  attacked: no `Under attack!` panel row / `Threat:` stats row, because
-  `mc/ui/campaign.rs` passes `None` to `Sector::is_attacked`
-  (`campaign.rs:945,1074,1138`) while Java returns `rules.waves ||
-  rules.attackMode` when `isBeingPlayed()` (`Sector.java:145-151`). Visible in
-  the PAR-0501/0502 pairs.
 - Not filed, pre-existing, noted in PAR-0498: `get_mine_result` never falls back
   to `tile.floor().itemDrop`, so the `playerUnmineable` floor gate is currently
   unobservable in vanilla.
