@@ -5427,3 +5427,33 @@ fn open_effects(
         &[gs("effects").to_variant(), gs("{}").to_variant()],
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_and_sound_fields_have_list_pickers() {
+        // `LStatements.java` `showSelectTable` sites: `playsound` field 1 is the
+        // sound browser, `ubind` field 0 the unit grid (GAPS #46: these are list
+        // pickers, not raw text fields).
+        let flag = [String::from("false")];
+        assert_eq!(picker_kind("playsound", 1, &flag), "sound");
+        assert_eq!(content_picker("ubind", 0), "unit");
+        assert_eq!(content_picker("status", 1), "status");
+        assert_eq!(content_picker("weatherset", 0), "weather");
+        assert_eq!(content_picker("sensor", 2), "sensor");
+        assert_eq!(content_picker("setprop", 0), "prop");
+        // Discriminator-gated pickers stay off for the other variants.
+        assert_eq!(content_picker("setmarker", 2), "layer");
+        assert_eq!(
+            picker_kind("setmarker", 2, &[String::from("drawLayer")]),
+            "layer"
+        );
+        assert_eq!(picker_kind("setmarker", 2, &[String::from("flush")]), "");
+        assert_eq!(content_picker("ulocate", 3), "ore");
+        assert_eq!(picker_kind("ulocate", 3, &[String::from("building")]), "");
+        // A field with no picker renders as a plain styled widget.
+        assert_eq!(content_picker("noop", 0), "");
+    }
+}

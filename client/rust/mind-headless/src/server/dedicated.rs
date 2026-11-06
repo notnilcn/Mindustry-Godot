@@ -13,9 +13,12 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::ServerOptions;
+
+/// File the `serve` shape hands to the boot loop (`<config>/match.json`).
+pub const CONTRACT_FILE: &str = "match.json";
 
 /// Dedicated `serve` options (plan §3.11 CLI contract).
 #[derive(Debug, Clone, Default)]
@@ -67,7 +70,7 @@ impl std::fmt::Display for ServeError {
 impl std::error::Error for ServeError {}
 
 /// Parsed `--match-config` (plan §3.11).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct MatchConfig {
     /// Map content id / name.
@@ -117,6 +120,48 @@ impl MatchConfig {
 /// Parses `--match-config` JSON (unknown fields ignored).
 pub fn parse_match_config(text: &str) -> Result<MatchConfig, String> {
     serde_json::from_str(text).map_err(|error| error.to_string())
+}
+
+/// The `serve` → boot-loop handoff (`<config>/match.json`).
+///
+/// `ServeOptions` is constructed by the CLI, so the match contract (rotation,
+/// seed, auto-pause, SpacetimeDB URI/database) reaches [`super::run`] through
+/// this file instead of a new struct field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ServeContract {
+    /// The dedicated match config.
+    pub match_config: MatchConfig,
+    /// SpacetimeDB URI (`ServeOptions::stdb_host`; empty = local default).
+    pub stdb_host: String,
+    /// SpacetimeDB database (`ServeOptions::db`; empty = local default).
+    pub db: String,
+}
+
+impl ServeContract {
+    /// Builds the contract from the parsed match config + CLI options.
+    pub fn new(match_config: MatchConfig, stdb_host: &str, db: &str) -> Self {
+        Self {
+            match_config,
+            stdb_host: stdb_host.to_owned(),
+            db: db.to_owned(),
+        }
+    }
+}
+
+/// Writes `<config>/match.json` (the `serve` handoff).
+pub fn write_serve_contract(dir: &Path, contract: &ServeContract) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(CONTRACT_FILE);
+    let text = serde_json::to_string_pretty(contract).unwrap_or_default();
+    std::fs::write(&path, text)?;
+    Ok(path)
+}
+
+/// Reads `<config>/match.json`; `None` when `server` was launched directly.
+pub fn load_serve_contract(dir: &Path) -> Option<ServeContract> {
+    let text = std::fs::read_to_string(dir.join(CONTRACT_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 /// Reads a dedicated service token (trimmed, non-empty); never a player token.
@@ -197,12 +242,24 @@ pub fn run(options: ServeOptions) -> i32 {
     )];
     commands.extend(options.commands.iter().cloned());
 
+    let config_dir = if options.config_dir.as_os_str().is_empty() {
+        PathBuf::from("config")
+    } else {
+        options.config_dir
+    };
+    // Hand the match contract (rotation/seed/auto-pause/STDB endpoint) to the
+    // boot loop; `ServeOptions` is CLI-constructed and cannot carry it.
+    let contract = ServeContract::new(match_config.clone(), &options.stdb_host, &options.db);
+    if let Err(error) = write_serve_contract(&config_dir, &contract) {
+        eprintln!(
+            "mind-headless serve: cannot write `{}`: {error}",
+            config_dir.join(CONTRACT_FILE).display()
+        );
+        return 2;
+    }
+
     crate::server::run(ServerOptions {
-        config_dir: if options.config_dir.as_os_str().is_empty() {
-            PathBuf::from("config")
-        } else {
-            options.config_dir
-        },
+        config_dir,
         commands,
         socket_port: None,
         offline: options.offline,
@@ -281,6 +338,37 @@ mod tests {
     }
 
     #[test]
+    fn serve_writes_the_match_contract() {
+        let root = temp("contract");
+        let _ = std::fs::remove_dir_all(&root);
+        let config_path = temp("contract-config.json");
+        std::fs::write(
+            &config_path,
+            r#"{"map_id":"synthetic","map_seed":11,"mode":"survival","auto_pause":true,"map_rotation":["synthetic"]}"#,
+        )
+        .expect("write config");
+        let code = run(ServeOptions {
+            config_dir: root.clone(),
+            stdb_host: "http://127.0.0.1:3999".to_owned(),
+            db: "mindustry-test".to_owned(),
+            offline: true,
+            match_config: Some(config_path.clone()),
+            commands: vec!["exit".to_string()],
+            ..ServeOptions::default()
+        });
+        assert_eq!(code, 0);
+        let contract = load_serve_contract(&root).expect("contract written");
+        assert_eq!(contract.match_config.map_seed, 11);
+        assert!(contract.match_config.auto_pause);
+        assert_eq!(contract.match_config.map_rotation, vec!["synthetic"]);
+        assert_eq!(contract.stdb_host, "http://127.0.0.1:3999");
+        assert_eq!(contract.db, "mindustry-test");
+        assert!(root.join(CONTRACT_FILE).is_file());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&config_path);
+    }
+
+    #[test]
     fn serve_boots_with_exit_command() {
         let root = temp("boot");
         let _ = std::fs::remove_dir_all(&root);
@@ -294,11 +382,34 @@ mod tests {
             config_dir: root.clone(),
             offline: true,
             match_config: Some(config_path.clone()),
-            commands: vec!["exit".to_string()],
+            commands: vec!["status".to_string(), "exit".to_string()],
             ..ServeOptions::default()
         });
         assert_eq!(code, 0);
+        // The contract also drove the boot loop (`serve` → `server`).
+        assert!(root.join(CONTRACT_FILE).is_file());
+        assert!(load_serve_contract(&root).is_some());
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&config_path);
+    }
+
+    #[test]
+    fn contract_roundtrip_and_missing() {
+        let dir = temp("contract-roundtrip");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(load_serve_contract(&dir).is_none(), "missing file ignored");
+        let contract = ServeContract::new(
+            MatchConfig {
+                map_id: "fork".to_owned(),
+                map_rotation: vec!["fork".to_owned(), "caldera".to_owned()],
+                ..MatchConfig::default()
+            },
+            "",
+            "mindustry",
+        );
+        let path = write_serve_contract(&dir, &contract).expect("write");
+        assert_eq!(path, dir.join(CONTRACT_FILE));
+        assert_eq!(load_serve_contract(&dir), Some(contract));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

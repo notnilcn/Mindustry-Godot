@@ -44,6 +44,12 @@ pub struct NetHost {
     player_limit: Option<u16>,
     match_map: Option<String>,
     match_mode: Option<String>,
+    /// `host` created a lobby match; start it as soon as `my_match` arrives
+    /// (`NetServer.openServer` + `startMatch(true)` on a dedicated host).
+    pending_start: bool,
+    /// Live match id from the `my_match` row (`MatchSession.match_id` never
+    /// learns it on the host path: the host observes the row, not `join`).
+    match_id: Option<u64>,
 }
 
 impl std::fmt::Debug for NetHost {
@@ -64,8 +70,19 @@ impl NetHost {
     /// (no boot-time network), call [`NetHost::ensure_connected`] or an admin
     /// operation to open it.
     pub fn new(root: impl Into<PathBuf>, online: bool) -> Self {
+        Self::with_server(root, None, None, online)
+    }
+
+    /// Creates a host against an explicit SpacetimeDB URI/database
+    /// (`ServeOptions::stdb_host`/`db`; `None` keeps the local defaults).
+    pub fn with_server(
+        root: impl Into<PathBuf>,
+        host: Option<String>,
+        db_name: Option<String>,
+        online: bool,
+    ) -> Self {
         let root = root.into();
-        let config = ConnectionConfig {
+        let mut config = ConnectionConfig {
             token_store_path: Some(root.clone()),
             mode: if online {
                 StdbMode::Online
@@ -74,6 +91,12 @@ impl NetHost {
             },
             ..ConnectionConfig::local()
         };
+        if let Some(host) = host.filter(|host| !host.trim().is_empty()) {
+            config.host = host;
+        }
+        if let Some(db) = db_name.filter(|db| !db.trim().is_empty()) {
+            config.db_name = db;
+        }
         let mut connector = Connector::new(config);
         let members = Some(connector.bind::<MyMatchMembersTableAccessor>("my_match_members"));
         let match_binder = Some(connector.bind::<MyMatchTableAccessor>("my_match"));
@@ -89,6 +112,8 @@ impl NetHost {
             player_limit: None,
             match_map: None,
             match_mode: None,
+            pending_start: false,
+            match_id: None,
         }
     }
 
@@ -149,6 +174,33 @@ impl NetHost {
         }
         self.drain_members();
         self.drain_match();
+        self.start_pending_match();
+    }
+
+    /// The live match id observed from `my_match`.
+    pub fn match_id(&self) -> Option<u64> {
+        self.match_id
+    }
+
+    /// Starts the hosted match once the `my_match` row supplies its id
+    /// (`start_match(force = true)`; a dedicated server's world is already up).
+    fn start_pending_match(&mut self) {
+        if !self.pending_start {
+            return;
+        }
+        let Some(match_id) = self.match_id else {
+            return;
+        };
+        match self.connector.start_match(match_id, true) {
+            Ok(()) => {
+                self.pending_start = false;
+                log::info!("STDB match started (playing)");
+            }
+            Err(error) => {
+                log::warn!("could not start the STDB match: {error}");
+                self.pending_start = false;
+            }
+        }
     }
 
     /// Advances the loaded match by `ticks` (host-side fixed-step pump hook).
@@ -159,6 +211,31 @@ impl NetHost {
     /// Live player views (`players`/`status`).
     pub fn players(&self) -> Vec<PlayerView> {
         self.players.values().cloned().collect()
+    }
+
+    /// `NetServer.kickAll(reason)` (`NetServer.java:1096-1100`): kicks every
+    /// connected member and forgets them. Returns the number of kicks sent.
+    pub fn kick_all(&mut self, reason: &str) -> usize {
+        let Some(match_id) = self.match_id else {
+            self.players.clear();
+            return 0;
+        };
+        let targets: Vec<Identity> = self
+            .players
+            .values()
+            .filter(|player| player.connected)
+            .filter_map(|player| Identity::from_hex(&player.identity).ok())
+            .collect();
+        let count = targets.len();
+        if self.online {
+            for identity in targets {
+                if let Err(error) = self.connector.admin_kick(match_id, identity, reason) {
+                    log::warn!("kick_all: {error}");
+                }
+            }
+        }
+        self.players.clear();
+        count
     }
 
     /// The configured player cap, if any.
@@ -263,6 +340,7 @@ impl NetHost {
         let changes = binder.drain();
         for change in changes {
             if let RowChange::Insert(row) | RowChange::Update { new: row, .. } = change {
+                self.match_id = Some(row.match_id);
                 self.match_map = Some(row.map_id.clone());
                 self.match_mode = Some(row.mode_name.clone());
                 self.session.on_match_status(row.status);
@@ -298,26 +376,32 @@ impl HostControl for NetHost {
         self.connector.subscribe_game();
         self.match_map = Some(map.to_owned());
         self.match_mode = Some(mode.to_owned());
+        self.match_id = None;
+        self.pending_start = true;
         Ok(())
     }
 
     fn stop(&mut self) {
-        if self.session.match_id().is_some() {
-            let _ = self.session.leave(&mut self.connector);
+        if let Some(match_id) = self.match_id {
+            let _ = self.connector.leave_match(match_id);
         }
         self.players.clear();
         self.match_map = None;
         self.match_mode = None;
+        self.pending_start = false;
+        self.match_id = None;
+        self.session.reset();
     }
 
     fn status(&self) -> HostStatus {
         HostStatus {
-            hosting: self.session.match_id().is_some(),
+            hosting: self.match_id.is_some(),
             map: self.match_map.clone(),
             mode: self.match_mode.clone(),
             wave: 0,
             tick: 0,
             players: self.players.len(),
+            ..HostStatus::default()
         }
     }
 
@@ -326,8 +410,7 @@ impl HostControl for NetHost {
             return Err(HostError::Net("offline".to_owned()));
         }
         let match_id = self
-            .session
-            .match_id()
+            .match_id
             .ok_or_else(|| HostError::Net("no match is hosted".to_owned()))?;
         self.connector
             .admin_run_wave(match_id, 1)
@@ -346,7 +429,7 @@ impl Admins for NetHost {
                 "`say` requires a live match (plan 21)".to_owned(),
             ));
         }
-        let match_id = self.session.match_id().ok_or(AdminError::NoMatch)?;
+        let match_id = self.match_id.ok_or(AdminError::NoMatch)?;
         self.connector
             .send_chat(match_id, ChatKind::System, message)
             .map_err(|error| AdminError::Connector(error.to_string()))
@@ -358,7 +441,7 @@ impl Admins for NetHost {
                 "`kick` requires a live match (plan 21)".to_owned(),
             ));
         }
-        let match_id = self.session.match_id().ok_or(AdminError::NoMatch)?;
+        let match_id = self.match_id.ok_or(AdminError::NoMatch)?;
         let identity = self.identity_of(target)?;
         self.connector
             .admin_kick(match_id, identity, "Kicked by admin")

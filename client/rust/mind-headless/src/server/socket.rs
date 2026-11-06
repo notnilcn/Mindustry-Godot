@@ -56,7 +56,9 @@ impl CommandSocket {
         };
         match listener.accept() {
             Ok((stream, _)) => {
-                stream.set_nonblocking(false)?;
+                // Non-blocking reads so the dedicated-server frame loop keeps
+                // ticking while the console socket is idle.
+                stream.set_nonblocking(true)?;
                 self.reader = Some(BufReader::new(stream.try_clone()?));
                 self.stream = Some(stream);
                 log::info!("[socket] client connected");

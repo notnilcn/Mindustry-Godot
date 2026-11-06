@@ -264,6 +264,7 @@ impl IControl for MindUiRoot {
 
     fn process(&mut self, delta: f64) {
         self.drain_logic_messages();
+        self.drain_save_failures();
         self.refresh_join_loading();
         self.tick_mod_init_failure();
         self.tick_uiscale(delta);
@@ -771,6 +772,59 @@ impl MindUiRoot {
             &close,
         );
         self.prompt = Some(prompt);
+    }
+
+    /// Polls the sim host's IO responses and shows the `@savefail` prompt for a
+    /// failed save (`ui.showException("[accent]" + Core.bundle.get("savefail"),
+    /// e)`; `PausedDialog.java:211`, `SaveDialog.java:55`,
+    /// `PlanetDialog.java:1391`). Load failures keep their dedicated dialogs.
+    fn drain_save_failures(&mut self) {
+        // A prompt is already up: leave the response queued (taking it here
+        // would drop it) until the prompt closes.
+        if self.prompt.is_some() {
+            return;
+        }
+        let Some(mut host) = kit::sim_host() else {
+            return;
+        };
+        if !host.has_method("take_io_responses_json") {
+            return;
+        }
+        let text = host
+            .call("take_io_responses_json", &[])
+            .try_to::<GString>()
+            .unwrap_or_default()
+            .to_string();
+        if text.is_empty() {
+            return;
+        }
+        let parsed = Json::parse_string(&text);
+        let Ok(rows) = parsed.try_to::<VarArray>() else {
+            return;
+        };
+        for entry in rows.iter_shared() {
+            let Ok(row) = entry.try_to::<VarDictionary>() else {
+                continue;
+            };
+            let field = |key: &str| {
+                row.get(key)
+                    .and_then(|value| value.try_to::<GString>().ok())
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+            };
+            if field("kind") != "save" {
+                continue;
+            }
+            let error = field("error");
+            if error.is_empty() {
+                continue;
+            }
+            let failure = save_failure_markup(&kit::t("@savefail").to_string(), &error);
+            self.on_show_text(kit::t("@error.title"), GString::from(failure.as_str()));
+            // One prompt carries one failure; extra responses would only
+            // overwrite (and leak) the modal just opened.
+            break;
+        }
     }
 
     /// `UI.java:582-606 showConfirm(text, cb)`: `@confirm` title, 500 px wrapped
@@ -2237,6 +2291,16 @@ fn insert_prompt_gap(layout: &mut Gd<VBoxContainer>, index: i32, height: f32) {
     layout.move_child(&gap, index);
 }
 
+/// Body of the `savefail` prompt: `ui.showException` renders
+/// `"[accent]" + Core.bundle.get("savefail")` plus
+/// `"\n[lightgray](" + message + ")"` (`UI.java:518-527`).
+fn save_failure_markup(savefail: &str, error: &str) -> String {
+    if error.is_empty() {
+        return format!("[accent]{savefail}[]");
+    }
+    format!("[accent]{savefail}[]\n[lightgray]({error})")
+}
+
 /// A string field from a manifest entry (empty when absent).
 fn json_string(value: &serde_json::Value, key: &str) -> String {
     value
@@ -2291,6 +2355,22 @@ mod tests {
         push_node_hook(second);
         assert!(take_node_hooks() == vec![first, second]);
         assert!(take_node_hooks().is_empty());
+    }
+
+    #[test]
+    fn save_failure_markup_matches_show_exception() {
+        // `ui.showException("[accent]" + @savefail, e)`: accent body, the final
+        // message in light gray inside parentheses (`UI.java:518-527`).
+        let text = save_failure_markup("Failed to save game!", "disk full");
+        assert_eq!(
+            text,
+            "[accent]Failed to save game![]\n[lightgray](disk full)"
+        );
+        // A message-less failure keeps only the accent body.
+        assert_eq!(
+            save_failure_markup("Failed to save game!", ""),
+            "[accent]Failed to save game![]"
+        );
     }
 
     #[test]

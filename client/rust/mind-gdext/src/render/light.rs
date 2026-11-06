@@ -8,14 +8,15 @@
 //! renderer, `OD16-B`/`D16-3`). Circle accumulation lives in
 //! `mind_core::render::light`; sources come from the G03 T12
 //! `MindSimHost::light_sources` seam (cores, illuminators, static `emitLight`
-//! blocks, units and bullets); this module owns the Godot texture + `light`
-//! shader composite.
+//! blocks and floor/overlay environment lights, units and bullets); this
+//! module owns the Godot texture + `light` shader composite.
 //!
-//! Deviation S16-5: the per-block `lightRadius`/`lightColor` overrides and the
-//! illuminator `brightness`/efficiency factor are not yet in plan 02's
-//! `BlockDef`/`LightState`; the pass uses the Java defaults (`Block.lightRadius`
-//! 60, illuminator `radius * 2.5`, brightness 0.75). Per-block overrides found
-//! in `J/content/Blocks.java` are listed in the T12 commit.
+//! S16-5 residual (PAR-0467 landed the data half): per-block
+//! `lightRadius`/`lightColor` now come from `BlockDef` (Java
+//! `Block.java:344,350` + the class/`Blocks.java` overrides), so the render
+//! pass stamps arbitrary radii/colours. The illuminator `brightness` factor is
+//! still the Java default 0.75 and the custom `drawLight` overrides
+//! (`LandingPad`/`Accelerator`/`NuclearReactor` heat light) are not modelled.
 
 use godot::classes::{Image, ImageTexture, Material, Mesh, MeshInstance2D, Node2D, ShaderMaterial};
 use godot::obj::NewGd;

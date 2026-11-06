@@ -452,6 +452,83 @@ fn building_center(
     (anchor_x, anchor_y)
 }
 
+/// `Block.drawEnvironmentLight` (`Block.java:493-495`):
+/// `Drawf.light(tile.worldx(), tile.worldy(), lightRadius, lightColor,
+/// lightColor.a)` — the per-block environment light from the `BlockDef`
+/// fields (PAR-0467). `x`/`y` are the Java anchor (building centre for a
+/// building, tile centre for a floor).
+fn environment_light(
+    def: &mind_core::content::registries::blocks::BlockDef,
+    x: f32,
+    y: f32,
+) -> LightSource {
+    let color = def.light_color;
+    LightSource {
+        x,
+        y,
+        radius: def.light_radius,
+        color: [color.r, color.g, color.b, color.a],
+        // `drawEnvironmentLight` passes `lightColor.a` as the opacity.
+        opacity: color.a,
+    }
+}
+
+/// `BlockRenderer.java:843-855`: floor/overlay environment lights.
+///
+/// Java emits one light per visible tile whose block does not obstruct light:
+/// the overlay when its floor lets light through, then the floor itself
+/// (`forceDrawLight` is not carried on `BlockDef`; every vanilla floor that
+/// sets it also clears `obstructsLight`, so the plain predicate is
+/// equivalent). The light sits at `Tile.worldx()/worldy()` — the tile centre
+/// in Mindustry's coordinate convention (tile `x` spans
+/// `[x*8 - 4, x*8 + 4)`, `World.toTile` rounds).
+fn floor_light_sources(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    view: &CameraView,
+) -> Vec<LightSource> {
+    let size = mind_core::config::TILESIZE as f32;
+    let grow = size * 2.0;
+    let [bx, by, bw, bh] = view.bounds();
+    let min_x = ((bx - grow) / size).floor().max(0.0) as i32;
+    let min_y = ((by - grow) / size).floor().max(0.0) as i32;
+    let max_x = (((bx + bw + grow) / size).ceil() as i32).min(grid.width() - 1);
+    let max_y = (((by + bh + grow) / size).ceil() as i32).min(grid.height() - 1);
+    let mut out = Vec::new();
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let tile = grid.tile(x, y);
+            // `if(!tile.block().obstructsLight)` — `air` clears the flag
+            // (`AirBlock extends Floor`).
+            if content
+                .block(tile.block)
+                .is_none_or(|block| block.obstructs_light)
+            {
+                continue;
+            }
+            let floor = content.block(tile.floor);
+            let overlay = content.block(tile.overlay);
+            let (lx, ly) = (x as f32 * size, y as f32 * size);
+            // `if(!floor.obstructsLight && overlay.emitLight)`.
+            if let (Some(floor), Some(overlay)) = (floor, overlay)
+                && !floor.obstructs_light
+                && overlay.emit_light
+            {
+                out.push(environment_light(overlay, lx, ly));
+            }
+            // `if(floor.forceDrawLight || (!overlay.obstructsLight &&
+            // floor.emitLight))`.
+            if let Some(floor) = floor
+                && overlay.is_none_or(|overlay| !overlay.obstructs_light)
+                && floor.emit_light
+            {
+                out.push(environment_light(floor, lx, ly));
+            }
+        }
+    }
+    out
+}
+
 /// Per-building draw state (`Door`/`SwitchBlock`/`Sorter`/`ItemSource`/
 /// `Unloader` + cracks/team marks; G03 T8).
 pub struct BlockStateDraw {
@@ -4898,7 +4975,6 @@ impl MindSimHost {
         use mind_core::combat::bullet::Bullet;
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::unit::comp::UnitTypeComp;
-        use mind_core::render::draw_meta::BlockDrawMeta;
         use mind_core::render::drawf::pal;
         use mind_core::world::behavior::light::LightState;
         let Some(content) = self.content_snapshot.as_ref() else {
@@ -4918,15 +4994,31 @@ impl MindSimHost {
             let Some(def) = content.block(tile.block) else {
                 continue;
             };
+            // `BlockRenderer.indexBlock` indexes `tile.isCenter()` only and
+            // `procLights.add(tile.build.pos())` dedupes multiblocks, so a
+            // placed building contributes exactly one light at its centre
+            // (PAR-0467: the covered proxy tiles used to emit shifted copies).
+            if let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build
+                && let Some(building) = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::Building>(entity)
+                && building.tile != TilePos::new(tile.x as i16, tile.y as i16)
+            {
+                continue;
+            }
             let (cx, cy) = building_center(tile.x, tile.y, def);
             match def.kind {
                 BlockKind::CoreBlock => {
-                    // `CoreBlock.java:739-741`: `0.65 + absin(time, 20, 0.1)`.
+                    // `CoreBlock.java:739-741`: `0.65 + absin(time, 20, 0.1)`
+                    // over `Pal.accent` at the block's `lightRadius`
+                    // (`CoreBlock.java:158`, PAR-0467).
                     let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
                     out.push(LightSource {
                         x: cx,
                         y: cy,
-                        radius: 30.0 + 20.0 * def.size as f32,
+                        radius: def.light_radius,
                         color: pal::ACCENT,
                         opacity: 0.65 + mind_core::render::drawf::absin(ticks, 20.0, 0.1),
                     });
@@ -4941,23 +5033,20 @@ impl MindSimHost {
                     out.push(LightSource {
                         x: cx,
                         y: cy,
-                        // `illuminator` radius 140 * 2.5 (per-block radius is
-                        // not in `BlockDef` yet; G03 T12 note).
-                        radius: 350.0 * smooth,
+                        // `LightBlock.java:39,128`: `lightRadius * min(smoothTime,
+                        // 2f)` (`illuminator` 140 * 2.5 = 350, PAR-0467).
+                        radius: def.light_radius * smooth,
                         color: rgba_f32(color),
                         opacity: 0.75,
                     });
                 }
-                _ if BlockDrawMeta::from_def(def).emit_light => out.push(LightSource {
-                    x: cx,
-                    y: cy,
-                    radius: 60.0,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    opacity: 1.0,
-                }),
+                _ if def.emit_light => out.push(environment_light(def, cx, cy)),
                 _ => {}
             }
         }
+        // `BlockRenderer.java:846-855`: floor/overlay environment lights for
+        // tiles whose block does not obstruct light (PAR-0467).
+        out.extend(floor_light_sources(&self.sim.grid, content, &view));
         // Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
         // `Liquid.drawPuddle`; H03 T7).
         let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
@@ -11818,6 +11907,79 @@ mod tests {
             }
             Err(error) => panic!("content boot failed: {error}"),
         }
+    }
+
+    /// PAR-0467: the host's light source reads `BlockDef.light_radius` /
+    /// `light_color` instead of the old hardcoded 60/white
+    /// (`Block.drawEnvironmentLight`, `Block.java:493-495`).
+    #[test]
+    fn block_light_sources_use_the_block_light_fields() {
+        let content = base_registry();
+        let get = |name: &str| {
+            content
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("block {name}"))
+        };
+
+        // `ImpactReactor.java:30`: a placed impact reactor lights at 115.
+        let impact = environment_light(get("impact-reactor"), 100.0, 200.0);
+        assert_eq!((impact.x, impact.y), (100.0, 200.0));
+        assert_eq!(impact.radius, 115.0);
+        assert_eq!(impact.color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(impact.opacity, 1.0, "white alpha");
+
+        // `LandingPad.java:71`: 90 white (`#eab678` is LaunchPad's custom draw
+        // colour, not the environment light).
+        let landing = environment_light(get("landing-pad"), 0.0, 0.0);
+        assert_eq!(landing.radius, 90.0);
+        assert_eq!(landing.color, [1.0, 1.0, 1.0, 1.0]);
+
+        // `Accelerator.java:79-80`: 70 `Pal.accent`.
+        let accelerator = environment_light(get("interplanetary-accelerator"), 0.0, 0.0);
+        assert_eq!(accelerator.radius, 70.0);
+        assert!((accelerator.color[1] - 211.0 / 255.0).abs() < 1e-6);
+        assert!((accelerator.color[2] - 127.0 / 255.0).abs() < 1e-6);
+
+        // `NuclearReactor` keeps the base 60 white environment light.
+        let reactor = environment_light(get("thorium-reactor"), 0.0, 0.0);
+        assert_eq!(reactor.radius, 60.0);
+        assert_eq!(reactor.color, [1.0, 1.0, 1.0, 1.0]);
+
+        // Floor alpha becomes the stamped opacity (`drawEnvironmentLight`
+        // passes `lightColor.a`).
+        let cryo = environment_light(get("pooled-cryofluid"), 0.0, 0.0);
+        assert_eq!(cryo.radius, 25.0);
+        assert!((cryo.opacity - 0.19).abs() < 1e-6);
+    }
+
+    /// PAR-0467: `BlockRenderer.java:846-855` floor/overlay lights from a
+    /// placed floor tile (Java positions them at `Tile.worldx()/worldy()`).
+    #[test]
+    fn floor_light_sources_follow_the_java_table() {
+        let content = base_registry();
+        let mut grid = WorldGrid::new(6, 6);
+        let cryofluid = content.block_id("pooled-cryofluid").expect("cryofluid");
+        grid.tiles.get_mut(2, 3).floor = cryofluid;
+        let view = CameraView {
+            x: 24.0,
+            y: 24.0,
+            w: 48.0,
+            h: 48.0,
+            zoom: 1.0,
+            team: 0,
+        };
+        let lights = floor_light_sources(&grid, &content, &view);
+        assert_eq!(lights.len(), 1, "only the cryofluid tile emits");
+        let light = &lights[0];
+        assert_eq!((light.x, light.y), (16.0, 24.0), "tile centre x*8, y*8");
+        assert_eq!(light.radius, 25.0);
+        assert!((light.opacity - 0.19).abs() < 1e-6);
+        assert!(light.color[0] < 1e-6 && (light.color[1] - 1.0).abs() < 1e-6);
+
+        // A solid block on the tile blocks the floor light (`!obstructsLight`).
+        let wall = content.block_id("copper-wall").expect("wall");
+        grid.tiles.get_mut(2, 3).block = wall;
+        assert!(floor_light_sources(&grid, &content, &view).is_empty());
     }
 
     fn bar_rows(def_name: &str, extras: &BarExtras, content: &ContentRegistry) -> Vec<BarRow> {

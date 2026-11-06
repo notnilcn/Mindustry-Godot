@@ -2240,18 +2240,55 @@ fn keybind_end_capture(overlay: &Gd<Control>) {
 /// `EffectsDialog.EffectCell` edge and grid gap (`EffectsDialog.setup`).
 const EFFECTS_CELL_SIZE: f32 = 280.0;
 const EFFECTS_CELL_GAP: f32 = 12.0;
+/// The shared preview host ticks at 20 Hz (`EffectCell.act` is per frame; the
+/// port re-renders the one hovered effect rather than 35 cell batches).
+const EFFECTS_PREVIEW_TICK_SECONDS: f64 = 0.05;
+/// `EffectCell` respawns when its lifetime elapses; the port re-emits the
+/// hovered effect every 8 ticks (0.4 s).
+const EFFECTS_PREVIEW_RESPAWN_TICKS: u32 = 8;
+/// `EffectCell` scale clamp (`width / calculateSize` explodes for tiny bounds).
+const EFFECTS_PREVIEW_MIN_SCALE: f32 = 0.1;
+const EFFECTS_PREVIEW_MAX_SCALE: f32 = 2.0;
+
+/// The shared live-preview host of the effects dialog.
+///
+/// Java's `EffectsDialog.EffectCell` renders its own effect through
+/// `Core.batch`. The native port has no per-cell batch, so one [`MindFx`] node
+/// is parented over the dialog and plays the hovered cell's `LogicFx` entry
+/// (`EffectCell.draw` + `act`: the effect loops until the pointer leaves). This
+/// is a documented deviation: only the hovered cell animates, not all 35.
+#[derive(Clone)]
+struct EffectsPreview {
+    fx: Gd<crate::fx::MindFx>,
+    /// `(Fx field name, canvas position, scale)` while a cell is hovered.
+    current: Option<(String, Vector2, f32)>,
+    tick: u32,
+}
+
+/// The `Fx` field a `LogicFx` entry plays (`LogicFx.EffectEntry.effect`).
+fn effects_fx_name(effect_name: &str) -> Option<&'static str> {
+    mind_core::logic::fx::get(effect_name)
+        .map(|entry| entry.fx)
+        .filter(|fx| !fx.is_empty())
+}
+
+/// `width / calculateSize(effect)` (`EffectsDialog.java:211`), clamped so a
+/// tiny cached bound cannot blow the preview up past the cell.
+fn effects_preview_scale(bounds: f32) -> f32 {
+    let bounds = if bounds > 0.0 {
+        bounds
+    } else {
+        EFFECTS_CELL_SIZE
+    };
+    (EFFECTS_CELL_SIZE / bounds).clamp(EFFECTS_PREVIEW_MIN_SCALE, EFFECTS_PREVIEW_MAX_SCALE)
+}
 
 /// `ui.effects` — the `LogicFx` picker used by `EffectStatement`.
 ///
-/// A scrolling grid of 280 px cells, each an animated preview over the
-/// effect's `name.token.<name>` label. Selecting a cell emits `effect_selected`
-/// and closes the dialog.
-///
-/// Deviation: the Java `EffectCell` renders the live effect through
-/// `Core.batch` and sizes its cell from `calculateSize(entry)`. The port has no
-/// UI-side effect renderer, so the cell draws Mindustry's animated HSV wash
-/// over the alpha checker and leaves the particle preview to a later
-/// effect-render seam.
+/// A scrolling grid of 280 px cells over the alpha checker with the effect's
+/// `name.token.<name>` label. Hovering a cell plays its `Fx` in a shared
+/// [`MindFx`] preview host; selecting a cell emits `effect_selected` and closes
+/// the dialog.
 #[derive(Default)]
 pub struct EffectsController;
 
@@ -2287,6 +2324,8 @@ fn effects_entries() -> Vec<VarDictionary> {
 /// grid of 280 px cells.
 fn effects_build(dialog: &mut MindDialog) {
     dialog.clear_content();
+    // The shared live-preview host over the cells (`EffectCell.draw`).
+    let preview = effects_preview_host(dialog);
     let width = viewport_width(dialog);
     let columns = ((width / (EFFECTS_CELL_SIZE + EFFECTS_CELL_GAP)) as i32).max(1);
     // code-instantiated: the effect grid is data-driven (`LogicFx.entries()`).
@@ -2313,14 +2352,97 @@ fn effects_build(dialog: &mut MindDialog) {
         return;
     }
     for entry in entries {
-        let cell = effects_cell(dialog, &dict_text(&entry, "name"));
+        let cell = effects_cell(dialog, preview.as_ref(), &dict_text(&entry, "name"));
         grid.add_child(&cell);
     }
 }
 
-/// One `EffectsDialog.EffectCell`: a clickable 280 px stack with the animated
-/// preview and the bottom-left outlined name.
-fn effects_cell(dialog: &mut MindDialog, effect_name: &str) -> Gd<Button> {
+/// The shared [`MindFx`] preview host over the effects dialog.
+///
+/// Java's `EffectCell` renders into its own clipped transform; the port parents
+/// one `MindFx` Node2D over the dialog, moves it to the hovered cell and loops
+/// that cell's effect. Returns `None` when the FX host cannot be built (the
+/// cell keeps its HSV-wash fallback).
+fn effects_preview_host(dialog: &mut MindDialog) -> Option<Rc<RefCell<EffectsPreview>>> {
+    for name in ["EffectPreviewFx", "EffectPreviewTick"] {
+        if let Some(mut old) = dialog.base().get_node_or_null(name) {
+            if let Some(mut parent) = old.get_parent() {
+                parent.remove_child(&old);
+            }
+            old.queue_free();
+        }
+    }
+    let mut fx = crate::fx::MindFx::new_alloc();
+    // Silence the required-camera wiring warning when the game camera exists
+    // (the preview never emits shake events, so it only satisfies the export).
+    let camera = kit::node("/root/Spine/World/Camera2D")
+        .and_then(|node| node.try_cast::<crate::camera::MindCamera2D>().ok());
+    fx.bind_mut().camera = camera;
+    let mut fx_node = fx.clone();
+    fx_node.set_name("EffectPreviewFx");
+    fx_node.set_z_index(100);
+    let preview = Rc::new(RefCell::new(EffectsPreview {
+        fx: fx.clone(),
+        current: None,
+        tick: 0,
+    }));
+    {
+        let mut root: Gd<Control> = dialog.to_gd().upcast();
+        let node: Gd<Node> = fx.upcast();
+        root.add_child(&node);
+    }
+    // code-instantiated: the shared 20 Hz preview ticker (there is one per open
+    // dialog, not one per cell).
+    let mut timer = Timer::new_alloc();
+    timer.set_name("EffectPreviewTick");
+    timer.set_wait_time(EFFECTS_PREVIEW_TICK_SECONDS);
+    timer.set_one_shot(false);
+    timer.set_autostart(true);
+    let preview_for_tick = preview.clone();
+    let dialog_for_tick = dialog.to_gd();
+    let callable = Callable::from_fn("effects_preview_tick", move |_args: &[&Variant]| {
+        if !dialog_for_tick.is_instance_valid() || !dialog_for_tick.is_visible_in_tree() {
+            return Variant::nil();
+        }
+        let mut state = preview_for_tick.borrow_mut();
+        state.tick = state.tick.wrapping_add(1);
+        let Some((fx_name, position, scale)) = state.current.clone() else {
+            // Still advance the pool so the last effect finishes its lifetime.
+            state.fx.clone().bind_mut().tick_view();
+            return Variant::nil();
+        };
+        {
+            let mut fx = state.fx.clone();
+            fx.set_position(position);
+            fx.set_scale(Vector2::splat(scale));
+            fx.bind_mut().tick_view();
+        }
+        if state.tick % EFFECTS_PREVIEW_RESPAWN_TICKS == 0 {
+            state.fx.clone().bind_mut().spawn_effect(
+                GString::from(fx_name.as_str()),
+                0.0,
+                0.0,
+                0.0,
+            );
+        }
+        Variant::nil()
+    });
+    timer.connect("timeout", &callable);
+    {
+        let mut root: Gd<Control> = dialog.to_gd().upcast();
+        let node: Gd<Node> = timer.upcast();
+        root.add_child(&node);
+    }
+    Some(preview)
+}
+
+/// One `EffectsDialog.EffectCell`: a clickable 280 px stack with the preview
+/// and the bottom-left outlined name.
+fn effects_cell(
+    dialog: &mut MindDialog,
+    preview: Option<&Rc<RefCell<EffectsPreview>>>,
+    effect_name: &str,
+) -> Gd<Button> {
     // code-instantiated: one preview cell per LogicFx entry.
     let mut button = Button::new_alloc();
     button.set_custom_minimum_size(Vector2::new(EFFECTS_CELL_SIZE, EFFECTS_CELL_SIZE));
@@ -2337,10 +2459,10 @@ fn effects_cell(dialog: &mut MindDialog, effect_name: &str) -> Gd<Button> {
     ] {
         button.add_theme_stylebox_override(state, &StyleBoxEmpty::new_gd());
     }
-    let mut preview = effects_preview();
-    preview.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
-    preview.set_mouse_filter(MouseFilter::IGNORE);
-    button.add_child(&preview);
+    let mut preview_control = effects_preview(effect_name);
+    preview_control.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+    preview_control.set_mouse_filter(MouseFilter::IGNORE);
+    button.add_child(&preview_control);
     let mut label = effects_outline_label(effect_name);
     label.set_anchors_and_offsets_preset(LayoutPreset::BOTTOM_LEFT);
     label.set_offset(Side::LEFT, 6.0);
@@ -2361,6 +2483,46 @@ fn effects_cell(dialog: &mut MindDialog, effect_name: &str) -> Gd<Button> {
         effects_pick(&mut bound, &name_for_pick);
     });
     button.connect("pressed", &callable);
+    // Live preview (`EffectCell.draw`): the shared host moves to this cell and
+    // loops its `Fx` while hovered. The HSV wash is the no-host fallback.
+    if let Some(preview) = preview
+        && let Some(fx_name) = effects_fx_name(effect_name)
+    {
+        let bounds = mind_core::logic::fx::get(effect_name)
+            .map(|entry| entry.bounds)
+            .unwrap_or(-1.0);
+        let scale = effects_preview_scale(bounds);
+        let cell_id = button.instance_id();
+        let preview_in = preview.clone();
+        let dialog_for = dialog.to_gd();
+        let fx_name = fx_name.to_string();
+        let enter = Callable::from_fn("effects_preview_enter", move |_args: &[&Variant]| {
+            let Ok(cell) = Gd::<Control>::try_from_instance_id(cell_id) else {
+                return Variant::nil();
+            };
+            if !dialog_for.is_instance_valid() {
+                return Variant::nil();
+            }
+            let mut state = preview_in.borrow_mut();
+            let centre = cell.get_global_rect().center();
+            {
+                let mut fx = state.fx.clone();
+                fx.set_position(centre);
+                fx.set_scale(Vector2::splat(scale));
+                fx.bind_mut().tick_view();
+            }
+            state.current = Some((fx_name.clone(), centre, scale));
+            state.tick = EFFECTS_PREVIEW_RESPAWN_TICKS - 1;
+            Variant::nil()
+        });
+        button.connect("mouse_entered", &enter);
+        let preview_out = preview.clone();
+        let leave = Callable::from_fn("effects_preview_leave", move |_args: &[&Variant]| {
+            preview_out.borrow_mut().current = None;
+            Variant::nil()
+        });
+        button.connect("mouse_exited", &leave);
+    }
     button
 }
 
@@ -2382,41 +2544,45 @@ fn effects_outline_label(effect_name: &str) -> Gd<Label> {
     label
 }
 
-/// `EffectsDialog.EffectCell` preview: `Tex.alphaBg` under an animated HSV wash
-/// and a black border. The per-frame redraw is a `Timer` because a plain
-/// `Control` only draws on `queue_redraw` (`_process` in the GDScript class).
-fn effects_preview() -> Gd<Control> {
-    // code-instantiated: animated preview layer of one effect cell.
+/// `EffectsDialog.EffectCell` background: the alpha checker and the border;
+/// the live `Fx` itself is drawn by the shared preview host above the cell.
+/// Cells without a resolvable `Fx` keep the animated HSV wash as a fallback.
+fn effects_preview(effect_name: &str) -> Gd<Control> {
+    // code-instantiated: preview layer of one effect cell.
     let mut preview = Control::new_alloc();
     preview.set_mouse_filter(MouseFilter::IGNORE);
+    let with_wash = effects_fx_name(effect_name).is_none();
     let preview_for_draw = preview.clone();
     let callable = Callable::from_fn("effects_preview_draw", move |_args: &[&Variant]| {
         if !preview_for_draw.is_instance_valid() {
             return;
         }
-        effects_draw_preview(&preview_for_draw);
+        effects_draw_preview(&preview_for_draw, with_wash);
     });
     preview.connect("draw", &callable);
-    // code-instantiated: the redraw ticker of one preview cell.
-    let mut timer = Timer::new_alloc();
-    timer.set_wait_time(1.0 / 60.0);
-    timer.set_one_shot(false);
-    timer.set_autostart(true);
-    let preview_for_tick = preview.clone();
-    let callable = Callable::from_fn("effects_preview_tick", move |_args: &[&Variant]| {
-        if !preview_for_tick.is_instance_valid() {
-            return;
-        }
-        let mut node = preview_for_tick.clone();
-        node.queue_redraw();
-    });
-    timer.connect("timeout", &callable);
-    preview.add_child(&timer);
+    if with_wash {
+        // code-instantiated: the fallback animation ticker of one preview cell.
+        let mut timer = Timer::new_alloc();
+        timer.set_wait_time(1.0 / 60.0);
+        timer.set_one_shot(false);
+        timer.set_autostart(true);
+        let preview_for_tick = preview.clone();
+        let callable = Callable::from_fn("effects_preview_redraw", move |_args: &[&Variant]| {
+            if !preview_for_tick.is_instance_valid() {
+                return;
+            }
+            let mut node = preview_for_tick.clone();
+            node.queue_redraw();
+        });
+        timer.connect("timeout", &callable);
+        preview.add_child(&timer);
+    }
     preview
 }
 
-/// `EffectsDialog.EffectCell.draw`: the checker, the HSV wash and the border.
-fn effects_draw_preview(preview: &Gd<Control>) {
+/// `EffectsDialog.EffectCell.draw`: the checker, the optional HSV wash and the
+/// border.
+fn effects_draw_preview(preview: &Gd<Control>, with_wash: bool) {
     let mut canvas: Gd<Control> = preview.clone();
     let size = canvas.get_size();
     // `Tex.alphaBg`: a 16 px dark/light checker.
@@ -2442,14 +2608,16 @@ fn effects_draw_preview(preview: &Gd<Control>) {
         y += cell;
         row += 1;
     }
-    // `color.fromHsv((Time.globalTime * 2f) % 360f, 1f, 1f)`.
-    let hue = (Time::singleton().get_ticks_msec() as f64 * 0.002) % 1.0;
-    let mut wash = Color::from_hsv(hue, 1.0, 1.0);
-    wash.a = 0.85;
-    let centre = size * 0.5;
-    let radius = size.x.min(size.y) * 0.28;
-    canvas.draw_circle(centre, radius, wash);
-    canvas.draw_circle(centre, radius * 0.55, Color::from_rgba(1.0, 1.0, 1.0, 0.35));
+    if with_wash {
+        // `color.fromHsv((Time.globalTime * 2f) % 360f, 1f, 1f)`.
+        let hue = (Time::singleton().get_ticks_msec() as f64 * 0.002) % 1.0;
+        let mut wash = Color::from_hsv(hue, 1.0, 1.0);
+        wash.a = 0.85;
+        let centre = size * 0.5;
+        let radius = size.x.min(size.y) * 0.28;
+        canvas.draw_circle(centre, radius, wash);
+        canvas.draw_circle(centre, radius * 0.55, Color::from_rgba(1.0, 1.0, 1.0, 0.35));
+    }
     canvas
         .draw_rect_ex(Rect2::new(Vector2::ZERO, size), Color::BLACK)
         .filled(false)
@@ -3573,3 +3741,26 @@ fn content_bundle_value(key: &str) -> String {
 }
 
 // @@PART7@@
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effects_preview_resolves_logic_fx_to_its_fx_field() {
+        // `LogicFx.EffectEntry.effect`: the preview spawns the Fx by field name.
+        assert_eq!(effects_fx_name("breakBlock"), Some("breakBlock"));
+        assert_eq!(effects_fx_name("explosion"), Some("dynamicExplosion"));
+        assert_eq!(effects_fx_name("bubble"), Some("airBubble"));
+        assert_eq!(effects_fx_name("not-an-effect"), None);
+    }
+
+    #[test]
+    fn effects_preview_scale_fits_the_cell() {
+        // `width / calculateSize`; no cached bounds falls back to the cell size.
+        assert_eq!(effects_preview_scale(EFFECTS_CELL_SIZE), 1.0);
+        assert_eq!(effects_preview_scale(-1.0), 1.0);
+        assert_eq!(effects_preview_scale(100.0), EFFECTS_PREVIEW_MAX_SCALE);
+        assert_eq!(effects_preview_scale(10_000.0), EFFECTS_PREVIEW_MIN_SCALE);
+    }
+}

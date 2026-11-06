@@ -335,7 +335,10 @@ impl MatchSession {
         }
     }
 
-    fn reset(&mut self) {
+    /// Returns the session to [`SessionState::Offline`] (disconnect, host
+    /// teardown). `leave` calls it after the reducer; hosts that observed the
+    /// match row (never `join`) call it directly.
+    pub fn reset(&mut self) {
         self.state = SessionState::Offline;
         self.match_id = None;
         self.host_identity = None;

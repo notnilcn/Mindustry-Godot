@@ -1363,6 +1363,12 @@ pub struct BlockSpec {
     pub obstructs_light: Option<bool>,
     /// `Block.emitLight` (`drawLight()` is called).
     pub emit_light: Option<bool>,
+    /// `Block.lightRadius` (`Block.java:350`; default 60, class/`Blocks.java`
+    /// overrides applied by [`java_light_defaults`]).
+    pub light_radius: Option<f32>,
+    /// `Block.lightColor` (`Block.java:344`; default white; the alpha is the
+    /// environment light's opacity, `drawEnvironmentLight`).
+    pub light_color: Option<Rgba>,
     /// `Block.drawTeamOverlay` (team corner is drawn).
     pub draw_team_overlay: Option<bool>,
     /// `Floor.liquidDrop` (the liquid this floor yields / reacts with; plan 10
@@ -1541,6 +1547,8 @@ impl Default for BlockSpec {
             custom_shadow: None,
             obstructs_light: None,
             emit_light: None,
+            light_radius: None,
+            light_color: None,
             draw_team_overlay: None,
             liquid_drop: None,
             speed_multiplier: None,
@@ -1651,6 +1659,26 @@ impl BlockSpec {
                 spec.emit_light = Some(true);
             }
             _ => {}
+        }
+        // `Floor.java:117`: every `Floor` subclass clears `obstructsLight` in
+        // its constructor (so floors and their overlays can light the tile,
+        // `BlockRenderer.java:846-855`); walls/props keep the base `true`.
+        if matches!(
+            kind,
+            BlockKind::Floor
+                | BlockKind::AirBlock
+                | BlockKind::EmptyFloor
+                | BlockKind::OverlayFloor
+                | BlockKind::OreBlock
+                | BlockKind::RemoveOre
+                | BlockKind::SpawnBlock
+                | BlockKind::CharacterOverlay
+                | BlockKind::RuneOverlay
+                | BlockKind::ColoredFloor
+                | BlockKind::ShallowLiquid
+                | BlockKind::SteamVent
+        ) {
+            spec.obstructs_light = Some(false);
         }
         match kind {
             BlockKind::Block => {}
@@ -2038,6 +2066,71 @@ pub fn spec(name: &'static str, kind: BlockKind) -> BlockSpec {
     spec
 }
 
+/// `Color.cyan` (`arc.graphics.Color.cyan` = `#00ffff`).
+const COLOR_CYAN: Rgba = Rgba::new(0.0, 1.0, 1.0, 1.0);
+/// `Color.orange` (`arc.graphics.Color.orange` = `#ffa500`).
+const COLOR_ORANGE: Rgba = Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0);
+/// `Pal.accent` (`Pal.java`: `#ffd37f`).
+const PAL_ACCENT: Rgba = Rgba::new(1.0, 211.0 / 255.0, 127.0 / 255.0, 1.0);
+/// `Team.crux.color` (`Team.java:35`: `#f25555`).
+const TEAM_CRUX: Rgba = Rgba::new(242.0 / 255.0, 85.0 / 255.0, 85.0 / 255.0, 1.0);
+
+/// `Blocks.java` environment-light overrides for floors (the only non-building
+/// `emitLight` blocks): returns `(radius, colour)` with Java's alpha.
+///
+/// * `pooled-cryofluid` — `Blocks.java:311-315`: 25, cyan `.a(0.19)`.
+/// * `molten-slag` — `Blocks.java:329-333`: 40, orange `.a(0.38)`.
+/// * `hotrock` — `Blocks.java:369-371`: 30, orange `.a(0.15)`.
+/// * `magmarock` — `Blocks.java:379-381`: 50, orange `.a(0.3)`.
+/// * `metal-tiles-6` / `metal-tiles-12` — `Blocks.java:876-879,920-922`: 30,
+///   `Team.crux.color.a(0.3)`.
+pub fn java_floor_light(name: &str) -> Option<(f32, Rgba)> {
+    let color = |base: Rgba, alpha: f32| Rgba::new(base.r, base.g, base.b, alpha);
+    Some(match name {
+        "pooled-cryofluid" => (25.0, color(COLOR_CYAN, 0.19)),
+        "molten-slag" => (40.0, color(COLOR_ORANGE, 0.38)),
+        "hotrock" => (30.0, color(COLOR_ORANGE, 0.15)),
+        "magmarock" => (50.0, color(COLOR_ORANGE, 0.3)),
+        "metal-tiles-6" | "metal-tiles-12" => (30.0, color(TEAM_CRUX, 0.3)),
+        _ => return None,
+    })
+}
+
+/// `Block.lightRadius`/`lightColor` defaults: `Block.java:344,350` (white, 60)
+/// plus the block-class and `Blocks.java` overrides (PAR-0467).
+///
+/// Class overrides:
+/// * `ConsumeGenerator.java:69,25`: `lightRadius = baseLightRadius(65) * size`.
+/// * `ImpactReactor.java:30`: 115.
+/// * `LandingPad.java:71`: 90 (white; the coloured draw light is
+///   `LandingPad.drawLight`'s `Pal.accent`, not the environment light).
+/// * `Accelerator.java:79-80`: 70, `Pal.accent`.
+/// * `MendProjector.java:45` / `OverdriveProjector.java:42`: 50.
+/// * `CoreBlock.java:158`: `30 + 20 * size`.
+/// * `LightBlock.java:40`: `radius * 2.5` (`illuminator` radius 140 ->
+///   350; the per-tick colour comes from `LightState`).
+///
+/// `NuclearReactor` keeps the base 60/white environment light: its `#7f19ea`
+/// radius-90 light is the `NuclearReactor.draw` heat light
+/// (`NuclearReactor.java:178`), a custom draw light rather than
+/// `drawEnvironmentLight`.
+pub fn java_light_defaults(spec: &BlockSpec) -> (f32, Rgba) {
+    if let Some((radius, color)) = java_floor_light(spec.name) {
+        return (radius, color);
+    }
+    let size = spec.size.unwrap_or(1) as f32;
+    match spec.kind {
+        BlockKind::ConsumeGenerator => (65.0 * size, Rgba::WHITE),
+        BlockKind::ImpactReactor => (115.0, Rgba::WHITE),
+        BlockKind::LandingPad => (90.0, Rgba::WHITE),
+        BlockKind::Accelerator => (70.0, PAL_ACCENT),
+        BlockKind::MendProjector | BlockKind::OverdriveProjector => (50.0, Rgba::WHITE),
+        BlockKind::CoreBlock => (30.0 + 20.0 * size, Rgba::WHITE),
+        BlockKind::LightBlock => (350.0, Rgba::WHITE),
+        _ => (60.0, Rgba::WHITE),
+    }
+}
+
 /// `consumeItem`/`consumeItems` helper for generated waves.
 pub fn consume_item(item: &'static str, amount: i32) -> ConsumeDef {
     ConsumeDef::Items {
@@ -2334,6 +2427,12 @@ pub struct BlockDef {
     pub obstructs_light: bool,
     /// `Block.emitLight` (`drawLight()` is called).
     pub emit_light: bool,
+    /// `Block.lightRadius` (`Block.java:350`): the environment light radius
+    /// emitted by `drawEnvironmentLight` (`Block.java:493-495`).
+    pub light_radius: f32,
+    /// `Block.lightColor` (`Block.java:344`): the environment light colour; the
+    /// alpha is the light opacity (`drawEnvironmentLight`'s `lightColor.a`).
+    pub light_color: Rgba,
     /// `Block.drawTeamOverlay` (team corner is drawn for enemy buildings).
     pub draw_team_overlay: bool,
     /// Item base costs indexed by item id (`Item.cost`; used by `init`).
@@ -2499,6 +2598,11 @@ impl BlockDef {
         bundle: &dyn BundleView,
         store: &dyn UnlockStore,
     ) -> Result<Self, ContentError> {
+        // `Block.lightRadius`/`lightColor` (`Block.java:344,350` + the class and
+        // `Blocks.java` overrides in [`java_light_defaults`]); resolved before
+        // `spec.consumes` moves below.
+        let (default_light_radius, default_light_color) = java_light_defaults(&spec);
+        let floor_emit_light = java_floor_light(spec.name).is_some();
         let item_costs: Vec<f32> = registry.items().iter().map(|item| item.cost).collect();
         let item_health_scaling: Vec<f32> = registry
             .items()
@@ -2658,6 +2762,8 @@ impl BlockDef {
                 BuildVisibility::Shown
             }
         });
+        // `Block.lightRadius`/`lightColor` (`Block.java:344,350` + the class and
+        // `Blocks.java` overrides in [`java_light_defaults`]).
         let mut def = Self {
             id: BlockId::new(0),
             name: spec.name.to_owned(),
@@ -2769,7 +2875,9 @@ impl BlockDef {
             // `displayShadow` is derived from `hasShadow`.
             display_shadow: has_shadow,
             obstructs_light: spec.obstructs_light.unwrap_or(true),
-            emit_light: spec.emit_light.unwrap_or(false),
+            emit_light: spec.emit_light.unwrap_or(floor_emit_light),
+            light_radius: spec.light_radius.unwrap_or(default_light_radius),
+            light_color: spec.light_color.unwrap_or(default_light_color),
             draw_team_overlay: spec.draw_team_overlay.unwrap_or(true),
             item_costs,
             item_health_scaling,
@@ -3112,8 +3220,10 @@ impl Content for BlockDef {
         // `CoreBlock.java:158-159`: `lightRadius = 30f + 20f * size;
         // fogRadius = Math.max(fogRadius, (int)(lightRadius / 8f * 3f) + 13)`.
         if self.kind == BlockKind::CoreBlock {
-            let light_radius = 30.0 + 20.0 * self.size as f32;
-            self.fog_radius = self.fog_radius.max((light_radius / 8.0 * 3.0) as i32 + 13);
+            // `lightRadius` is populated by [`java_light_defaults`] (PAR-0467).
+            self.fog_radius = self
+                .fog_radius
+                .max((self.light_radius / 8.0 * 3.0) as i32 + 13);
         }
         // `BaseTurret.java:59` (`init()`): `fogRadius = max(round(range / 8 *
         // fogRadiusMultiplier), fogRadius)` — the runtime range lives on
@@ -3710,6 +3820,107 @@ mod tests {
         assert_eq!(wall.build_time, 6.0 * copper.cost * 6.0);
         assert_eq!(wall.offset, 0.0);
         assert_eq!(wall.size_offset, 0);
+    }
+
+    /// PAR-0467: `Block.lightRadius`/`lightColor` (`Block.java:344,350`) plus
+    /// the per-class (`ConsumeGenerator.java:69`, `ImpactReactor.java:30`,
+    /// `LandingPad.java:71`, `Accelerator.java:79-80`, `MendProjector.java:45`,
+    /// `OverdriveProjector.java:42`, `CoreBlock.java:158`,
+    /// `LightBlock.java:39`) and `Blocks.java` floor overrides.
+    #[test]
+    fn light_radius_and_color_follow_the_java_table() {
+        let registry = test_registry();
+        let get = |name: &str| {
+            registry
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("block {name}"))
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+
+        // `Block.java:344,350`: white, 60 — the `NuclearReactor` environment
+        // light (its `#7f19ea` radius-90 light is `NuclearReactor.drawLight`,
+        // `NuclearReactor.java:175-179`, not `drawEnvironmentLight`).
+        let reactor = get("thorium-reactor");
+        assert_eq!(reactor.light_radius, 60.0);
+        assert_eq!(reactor.light_color, Rgba::WHITE);
+        assert!(reactor.emit_light);
+
+        // `ImpactReactor.java:30`: 115 white.
+        let impact = get("impact-reactor");
+        assert_eq!(impact.light_radius, 115.0);
+        assert_eq!(impact.light_color, Rgba::WHITE);
+
+        // `ConsumeGenerator.java:25,69`: `65 * size` (steam size 2 -> 130,
+        // differential size 3 -> 195). `ThermalGenerator extends
+        // PowerGenerator` (not `ConsumeGenerator`), so it keeps 60.
+        assert_eq!(get("steam-generator").light_radius, 130.0);
+        assert_eq!(get("thermal-generator").light_radius, 60.0);
+        assert_eq!(get("differential-generator").light_radius, 195.0);
+
+        // `LandingPad.java:71`: 90 white; `#eab678` is `LaunchPad.lightColor`
+        // (`LaunchPad.java:39`), a custom draw light.
+        let landing = get("landing-pad");
+        assert_eq!(landing.light_radius, 90.0);
+        assert_eq!(landing.light_color, Rgba::WHITE);
+
+        // `Accelerator.java:79-80`: 70, `Pal.accent` (`#ffd37f`).
+        let accelerator = get("interplanetary-accelerator");
+        assert_eq!(accelerator.light_radius, 70.0);
+        assert!(near(accelerator.light_color.r, 1.0));
+        assert!(near(accelerator.light_color.g, 211.0 / 255.0));
+        assert!(near(accelerator.light_color.b, 127.0 / 255.0));
+        assert!(near(accelerator.light_color.a, 1.0));
+
+        // `MendProjector.java:45` / `OverdriveProjector.java:42`: 50 white
+        // (RegenProjector/ThermalGenerator keep the 60 class default).
+        assert_eq!(get("mend-projector").light_radius, 50.0);
+        assert_eq!(get("overdrive-projector").light_radius, 50.0);
+        assert_eq!(get("regen-projector").light_radius, 60.0);
+
+        // `CoreBlock.java:158`: `30 + 20 * size` (3 -> 90, 4 -> 110, 5 -> 130)
+        // and the derived `fogRadius` (`CoreBlock.java:159`) now reads the
+        // unified field: (int)(90 / 8 * 3) + 13 = 46.
+        assert_eq!(get("core-shard").light_radius, 90.0);
+        assert_eq!(get("core-foundation").light_radius, 110.0);
+        assert_eq!(get("core-nucleus").light_radius, 130.0);
+        assert_eq!(get("core-shard").fog_radius, 46);
+
+        // `LightBlock.java:39,40`: `radius * 2.5` (`illuminator` 140 -> 350).
+        let illuminator = get("illuminator");
+        assert_eq!(illuminator.light_radius, 350.0);
+        assert!(illuminator.emit_light);
+
+        // Floors (`Blocks.java:311-315,329-333,369-381,876-879,920-922`).
+        let cryo = get("pooled-cryofluid");
+        assert_eq!(cryo.light_radius, 25.0);
+        assert!(near(cryo.light_color.r, 0.0) && near(cryo.light_color.g, 1.0));
+        assert!(near(cryo.light_color.b, 1.0) && near(cryo.light_color.a, 0.19));
+        assert!(cryo.emit_light && !cryo.obstructs_light);
+
+        let slag = get("molten-slag");
+        assert_eq!(slag.light_radius, 40.0);
+        assert!(near(slag.light_color.r, 1.0) && near(slag.light_color.g, 165.0 / 255.0));
+        assert!(near(slag.light_color.b, 0.0) && near(slag.light_color.a, 0.38));
+
+        let hotrock = get("hotrock");
+        assert_eq!(hotrock.light_radius, 30.0);
+        assert!(near(hotrock.light_color.a, 0.15));
+        let magmarock = get("magmarock");
+        assert_eq!(magmarock.light_radius, 50.0);
+        assert!(near(magmarock.light_color.a, 0.3));
+        // `Team.crux.color` (`Team.java:35`) at alpha 0.3.
+        let metal = get("metal-tiles-6");
+        assert_eq!(metal.light_radius, 30.0);
+        assert!(near(metal.light_color.r, 242.0 / 255.0) && near(metal.light_color.a, 0.3));
+        // A non-emitting floor/floor-light defaults: white 60, no light.
+        let stone = get("stone");
+        assert_eq!(stone.light_radius, 60.0);
+        assert!(!stone.emit_light && !stone.obstructs_light);
+
+        // `Floor.java:117`: floors clear `obstructsLight`; walls keep it.
+        assert!(!registry.block(BlockId::AIR).unwrap().obstructs_light);
+        let wall = get("copper-wall");
+        assert!(wall.obstructs_light);
     }
 
     /// Plan 02 §7a: `blocks::research_requirements_formula`

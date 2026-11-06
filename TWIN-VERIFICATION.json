@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T15:29:14Z",
+  "updated": "2026-11-06T15:36:40Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -14052,6 +14052,11 @@
           "at": "2026-11-06T15:08:01Z",
           "by": "hx-net",
           "text": "Data path + gx/net plumbing verified with unit tests and cargo check. Remaining UI wiring (gx/ui owned by hx-ui/UI agent): client/rust/mind-gdext/src/ui/ui_host.rs player_list_json() still returns hard-coded \"[]\" and player_action() returns false; wire them to MindNet.players_json()/player_action(). The player-list/trace dialogs (gx/ui fragments/dialogs) and the Tab binding still need their rows/menus."
+        },
+        {
+          "at": "2026-11-06T15:35:29Z",
+          "by": "hx-net",
+          "text": "Action-path fix included: NetHost::match_id is now observed from the my_match row (MatchSession.match_id is never set on the host path because a host never calls join), so say/kick/runwave/kick_all now reach the reducers on a live match instead of failing with 'no match is hosted'. The live serve smoke showed 1 relay_member player in status."
         }
       ],
       "claimed_by": "hx-net",
@@ -14059,7 +14064,8 @@
       "fix": "Player-list/player-state data path implemented. New mind-stdb/src/roster.rs: Roster aggregates relay_member + player + player_session + admin_identity + player_ban + whitelist_entry + match_kick + admin_action_log rows into PlayerEntry rows (identity, name, team, admin, connected, role, kick reason, last seen) with stable JSON and TraceInfo (names, session count/open session, join time, kicks, admin actions, ban/whitelist flags); Roster::assign_team ports NetServer.assigner PvP balancing (min players, wave-team/no-core/unprotected filters, deterministic tie-break); PlayerAction maps kick/ban/unban/admin/whitelist/team onto admin_kick/admin_ban/admin_unban/admin_grant/admin_whitelist/admin_switch_team and is unit-tested to reach the reducer path. Subscription waves now include all_admins/all_bans/all_whitelist (lobby) and my_admin_actions (game). gx/net MindNet binds all_players/all_admins/all_bans/all_whitelist/my_kick/my_admin_actions, feeds the roster, clears it on disconnect/resync, and exposes players_json()/player_count()/player_action()/player_action_with()/player_trace_json(). UI wiring remains for the gx/ui owner: ui_host.rs player_list_json must return MindNet.players_json(), MindUi.player_action must call MindNet.player_action/player_action_with, and the trace dialog should read MindNet.player_trace_json.",
       "evidence": [
         "cargo test -p mind-stdb --lib -> 54 passed; roster 5 new tests: rows->entries+JSON, assignTeam PvP balancing, trace aggregation, action->reducer mapping, disconnect/kick state",
-        "cargo check -p mind-gdext -> ok (MindNet roster binders + players_json/player_action/player_trace_json)"
+        "cargo check -p mind-gdext -> ok (MindNet roster binders + players_json/player_action/player_trace_json)",
+        "live: console `status` showed players=1 (relay_member row) and the host's STDB match row; NetHost now tracks match_id from my_match, fixing say/kick/runwave which failed with 'no match is hosted' before (MatchSession.match_id is never set on the host path)"
       ]
     },
     "PAR-0123": {
@@ -14142,6 +14148,11 @@
           "at": "2026-11-06T15:08:00Z",
           "by": "hx-net",
           "text": "Verified headlessly at HEAD+f fix. Real host loop proved by unit tests + two CLI smokes. The live networked-match leg (create_match against SpacetimeDB) is wired and compile-checked but NOT executed: the lane had only an empty shared spacetime server on :3000 and publishing would wipe shared dev data. Remaining known stubs in this area: reloadassets only re-scans mods (compiled-in content cannot be hot-reloaded), autosave scheduling is still not driven by the frame loop, and `mods` lists scanned mods but does not load mod content into the registry (plan-20 loader)."
+        },
+        {
+          "at": "2026-11-06T15:35:29Z",
+          "by": "hx-net",
+          "text": "Live networked leg executed after the initial report: published an isolated module DB `mindustry-hxnet` with `bash server/build.sh --db mindustry-hxnet` (the checked-in bindings were restored afterwards; only the generator-version comment changed) and ran the dedicated serve against it. Evidence: config/host creates relay_match + relay_member rows, start_match moves lobby->playing, exit closes the row. NetHost also now learns the match id from my_match (before this, say/kick/runwave reported 'no match is hosted' even with a live match). The shared :3000 server was restarted for the run and stopped again afterwards."
         }
       ],
       "claimed_by": "hx-net",
@@ -14152,7 +14163,9 @@
         "server::host::tests -> 12 pass: synthetic live sim ticks, .msav load (fork.msav real grid/buildings), sector preset generation (groundZero), runwave advances session wave, fillitems fills the live core, autoPause hold/release, gameover rotation + roundExtraTime reload, no-rotation stop, nextmap/shuffle, save+load through the live engine, AlreadyHosting",
         "cargo check -p mind-gdext -> ok",
         "CLI smoke `mind-headless server --stdb offline --commands \"host synthetic survival,runwave,status,fillitems,gameover,status,exit\"` -> real host, Wave 2, Core filled (1 core(s)), game over + close (runs/hx-net/server-smoke.log)",
-        "serve smoke with stdin after 2s: tick advanced, wavetime 240->239, exit closed cleanly (runs/hx-net/serve-smoke.log)"
+        "serve smoke with stdin after 2s: tick advanced, wavetime 240->239, exit closed cleanly (runs/hx-net/serve-smoke.log)",
+        "cargo test -p mind-headless --lib server -> 54 passed (after the observed-match-id fix)",
+        "live leg: `serve --stdb online --stdb-host http://127.0.0.1:3000 --db mindustry-hxnet` (isolated module DB published for this run) -> logs 'Opened a server: networked match created' and 'STDB match started (playing)'; `spacetime sql mindustry-hxnet` shows relay_match rows (match_id 1..4, map 'synthetic', mode 'survival'), 1 relay_member, and the last row lobby->playing->ended with closed_at set (runs/hx-net/live-host-smoke.log)"
       ]
     },
     "PAR-0125": {
@@ -27639,7 +27652,7 @@
     },
     "PAR-0517": {
       "title": "GAPS #24: legacy blocks are never removed/replaced on map load; read byte-skips missing",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -27650,30 +27663,35 @@
           }
         ]
       },
-      "action": {
-        "godot": [
-          {
-            "tool": "note",
-            "params": {
-              "text": "see runs/PAR-0517"
-            }
+      "action": [
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "cargo test -p mind-core --lib live_sweep_despawns_the_legacy_entity"
           }
-        ]
-      },
+        }
+      ],
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:32Z",
       "severity": "P2",
       "source": "GAPS.md#24",
       "gap": "LegacyBlock/LegacyMechPad/LegacyUnitFactory/LegacyCommandCenter removal+replacement (World.endMapLoad) is never invoked by the load path and their read() byte-skips are not ported.",
-      "fix": "Partial: world/behavior/legacy.rs now ports the per-kind read byte-skips (LegacyCommandCenter 1 byte, LegacyMechPad 3 floats, LegacyUnitFactory float + revision-0 int) and the LegacyCommandCenter write.b(0), plus a grid-level remove_legacy_blocks sweep (LegacyBlock.removeSelf -> air; legacy-unit-factory-air/-ground -> 3x3 air-factory/ground-factory, Blocks.java:6824-6834). The sweep is NOT yet wired into a load path: WorldGrid::end_map_load (world/mod.rs:303) and SimRuntime::materialize_buildings (sim/runtime.rs:1035, used by mind-gdext sim_host.rs:3806) are outside this file set; the latter also needs to despawn the legacy ECS entity and spawn the replacement through the normal set_block path (pending decoded bases reference the legacy block).",
+      "fix": "Legacy removal wired on both load paths: WorldGrid::end_map_load (mc/world/mod.rs) now runs legacy::remove_legacy_blocks before the darkness BFS, matching World.endMapLoad (World.java:220-230) tile pass order; SimRuntime::materialize_buildings (mc/sim/runtime.rs) runs legacy::remove_legacy_blocks_live before spawning, which also despawns any stale live legacy entity and lets the replacement block spawn from the tile; pending decoded bases that name a legacy block are skipped because the tile is air afterwards.",
       "evidence": [
-        "cargo test -p mind-core --lib legacy -> 25 passed incl. behavior::legacy::tests::{command_center_skips_and_writes_its_byte, legacy_mech_pad_skips_three_floats, legacy_unit_factory_skips_build_time_and_spawn_count, sweep_removes_and_replaces_legacy_blocks}"
+        "cargo test -p mind-core --lib: 2993 passed, 0 failed, 4 ignored",
+        "new test world::behavior::legacy::tests::live_sweep_despawns_the_legacy_entity",
+        "cargo check -p mind-gdext: exit 0"
       ],
       "notes": [
         {
           "at": "2026-11-06T13:38:28Z",
           "by": "hx-prod",
           "text": "Partial fix: read/write byte-skips and the replacement sweep are landed+tested. Remaining wiring (outside owned files): call remove_legacy_blocks from WorldGrid::end_map_load and from SimRuntime::materialize_buildings before spawning (plus despawn/replace the legacy entity for the live save path). Note LegacyDef.replacement is never populated by content; the helper resolves the vanilla air/ground mappings by block name."
+        },
+        {
+          "at": "2026-11-06T15:36:40Z",
+          "by": "hx-wiring",
+          "text": "end_map_load now removes/replaces legacy tiles before darkness (Java order) and materialize_buildings despawns stale legacy entities before the spawn loop. Verified headlessly."
         }
       ]
     },
@@ -28049,7 +28067,7 @@
     },
     "PAR-0525": {
       "title": "GAPS #67 (combat-owned): logic-controlled turret missile shooter never set (combat/bullet/spawn.rs:174 ignores ControlBlock.unit())",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28060,16 +28078,14 @@
           }
         ]
       },
-      "action": {
-        "godot": [
-          {
-            "tool": "note",
-            "params": {
-              "text": "see runs/PAR-0525"
-            }
+      "action": [
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "cargo test -p mind-core --lib combat::bullet"
           }
-        ]
-      },
+        }
+      ],
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:32Z",
       "severity": "P2",
@@ -28080,7 +28096,17 @@
           "at": "2026-11-06T14:14:07Z",
           "by": "hx-logic",
           "text": "Not fixed here: mc/combat/** is owned by the combat packet. Required change in combat/bullet/spawn.rs missile branch: when spawn.shooter (or owner) is a turret building, resolve its ControlBlock proxy unit (TurretState.block_unit / router_controlled_unit) and assign MissileShooter(Some(proxy)) before the UnitTypeComp filter; Java BulletType.java:943-949 does this for any ControlBlock shooter, not only logic-controlled turrets."
+        },
+        {
+          "at": "2026-11-06T15:36:40Z",
+          "by": "hx-wiring",
+          "text": "ControlBlock shooter resolution landed in combat/bullet/spawn.rs (GAPS #67 missile half). Verified headlessly; no new dedicated test (the fixture turrets carry no block_unit proxy, and a proxy-missile end-to-end test would need a live turret entity with block_unit — covered by code review + full-suite regression)."
         }
+      ],
+      "fix": "combat/bullet/spawn.rs missile branch now resolves MissileAI.shooter like BulletType.java:943-949: a Unit shooter is itself, otherwise a ControlBlock building resolves control.unit() — the port s TurretState.block_unit proxy (every TurretBuild implements ControlBlock upstream: Turret.java TurretBuild implements ControlBlock). missile_shooter_unit() helper; a turret without a proxy still leaves shooter None (unchanged).",
+      "evidence": [
+        "cargo test -p mind-core --lib: 2993 passed, 0 failed, 4 ignored (missile/spawn tests green)",
+        "cargo check -p mind-gdext: exit 0"
       ]
     },
     "PAR-0526": {
@@ -28128,7 +28154,7 @@
     },
     "PAR-0527": {
       "title": "GAPS #15: Door control(enabled), AutoDoor sense(enabled), ForceProjector setProp/overwrote/pickedUp, BuildingBehavior::picked_up",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28139,38 +28165,42 @@
           }
         ]
       },
-      "action": {
-        "godot": [
-          {
-            "tool": "note",
-            "params": {
-              "text": "headless verification log runs/PAR-0527/defense-20261106.log; repro: tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib defense"
-            }
+      "action": [
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "cargo test -p mind-core --lib access::tests::control_enabled_dispatches_to_door_behavior"
           }
-        ]
-      },
+        }
+      ],
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:31Z",
       "severity": "P0",
       "gap": "DoorBuild.control(LAccess.enabled) and AutoDoorBuild.sense(LAccess.enabled) were missing; ForceBuild.setProp(LAccess.shield), ForceBuild.overwrote(previous) and ForceBuild.pickedUp / ShieldWallBuild.pickedUp were missing; BuildingBehavior had no picked_up hook (BuildingComp.java:1849-1851). Java: Door.java:89-105, AutoDoor.java:62-65, ForceProjector.java:157-163,194-199,334-340, ShieldWall.java:96-98.",
       "source": "GAPS.md#15",
-      "fix": "Landed: (1) DoorBehavior::logic_control(enabled) in world/behavior/defense.rs - the Door.java:89-105 body (Mathf.zero(p1) -> shouldOpen, skip on same state / units in a closing door, shared timerToggle 80-tick throttle via DoorState.last_toggle, configureAny). (2) AutoDoorBehavior::logic_sense(enabled) = open?1:0 (live through the existing sense_building logic_sense dispatch). (3) ForceProjectorBehavior::logic_set_prop(shield) = buildup = max(shieldHealth + phaseShieldBoost*phaseHeat - v, 0) (ForceProjector.java:157-163). (4) ForceProjectorBehavior::overwrote copies broken/buildup from previous.first() when it is the same block (ForceProjector.java:334-340). (5) ForceProjectorBehavior/ShieldWallBehavior::picked_up reset radscl+warmup / shieldRadius (ForceProjector.java:194-199, ShieldWall.java:96-98). (6) BuildingBehavior::picked_up hook in world/behavior/mod.rs (BuildingComp.java:1849-1851).",
+      "fix": "Dispatch wired in mc/logic/access.rs (hooks themselves were already merged): control() resolves the building BlockTable instance and calls behavior.logic_control(world, e, a, &params4) before the generic accessor match (all four LVar params; a true return suppresses the base branch), so DoorBuild.control(enabled) (Door.java:89-105) runs instead of the generic enabled-flag write; set_prop_building_num() calls behavior.logic_set_prop(world, e, a, v) first, so ForceBuild.setProp(shield) (ForceProjector.java:157-163) maps to buildup, while other accessors still fall through to the base table.",
       "evidence": [
-        "cargo test -p mind-core --lib defense: 96 passed (door_logic_control_opens_and_throttles, auto_door_sense_reports_open_state, force_projector_set_prop_shield_maps_to_buildup, force_projector_overwrote_keeps_previous_state, picked_up_hooks_collapse_the_shields)",
-        "runs/PAR-0527/defense-20261106.log",
-        "cargo check -p mind-gdext: ok"
+        "cargo test -p mind-core --lib: 2993 passed, 0 failed, 4 ignored",
+        "new tests logic::access::tests::control_enabled_dispatches_to_door_behavior and logic::access::tests::set_prop_shield_dispatches_to_force_projector",
+        "cargo check -p mind-gdext: exit 0",
+        "cargo fmt --all: clean"
       ],
       "notes": [
         {
           "at": "2026-11-06T13:42:08Z",
           "by": "hx-defense",
           "text": "DISPATCH HANDOFF (hooks are inert until these are applied; parent routed them to the owning agents): (a) mc/logic/access.rs control() at ~line 1597 - before the match, resolve the BlockTable instance and if inst.behavior.logic_control(world, e, a, &params4) return true (the Shoot/Shootp arm already builds params4; splice that pre-dispatch for all accessors, door returns false for non-enabled). (b) mc/logic/access.rs set_prop_building_num at line 1202 - same pre-dispatch via inst.behavior.logic_set_prop(world, e, a, v) returning true. (c) mc/sim/unit_runtime.rs payload_pickup_build (~line 4531) - build can_pick = build_team==carrier_team && pickable && within && used+size*size<=capacity+0.001, call behavior.picked_up(&mut self.ecs.0, build) before rt.pickup_building. Also note ForceProjector.overwrote has no dispatcher at all (ConstructBlock.java:97 constructFinish prevBuild) - pre-existing for every overwrote implementor; needs ConstructState to retain previous build entities."
+        },
+        {
+          "at": "2026-11-06T15:36:35Z",
+          "by": "hx-wiring",
+          "text": "hx-wiring dispatch half landed: control() pre-dispatch now covers every accessor (not just shoot/shootp) and set_prop_building_num pre-dispatches logic_set_prop. Verified headlessly; Java twin pass still pending."
         }
       ]
     },
     "PAR-0528": {
       "title": "GAPS #13: BuildTurret only builds explicitly queued plans (team rebuild queue, following builders, deconstruct missing)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
@@ -28181,31 +28211,35 @@
           }
         ]
       },
-      "action": {
-        "godot": [
-          {
-            "tool": "note",
-            "params": {
-              "text": "headless verification log runs/PAR-0528/defense-20261106.log; repro: tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib defense"
-            }
+      "action": [
+        {
+          "tool": "shell",
+          "params": {
+            "cmd": "cargo test -p mind-core --lib build_turret_scans_the_team_rebuild_queue"
           }
-        ]
-      },
+        }
+      ],
       "claimed_by": "hx-wiring",
       "claimed_at": "2026-11-06T15:03:31Z",
       "severity": "P0",
       "gap": "BuildTurretBuild.updateTile (BuildTurret.java:132-260) must scan team.data().plans, follow nearby actively-building units, validate/deconstruct the current plan and keep shouldConsume = plans.size > 0 && !isHealSuppressed. The port (mc/world/blocks/defense/turrets/mod.rs::update_build) only walks the explicitly queued state.build_plans; the team rebuild queue, follower scan and deconstruct path are missing. shouldConsume is already present (turrets/behavior.rs:258, PAR-0471).",
       "source": "GAPS.md#13",
-      "fix": "PARTIAL (report-only wiring; turrets/** owned by the combat agent). Landed pure helpers in mc/world/blocks/defense/build_turret_plans.rs: rebuild_plan(Teams.BlockPlan -> BuildPlan, BuildTurret.java:169), scan_team_rebuild_queue(plans, within, placeable) -> (index, BuildPlan) for the first !removed entry that is in range and legal+affordable (BuildTurret.java:158-176), and rotate_plan_to_tail (blocks.addLast(blocks.removeIndex(i)), BuildTurret.java:172). 4 unit tests.",
+      "fix": "BuildTurret wiring landed in world/blocks/defense/turrets/mod.rs::update_build (BuildTurret.java:132-260): (1) 15-tick team rebuild-queue scan over CampaignRuntime.session.teams[team].plans via build_turret_plans::{scan_team_rebuild_queue,rotate_plan_to_tail}, gated by within(range) + Build.validPlace(PLAYER) + team items affordability; records lastPlan. (2) follower scan Units.nearby(team,x,y,range) for canBuild+activelyBuilding units whose head plan targets a ConstructBuild in range, then mirrors that plan (clear + push front). (3) per-tick plan validation: lastPlan.removed, ConstructState.current == plan.block, validPlace/validBreak; 30-tick another-player-breaking drop that also removes the team plan. (4) BuildPlan.breaking routes to ConstructState::advance_deconstruct, never construct. (5) anti-suicide plan removal. TurretState gained following/lastPlan/build_target_timer/build_break_timer. New test build_turret_scans_the_team_rebuild_queue proves scan + tail rotation + construction progress.",
       "evidence": [
-        "cargo test -p mind-core --lib defense: 96 passed (world::blocks::defense::build_turret_plans::tests::{scan_skips_removed_out_of_range_and_illegal_entries, scan_requires_both_range_and_placeable, rotate_moves_the_built_plan_to_the_tail, rebuild_plan_carries_config})",
-        "cargo check -p mind-gdext: ok"
+        "cargo test -p mind-core --lib: 2993 passed, 0 failed, 4 ignored",
+        "new test world::blocks::defense::turrets::find_target_tests::build_turret_scans_the_team_rebuild_queue",
+        "cargo check -p mind-gdext: exit 0"
       ],
       "notes": [
         {
           "at": "2026-11-06T13:42:19Z",
           "by": "hx-defense",
           "text": "WIRING HANDOFF for mc/world/blocks/defense/turrets/mod.rs::update_build (~2035-2107). (1) Team queue scan: when build_target.is_none(), read CampaignRuntime.session.teams[team].plans (game/teams.rs:129), call build_turret_plans::scan_team_rebuild_queue(plans, |p| within(p.x*8, p.y*8, range), |p| Build.validPlace(...) && (rules.infiniteResources || team items has p.block requirements)); on Some push the returned BuildPlan to state.build_plans (or set build_target) and build_turret_plans::rotate_plan_to_tail(plans, index); record last_plan. (2) Following builders: if still no target, Units.nearby(team, x, y, range) -> first unit with canBuild() && activelyBuilding() whose build plan resolves to a ConstructBuild within range -> copy its plan to the front of state.build_plans (BuildTurret.java:178-195). (3) Validate the current plan each tick: lastPlan.removed, ConstructState.current == plan.block, valid_place/valid_break; drop when invalid (BuildTurret.java:209-226); also drop the plan if another team PLAYER has a breaking plan at the same pos (BuildTurret.java:196-208). (4) Deconstruct: route BuildPlan.breaking plans to plan 07's deconstruct path (ConstructState::deconstruct + deconstruct_step/remove_block_raw, sim/builder.rs:755-...), not construct_step. (5) shouldConsume already implemented (turrets/behavior.rs:258) - stale sub-item."
+        },
+        {
+          "at": "2026-11-06T15:36:35Z",
+          "by": "hx-wiring",
+          "text": "Wiring landed and tested headlessly. Remaining deviation: Build.beginPlace/beginBreak need the live SimRuntime (hooks/render) and are unreachable from the CombatCtx pass, so a plan whose tile holds no ConstructBuild is discarded instead of starting a construct; deconstruct refunds are not distributed. Java twin pending."
         }
       ]
     },

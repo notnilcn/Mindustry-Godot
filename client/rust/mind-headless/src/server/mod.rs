@@ -29,7 +29,7 @@ use mind_core::io::settings::SettingValue;
 
 use config::ServerConfig;
 use console::ConsoleState;
-use host::LocalHost;
+use host::{Admins, HostConfig, HostControl, HostEvent, LocalHost};
 use logs::LogRotator;
 use net_host::NetHost;
 use rules_file::{RulesFile, RulesState};
@@ -95,6 +95,13 @@ pub struct ServerState {
     pub boot_ms: u64,
     /// Server start instant.
     pub started: Instant,
+    /// Wall clock of the last fixed-step pump (`ServerControl` frame loop).
+    pub last_frame: Instant,
+    /// Fractional 60 Hz accumulator for the host loop.
+    pub frame_accum: f64,
+    /// `--match-config` handed over by the `serve` shape
+    /// (`config/match.json`; defaults when `server` was launched directly).
+    pub match_config: dedicated::MatchConfig,
 }
 
 impl ServerState {
@@ -146,6 +153,86 @@ impl ServerState {
             .load(&NativeFs, &path)
             .map_err(|error| error.to_string())?;
         Ok(path)
+    }
+
+    /// Broadcasts a server `System` chat message to the live match (`say`,
+    /// the game-over notice). Offline hosts only log it.
+    pub fn broadcast(&mut self, message: &str) {
+        if self.net.is_online() {
+            if let Err(error) = self.net.say(message) {
+                self.warn(&format!("could not send server message: {error}"));
+            }
+        }
+    }
+
+    /// One server frame: pump the plan-21 connector, feed the live player
+    /// count to `autoPause`, advance the world and relay host lifecycle
+    /// events (`ServerControl`'s `Events.run(Trigger.update)` block).
+    pub fn frame(&mut self) {
+        let now = Instant::now();
+        let elapsed = self.last_frame.elapsed().as_secs_f64();
+        self.last_frame = now;
+        self.frame_accum += elapsed * TICKS_PER_SECOND as f64;
+        let ticks = self.frame_accum.floor().max(0.0) as u64;
+        self.frame_accum -= ticks as f64;
+        self.net.pump();
+        let players = self.net.players().len();
+        self.host.set_players(players);
+        // Clamp a long stall so a suspended server does not burn a minute of
+        // simulation in one frame.
+        self.host.tick(ticks.min(TICKS_PER_SECOND * 10));
+        self.drain_host_events();
+        self.sync_pause();
+    }
+
+    /// Mirrors the host pause state onto the server console flag.
+    fn sync_pause(&mut self) {
+        self.paused = self.host.is_paused();
+    }
+
+    /// Handles the host's game-over/rotation/stop events (the upstream
+    /// `GameOverEvent` listener, `ServerControl.java:116-133`).
+    pub fn drain_host_events(&mut self) {
+        let events = self.host.take_events();
+        for event in events {
+            match event {
+                HostEvent::Hosted { map, mode } => {
+                    self.info(&format!("Map loaded: {map} ({mode})."));
+                }
+                HostEvent::WaveStarted { wave } => {
+                    self.info(&format!("Wave {wave} started."));
+                }
+                HostEvent::GameOver {
+                    wave,
+                    winner: _,
+                    next,
+                    extra_seconds,
+                } => {
+                    let players = self.net.players().len();
+                    let map = self.host.status().map.unwrap_or_default();
+                    self.info(&format!(
+                        "Game over! Reached wave {wave} with {players} players online on map {map}."
+                    ));
+                    match next {
+                        Some(next_map) => {
+                            self.info(&format!("Selected next map to be {next_map}."));
+                            self.broadcast(&format!(
+                                "[scarlet]Game over![]\n\nNext selected map: [accent]{next_map}[white].\nNew game begins in {extra_seconds} seconds."
+                            ));
+                        }
+                        None => {
+                            // `netServer.kickAll(KickReason.gameover)` +
+                            // `state.set(State.menu)` + `net.closeServer()`.
+                            self.net.kick_all("gameover");
+                            self.net.stop();
+                            self.host.stop();
+                            self.info("No maps left to host; server closed.");
+                        }
+                    }
+                }
+                HostEvent::Stopped => self.info("Stopped hosting."),
+            }
+        }
     }
 }
 
@@ -213,12 +300,35 @@ pub fn run(options: ServerOptions) -> i32 {
     let paths = Paths::new(&config_dir);
     let maps_dir = paths.maps();
     let online = !options.offline;
+    // The `serve` shape hands its match contract (map rotation, seed,
+    // auto-pause, SpacetimeDB URI/database) over through `config/match.json`.
+    let contract = dedicated::load_serve_contract(&config_dir);
+    let match_config = contract
+        .as_ref()
+        .map(|contract| contract.match_config.clone())
+        .unwrap_or_default();
+    let round_extra_time = config.get_i32("roundExtraTime").max(0) as f32;
+    let auto_pause = config.get_bool("autoPause");
+    let mut host = LocalHost::new(registry, maps_dir);
+    host.configure(HostConfig {
+        auto_pause,
+        round_extra_time,
+        seed: match_config.map_seed,
+        rotation: match_config.map_rotation.clone(),
+        shuffle: mind_core::maps::shuffle::ShuffleMode::All,
+    });
+    let net = NetHost::with_server(
+        &config_dir,
+        contract.as_ref().map(|contract| contract.stdb_host.clone()),
+        contract.as_ref().map(|contract| contract.db.clone()),
+        online,
+    );
     let mut state = ServerState {
         config,
         config_dir: config_dir.clone(),
         paths,
-        host: LocalHost::new(registry, maps_dir),
-        net: NetHost::new(&config_dir, online),
+        host,
+        net,
         rules,
         rules_state,
         console: ConsoleState::default(),
@@ -228,6 +338,9 @@ pub fn run(options: ServerOptions) -> i32 {
         exit: false,
         boot_ms: started.elapsed().as_millis() as u64,
         started,
+        last_frame: Instant::now(),
+        frame_accum: 0.0,
+        match_config,
     };
 
     state.info(&format!(
@@ -260,24 +373,27 @@ pub fn run(options: ServerOptions) -> i32 {
         }
     }
 
-    // 6. Socket loop, else interactive stdin loop (skipped when startup
-    //    commands were given and no socket is enabled, so scripted boots
-    //    terminate).
-    if !state.exit && state.socket.is_enabled() {
-        socket_loop(&mut state);
-    } else if !state.exit && options.commands.is_empty() {
-        use std::io::BufRead;
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(line) => {
-                    commands::execute(&mut state, line.trim());
-                    state.net.pump();
-                    if state.exit {
-                        break;
+    // 6. Host loop: pump the fixed-step game (`ServerControl`'s update timer)
+    //    plus the console. Scripted boots that issued `exit` terminate above;
+    //    a hosted server or an enabled socket keeps running until `exit`
+    //    (SIGINT/stdin EOF never stops a dedicated host, like upstream).
+    if !state.exit {
+        if state.host.is_hosting() || state.socket.is_enabled() {
+            server_loop(&mut state);
+        } else if options.commands.is_empty() {
+            use std::io::BufRead;
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                match line {
+                    Ok(line) => {
+                        commands::execute(&mut state, line.trim());
+                        state.net.pump();
+                        if state.exit {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         }
     }
@@ -309,34 +425,75 @@ pub fn run(options: ServerOptions) -> i32 {
     0
 }
 
-/// Serves the console socket until `exit` (plan 22 §6.6): one active client,
-/// each line handled identically to stdin, every log line echoed back.
-fn socket_loop(state: &mut ServerState) {
+/// The fixed-step dedicated-server loop (`ServerControl`'s update timer +
+/// socket/stdin console). Each iteration pumps one server frame, then drains
+/// console lines from the socket and a stdin reader thread.
+fn server_loop(state: &mut ServerState) {
     if let Some(addr) = state.socket.local_addr() {
         state.info(&format!("Socket listening on {addr}"));
     }
+    let stdin_rx = spawn_stdin_reader();
     while !state.exit {
-        if let Err(error) = state.socket.accept() {
-            state.warn(&format!("socket accept failed: {error}"));
+        state.frame();
+        if state.socket.is_enabled() {
+            if let Err(error) = state.socket.accept() {
+                state.warn(&format!("socket accept failed: {error}"));
+            }
+            match state.socket.read_line() {
+                Ok(Some(line)) => {
+                    if !line.trim().is_empty() {
+                        commands::execute(state, line.trim());
+                        state.frame();
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => state.warn(&format!("socket read failed: {error}")),
+            }
         }
-        match state.socket.read_line() {
-            Ok(Some(line)) => {
-                if !line.is_empty() {
-                    commands::execute(state, &line);
-                    state.net.pump();
+        if let Some(rx) = &stdin_rx {
+            let mut lines = Vec::new();
+            while let Ok(line) = rx.try_recv() {
+                lines.push(line);
+            }
+            for line in lines {
+                if !line.trim().is_empty() {
+                    commands::execute(state, line.trim());
+                    state.frame();
+                }
+                if state.exit {
+                    break;
                 }
             }
-            Ok(None) => {
-                state.net.pump();
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            Err(error) => {
-                state.warn(&format!("socket read failed: {error}"));
-                state.net.pump();
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
         }
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
+}
+
+/// Spawns the blocking stdin console reader (`ServerControl.serverInput`).
+///
+/// A dedicated host keeps running after stdin reaches EOF; the channel simply
+/// disconnects. The thread never touches `ServerState`, so it stays `Send`.
+fn spawn_stdin_reader() -> Option<std::sync::mpsc::Receiver<String>> {
+    use std::io::BufRead;
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("mind-server-stdin".to_owned())
+        .spawn(move || {
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                match line {
+                    Ok(line) => {
+                        if tx.send(line).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok()
+        .map(|_| rx)
 }
 
 /// Boots base content (plan 02), the headless server path.

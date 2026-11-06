@@ -26,18 +26,20 @@ use mind_stdb::binder::TableBinder;
 use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport};
 use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
-    AllMatchesTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState,
-    MatchStatus, MemberRole, MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor,
-    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotChunksTableAccessor,
-    MyMatchSnapshotRequestsTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
-    MyMatchTableAccessor, MyMatchesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind, Visibility,
+    AllAdminsTableAccessor, AllBansTableAccessor, AllMatchesTableAccessor, AllPlayersTableAccessor,
+    AllWhitelistTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode,
+    MatchPlayerState, MatchStatus, MemberRole, MyAdminActionsTableAccessor, MyKickTableAccessor,
+    MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
+    MyMatchSnapshotChunksTableAccessor, MyMatchSnapshotRequestsTableAccessor,
+    MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor,
+    MyMatchesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind, Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
-    ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, SessionState,
-    StdbMode, WaveName, parse_player_suffix_from,
+    ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, PlayerAction, Roster,
+    RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
 };
 
 use crate::settings_hub;
@@ -201,6 +203,20 @@ pub struct MindNet {
     members: std::collections::BTreeMap<String, mind_stdb::module_bindings::RelayMember>,
     /// Relay kinds already reported as "no sim equivalent" (log once).
     unmapped_kinds: std::collections::BTreeSet<String>,
+    /// Player-list/trace aggregation over the roster tables (PAR-0122).
+    roster: Roster,
+    /// `all_players` rows (usernames for the roster).
+    all_players_binder: Option<TableBinder<AllPlayersTableAccessor>>,
+    /// `all_admins` rows (admin flag).
+    all_admins_binder: Option<TableBinder<AllAdminsTableAccessor>>,
+    /// `all_bans` rows (trace ban flag).
+    all_bans_binder: Option<TableBinder<AllBansTableAccessor>>,
+    /// `all_whitelist` rows (trace whitelist flag).
+    all_whitelist_binder: Option<TableBinder<AllWhitelistTableAccessor>>,
+    /// `my_kick` rows (kick history/trace).
+    my_kick_binder: Option<TableBinder<MyKickTableAccessor>>,
+    /// `my_admin_actions` rows (admin action history/trace).
+    admin_actions_binder: Option<TableBinder<MyAdminActionsTableAccessor>>,
 }
 
 #[godot_api]
@@ -253,6 +269,13 @@ impl INode for MindNet {
             relay_outbox: None,
             members: std::collections::BTreeMap::new(),
             unmapped_kinds: std::collections::BTreeSet::new(),
+            roster: Roster::new(),
+            all_players_binder: None,
+            all_admins_binder: None,
+            all_bans_binder: None,
+            all_whitelist_binder: None,
+            my_kick_binder: None,
+            admin_actions_binder: None,
         }
     }
 
@@ -281,14 +304,21 @@ impl INode for MindNet {
                             runtime.set_local_identity(identity.identity);
                         }
                     }
-                    ConnectorEvent::Disconnected { .. } => self.session.on_disconnected(),
-                    ConnectorEvent::Resync => self.session.on_resync(),
+                    ConnectorEvent::Disconnected { .. } => {
+                        self.session.on_disconnected();
+                        self.roster.clear();
+                    }
+                    ConnectorEvent::Resync => {
+                        self.session.on_resync();
+                        self.roster.clear();
+                    }
                     _ => {}
                 }
             }
             self.drain_match_rows();
             self.drain_my_matches();
             self.drain_members_rows();
+            self.drain_roster();
             self.drain_state_rows();
             self.drain_public_matches();
             self.drain_player_states();
@@ -385,6 +415,15 @@ impl MindNet {
         self.snapshot_requests_binder = Some(
             connector.bind::<MyMatchSnapshotRequestsTableAccessor>("my_match_snapshot_requests"),
         );
+        // Player roster/trace tables (PAR-0122).
+        self.all_players_binder = Some(connector.bind::<AllPlayersTableAccessor>("all_players"));
+        self.all_admins_binder = Some(connector.bind::<AllAdminsTableAccessor>("all_admins"));
+        self.all_bans_binder = Some(connector.bind::<AllBansTableAccessor>("all_bans"));
+        self.all_whitelist_binder =
+            Some(connector.bind::<AllWhitelistTableAccessor>("all_whitelist"));
+        self.my_kick_binder = Some(connector.bind::<MyKickTableAccessor>("my_kick"));
+        self.admin_actions_binder =
+            Some(connector.bind::<MyAdminActionsTableAccessor>("my_admin_actions"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -786,6 +825,51 @@ impl MindNet {
     #[func]
     pub fn get_members_json(&self) -> GString {
         GString::from(self.last_members_json.as_str())
+    }
+
+    /// Player-list rows (name, team, admin, connected, role) built from the
+    /// relay roster tables (PAR-0122). Replaces the always-empty
+    /// `MindUi.player_list_json()`; the UI owns the rendering.
+    #[func]
+    pub fn players_json(&self) -> GString {
+        GString::from(self.roster.players_json().to_string().as_str())
+    }
+
+    /// Connected player count (player-list header).
+    #[func]
+    pub fn player_count(&self) -> i32 {
+        self.roster.connected().len() as i32
+    }
+
+    /// Dispatches a player-list action (`kick`/`ban`/`unban`/`admin`/`team`)
+    /// for `target` (name or identity). Returns `true` when the reducer was
+    /// sent. The UI player-list menu calls this per button.
+    #[func]
+    pub fn player_action(&mut self, action: GString, target: GString) -> bool {
+        self.dispatch_player_action(action, target, 0)
+    }
+
+    /// [`Self::player_action`] with the team id for the `team` action.
+    #[func]
+    pub fn player_action_with(&mut self, action: GString, target: GString, value: i64) -> bool {
+        self.dispatch_player_action(action, target, value)
+    }
+
+    /// Admin-action/session history for `target` (trace dialog JSON).
+    #[func]
+    pub fn player_trace_json(&self, target: GString) -> GString {
+        let query = target.to_string();
+        let identity = self
+            .roster
+            .find(query.as_str())
+            .map(|entry| entry.identity)
+            .unwrap_or(query);
+        GString::from(
+            self.roster
+                .trace_json(identity.as_str())
+                .to_string()
+                .as_str(),
+        )
     }
 
     /// Greatest applied `command_id` (checkpoint watermark).
@@ -1460,15 +1544,112 @@ impl MindNet {
             match change {
                 RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
                     members.push(row.debug_json());
+                    self.roster.apply_member(RowChange::Insert(row.clone()));
                     self.members.insert(row.identity.to_hex().to_string(), row);
                 }
                 RowChange::Delete(row) => {
+                    self.roster.apply_member(RowChange::Delete(row.clone()));
                     self.members.remove(&row.identity.to_hex().to_string());
                 }
             }
         }
         if !members.is_empty() {
             self.last_members_json = format!("[{}]", members.join(","));
+        }
+    }
+
+    /// Maps a player-list action name to the plan-21 reducer and sends it
+    /// (`PlayerListFragment` Ban/Kick/Trace/Team/Admin buttons, `PlayerListFragment.java:149-247`).
+    fn dispatch_player_action(&mut self, action: GString, target: GString, value: i64) -> bool {
+        let target = target.to_string();
+        let Some(entry) = self.roster.find(target.as_str()) else {
+            log::warn!("player_action: no player matching `{target}`");
+            return false;
+        };
+        let Ok(identity) = mind_stdb::Identity::from_hex(&entry.identity) else {
+            log::warn!("player_action: bad identity `{}`", entry.identity);
+            return false;
+        };
+        let Some(match_id) = self.session.match_id() else {
+            log::warn!("player_action: no match hosted");
+            return false;
+        };
+        let action = match action.to_string().as_str() {
+            "kick" => PlayerAction::Kick {
+                reason: "Kicked by an admin".to_owned(),
+            },
+            "ban" => PlayerAction::Ban {
+                reason: "Banned by an admin".to_owned(),
+                duration_secs: None,
+            },
+            "unban" => PlayerAction::Unban,
+            "admin" => PlayerAction::GrantAdmin(true),
+            "unadmin" => PlayerAction::GrantAdmin(false),
+            "whitelist" => PlayerAction::Whitelist(true),
+            "unwhitelist" => PlayerAction::Whitelist(false),
+            "team" => PlayerAction::SwitchTeam(value.clamp(0, u8::MAX as i64) as u8),
+            other => {
+                log::warn!("player_action: unknown action `{other}`");
+                return false;
+            }
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            log::warn!("player_action: no connector (single-player)");
+            return false;
+        };
+        match action.apply(connector, match_id, identity) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("player_action {} failed: {error}", action.reducer());
+                false
+            }
+        }
+    }
+
+    /// Drains the roster tables into the [`Roster`] (PAR-0122): member rows,
+    /// usernames, admin/ban/whitelist flags, kicks and admin action history.
+    fn drain_roster(&mut self) {
+        if let Some(changes) = self
+            .all_players_binder
+            .as_ref()
+            .map(|binder| binder.drain())
+        {
+            for change in changes {
+                self.roster.apply_player(change);
+            }
+        }
+        if let Some(changes) = self.all_admins_binder.as_ref().map(|binder| binder.drain()) {
+            for change in changes {
+                self.roster.apply_admin(change);
+            }
+        }
+        if let Some(changes) = self.all_bans_binder.as_ref().map(|binder| binder.drain()) {
+            for change in changes {
+                self.roster.apply_ban(change);
+            }
+        }
+        if let Some(changes) = self
+            .all_whitelist_binder
+            .as_ref()
+            .map(|binder| binder.drain())
+        {
+            for change in changes {
+                self.roster.apply_whitelist(change);
+            }
+        }
+        if let Some(changes) = self.my_kick_binder.as_ref().map(|binder| binder.drain()) {
+            for change in changes {
+                self.roster.apply_kick(change);
+            }
+        }
+        if let Some(changes) = self
+            .admin_actions_binder
+            .as_ref()
+            .map(|binder| binder.drain())
+        {
+            for change in changes {
+                self.roster.apply_admin_action(change);
+            }
         }
     }
 

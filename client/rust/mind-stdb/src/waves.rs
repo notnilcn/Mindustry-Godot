@@ -21,6 +21,9 @@ pub const LOBBY_TABLES: &[&str] = &[
     "local_player",
     "local_player_profile",
     "all_players",
+    "all_admins",
+    "all_bans",
+    "all_whitelist",
     "my_matches",
     "all_matches",
 ];
@@ -35,6 +38,7 @@ pub const GAME_TABLES: &[&str] = &[
     "my_match_members",
     "my_match_state",
     "my_kick",
+    "my_admin_actions",
     "my_sender_command_state",
     "my_match_player_states",
     "my_match_plans",

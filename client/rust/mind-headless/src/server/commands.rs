@@ -283,27 +283,31 @@ fn dispatch(state: &mut ServerState, name: &str, args: &[&str]) -> Outcome {
             ));
         }
         "exit" => {
+            state.host.stop();
+            state.net.stop();
             state.info("Exiting server.");
             state.exit = true;
             return Outcome::Exit;
         }
         "stop" => {
             state.host.stop();
+            state.net.stop();
             state.info("Server stopped.");
         }
         "host" => cmd_host(state, args),
         "maps" => cmd_maps(state),
         "reloadmaps" => cmd_reloadmaps(state),
-        "reloadassets" => state.warn("reloadassets requires the plan-20 server asset loader"),
+        "reloadassets" => cmd_reloadassets(state),
         "status" => cmd_status(state),
-        "mods" | "mod" => state.info("0 mods loaded (plan-20 server loaders not built)"),
+        "mods" => cmd_mods(state, None),
+        "mod" => cmd_mods(state, args.first().copied()),
         "js" => state.error("script mods are not available in this build"),
         "say" => cmd_say(state, args),
         "pause" => cmd_pause(state, args),
         "rules" => cmd_rules(state, args),
         "dumpsettings" => cmd_dumpsettings(state),
         "config" => cmd_config(state, args),
-        "fillitems" => delegate(state, "fillitems", "plan 12"),
+        "fillitems" => cmd_fillitems(state, args),
         "playerlimit" => cmd_playerlimit(state, args),
         "subnet-ban" | "dos-ban" => cmd_ip_ban(state, name, args),
         "name-ban" => cmd_name_ban(state, args),
@@ -317,13 +321,14 @@ fn dispatch(state: &mut ServerState, name: &str, args: &[&str]) -> Outcome {
         "admins" => cmd_admins(state),
         "players" => cmd_players(state),
         "info" | "search" => cmd_search(state, args),
-        "shuffle" | "nextmap" => state.warn(&format!("`{name}` needs the plan-19 map registry")),
+        "shuffle" => cmd_shuffle(state, args),
+        "nextmap" => cmd_nextmap(state, args),
         "runwave" => cmd_runwave(state),
         "loadautosave" => cmd_loadautosave(state),
         "load" => cmd_load(state, args),
         "save" => cmd_save(state, args),
         "saves" => cmd_saves(state),
-        "gameover" => state.warn("gameover needs the plan-12 campaign state"),
+        "gameover" => cmd_gameover(state),
         "gc" => cmd_gc(state),
         "yes" => cmd_yes(state),
         other => {
@@ -340,10 +345,147 @@ fn dispatch(state: &mut ServerState, name: &str, args: &[&str]) -> Outcome {
     Outcome::Handled
 }
 
-fn delegate(state: &mut ServerState, name: &str, owner: &str) {
-    state.warn(&format!(
-        "`{name}` requires {owner}; not available in this build"
-    ));
+/// `fillitems [team]` (`ServerControl.java:772-795`): fills the team's first
+/// core with every item.
+fn cmd_fillitems(state: &mut ServerState, args: &[&str]) {
+    if !state.host.is_hosting() {
+        state.error("Not playing. Host first.");
+        return;
+    }
+    let team = args.first().copied();
+    match state.host.fill_items(team) {
+        Ok(0) => state.error("That team has no cores."),
+        Ok(count) => state.info(&format!("Core filled ({count} core(s)).")),
+        Err(error) => state.error(&error.to_string()),
+    }
+}
+
+/// `shuffle [none/all/custom/builtin]` (`ServerControl.java:966-979`).
+fn cmd_shuffle(state: &mut ServerState, args: &[&str]) {
+    use mind_core::maps::shuffle::ShuffleMode;
+    match args.first().copied() {
+        None => state.info(&format!(
+            "Shuffle mode currently set to '{}'.",
+            state.host.rotation().shuffle.name()
+        )),
+        Some(name) => {
+            if !matches!(name, "none" | "all" | "custom" | "builtin") {
+                state.error("Invalid shuffle mode.");
+                return;
+            }
+            let mode = ShuffleMode::from_name(name);
+            state.host.rotation_mut().set_shuffle(mode);
+            state.info(&format!("Shuffle mode set to '{name}'."));
+        }
+    }
+}
+
+/// `nextmap <mapname...>` (`ServerControl.java:981-989`).
+fn cmd_nextmap(state: &mut ServerState, args: &[&str]) {
+    let Some(name) = args.first().copied().filter(|name| !name.is_empty()) else {
+        state.warn("Usage: nextmap <mapname...>");
+        return;
+    };
+    state.host.rotation_mut().set_next(name);
+    state.info(&format!("Next map set to '{name}'."));
+}
+
+/// `gameover` (`ServerControl.java:1234-1243`): forces the game-over path.
+fn cmd_gameover(state: &mut ServerState) {
+    if !state.host.is_hosting() {
+        state.error("Not playing a map.");
+        return;
+    }
+    match state.host.game_over() {
+        Ok(()) => {
+            state.info("Core destroyed.");
+            state.drain_host_events();
+        }
+        Err(error) => state.error(&error.to_string()),
+    }
+}
+
+/// `mods`/`mod <name>` (`ServerControl.java:641-667`): scans the mod directory
+/// and lists the loaded mods.
+fn cmd_mods(state: &mut ServerState, name: Option<&str>) {
+    let dir = state.config_dir.join("mods");
+    let mut mods = mind_core::mods::Mods::new(true, dir.clone());
+    let mut settings = mind_core::io::settings::SettingsStore::new();
+    let fs = state.fs();
+    match mods.load(&fs, &dir, &mut settings) {
+        Ok(report) => match name {
+            Some(name) => {
+                let found = mods.list().iter().find(|entry| {
+                    entry.name.eq_ignore_ascii_case(name)
+                        || entry
+                            .meta
+                            .display_name
+                            .as_deref()
+                            .is_some_and(|display| display.eq_ignore_ascii_case(name))
+                });
+                match found {
+                    Some(entry) => {
+                        state.info(&format!(
+                            "Name: {}",
+                            entry
+                                .meta
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| entry.name.clone())
+                        ));
+                        state.info(&format!("Internal Name: {}", entry.name));
+                        state.info(&format!(
+                            "Version: {}",
+                            entry.meta.version.clone().unwrap_or_default()
+                        ));
+                        state.info(&format!(
+                            "Author: {}",
+                            entry.meta.author.clone().unwrap_or_default()
+                        ));
+                        state.info(&format!("Path: {}", entry.file.display()));
+                        state.info(&format!(
+                            "Description: {}",
+                            entry.meta.description.clone().unwrap_or_default()
+                        ));
+                    }
+                    None => state.error(&format!("No mod with name '{name}' found.")),
+                }
+            }
+            None => {
+                if report.mods.is_empty() {
+                    state.info("No mods found.");
+                } else {
+                    state.info("Mods:");
+                    for entry in &report.mods {
+                        state.info(&format!(
+                            "  {} {} {}",
+                            entry.display_name,
+                            entry.version,
+                            if entry.enabled { "" } else { "(disabled)" }
+                        ));
+                    }
+                }
+                state.info(&format!("Mod directory: {}", dir.display()));
+            }
+        },
+        Err(error) => state.error(&format!("Could not scan mods: {error}")),
+    }
+}
+
+/// `reloadassets` (`ServerControl.java:580-587`): data assets from disk are the
+/// plan-20 mod asset patcher; report the current state honestly.
+fn cmd_reloadassets(state: &mut ServerState) {
+    let mod_dir = state.config_dir.join("mods");
+    let mut mods = mind_core::mods::Mods::new(true, mod_dir.clone());
+    let mut settings = mind_core::io::settings::SettingsStore::new();
+    let fs = state.fs();
+    match mods.load(&fs, &mod_dir, &mut settings) {
+        Ok(report) if report.requires_reload => {
+            state.info("Asset files reloaded; a restart is required to apply mod assets.")
+        }
+        Ok(_) => state.warn("No valid asset files found."),
+        Err(error) => state.error(&format!("Could not reload assets: {error}")),
+    }
 }
 
 fn cmd_help(state: &mut ServerState, args: &[&str]) {
@@ -376,10 +518,31 @@ fn cmd_help(state: &mut ServerState, args: &[&str]) {
 }
 
 fn cmd_host(state: &mut ServerState, args: &[&str]) {
-    let map = args.first().copied().unwrap_or("synthetic");
+    let map = args
+        .first()
+        .copied()
+        .filter(|arg| !arg.is_empty())
+        .unwrap_or("synthetic");
     let mode = args.get(1).copied().unwrap_or("survival");
+    state.info("Loading map...");
     match state.host.host(map, mode) {
-        Ok(()) => state.info(&format!("Hosting map '{map}' in mode '{mode}'.")),
+        Ok(()) => {
+            state.info(&format!("Map loaded. Hosting '{map}' in mode '{mode}'."));
+            state.drain_host_events();
+            // `netServer.openServer()` (`ServerControl.java:560`): the
+            // plan-21 match row makes the server listed/joinable.
+            if state.net.is_online() {
+                match state.net.host(map, mode) {
+                    Ok(()) => state.info("Opened a server: networked match created."),
+                    Err(error) => {
+                        state.error(&format!("Could not open a server: {error}"));
+                        state.warn("Hosting locally only; clients cannot join.");
+                    }
+                }
+            } else {
+                state.info("STDB offline: hosting locally (no networked match).");
+            }
+        }
         Err(error) => state.error(&format!("Could not host: {error}")),
     }
 }
@@ -414,16 +577,48 @@ fn cmd_status(state: &mut ServerState) {
     let status = state.host.status();
     let live = state.net.players().len();
     if !status.hosting {
-        state.info(&format!("Hosting: no | players={live}"));
+        state.info(&format!("Status: server closed | players={live}"));
         return;
     }
+    state.info("Status:");
     state.info(&format!(
-        "Hosting: {} | mode={} | wave={} | tick={} | players={live}",
+        "  Playing on map {} / Wave {}",
         status.map.as_deref().unwrap_or("?"),
+        status.wave
+    ));
+    state.info(&format!(
+        "  {} seconds until next wave.",
+        status.seconds_until_wave.max(0)
+    ));
+    if status.auto_paused {
+        state.info("  Paused (no players connected).");
+    } else if status.paused {
+        state.info("  Game paused.");
+    }
+    if let Some(next) = &status.next_map {
+        state.info(&format!(
+            "  Next map {} in {} seconds.",
+            next,
+            status.restart_in.unwrap_or(0) / super::TICKS_PER_SECOND
+        ));
+    }
+    state.info(&format!(
+        "  mode={} | tick={} | players={live}",
         status.mode.as_deref().unwrap_or("?"),
-        status.wave,
         status.tick,
     ));
+    // Plan-21 half: the networked match row (`my_match`) once create_match
+    // round-trips through the relay.
+    let net = state.net.status();
+    if state.net.is_online() {
+        state.info(&format!(
+            "  STDB match: hosting={} map={} mode={} players={}",
+            net.hosting,
+            net.map.as_deref().unwrap_or("-"),
+            net.mode.as_deref().unwrap_or("-"),
+            net.players
+        ));
+    }
 }
 
 fn cmd_say(state: &mut ServerState, args: &[&str]) {
@@ -675,14 +870,20 @@ fn cmd_search(state: &mut ServerState, args: &[&str]) {
 }
 
 fn cmd_pause(state: &mut ServerState, args: &[&str]) {
+    if !state.host.is_hosting() {
+        state.error("Cannot pause without a game running.");
+        return;
+    }
     match args.first().copied() {
         Some("on") | Some("true") => {
+            state.host.set_paused(true);
             state.paused = true;
             state.info("Game paused.");
         }
         Some("off") | Some("false") => {
+            state.host.set_paused(false);
             state.paused = false;
-            state.info("Game resumed.");
+            state.info("Game unpaused.");
         }
         _ => state.warn("Usage: pause <on/off>"),
     }
@@ -774,7 +975,17 @@ fn cmd_config(state: &mut ServerState, args: &[&str]) {
 
 fn cmd_runwave(state: &mut ServerState) {
     match state.host.run_wave() {
-        Ok(()) => state.info("Wave forced."),
+        Ok(()) => {
+            state.info("Wave spawned.");
+            state.drain_host_events();
+            // The host half ran locally; tell the networked match too
+            // (`admin_run_wave`).
+            if state.net.is_online() {
+                if let Err(error) = state.net.run_wave() {
+                    state.warn(&format!("Could not relay the wave: {error}"));
+                }
+            }
+        }
         Err(error) => state.error(&error.to_string()),
     }
 }

@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T14:45:07Z",
+  "updated": "2026-11-06T15:30:17Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -973,6 +973,124 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::lightning; ... world::blocks::defense::turrets",
       "expected": "full lib 2986 pass; lightning 10; turrets 56",
       "risk": "lightning goldens/checksums; turret stat/DPS UI; lustre PointLaser; splash status_area signature",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-153017",
+      "created_at": "2026-11-06T15:30:17Z",
+      "agent": "hx-moddata",
+      "branch": "main",
+      "head": "01d18ac6",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/mods",
+      "summary": "ContentParser/BlockKindData/DataPatcher mod parity (GAPS #56/#59/#60, PAR-0537/0538/0539)",
+      "files": [
+        "client/rust/mind-core/src/mods/json/mod.rs",
+        "client/rust/mind-core/src/mods/patch/mod.rs",
+        "client/rust/mind-core/src/content/registries/fx_meta.rs",
+        "client/rust/mind-core/src/content/registries/bullets.rs",
+        "client/rust/mind-core/src/content/registries/units/mod.rs",
+        "client/rust/mind-core/src/content/registries/units/weapon.rs",
+        "client/rust/mind-core/src/content/registries/units/parts.rs",
+        "client/rust/mind-core/src/world/block_kind_data.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods; ... block_kind_data",
+      "expected": "mods 160, block_kind_data 4; full lib passes",
+      "risk": "craftTime class default 80; parser field surface; AttributeCrafter defaults merge",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-153017-2",
+      "created_at": "2026-11-06T15:30:17Z",
+      "agent": "hx-audio",
+      "branch": "main",
+      "head": "01d18ac6",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/audio",
+      "summary": "Audio per-key SoundLoop voices + BurstDrill/LaunchPad hooks (GAPS #54, PAR-0540)",
+      "files": [
+        "client/rust/mind-gdext/src/audio/mod.rs",
+        "client/rust/mind-gdext/src/audio/voices.rs",
+        "client/rust/mind-gdext/src/audio/streams.rs",
+        "client/rust/mind-gdext/src/audio/hooks.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib voices",
+      "expected": "9 passed; headless boot exit 0",
+      "risk": "MAX_LOOP_VOICES shared; LoopInstance baseVolume default",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-153017-3",
+      "created_at": "2026-11-06T15:30:17Z",
+      "agent": "hx-campaign",
+      "branch": "main",
+      "head": "01d18ac6",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src",
+      "summary": "Campaign launch pricing/gating, resume loadout retention, last-used loadout (PAR-0489/0507/0508/0509)",
+      "files": [
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs",
+        "client/rust/mind-core/src/game/universe.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib launch_; ... -p mind-core --lib universe",
+      "expected": "4 launch_ + 18 universe pass",
+      "risk": "launch_dialog_json new keys; Erekir grid absent by design",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-153017-4",
+      "created_at": "2026-11-06T15:30:17Z",
+      "agent": "hx-stdb",
+      "branch": "main",
+      "head": "01d18ac6",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "server/spacetimedb",
+      "summary": "STDB chat/admin/events module (PAR-0121/0125/0557/0558; bindings regen handoff)",
+      "files": [
+        "server/spacetimedb/src/chat/mod.rs",
+        "server/spacetimedb/src/chat/commands.rs",
+        "server/spacetimedb/src/chat/vote.rs",
+        "server/spacetimedb/src/admin/actions.rs",
+        "server/spacetimedb/src/admin/history.rs",
+        "server/spacetimedb/src/relay/events.rs",
+        "server/spacetimedb/src/relay/reducers.rs",
+        "server/spacetimedb/src/relay/views.rs",
+        "server/spacetimedb/src/relay/sweep.rs",
+        "server/spacetimedb/Cargo.toml"
+      ],
+      "gates": [
+        "fmt",
+        "cargo-check",
+        "stdb-check",
+        "stdb-bindings"
+      ],
+      "repro": "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib; bash server/build.sh",
+      "expected": "94 module tests pass; bindings drift-clean after regen",
+      "risk": "ABI additions (ChatKind::Admin, MatchChat.target, ChatFilter.match_id, ServerConfig +9, new tables/views); client bindings stale until regenerated",
       "status": "pending"
     }
   ]
