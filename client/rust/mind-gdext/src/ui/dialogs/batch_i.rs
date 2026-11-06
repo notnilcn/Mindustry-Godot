@@ -257,6 +257,36 @@ fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
     callable.call_deferred(&[]);
 }
 
+/// Runs `action` on a freshly bound dialog during the idle phase.
+///
+/// The custom-rules overlays are built *from signals* (the `@edit`/`@configure`/
+/// `@banned*`/`@rules.weather` buttons, the search field's `text_changed`, and
+/// the overlay buttons that rebuild the rules table), and every one of them
+/// needs a mutable `MindDialog` (`open_*`/`setup_main`). A signal can be emitted
+/// while that dialog is already bound — a programmatic press from a `shown()`/
+/// `#[func]` handler, a field signal fired from a rebuild, or a press made from
+/// a bound host method — and the nested `Gd::bind_mut()` then panics
+/// `bind_mut() failed, already bound`; gdext catches it, the overlay never
+/// opens, and (with the MCP debugger's break-on-error) Play's frame loop stays
+/// wedged until restart (`PAR-0470`). Queue the bind instead: it lands after the
+/// emitting call stack returns, exactly like the `editor_maps` prompt seams
+/// (`PAR-0066`).
+fn defer_dialog_action(
+    name: &'static str,
+    target: &Gd<MindDialog>,
+    action: impl FnOnce(&mut MindDialog) + 'static,
+) {
+    let target = target.clone();
+    defer_action(name, move || {
+        if !target.is_instance_valid() {
+            return;
+        }
+        let mut node = target;
+        let mut bound = node.bind_mut();
+        action(&mut bound);
+    });
+}
+
 /// `String.is_valid_int()`: an optional sign followed by digits only.
 fn is_valid_int(text: &str) -> bool {
     let body = text.strip_prefix('-').unwrap_or(text);
@@ -524,9 +554,12 @@ impl DialogController for CustomRulesDialog {
         let target = dialog.to_gd();
         let state = self.state.clone();
         let callable = Callable::from_fn("custom_rules_edit", move |_args: &[&Variant]| {
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            open_edit_menu(&mut bound, &state);
+            // `@edit` builds an overlay and therefore re-binds the dialog: must
+            // not run inside the button's `pressed` emission (PAR-0470).
+            let state = state.clone();
+            defer_dialog_action("custom_rules_edit_menu", &target, move |dialog| {
+                open_edit_menu(dialog, &state);
+            });
         });
         let text = dialog.t("@edit").to_string();
         dialog.add_button(&text, Some(callable), "pencil", 210.0);
@@ -592,9 +625,12 @@ fn setup(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
                 .first()
                 .map(|value| (*value).to::<GString>().to_string())
                 .unwrap_or_default();
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            on_search(&mut bound, &state_for_search, &text);
+            // `on_search` rebuilds the rows: defer the dialog bind out of the
+            // field's `text_changed` emission (PAR-0470).
+            let state = state_for_search.clone();
+            defer_dialog_action("custom_rules_search_rebuild", &target, move |dialog| {
+                on_search(dialog, &state, &text);
+            });
         });
         field.connect("text_changed", &callable);
     }
@@ -1108,9 +1144,10 @@ fn setup_main(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
             let state_for = state.clone();
             let callable =
                 Callable::from_fn("custom_rules_loadout", move |_args: &[&Variant]| {
-                    let mut node = target.clone();
-                    let mut bound = node.bind_mut();
-                    open_loadout(&mut bound, &state_for);
+                    let state = state_for.clone();
+                    defer_dialog_action("custom_rules_loadout_open", &target, move |dialog| {
+                        open_loadout(dialog, &state);
+                    });
                 });
             button.connect("pressed", &callable);
         }
@@ -1123,9 +1160,14 @@ fn setup_main(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
             let state_for = state.clone();
             let callable =
                 Callable::from_fn("custom_rules_banned_blocks", move |_args: &[&Variant]| {
-                    let mut node = target.clone();
-                    let mut bound = node.bind_mut();
-                    open_banned(&mut bound, &state_for, "block");
+                    let state = state_for.clone();
+                    defer_dialog_action(
+                        "custom_rules_banned_blocks_open",
+                        &target,
+                        move |dialog| {
+                            open_banned(dialog, &state, "block");
+                        },
+                    );
                 });
             button.connect("pressed", &callable);
         }
@@ -1262,9 +1304,10 @@ fn setup_main(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
             let state_for = state.clone();
             let callable =
                 Callable::from_fn("custom_rules_banned_units", move |_args: &[&Variant]| {
-                    let mut node = target.clone();
-                    let mut bound = node.bind_mut();
-                    open_banned(&mut bound, &state_for, "unit");
+                    let state = state_for.clone();
+                    defer_dialog_action("custom_rules_banned_units_open", &target, move |dialog| {
+                        open_banned(dialog, &state, "unit");
+                    });
                 });
             button.connect("pressed", &callable);
         }
@@ -1402,9 +1445,10 @@ fn setup_main(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
             let state_for = state.clone();
             let callable =
                 Callable::from_fn("custom_rules_weather", move |_args: &[&Variant]| {
-                    let mut node = target.clone();
-                    let mut bound = node.bind_mut();
-                    open_weather(&mut bound, &state_for);
+                    let state = state_for.clone();
+                    defer_dialog_action("custom_rules_weather_open", &target, move |dialog| {
+                        open_weather(dialog, &state);
+                    });
                 });
             button.connect("pressed", &callable);
         }
@@ -2617,9 +2661,10 @@ fn open_loadout(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) 
             loadout.push(&entry.to_variant());
             rules_for.borrow_mut().set("loadout", &loadout.to_variant());
             close_overlay(&state_for);
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            setup_main(&mut bound, &state_for);
+            let state = state_for.clone();
+            defer_dialog_action("custom_rules_loadout_reset", &target, move |dialog| {
+                setup_main(dialog, &state);
+            });
         });
         reset_button.connect("pressed", &callable);
     }
@@ -2715,9 +2760,10 @@ fn open_weather(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) 
                         .borrow_mut()
                         .set("weather", &entries_for.borrow().to_variant());
                     close_overlay(&state_for);
-                    let mut node = target.clone();
-                    let mut bound = node.bind_mut();
-                    open_weather(&mut bound, &state_for);
+                    let state = state_for.clone();
+                    defer_dialog_action("custom_rules_weather_remove", &target, move |dialog| {
+                        open_weather(dialog, &state);
+                    });
                 });
             remove_entry.connect("pressed", &callable);
         }
@@ -2796,9 +2842,10 @@ fn open_weather(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) 
                     .unwrap_or(false);
                 entry_for.borrow_mut().set("always", &value.to_variant());
                 close_overlay(&state_for);
-                let mut node = target.clone();
-                let mut bound = node.bind_mut();
-                open_weather(&mut bound, &state_for);
+                let state = state_for.clone();
+                defer_dialog_action("custom_rules_weather_always", &target, move |dialog| {
+                    open_weather(dialog, &state);
+                });
             });
             check
                 .bind_mut()
@@ -2813,9 +2860,10 @@ fn open_weather(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) 
         let state_for = state.clone();
         let target = dialog.to_gd();
         let callable = Callable::from_fn("rules_weather_add", move |_args: &[&Variant]| {
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            open_weather_add(&mut bound, &state_for);
+            let state = state_for.clone();
+            defer_dialog_action("custom_rules_weather_add", &target, move |dialog| {
+                open_weather_add(dialog, &state);
+            });
         });
         add_button.connect("pressed", &callable);
     }
@@ -2903,9 +2951,10 @@ fn open_weather_add(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState
                     .borrow_mut()
                     .set("weather", &entries_for.borrow().to_variant());
                 close_overlay(&state_for);
-                let mut node = target.clone();
-                let mut bound = node.bind_mut();
-                open_weather(&mut bound, &state_for);
+                let state = state_for.clone();
+                defer_dialog_action("custom_rules_weather_new", &target, move |dialog| {
+                    open_weather(dialog, &state);
+                });
             });
             button.connect("pressed", &callable);
         }
@@ -2967,9 +3016,10 @@ fn open_edit_menu(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>
             loaded.set("objectives", &objectives);
             replace_rules(&rules_for, &loaded);
             close_overlay(&state_for);
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            setup_main(&mut bound, &state_for);
+            let state = state_for.clone();
+            defer_dialog_action("custom_rules_load_clipboard", &target, move |dialog| {
+                setup_main(dialog, &state);
+            });
         });
         load_button.connect("pressed", &callable);
     }
@@ -2996,9 +3046,10 @@ fn open_edit_menu(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>
             }
             replace_rules(&rules_for, &copy);
             close_overlay(&state_for);
-            let mut node = target.clone();
-            let mut bound = node.bind_mut();
-            setup_main(&mut bound, &state_for);
+            let state = state_for.clone();
+            defer_dialog_action("custom_rules_reset_menu", &target, move |dialog| {
+                setup_main(dialog, &state);
+            });
         });
         reset_menu.connect("pressed", &callable);
     }
@@ -3050,6 +3101,9 @@ fn overlay_open(
     close_overlay(state);
     // code-instantiated: per-action popup panels have no static scene.
     let mut root = ColorRect::new_alloc();
+    // Deterministic handle for the headless sweep (`dialog_sweep_check`) and the
+    // PAR-0470 twin walk: the overlay is the only direct `rules_overlay` child.
+    root.set_name("rules_overlay");
     root.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.8));
     root.set_anchors_preset(LayoutPreset::FULL_RECT);
     root.set_mouse_filter(MouseFilter::STOP);

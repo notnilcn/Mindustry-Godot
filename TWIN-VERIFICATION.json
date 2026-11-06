@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-03T14:26:18Z",
+  "updated": "2026-11-06T01:02:01Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -17227,6 +17227,3273 @@
       "acceptance": "cargo test -p mind-core asserting BlockDef light_radius/light_color per Java override (impact-reactor 115, landing-pad 90/#eab678, accelerator 70/accent, nuclear-reactor 60/#7f19ea, mend/overdrive 50, differential-generator 195, steam-generator 130) plus a mind-gdext light_sources test that a placed impact-reactor yields radius 115; live: a lit custom game shows the 115 px glow and the landing-pad #eab678 tint.",
       "claimed_by": "p1-orch",
       "claimed_at": "2026-11-03T14:26:18Z"
+    },
+    "PAR-0468": {
+      "title": "GAPS #43: PlacementFragment unplaceable-reason row + block.unknown header",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && export DISPLAY=:10 PY=$HOME/.local/share/parity-eval/venv/bin/python && $PY ../.claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output /tmp/java-state.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "bash tools/build.sh"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "pkill -f 'godot-real --editor --path client'; sleep 3; nohup env DISPLAY=:10 godot --editor --path client > /tmp/mind-editor.log 2>&1 & until grep -q 'Bridge listening on ws://127.0.0.1:6970' /tmp/mind-editor.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return {\"pid\": str(OS.get_process_id()), \"has_info\": str(s.has_method(\"block_placement_info_json\"))}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 548 358 left",
+              "note": "Play submenu -> Custom Game"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 178 520 left",
+              "note": "select the sandbox map"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 727 647 left",
+              "note": "Play"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py key esc",
+              "note": "pause menu"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 87 669 left",
+              "note": "pause rules button (Icon.book, bottom-left)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 645 141 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py type banned",
+              "note": "Custom Rules search = banned"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 604 314 left",
+              "note": "@bannedblocks button"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 615 133 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py type conveyor",
+              "note": "Banned Blocks picker search = conveyor"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 658 383 left",
+              "note": "ban conveyor (first filtered icon)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 565 682 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 511 682 left",
+              "note": "Back out of the picker and the rules dialog (applies the rules)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 507 313 left",
+              "note": "Back to resume"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 914 495 left",
+              "note": "select the (banned) conveyor palette cell"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "$REPO/tools/twin_item.sh java-shot PAR-0468 01-action",
+              "note": "capture 1152x648"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "note": "Play submenu -> Custom Game"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "note": "select the sandbox map"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "note": "Play"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\")\nvar parsed=JSON.parse_string(c.call(\"get_rules_json\"))\nparsed[\"bannedBlocks\"]=[\"conveyor\"]\nvar ok=c.call(\"set_rules_json\", JSON.stringify(parsed))\nreturn {\"ok\": str(ok)}",
+                "note": "FALLBACK: the Godot Rules dialog Edit overlay stalls the frame loop, so ban conveyor through the rules JSON the client loads; Java used the UI picker above"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return {\"info\": str(s.call(\"block_placement_info_json\", \"conveyor\"))}",
+                "note": "reads {unlocked, reason:@banned, limit}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var p=get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement\"); var blocks=p.get_node(\"Panel/Frame/Layout/Left/Rows/Scroll/Pad/Blocks\"); var cell=blocks.get_children().filter(func(c): return str(c.get(\"tooltip_text\")) == \"Conveyor\")[0]; var r=cell.get_global_rect(); return {\"x\": int(r.get_center().x), \"y\": int(r.get_center().y)}",
+                "note": "resolve the conveyor palette cell centre"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 870,
+                        "y": 426
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 870,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 870,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "note": "select the (banned) conveyor palette cell"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events(); var s=get_node(\"/root/Spine/SimHost\"); var top=get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Frame/TopTable\"); return {\"sel\": str(s.call(\"selected_block\")), \"top\": str(top.visible), \"rows\": top.get_node(\"Rows\").get_child_count()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game",
+              "note": "capture 1152x648, then tools/twin_item.sh godot-shot PAR-0468 01-action"
+            }
+          }
+        ]
+      },
+      "similarity": 92.4,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0468/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0468/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0469": {
+      "title": "GAPS #17: ArmoredConveyor/ArmoredConduit accept side input from non-conveyors",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && export DISPLAY=:10 PY=$HOME/.local/share/parity-eval/venv/bin/python && $PY ../.claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            },
+            "note": "raise the Java reference; input screen coords are the 1152x648 frame + (45,69)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output /tmp/java-state.png"
+            },
+            "note": "1152x648 Java frame"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && sed -n '20,35p' ../Mindustry/core/src/mindustry/world/blocks/distribution/ArmoredConveyor.java && cat ../Mindustry/core/src/mindustry/world/blocks/liquid/ArmoredConduit.java && sed -n '114,136p' ../Mindustry/core/src/mindustry/world/Tile.java"
+            },
+            "note": "Java oracle: ArmoredConveyorBuild.acceptItem, ArmoredConduitBuild.acceptLiquid, Tile.absoluteRelativeTo"
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && bash tools/build.sh"
+            },
+            "note": "incremental mind-gdext + mind-headless build (the #17 code was already in the shared build)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "pkill -f 'godot-real --editor --path clien[t]'; sleep 3; cd $REPO && nohup env DISPLAY=:10 godot --editor --path client > /tmp/mind-editor.log 2>&1 & until grep -q 'Bridge listening on ws://127.0.0.1:6970' /tmp/mind-editor.log; do sleep 2; done"
+            },
+            "note": "relaunch the editor so it loads the rebuilt cdylib"
+          },
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "player_unit_pos",
+                "args": []
+              }
+            },
+            "note": "runtime liveness/pid stamp (pid 256881, 1152x648)"
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 548 358 left"
+            },
+            "note": "Play submenu -> Custom Game (known-good PAR-0468 sandbox flow)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 178 520 left"
+            },
+            "note": "select map 'sandbox'"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 727 647 left"
+            },
+            "note": "Play (Sandbox mode; all blocks unlocked, infinite resources)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 1053 495 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 429 393 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 429 361 left"
+            },
+            "note": "select Armored Conveyor, place A at tile (93,100) and B at (93,101), rotation 1 (up)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 961 587 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 397 393 left"
+            },
+            "note": "select Router, place at tile (92,100) west of A (side feed)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 1053 633 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 365 393 left"
+            },
+            "note": "select Item Source, place at tile (91,100) west of the router"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 295 269 right && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 365 393 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 305 433 left "
+            },
+            "note": "deselect, open the item source config, pick copper"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 961 495 left && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 397 361 left && sleep 5"
+            },
+            "note": "select Titanium Conveyor, place the control at tile (92,101) north of the router (same default rotation), wait 5 s"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 745 519 right && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py hover 745 519"
+            },
+            "note": "deselect and park the cursor in the world"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && tools/twin_item.sh java-shot PAR-0469 01-action"
+            },
+            "note": "capture the 1152x648 Java verdict frame"
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "main menu Play"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 500,
+                        "y": 291
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 500,
+                        "y": 291
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 500,
+                        "y": 291
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Play submenu -> Custom Game"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 133,
+                        "y": 489
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "select map 'sandbox'"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 682,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Play (Sandbox mode selected in MapPlayDialog)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 62,
+                        "y": 341
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 62,
+                        "y": 341
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 62,
+                        "y": 341
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "dismiss the 'Use [WASD] to move' tutorial hint"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 49,
+                        "y": 341
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 341
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 341
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "dismiss the 'Scroll to zoom' tutorial hint"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1008,
+                        "y": 426
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "select Armored Conveyor"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 384,
+                        "y": 324
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 384,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 384,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place A at tile (93,100), rotation 1 (up)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 384,
+                        "y": 292
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 384,
+                        "y": 292
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 384,
+                        "y": 292
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place B at tile (93,101)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 916,
+                        "y": 518
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 518
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 518
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "select Router"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 352,
+                        "y": 324
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 352,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 352,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place router at tile (92,100), west of A (side feed)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "select Item Source"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place item source at tile (91,100)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 49,
+                        "y": 381
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 381
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 381
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "dismiss the 'F drag' tutorial hint"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_RIGHT",
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_RIGHT",
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "right-click: deselect placement"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 320,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "left-click the item source to open its config"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 260,
+                        "y": 364
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 260,
+                        "y": 364
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 260,
+                        "y": 364
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "pick copper in the item grid"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "set_paused",
+                "args": [
+                  false
+                ]
+              }
+            },
+            "note": "unpause after the Java leg took OS focus"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 916,
+                        "y": 426
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 426
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "select Titanium Conveyor"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 49,
+                        "y": 352
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 352
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 49,
+                        "y": 352
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "dismiss the 'L-Ctrl path' tutorial hint"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 352,
+                        "y": 292
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 352,
+                        "y": 292
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 352,
+                        "y": 292
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place the titanium control at tile (92,101) north of the router, rotation 1"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_RIGHT",
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_RIGHT",
+                      "position": {
+                        "x": 700,
+                        "y": 450
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "right-click deselect and park the cursor"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "building_items_json",
+                "args": [
+                  92,
+                  101
+                ]
+              }
+            },
+            "note": "control belt: copper present"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "building_items_json",
+                "args": [
+                  93,
+                  100
+                ]
+              }
+            },
+            "note": "armored A: empty (side feed rejected)"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "building_items_json",
+                "args": [
+                  93,
+                  101
+                ]
+              }
+            },
+            "note": "armored B: empty"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "call",
+              "params": {
+                "node_path": "/root/Spine/SimHost",
+                "method": "building_items_json",
+                "args": [
+                  92,
+                  100
+                ]
+              }
+            },
+            "note": "router: copper held (side-feed source is live)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && tools/twin_item.sh godot-shot PAR-0469 01-action"
+            },
+            "note": "capture the 1152x648 Godot verdict frame"
+          }
+        ]
+      },
+      "similarity": 93.6,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0469/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0469/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0470": {
+      "title": "New bug found in PAR-0468: Custom Rules Edit overlay stalls the Godot frame loop (reentrant dialog bind)",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "Java client alive on DISPLAY=:10 (window 0x4600014, 'Mindustry', client 1152x648 at screen origin (45,69)); one client per display, do not launch a second. Client was already inside a sandbox game from the previous item."
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0470 00-state",
+              "note": "state before the walk: sandbox game running"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "note",
+            "params": {
+              "text": "Built once by the orchestrator (tools/run-cpu-intensive-task.sh --build exit 0); editor pid 438295, bridge 6970; res://scenes/game.tscn played, runtime_connected, pid 438491, viewport 1152x648."
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var ui = get_node(\"/root/MindUi\"); return {\"pid\": OS.get_process_id(), \"ticks\": Time.get_ticks_msec(), \"frames\": Engine.get_process_frames(), \"stack\": ui.call(\"dialog_stack\"), \"has\": ui.call(\"has_dialog\")}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py key esc",
+              "note": "sandbox game -> pause menu"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0470 01-paused"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 92 670 left",
+              "note": "pause book (client 47,601) -> Custom Rules over the pause menu"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 525 207 left; DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py key end; DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py seq '[[\"key\",\"backspace\",80],[\"key\",\"backspace\",80],[\"key\",\"backspace\",80],[\"key\",\"backspace\",80],[\"key\",\"backspace\",80],[\"key\",\"backspace\",80],[\"sleep\",300]]'",
+              "note": "clear the leftover 'banned' search filter from PAR-0468 so the rows match Godot"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0470 02-rules-clean"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/java_input.py click 728 677 left",
+              "note": "footer Edit (client 683,608) -> @edit.menu BaseDialog"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0470 01-action"
+            }
+          },
+          {
+            "tool": "note",
+            "params": {
+              "text": "Java shows Edit... immediately: Copy to Clipboard / Load from Clipboard (disabled) / Reset to Defaults inside a bordered Tex.button table, with its own Back button row below the panel."
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var p = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu/Sidebar/Buttons\").get_child(0); var c = (p as Control).get_global_rect().get_center(); return {\"x\": int(c.x), \"y\": int(c.y)}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "Play -> submenu"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "Custom Game -> dialog_stack ['custom']"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 140,
+                        "y": 502
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 140,
+                        "y": 502
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "sandbox map tile -> dialog_stack ['custom','map_play']"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 685,
+                        "y": 576
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 685,
+                        "y": 576
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "map_play Play -> get_state()=='playing'"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "key",
+                    "params": {
+                      "key": "Escape",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "key",
+                    "params": {
+                      "key": "Escape",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "dialog_stack ['paused']"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot\").call(\"dialog\", \"paused\"); var b = d.get_node_or_null(\"customize\"); var c = (b as Control).get_global_rect().get_center(); return {\"found\": b != null, \"x\": int(c.x), \"y\": int(c.y)}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 47,
+                        "y": 601
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 47,
+                        "y": 601
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "pause book -> dialog_stack ['paused','custom_rules']"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot\").call(\"dialog\", \"custom_rules\"); var row = d.get_node(\"Center/Panel/Layout/Buttons\"); var ch = row.get_children(); return {\"n\": ch.size(), \"rows\": ch.map(func(b): var ls = b.find_children(\"*\", \"Label\", true, false); var c = (b as Control).get_global_rect().get_center(); return [ls.map(func(l): return str(l.text)), int(c.x), int(c.y)])}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"ticks\": Time.get_ticks_msec(), \"frames\": Engine.get_process_frames(), \"tick\": get_node(\"/root/Spine/SimHost\").call(\"get_tick\")}"
+              }
+            },
+            "note": "pre-click liveness baseline: ticks 146896 / frames 8407 / tick 431"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 683,
+                        "y": 608
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 683,
+                        "y": 608
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "THE Edit click (footer child 1, glyph e869); the pre-fix stall trigger"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot\").call(\"dialog\", \"custom_rules\"); var o = d.get_node_or_null(\"rules_overlay\"); return {\"pid\": OS.get_process_id(), \"ticks\": Time.get_ticks_msec(), \"frames\": Engine.get_process_frames(), \"stack\": get_node(\"/root/MindUi\").call(\"dialog_stack\"), \"overlay\": o != null, \"overlay_children\": o.get_child_count() if o != null else 0}"
+              }
+            },
+            "note": "post-fix: overlay true, ticks 146896->153813, frames 8407->8822; overlay check + liveness"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot\").call(\"dialog\", \"custom_rules\"); var o = d.get_node(\"rules_overlay\"); var panel = o.get_child(0).get_child(0); var body = panel.get_child(0).get_child(1); return {\"ticks\": Time.get_ticks_msec(), \"frames\": Engine.get_process_frames(), \"title\": str(panel.get_child(0).get_child(0).text), \"cell_texts\": body.get_children().map(func(r): return str(r.get_children()[0].get_children()[1].text))}"
+              }
+            },
+            "note": "second post-click eval: title Edit..., rows Copy/Load/Reset, ticks 161195 / frames 9265"
+          },
+          {
+            "tool": "godot_log",
+            "params": {
+              "action": "errors",
+              "params": {
+                "max": 20,
+                "include_warnings": false
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0470 01-action"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 576,
+                        "y": 421
+                      },
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "coords": "viewport",
+                      "position": {
+                        "x": 576,
+                        "y": 421
+                      },
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "overlay Back -> overlay gone, custom_rules still visible with its table, ticks 327638 / frames 19252"
+          }
+        ]
+      },
+      "similarity": 90.6,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0470/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0470/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0471": {
+      "title": "GAPS #4: turrets/projectors never stop consuming when idle (should_consume overrides)",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && export DISPLAY=:10 PY=$HOME/.local/share/parity-eval/venv/bin/python && $PY ../.claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            },
+            "note": "raise the Java reference; screen coords = 1152x648 frame + (45,69)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && sed -n '709,722p' ../Mindustry/core/src/mindustry/world/Block.java && sed -n '638,652p' ../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java && sed -n '350,372p' ../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java && sed -n '45,58p' ../Mindustry/core/src/mindustry/world/blocks/defense/turrets/LaserTurret.java"
+            },
+            "note": "Java oracle: Block.setBars power-bar lambda (requestedPower==0 && produced>0 -> 1.0), BuildingComp.status() noOutput when !shouldConsume, Turret/Laser shouldConsume overrides"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && export DISPLAY=:10 PY=$HOME/.local/share/parity-eval/venv/bin/python && $PY ../.claude/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output /tmp/par0471-java-pre.png"
+            },
+            "note": "1152x648 Java frame before placement (sandbox Custom Game, map sandbox)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && export DISPLAY=:10 && $HOME/.local/share/parity-eval/venv/bin/python -c \"import time; from pynput.keyboard import Controller, Key; k=Controller(); k.press(Key.f6); time.sleep(0.08); k.release(Key.f6)\""
+            },
+            "note": "F6 enables the Java blockstatus markers (same setting the Godot leg toggles)"
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            },
+            "note": "MCP bridge 6970 reachable"
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            },
+            "note": "shared build already contains the PAR-0471 fix (orchestrator's build); no rebuild/revert for this twin; game pid/1152x648"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return {\"pid\": OS.get_process_id(), \"frames\": Engine.get_process_frames(), \"tick\": s.call(\"get_tick\")}"
+              }
+            },
+            "note": "runtime liveness/pid stamp before driving input"
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 1122 592 left"
+            },
+            "note": "Power category rail (frame 1077,523; screen = frame + 45,69)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 1053 633 left"
+            },
+            "note": "Power Source palette cell (frame 1008,564; hover-verified top table 'Power Source')"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 621 265 left"
+            },
+            "note": "place power-source at tile (99,104) in open sand north of the core"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 1122 492 left"
+            },
+            "note": "Turret category rail"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 961 541 left"
+            },
+            "note": "Lancer palette cell (frame 916,472; hover-verified Requirements Titanium/Silicon)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 573 249 left"
+            },
+            "note": "place lancer (2x2) at tiles (97..98,104..105), footprint centre click"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py click 961 541 left"
+            },
+            "note": "click the selected Lancer cell again to deselect (PlacementFragment: input.block == block ? null : block)"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py hover 700 400 && DISPLAY=:10 $PARITY_PY ../.claude/skills/parity-eval/scripts/java_input.py hover 573 249"
+            },
+            "note": "two-step hover so the placement hover table (Lancer + Health/Power/Liquid bars) rebuilds"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && tools/twin_item.sh java-shot PAR-0471 01-action"
+            },
+            "note": "1152x648 Java verdict frame: idle lancer + adjacent power-source, full Power hover bar, orange noOutput status diamond"
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1077,
+                        "y": 523
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1077,
+                        "y": 523
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1077,
+                        "y": 523
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Power category rail (get_global_rect centre 1077,523)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1008,
+                        "y": 564
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Power Source palette cell (block-power-source cell centre)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 196
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 196
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 196
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place power-source at tile (99,104)"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return [s.call(\"tile_debug\", 99, 104).get(\"name\"), s.call(\"tile_debug\", 99, 104).get(\"kind\")]"
+              }
+            },
+            "note": "verify: power-source (PowerSource) at (99,104)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1077,
+                        "y": 423
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1077,
+                        "y": 423
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1077,
+                        "y": 423
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Turret category rail"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "Lancer palette cell (block-lancer cell centre)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 528,
+                        "y": 180
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 528,
+                        "y": 180
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 528,
+                        "y": 180
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "place lancer (2x2) at tiles (97..98,104..105), footprint centre click"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return [s.call(\"tile_debug\", 97, 104).get(\"name\"), s.call(\"tile_debug\", 98, 105).get(\"name\"), s.call(\"power_debug\", 97, 104), s.call(\"building_debug\", 97, 104), s.call(\"building_bars_json\", 97, 104)]"
+              }
+            },
+            "note": "structured idle probe: lancer 2x2, same graph as the source, efficiency 0.0 / potential 1.0 (shouldConsume=false), power bar value 1.0"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "F6"
+              }
+            },
+            "note": "enable the blockstatus markers (same setting as the Java leg)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 916,
+                        "y": 472
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            },
+            "note": "deselect the Lancer cell so the hover-info path has no selected block"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.warp_mouse(Vector2(528,180)); return get_viewport().get_mouse_position()"
+              }
+            },
+            "note": "park the cursor over the lancer (the hover top table does not render in this build; documented in the run report)"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); s.call(\"set_paused\", false); return {\"phase\": s.call(\"get_state\"), \"frames\": Engine.get_process_frames()}"
+              }
+            },
+            "note": "unpause so both verdict frames are live/paused-free"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && tools/twin_item.sh godot-shot PAR-0471 01-action"
+            },
+            "note": "1152x648 Godot verdict frame: idle lancer + adjacent power-source + orange noOutput status diamond"
+          }
+        ]
+      },
+      "similarity": 87.5,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0471/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0471/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0472": {
+      "title": "GAPS #47: RTS command-mode drag selection rect is not drawn",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "Java reference client alive on DISPLAY=:10 ('Mindustry' 0x4600014, client origin (45,69), 1152x648) in a FRESH Custom Game sandbox (Play -> Custom Game -> sandbox map -> Sandbox -> Play; no palette clicks). Reference-setup finding: command_mode is rebound in ~/.local/share/Mindustry/settings.bin (keybind-default-keyboard-command_mode-key = 71 = arc.input.KeyCode.f; boost = 108 = shiftLeft), so Shift never enters command mode here. With the default shared-Shift binding, DesktopInput.java:300-310 additionally disables command mode while the player unit canBoost (the sandbox core mech), so bind/hold F for command-mode walks on this client."
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "note",
+            "params": {
+              "text": "Orchestrator build with the PAR-0472 fix (command_overlay.rs fills the live command drag rect before the empty-selection return; desktop.rs syncs InputHandler.commandRect every frame via sync_command_rect). Editor pid 481375, bridge 6970; res://scenes/game.tscn playing, runtime_connected; game pid 481525, viewport 1152x648, game window client origin (704,526); sandbox custom game, menu hidden, sim unpaused, camera centred on the core (world (792,800), zoom 4), input block:null."
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\")\nvar i=JSON.parse_string(get_node(\"/root/Spine/Input\").get_input_state_json())\nreturn {\"pid\": OS.get_process_id(), \"tick\": s.call(\"get_tick\"), \"state\": str(s.call(\"get_state\")), \"paused\": s.call(\"is_paused\"), \"block\": i[\"block\"], \"command_rect\": i[\"command_rect\"]}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; $PARITY_PY $PARITY_SKILL/scripts/java_input.py seq '[[\"focus\"],[\"sleep\",500],[\"hover\",400,200],[\"sleep\",300],[\"keydown\",\"f\"],[\"sleep\",1000]]'",
+              "note": "hold F = command_mode on this client; the bottom palette swaps to the Java command table ('Command Mode / [no units]') per PlacementFragment.java:446-455"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; $PARITY_PY $PARITY_SKILL/scripts/java_input.py seq '[[\"focus\"],[\"sleep\",300],[\"hover\",295,219],[\"sleep\",200],[\"mousedown\",295,219,\"left\"],[\"sleep\",250],[\"move\",795,499],[\"sleep\",500]]'",
+              "note": "screen coords = image + (45,69): A image (250,150) -> screen (295,219); B image (750,430) -> screen (795,499); mouse button stays held (InputHandler.commandRect set by the select tap, live second corner = mouse world)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0472 01-action",
+              "note": "1152x648 Java frame captured BEFORE mouseup: translucent Pal.accent box (250,150)-(750,430) over the core + 'Command Mode / [no units]' -> runs/PAR-0472/java/20261106-083850-01-action.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; $PARITY_PY $PARITY_SKILL/scripts/java_input.py seq '[[\"mouseup\",795,499,\"left\"],[\"keyup\",\"f\"],[\"sleep\",300]]'",
+              "note": "release the drag and command mode (SelectUnitsRect commits, commandRect = false)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10; $HOME/.local/share/parity-eval/venv/bin/python tools/twin_pointer.py move 1454 956 --jiggle",
+              "note": "MUST move the REAL X pointer: game window origin (704,526) + viewport (750,430) = screen (1454,956); godot_input mouse_motion only sets event.position, and a parked mid-window pointer keeps hover/edge-pan settled"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Shift",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var i=JSON.parse_string(get_node(\"/root/Spine/Input\").get_input_state_json())\nreturn {\"pid\": OS.get_process_id(), \"command_mode\": i[\"command_mode\"], \"command_rect\": i[\"command_rect\"], \"module\": i[\"mode\"], \"selected\": i[\"selected_units\"]}",
+                "note": "pre-drag: command_mode true, command_rect null, selected_units []"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "params": {
+                "position": {
+                  "x": 250,
+                  "y": 150
+                },
+                "coords": "viewport"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 250,
+                  "y": 150
+                },
+                "coords": "viewport",
+                "pressed": true
+              },
+              "note": "DesktopInput.java:567-573 sets commandRectX/Y from the press point"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "params": {
+                "position": {
+                  "x": 750,
+                  "y": 430
+                },
+                "coords": "viewport",
+                "button_mask": [
+                  "MOUSE_BUTTON_LEFT"
+                ]
+              },
+              "note": "held motion to B; NO release before the capture"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var i=JSON.parse_string(get_node(\"/root/Spine/Input\").get_input_state_json())\nvar ov=get_node(\"/root/Spine/World/Renderer/Band_plans_0/@CommandOverlay@336\")\nreturn {\"pid\": OS.get_process_id(), \"command_mode\": i[\"command_mode\"], \"command_rect\": i[\"command_rect\"], \"selected\": i[\"selected_units\"], \"ov_visible\": ov.is_visible_in_tree(), \"ov_class\": ov.get_class()}",
+                "note": "assert command_mode true, command_rect [710.5,843.5078125,125.0,-70.0] (live signed rect = raw press world point + mouse-world delta), selected_units [] (the no-selection early-return case), CommandOverlay visible"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0472 01-action",
+              "note": "1152x648 Godot frame while held: translucent accent box (250,150)-(750,430) + 'Command Mode [no units]' -> runs/PAR-0472/godot/20261106-082033-01-action.png"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 750,
+                  "y": 430
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Shift",
+                "pressed": false
+              }
+            }
+          }
+        ]
+      },
+      "similarity": 86.9,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0472/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0472/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0473": {
+      "title": "New bug (found in PAR-0471): placement-fragment hover top table never renders for a hovered world building",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "Java oracle: PlacementFragment.hasInfoBox() = control.input.block != null || menuHoverBlock != null || hover != null (PlacementFragment.java:784-787); hovered() returns null when Core.scene.hasMouse(...) or topTable.hit(...), else the hovered unit / tile building (PlacementFragment.java:790-823). Java client alive on DISPLAY=:10 (window 0x4600014 'Mindustry' 1152x648 at screen origin (45,69)), already inside the PAR-0471 sandbox (lancer at tiles (97..98,104..105) and power-source at (99,104) still placed; core-nucleus at the viewport centre)."
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "note",
+            "params": {
+              "text": "Orchestrator build with the PAR-0473 fix (placement.rs reads the hover payload via AnyDictionary, so gdext's typed-dictionary metadata on Dictionary<GString, Variant> no longer rejects it). Editor pid 481375, bridge 6970; res://scenes/game.tscn playing, runtime_connected, game pid 481525, viewport 1152x648, game window at screen origin (704,526)."
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); return {\"pid\": OS.get_process_id(), \"frames\": Engine.get_process_frames(), \"tick\": s.call(\"get_tick\"), \"state\": s.call(\"get_state\")}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python PARITY_SKILL=/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval; $PARITY_PY $PARITY_SKILL/scripts/java_input.py hover 400 450; sleep 0.3; $PARITY_PY $PARITY_SKILL/scripts/java_input.py hover 621 393",
+              "note": "two-step hover: (400,450) then the core at frame (576,324) -> screen (621,393) = frame + (45,69); the first move is needed so the placement top table rebuilds with the hovered displayable instead of a stale/null state"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0473 01-action",
+              "note": "1152x648 Java frame: placement top table shows 'Core: Nucleus' + icon + red Health bar + Capacity: 13k above the palette (PlacementFragment.hovered() -> hoverTile.build -> BuildingComp.display)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              },
+              "note": "Play (MenuGroup/menu/Sidebar/Buttons/0, get_global_rect centre 230,149)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 289
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              },
+              "note": "Custom Game submenu row 3 (rect 345,254 230x70; centre 460,289)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 140,
+                        "y": 502
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 140,
+                        "y": 502
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 140,
+                        "y": 502
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              },
+              "note": "sandbox map card (second row, first card: rect 40,376 200x252)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 679,
+                        "y": 578
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 679,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 679,
+                        "y": 578
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              },
+              "note": "Gamemode=Sandbox + Play -> world loads with core-nucleus at the viewport centre (576,324)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "export DISPLAY=:10 PARITY_PY=$HOME/.local/share/parity-eval/venv/bin/python; $PARITY_PY tools/twin_pointer.py move 1280 850 --jiggle --settle 0.4",
+              "note": "MUST be the REAL X cursor (godot_input mouse_motion only sets event.position): game window origin (704,526) + viewport (576,324) = screen (1280,850), the core-nucleus centre"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var s=get_node(\"/root/Spine/SimHost\"); var t=get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Frame/TopTable\"); var r=t.get_node(\"Rows\"); var mp=get_viewport().get_mouse_position(); var c=get_node(\"/root/Spine/World/Camera2D\"); var w=c.call(\"screen_to_world\", mp.x, mp.y); return {\"mp\": str(mp), \"w\": str(w), \"info\": str(s.call(\"hover_info_world\", w.x, w.y)), \"top_vis\": t.is_visible(), \"rows\": r.get_child_count(), \"sel\": s.call(\"selected_block\")}",
+                "note": "assert: mp (576,324), hover_info_world -> {kind: building, name: core-nucleus}, TopTable.visible true with 3 rows (icon+name hover row, Health bar, Capacity bar)"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "get_node(\"/root/Spine/SimHost\").call(\"set_paused\", false); return get_node(\"/root/Spine/SimHost\").call(\"get_state\")",
+                "note": "raising the Java window pauses the sandbox and shows hud/PausedBanner (a STOP control at the cursor, rect 524,314 104x19); that is the Java-equivalent Core.scene.hasMouse guard correctly blocking the world hover, so unpause before the verdict frame"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0473 01-action",
+              "note": "1152x648 Godot frame: placement top table shows 'Core: Nucleus' + icon + red Health bar + Capacity: 13k above the palette, same position/size as the Java frame"
+            }
+          }
+        ]
+      },
+      "similarity": 90.2,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0473/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0473/godot/01-action.avif"
+        ]
+      }
+    },
+    "PAR-0474": {
+      "title": "GAPS #20: WallCrafter attribute/liquid/item boosts and booster consumption",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0474"
+            }
+          }
+        ]
+      },
+      "claimed_by": "gaps-20",
+      "claimed_at": "2026-11-05T22:44:19Z",
+      "notes": [
+        {
+          "at": "2026-11-06T00:10:44Z",
+          "by": "gaps-20",
+          "text": "Code complete and unit-tested (full mind-core suite pass); Godot leg verified: runs/PAR-0474/godot/20261106-093159-01-action.png shows Drill Speed 12.00/s and 20261106-093140-02-base.png shows 7.50/s. Twin blocked on the Java reference: the sandbox map has no sand-attribute walls; the editor map par0474 has the wall row but Java editor map-view placement is unreliable under synthetic input (search-tool selection/wedged MapView) and the restarted client initially refused synthetic clicks. Java client is at the editor map par0474 (parity-java-home maps). Next: place large-cliff-crusher/power-source/liquid-source(hydrogen)/item-source(graphite)/item-void, Playtest, capture 12.00/s, publish. No Java verdict frame exists."
+        }
+      ]
+    },
+    "PAR-0475": {
+      "title": "GAPS #12: BaseShield absorbs all bullets/explosions and never repels units",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0475"
+            }
+          }
+        ]
+      },
+      "claimed_by": "gaps-12",
+      "claimed_at": "2026-11-05T22:44:19Z",
+      "notes": [
+        {
+          "at": "2026-11-06T00:26:53Z",
+          "by": "gaps-12",
+          "text": "Code complete and unit-tested (full mind-core suite pass). No Java verdict frame: shield-projector is BuildVisibility.editorOnly; the Java reference editor picker omits it because this stripped Java build is missing the block-shield-projector-ui atlas region (search 'shield' returns only Shielded Wall). Godot direct placement is possible; twin pending a Java reference with the full atlas or a pre-placed map. Tests: base_shield 10, shield 34, projector 27, bullet 60, explosion 24, plus shield_projector_repels_and_kills_enemy_units."
+        },
+        {
+          "at": "2026-11-06T00:39:16Z",
+          "by": "gaps-12",
+          "text": "Twin attempt 4: editor search 'barrier' places Barrier Projector + Power Source on the sandbox map and Playtest runs, but the sandbox map has no enemy spawn points (waves spawn zero units) and the projector renders no dome (likely efficiency 0: power source not linked / smoothRadius stays 0). Next: use a survival map with spawns (4 corners/Tanks/anthill) and a power node/battery link, confirm the dome before starting the wave, then capture. No verdict frame."
+        }
+      ]
+    },
+    "PAR-0476": {
+      "title": "GAPS #16: ShockMine lightning colour is WHITE (Java Pal.lancerLaser) and the optional bullet burst is missing",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0476"
+            }
+          }
+        ]
+      },
+      "claimed_by": "gaps-16",
+      "claimed_at": "2026-11-06T00:39:30Z",
+      "notes": [
+        {
+          "at": "2026-11-06T01:02:01Z",
+          "by": "gaps-16",
+          "text": "Code complete and unit-tested (shock_mine 4, lightning 6, fx 113, full mind-core lib 2895 pass; targeted clippy clean). ShockMine now uses Pal.lancerLaser, Lightning.create carries the colour into the Fx.lightning event (first producer of EffectData::Positions), and the renderer consumes it. Twin pending: needs tools/build.sh + editor restart, then place a shock-mine on the sandbox and walk the player mech onto it; capture a burst of the 4 tendrils in both clients. Vanilla shock-mine has bullet=null, so no burst."
+        }
+      ]
     }
   },
   "recipes": {

@@ -91,7 +91,8 @@ struct Drag {
 }
 
 /// Read-only view for the placement overlay (`DesktopInput.drawBottom` /
-/// `InputHandler.drawBreakSelection`; G03 T2).
+/// `InputHandler.drawBreakSelection`; G03 T2) and the command drag box
+/// (`InputHandler.drawUnitSelection`; GAPS #47).
 #[derive(Debug, Clone)]
 pub struct PlacementView {
     /// Cursor tile from the camera transform (`cursor_tile`).
@@ -106,6 +107,11 @@ pub struct PlacementView {
     pub line_plans: Vec<ClientPlan>,
     /// Right-drag break rectangle as `(start, last)` in tiles.
     pub break_rect: Option<((i32, i32), (i32, i32))>,
+    /// Live command-mode drag rect (`InputHandler.commandRect`), world pixels:
+    /// `(commandRectX, commandRectY, mouseWorldX - commandRectX, mouseWorldY -
+    /// commandRectY)` — the size is signed. `None` outside a held select drag;
+    /// the committed tile rect the state keeps after release is not this.
+    pub command_rect: Option<(f32, f32, f32, f32)>,
 }
 
 /// A UI-side action the shell must resolve against the scene tree.
@@ -1450,6 +1456,33 @@ impl DesktopBridge {
         }
     }
 
+    /// `InputHandler.update` L955-957 + `drawUnitSelection` L1354-1368: while a
+    /// command-mode select-rect drag is held, `command_rect` tracks Java's live
+    /// rect — the press point stored by [`Self::left_press`] plus
+    /// `(mouseWorldX - x, mouseWorldY - y)` recomputed from the current camera
+    /// every frame (a pan/zoom while the button is held moves the second
+    /// corner even without a new mouse event). Outside command mode Java drops
+    /// the rect (`commandRect = false`); the release commits the tile rect in
+    /// [`Self::commit_select`].
+    pub fn sync_command_rect(&mut self) {
+        if !self
+            .drag
+            .is_some_and(|drag| drag.kind == DragKind::SelectRect)
+        {
+            return;
+        }
+        if !self.controller.state.command_mode {
+            self.controller.state.command_rect = None;
+            return;
+        }
+        let Some((sx, sy, ..)) = self.controller.state.command_rect else {
+            return;
+        };
+        if let Some((wx, wy)) = self.aim_world() {
+            self.controller.state.command_rect = Some((sx, sy, wx - sx, wy - sy));
+        }
+    }
+
     /// `HintsFragment` triggers that fire while a key is held (G05 T4b):
     /// `boost` (`keyDown(boost)`) and `rebuildSelecting`
     /// (`input.isRebuildSelecting()` = `keyDown(rebuildSelect)`).
@@ -2106,6 +2139,16 @@ impl DesktopBridge {
                 Some(drag) if drag.kind == DragKind::Break => Some((drag.start, drag.last)),
                 _ => None,
             },
+            // `InputHandler.drawUnitSelection` (`IH:1354-1368`): the box only
+            // exists while the select-rect drag is held (`commandRect`); the
+            // post-release tile rect (`selectUnitsRect`, kept in the state for
+            // the preview handoff) is not a live drag and must not draw.
+            command_rect: match self.drag {
+                Some(drag) if drag.kind == DragKind::SelectRect => {
+                    self.controller.state.command_rect
+                }
+                _ => None,
+            },
         }
     }
 
@@ -2260,13 +2303,21 @@ impl DesktopBridge {
             }
         }
         if self.controller.state.command_mode {
+            // `DesktopInput.java:567-573` / `:722-726`: a command-mode press
+            // starts the rect at the raw cursor point (`commandRectX/Y`); the
+            // live mouse is the second corner (`drawUnitSelection`), so the
+            // size is zero until the pointer moves.
+            let (wx, wy) = self.aim_world().unwrap_or((
+                x as f32 * mind_core::config::TILESIZE as f32,
+                y as f32 * mind_core::config::TILESIZE as f32,
+            ));
             self.drag = Some(Drag {
                 kind: DragKind::SelectRect,
                 start: (x, y),
                 last: (x, y),
                 moved: false,
             });
-            self.controller.state.command_rect = None;
+            self.controller.state.command_rect = Some((wx, wy, 0.0, 0.0));
             return;
         }
         // `pollInputPlayer` select tap (`DesktopInput.java:704-705`): a click
@@ -3103,6 +3154,10 @@ impl DesktopBridge {
                     }
                 }
             }
+            // `InputHandler.selectUnitsRect` (`IH:1114`): `commandRect = false`
+            // — a tap never leaves a drag rect behind (the live rect set by
+            // the press is dropped here).
+            self.controller.state.command_rect = None;
         } else {
             let rect = SelectRect {
                 x: x1 as f32 * unit,
@@ -4302,6 +4357,40 @@ mod tests {
         assert_eq!(view.break_rect, Some(((1, 1), (3, 4))));
         assert_eq!(view.mode, PlaceMode::Breaking);
         assert!(view.line_plans.is_empty());
+    }
+
+    #[test]
+    fn placement_view_reports_command_drag() {
+        // GAPS #47: the live command drag rect (`InputHandler.commandRect`) is
+        // exposed only while the select-rect drag is held. The stored rect is
+        // Java's `(commandRectX, commandRectY, x2 - commandRectX, y2 -
+        // commandRectY)`, so a left/up drag carries a negative size.
+        let mut bridge = DesktopBridge::new();
+        bridge.controller.state.command_mode = true;
+        bridge.controller.state.command_rect = Some((16.0, 24.0, -8.0, 6.0));
+        bridge.drag = Some(Drag {
+            kind: DragKind::SelectRect,
+            start: (2, 3),
+            last: (1, 3),
+            moved: true,
+        });
+        assert_eq!(
+            bridge.placement_view().command_rect,
+            Some((16.0, 24.0, -8.0, 6.0))
+        );
+        // After the release the state keeps the committed tile rect, but that
+        // is not a held drag and must not be drawn as a live box.
+        bridge.drag = None;
+        assert_eq!(bridge.placement_view().command_rect, None);
+        // A placement/break drag never surfaces the command rect.
+        bridge.controller.state.command_rect = Some((0.0, 0.0, 8.0, 8.0));
+        bridge.drag = Some(Drag {
+            kind: DragKind::Break,
+            start: (1, 1),
+            last: (3, 4),
+            moved: true,
+        });
+        assert_eq!(bridge.placement_view().command_rect, None);
     }
 
     fn base_registry() -> ContentRegistry {

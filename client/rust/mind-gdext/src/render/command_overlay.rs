@@ -10,6 +10,13 @@
 //! target (`color.a(0.5)`, shortened by `rad`) plus a 3.5-half-size
 //! `Drawf.square` at the destination. `rad = hitSize / unitSelectRadScl + 1`.
 //! Colour is `Pal.accent` (`#ffd37f`). The pass lives at `Layer.plans`.
+//!
+//! The same pass also draws the held drag-selection box
+//! (`InputHandler.drawUnitSelection`, `InputHandler.java:1354-1368`):
+//! `Draw.color(Pal.accent, 0.3f); Fill.crect(commandRectX, commandRectY, x2 -
+//! commandRectX, y2 - commandRectY)`. The box draws even when nothing is
+//! selected (a drag over empty ground), so it comes before the empty-selection
+//! return.
 
 use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{INode2D, Node2D, Time};
@@ -28,6 +35,8 @@ const UNIT_SELECT_RAD_SCL: f32 = 1.0;
 /// `InputHandler.drawCommanded`: hexagon sides and fill alpha.
 const SIDES: u8 = 6;
 const ALPHA: f32 = 0.5;
+/// `InputHandler.drawUnitSelection`: drag-box fill alpha (`Draw.color(Pal.accent, 0.3f)`).
+const DRAG_ALPHA: f32 = 0.3;
 
 /// World-space command overlay (`Node2D` under the `Layer.plans` band).
 #[derive(GodotClass)]
@@ -66,6 +75,10 @@ impl INode2D for CommandOverlay {
         let Some(input) = self.input.clone() else {
             return;
         };
+        // The command drag box only exists inside command mode: the press that
+        // starts it (`DesktopBridge::left_press`) is gated on `command_mode`,
+        // `sync_command_rect` drops it when command mode ends, and `draw`
+        // bails out otherwise — so this gate already redraws every held frame.
         if input.bind().command_mode() {
             self.base_mut().queue_redraw();
         }
@@ -75,7 +88,13 @@ impl INode2D for CommandOverlay {
         let Some(input) = self.input.clone() else {
             return;
         };
-        if !input.bind().command_mode() {
+        // Take the typed input view and drop the bind before binding the host
+        // or the canvas (a second live `MindInput` bind would panic).
+        let (command_mode, drag_rect) = {
+            let guard = input.bind();
+            (guard.command_mode(), guard.placement_view().command_rect)
+        };
+        if !command_mode {
             return;
         }
         if self.reticle_only {
@@ -84,18 +103,29 @@ impl INode2D for CommandOverlay {
         }
         let ids: Vec<i32> =
             serde_json::from_str(&input.bind().selection_json().to_string()).unwrap_or_default();
-        if ids.is_empty() {
-            return;
-        }
-        let Some(host) = self.host.clone() else {
-            return;
+        let rows = if ids.is_empty() {
+            Vec::new()
+        } else {
+            self.host
+                .clone()
+                .map(|host| host.bind().unit_command_view(&ids))
+                .unwrap_or_default()
         };
-        let rows = host.bind().unit_command_view(&ids);
+        let accent = Color::from_rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0);
+        let mut base = self.base_mut();
+        // `InputHandler.drawUnitSelection` (`InputHandler.java:1367-1368`):
+        // `Draw.color(Pal.accent, 0.3f); Fill.crect(commandRectX, commandRectY,
+        // x2 - commandRectX, y2 - commandRectY)`. Java's size is signed (the
+        // live mouse is the second corner), so normalize the area for the fill.
+        if let Some(rect) = drag_rect {
+            let (x1, y1, x2, y2) = mind_core::input::command_draw_rect(rect);
+            let fill = Color::from_rgba(ACCENT.0, ACCENT.1, ACCENT.2, DRAG_ALPHA);
+            canvas::fill_rect(&mut base, x1, y1, x2, y2, fill);
+        }
+        // A drag over empty ground still shows the box; the rings need rows.
         if rows.is_empty() {
             return;
         }
-        let accent = Color::from_rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0);
-        let mut base = self.base_mut();
         for (x, y, hit_size, _flying, target) in rows {
             let rad = hit_size / UNIT_SELECT_RAD_SCL + 1.0;
             // `Fill.lightInner(x, y, 6, max(0, rad * 0.8), rad, 0, a(0), a(0.7))`:

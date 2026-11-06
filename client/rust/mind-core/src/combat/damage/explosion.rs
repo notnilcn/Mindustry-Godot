@@ -22,9 +22,7 @@ use crate::content::registries::bullets::FIREBALL;
 use crate::determinism::RngStream;
 use crate::ecs::EntitySeq;
 use crate::entities::comp::{Pos, TeamComp};
-use crate::world::blocks::defense::projectors::{BaseShieldState, base_shield_radius};
 use crate::world::blocks::defense::shields::ForceProjectorState;
-use crate::world::blocks::defense::shields::is_in_regular_polygon;
 
 use super::area::{DamageOptions, complete_damage, damage_area};
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
@@ -236,8 +234,9 @@ pub fn dynamic_explosion(
 }
 
 /// `ForceBuild.absorbExplosion(ex, ey, damage)` (ForceProjector.java:270-278)
-/// over the live shields: `ForceProjectorState` uses its polygon and buildup
-/// (`absorb_explosion`), `BaseShieldState` the simplified latch.
+/// over the live force projectors. `BaseShield` does **not** implement
+/// `ExplosionShield` (no `absorbExplosion` in `BaseShield.java`), so its dome
+/// never absorbs an explosion wave.
 ///
 /// Java semantics (`Damage.java:112-113`, `UnitComp.java:925-927`):
 /// `var shields = ignoreTeam == null ? null : indexer.getEnemy(ignoreTeam,
@@ -263,9 +262,9 @@ pub fn explosion_absorbed(
     // other teams (derelict is not an active enemy, BlockIndexer.java:389-414).
     let mut candidates: Vec<(u64, Entity)> = Vec::new();
     for entity_ref in world.iter_entities() {
-        if entity_ref.get::<ForceProjectorState>().is_none()
-            && entity_ref.get::<BaseShieldState>().is_none()
-        {
+        // Only `ForceProjector` implements `ExplosionShield` (`BaseShield`
+        // does not), so only its builds are candidates.
+        if entity_ref.get::<ForceProjectorState>().is_none() {
             continue;
         }
         let team = entity_ref
@@ -282,25 +281,11 @@ pub fn explosion_absorbed(
     // `Seq.contains(pred)`: the first absorbing shield wins.
     for (_, entity) in candidates {
         let pos = world.get::<Pos>(entity).copied();
-        if world.get::<ForceProjectorState>(entity).is_some() {
-            if let Some(mut state) = world.get_mut::<ForceProjectorState>(entity)
-                && let Some(pos) = pos
-                && state.absorb_explosion(pos.x, pos.y, x, y, damage)
-            {
-                return true;
-            }
-        } else if let Some(mut state) = world.get_mut::<BaseShieldState>(entity) {
-            if state.broken {
-                continue;
-            }
-            let radius = base_shield_radius(&state);
-            if let Some(pos) = pos
-                && radius > 0.0
-                && is_in_regular_polygon(state.sides, pos.x, pos.y, radius, 0.0, x, y)
-            {
-                state.hit = 1.0;
-                return true;
-            }
+        if let Some(mut state) = world.get_mut::<ForceProjectorState>(entity)
+            && let Some(pos) = pos
+            && state.absorb_explosion(pos.x, pos.y, x, y, damage)
+        {
+            return true;
         }
     }
     false
@@ -457,6 +442,122 @@ mod tests {
             buildups.iter().filter(|buildup| **buildup > 0.0).count(),
             1,
             "exactly one shield takes buildup: {buildups:?}"
+        );
+    }
+
+    /// PAR-0475: `BaseShield` does not implement `ExplosionShield`
+    /// (`BaseShield.java` has no `absorbExplosion`), so its dome neither
+    /// absorbs an explosion wave nor takes the removed `hit` latch — unlike
+    /// `ForceProjector` (`ForceProjector.java:270-278`).
+    #[test]
+    fn base_shield_does_not_absorb_explosions() {
+        use crate::entities::comp::TeamComp;
+        use crate::world::blocks::defense::projectors::BaseShieldState;
+
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = harness
+            .content()
+            .block_id("shield-projector")
+            .expect("shield-projector");
+        assert!(harness.place(10, 10, shield, 0, true));
+        let entity = harness.build_at(10, 10).expect("build");
+        {
+            if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(entity) {
+                team.team = 1;
+            }
+            if let Some(mut state) = harness.build.world.get_mut::<BaseShieldState>(entity) {
+                state.smooth_radius = 120.0;
+                state.broken = false;
+            }
+        }
+        let (x, y) = CombatHarness::tile_center(10, 10);
+        assert!(
+            !explosion_absorbed(&mut harness.build.world, x, y, 30.0, Some(2)),
+            "BaseShield has no absorbExplosion"
+        );
+        assert_eq!(
+            harness
+                .build
+                .world
+                .get::<BaseShieldState>(entity)
+                .expect("state")
+                .hit,
+            0.0,
+            "no shield-hit latch"
+        );
+    }
+
+    /// PAR-0475: `ForceProjector` keeps absorbing explosion waves (it is the
+    /// only `ExplosionShield` block of the pair).
+    #[test]
+    fn force_projector_still_absorbs_explosions() {
+        use crate::entities::comp::TeamComp;
+        use crate::world::blocks::defense::projectors::BaseShieldState;
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let mut harness = CombatHarness::new(48, 32, 5);
+        // A `shield-projector` dome covers tile (12, 10) but must not matter.
+        let shield = harness
+            .content()
+            .block_id("shield-projector")
+            .expect("shield-projector");
+        assert!(harness.place(10, 10, shield, 0, true));
+        let shield_entity = harness.build_at(10, 10).expect("shield build");
+        {
+            if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(shield_entity) {
+                team.team = 1;
+            }
+            if let Some(mut state) = harness
+                .build
+                .world
+                .get_mut::<BaseShieldState>(shield_entity)
+            {
+                state.smooth_radius = 120.0;
+            }
+        }
+        let projector = harness
+            .content()
+            .block_id("force-projector")
+            .expect("projector");
+        // Far enough that its 40 px shield does not reach the dome's centre.
+        assert!(harness.place(20, 10, projector, 0, true));
+        let projector_entity = harness.build_at(20, 10).expect("projector build");
+        {
+            if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(projector_entity) {
+                team.team = 1;
+            }
+            if let Some(mut state) = harness
+                .build
+                .world
+                .get_mut::<ForceProjectorState>(projector_entity)
+            {
+                state.radscl = 1.0;
+                state.radius = 40.0;
+                state.broken = false;
+                state.sides = 24;
+                state.buildup = 0.0;
+            }
+        }
+        let (px, py) = CombatHarness::tile_center(20, 10);
+        assert!(
+            explosion_absorbed(&mut harness.build.world, px, py, 30.0, Some(2)),
+            "ForceProjector absorbs the wave"
+        );
+        assert!(
+            harness
+                .build
+                .world
+                .get::<ForceProjectorState>(projector_entity)
+                .expect("state")
+                .buildup
+                > 0.0,
+            "the projector takes buildup"
+        );
+        // A point under the BaseShield dome only is still not absorbed.
+        let (sx, sy) = CombatHarness::tile_center(10, 10);
+        assert!(
+            !explosion_absorbed(&mut harness.build.world, sx, sy, 30.0, Some(2)),
+            "the BaseShield dome does not absorb"
         );
     }
 }

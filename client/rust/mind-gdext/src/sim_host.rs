@@ -7583,6 +7583,83 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
+    /// `PlacementFragment` block-info header state: `unlocked(block)` plus the
+    /// `getUnplaceableReason` row (`PlacementFragment.java:380-432,753-761,
+    /// 779-782`). JSON `{unlocked, reason, limit}`:
+    ///
+    /// - `unlocked` — `block.unlockedNowHost() && block.placeablePlayer &&
+    ///   block.environmentBuildable() && block.supportsEnv(state.rules.env)`;
+    ///   false swaps the header to `block.unknown` and hides `?`.
+    /// - `reason` — `null`, or the bundle key `@unit.nobuild`,
+    ///   `@unsupported.environment`, `@banned` or `block.limit`.
+    /// - `limit` — the `{0}` argument of `block.limit` (0 otherwise).
+    #[func]
+    pub fn block_placement_info_json(&self, name: GString) -> GString {
+        let fallback = GString::from(r#"{"unlocked":true,"reason":null,"limit":0}"#);
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return fallback;
+        };
+        let name = name.to_string();
+        let Some(def) = content.block_id(&name).and_then(|id| content.block(id)) else {
+            return fallback;
+        };
+        let campaign = self.sim.ecs.0.get_resource::<CampaignRuntime>();
+        let is_campaign = campaign.is_some_and(|runtime| runtime.session.is_campaign());
+        // `state.getPlanet()`: the launched sector's planet (campaign) or the
+        // session `rules.planet` (custom game, default serpulo).
+        let planet_name = self
+            .last_sector_rules()
+            .map(|rules| rules.planet.clone())
+            .or_else(|| campaign.map(|runtime| runtime.session.rules.planet.clone()))
+            .unwrap_or_default();
+        let planet = content.planet_id(&planet_name);
+        let sun = content.planet_id("sun");
+        let build_rules = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BuildRules>();
+        // `state.rules.env`; an absent `BuildRules` keeps the upstream default.
+        let env = build_rules.map_or(mind_core::game::rules::DEFAULT_ENV, |rules| rules.env);
+        let unlocked =
+            mind_core::world::build::placement_unlocked(def, is_campaign, planet, sun, env);
+        let team = self.player_team();
+        // `Block.isOverPlacementLimit` skips AI teams (`Block.java:1044-1048`).
+        let team_is_ai = campaign
+            .and_then(|runtime| {
+                mind_core::game::team::Team::all()
+                    .get(team as usize)
+                    .map(|team| team.is_ai(&runtime.session.rules, runtime.session.is_campaign()))
+            })
+            .unwrap_or(false);
+        let counter = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BlockCounter>();
+        let reason = mind_core::world::build::unplaceable_reason(
+            def,
+            &mind_core::world::build::PlacementReasonContext {
+                builder: self.sim.player_can_build(),
+                editor: build_rules.is_some_and(|rules| rules.editor),
+                env,
+                team,
+                team_is_ai,
+                rules: build_rules,
+                counter,
+            },
+        );
+        GString::from(
+            serde_json::json!({
+                "unlocked": unlocked,
+                "reason": reason.map(|reason| reason.key()),
+                "limit": reason.and_then(|reason| reason.limit()).unwrap_or(0),
+            })
+            .to_string()
+            .as_str(),
+        )
+    }
+
     /// `PlacementFragment.java:313-323`: the palette cell tint for every content
     /// block, keyed by block name — `0` white (placeable, affordable and the
     /// player unit is a builder), `1` gray (unaffordable or not a builder),
@@ -8823,6 +8900,14 @@ impl MindSimHost {
             drill: world
                 .get::<mind_core::entities::comp::DrillState>(entity)
                 .map(|state| (state.last_drill_speed, state.warmup)),
+            // `WallCrafter.setBars` (`WallCrafter.java:68-72`) reads the build's
+            // `lastEfficiency`/`warmup` and the block's `drillTime`.
+            wall_crafter: match instance.as_ref().map(|instance| &instance.kind_data) {
+                Some(mind_core::world::BlockKindData::WallCrafter(wall)) => world
+                    .get::<mind_core::entities::comp::DrillState>(entity)
+                    .map(|state| (state.last_efficiency, state.warmup, wall.drill_time)),
+                _ => None,
+            },
             time_scale: world
                 .get::<mind_core::entities::comp::Building>(entity)
                 .map(|building| building.time_scale)
@@ -10909,6 +10994,10 @@ pub struct BarExtras {
     pub heat: Option<(f32, f32)>,
     /// `DrillBuild.lastDrillSpeed`/`warmup` (`Drill.java:117-119`).
     pub drill: Option<(f32, f32)>,
+    /// `WallCrafterBuild`: `(lastEfficiency, warmup, drillTime)`
+    /// (`WallCrafter.java:68-72`; the bar reads
+    /// `lastEfficiency * 60 / drillTime`).
+    pub wall_crafter: Option<(f32, f32, f32)>,
     /// `Building.timeScale()`.
     pub time_scale: f32,
     /// `CoreBuild.storageCapacity` plus the unlocked item count
@@ -11176,6 +11265,23 @@ pub fn building_bar_rows(
                     key: "drillspeed",
                     label_key: String::from("bar.drillspeed"),
                     label_args: vec![format!("{:.2}", speed * 60.0 * extras.time_scale)],
+                    color: 0xff89_47ff,
+                    value: warmup.clamp(0.0, 1.0),
+                });
+            }
+        }
+        // `WallCrafter.setBars` (`WallCrafter.java:68-72`):
+        // `lastEfficiency * 60 / drillTime` (no `timeScale` factor — it is
+        // already folded into `lastEfficiency`).
+        BlockKind::WallCrafter => {
+            if let Some((last_efficiency, warmup, drill_time)) = extras.wall_crafter {
+                rows.push(BarRow {
+                    key: "drillspeed",
+                    label_key: String::from("bar.drillspeed"),
+                    label_args: vec![format!(
+                        "{:.2}",
+                        last_efficiency * 60.0 / drill_time.max(0.0001)
+                    )],
                     color: 0xff89_47ff,
                     value: warmup.clamp(0.0, 1.0),
                 });
@@ -11677,6 +11783,44 @@ mod tests {
         assert_eq!(
             duo.iter().map(|row| row.key).collect::<Vec<_>>(),
             ["health", "power", "liquid"]
+        );
+    }
+
+    /// PAR-0474: `WallCrafter.setBars` (`WallCrafter.java:68-72`) adds a
+    /// `drillspeed` bar showing `lastEfficiency * 60 / drillTime` (no extra
+    /// `timeScale` factor — it is already folded into `lastEfficiency`).
+    #[test]
+    fn wall_crafter_bar_uses_last_efficiency_over_drill_time() {
+        let content = base_registry();
+        // 6.4 * 60 / 48 = 8.00 items/s.
+        let extras = BarExtras {
+            wall_crafter: Some((6.4, 0.5, 48.0)),
+            ..BarExtras::default()
+        };
+        let Some(crusher) = content.block_by_name("large-cliff-crusher") else {
+            panic!("large-cliff-crusher");
+        };
+        let rows = building_bar_rows(crusher, 950.0, Some(1.0), Some(0), Some(&[]), &[], &extras);
+        let Some(row) = rows.iter().find(|row| row.key == "drillspeed") else {
+            panic!("wall crafter drill speed bar missing");
+        };
+        assert_eq!(row.label_key, "bar.drillspeed");
+        assert_eq!(row.label_args.first().map(String::as_str), Some("8.00"));
+        assert_eq!(row.value, 0.5, "warmup");
+        assert_eq!(row.color, 0xff89_47ff);
+        // No fitted `DrillState` values => no bar.
+        assert!(
+            !building_bar_rows(
+                crusher,
+                950.0,
+                Some(1.0),
+                Some(0),
+                Some(&[]),
+                &[],
+                &BarExtras::default()
+            )
+            .iter()
+            .any(|row| row.key == "drillspeed")
         );
     }
 

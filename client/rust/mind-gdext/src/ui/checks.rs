@@ -33,7 +33,7 @@
 use godot::classes::control::SizeFlags;
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
-    CenterContainer, Control, DirAccess, FileAccess, HBoxContainer, INode, Label, Node,
+    Button, CenterContainer, Control, DirAccess, FileAccess, HBoxContainer, INode, Label, Node,
     PackedScene, PanelContainer, ResourceLoader, ScrollContainer, Shader, ShaderMaterial,
     TextureRect, VBoxContainer, Window,
 };
@@ -1178,6 +1178,9 @@ fn find_texture_rect(node: &Gd<Node>) -> Option<Gd<TextureRect>> {
 /// tree. This oracle drives all 59 manifest dialogs together: build, show, hide
 /// through the 0.1 s fade, re-show, hide and free. A `bind_mut` panic inside a
 /// builder aborts that dialog's `ready`, so the visibility assertions catch it.
+/// It also presses `custom_rules`' `@edit` footer button *while the dialog is
+/// mutably bound*: `open_edit_menu` mutates the dialog, so it must queue that
+/// bind out of the signal instead of re-binding inside it (`PAR-0470`).
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct MindDialogSweepCheck {
@@ -1226,44 +1229,52 @@ impl INode for MindDialogSweepCheck {
             }
             2 => {
                 self.assert_visibility("shows", true);
+                // PAR-0470: the `@edit` overlay opener must survive a press made
+                // while the dialog's mutable bind is live.
+                self.press_custom_rules_edit();
+                self.step = 3;
+                self.delay = 1;
+            }
+            3 => {
+                self.assert_custom_rules_overlay();
                 for (_, dialog) in &mut self.dialogs {
                     dialog.bind_mut().hide_dialog();
                 }
-                self.step = 3;
+                self.step = 4;
                 self.poll = 0;
             }
-            3 => {
+            4 => {
                 // `hide_dialog` fades for 0.1 s; poll until every fade completes.
                 if self.all_hidden() {
-                    self.step = 4;
+                    self.step = 5;
                     self.delay = 2;
                 } else {
                     self.poll += 1;
                     if self.poll > 60 {
-                        self.step = 4;
+                        self.step = 5;
                         self.delay = 2;
                     }
                 }
             }
-            4 => {
+            5 => {
                 self.assert_visibility("hides (fade completes)", false);
                 for (_, dialog) in &mut self.dialogs {
                     dialog.bind_mut().show_dialog();
                 }
-                self.step = 5;
+                self.step = 6;
                 self.delay = 2;
             }
-            5 => {
+            6 => {
                 self.assert_visibility("reshows", true);
                 for (_, dialog) in &mut self.dialogs {
                     dialog.bind_mut().hide_dialog();
                 }
-                self.step = 6;
+                self.step = 7;
                 self.poll = 0;
             }
-            6 => {
+            7 => {
                 if self.all_hidden() || self.poll > 60 {
-                    self.step = 7;
+                    self.step = 8;
                     self.delay = 1;
                 } else {
                     self.poll += 1;
@@ -1324,6 +1335,73 @@ impl MindDialogSweepCheck {
             self.base_mut().add_child(&node);
         }
         self.dialogs = pending;
+    }
+
+    /// Emits `custom_rules`' `@edit` footer button *while the dialog is mutably
+    /// bound* (`PAR-0470`).
+    ///
+    /// `open_edit_menu` needs `&mut MindDialog`, so a synchronous bind inside
+    /// the `pressed` handler re-enters the live bind and panics
+    /// (`bind_mut() failed, already bound`); with the MCP debugger's
+    /// break-on-error that wedges Play's frame loop, and the overlay never
+    /// appears. The port queues the bind, so this press must stay bind-free and
+    /// the overlay must exist one idle later.
+    fn press_custom_rules_edit(&mut self) {
+        let Some((_, dialog)) = self.dialogs.iter().find(|(name, _)| name == "custom_rules") else {
+            self.check(false, "custom_rules", "dialog instantiated");
+            return;
+        };
+        let mut dialog = dialog.clone();
+        let mut bound = dialog.bind_mut();
+        let Some(row) = bound.buttons_row() else {
+            self.check(false, "custom_rules", "button row exists");
+            return;
+        };
+        let wanted = kit::t("@edit").to_string();
+        let mut edit: Option<Gd<Button>> = None;
+        for child in row.get_children().iter_shared() {
+            let Ok(button) = child.try_cast::<Button>() else {
+                continue;
+            };
+            // An icon button keeps its label in a child `Label`; the `Button`'s
+            // own text is empty.
+            let labels = button
+                .clone()
+                .find_children_ex("*")
+                .type_("Label")
+                .owned(false)
+                .done();
+            let matches = labels
+                .iter_shared()
+                .filter_map(|node| node.try_cast::<Label>().ok())
+                .any(|label| label.get_text().to_string() == wanted);
+            if matches {
+                edit = Some(button);
+                break;
+            }
+        }
+        let Some(mut edit) = edit else {
+            self.check(false, "custom_rules", "`@edit` button exists");
+            return;
+        };
+        // Keep `bound` live across the emission: that is the hazard under test.
+        let _ = edit.emit_signal("pressed", &[]);
+        self.check(true, "custom_rules", "`@edit` pressed under a dialog bind");
+    }
+
+    /// The deferred `@edit` opener must have built the overlay after the press.
+    fn assert_custom_rules_overlay(&mut self) {
+        let built = self
+            .dialogs
+            .iter()
+            .find(|(name, _)| name == "custom_rules")
+            .and_then(|(_, dialog)| dialog.get_node_or_null("rules_overlay"))
+            .is_some();
+        self.check(
+            built,
+            "custom_rules",
+            "`@edit` overlay built outside the bind",
+        );
     }
 
     fn assert_visibility(&mut self, what: &str, expected: bool) {

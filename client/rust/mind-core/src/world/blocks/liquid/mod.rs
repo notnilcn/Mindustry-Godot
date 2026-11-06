@@ -50,6 +50,8 @@ pub struct LiquidNode {
     /// `Conduit` rejects liquid arriving from its output side
     /// (`ConduitBuild.acceptLiquid`).
     pub reject_from_output: bool,
+    /// `ArmoredConduit` (`ArmoredConduitBuild.acceptLiquid` source gate).
+    pub armored: bool,
     /// `liquidPressure` multiplier (default `1.0`).
     pub pressure: f32,
     /// Accepted liquid filter (`Block.liquidFilter`); empty = accept all.
@@ -65,6 +67,7 @@ impl Default for LiquidNode {
             junction: false,
             router: false,
             reject_from_output: false,
+            armored: false,
             pressure: 1.0,
             filter: SmallVec::new(),
         }

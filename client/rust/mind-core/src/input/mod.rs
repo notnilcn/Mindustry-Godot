@@ -71,8 +71,8 @@ pub use plan::{ClientPlan, PlanCopy, PlanMirror, PlanTree, PreviewState};
 pub use queue::{AddOutcome, BuildQueue};
 pub use replay::{MobileReplayHarness, ReplayHarness};
 pub use rts::{
-    SelectRect, SelectableBuilding, SelectableUnit, command_units_apply, enemy_unit_at,
-    select_buildings_rect, select_typed_units, select_unit_tap, select_units_rect,
+    SelectRect, SelectableBuilding, SelectableUnit, command_draw_rect, command_units_apply,
+    enemy_unit_at, select_buildings_rect, select_typed_units, select_unit_tap, select_units_rect,
 };
 pub use sync::{
     MAX_PLAYER_PREVIEW_PLANS, PLAN_SNAPSHOT_CHUNK, PLAN_SNAPSHOT_INTERVAL_TICKS, PlanSnapshot,

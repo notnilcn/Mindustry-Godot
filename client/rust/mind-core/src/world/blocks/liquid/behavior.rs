@@ -184,6 +184,7 @@ impl BuildingBehavior for LiquidConduitBehavior {
                 junction: false,
                 router: false,
                 reject_from_output: true,
+                armored: self.armored,
                 pressure: 1.0,
                 filter: Default::default(),
             },
@@ -307,6 +308,7 @@ impl BuildingBehavior for LiquidRouterBehavior {
                 junction: false,
                 router: true,
                 reject_from_output: false,
+                armored: false,
                 pressure: 1.0,
                 filter: Default::default(),
             },
@@ -349,6 +351,7 @@ impl BuildingBehavior for LiquidJunctionBehavior {
                 junction: true,
                 router: false,
                 reject_from_output: false,
+                armored: false,
                 pressure: 1.0,
                 filter: Default::default(),
             },
@@ -468,6 +471,7 @@ impl BuildingBehavior for LiquidBridgeBehavior {
                 junction: false,
                 router: false,
                 reject_from_output: false,
+                armored: false,
                 pressure: 1.0,
                 filter: Default::default(),
             },
@@ -516,6 +520,7 @@ impl BuildingBehavior for DirectionLiquidBridgeBehavior {
                 junction: false,
                 router: false,
                 reject_from_output: false,
+                armored: false,
                 pressure: 1.0,
                 filter: Default::default(),
             },
@@ -730,5 +735,175 @@ mod tests {
             .map(|module| module.get(LiquidId::WATER))
             .unwrap_or(0.0);
         assert!(moved > 0.0, "direction bridge forwarded moved={moved}");
+    }
+
+    /// Places `target` then `source` on a clean harness and asks the target
+    /// whether it accepts water from the source (`ArmoredConduit` gate path).
+    fn liquid_accepts_from(target: (&str, i32, i32, u8), source: (&str, i32, i32, u8)) -> bool {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let target_block = harness.content().block_id(target.0).expect(target.0);
+        let source_block = harness.content().block_id(source.0).expect(source.0);
+        assert!(harness.place(target.1, target.2, target_block, target.3, true));
+        assert!(harness.place(source.1, source.2, source_block, source.3, true));
+        let target_e = harness.build_at(target.1, target.2).expect("target");
+        let source_e = harness.build_at(source.1, source.2).expect("source");
+        crate::world::blocks::liquid::accept_liquid(
+            &harness.world,
+            target_e,
+            source_e,
+            LiquidId::WATER,
+        )
+    }
+
+    /// `ArmoredConduit.java:23-27` (`ArmoredConduitBuild.acceptLiquid`): a
+    /// side-feeding liquid router is not a conduit/bridge/junction, is not on
+    /// the conduit's back edge, and is in its proximity -> rejected. A plain
+    /// conduit has no such gate.
+    #[test]
+    fn armored_conduit_rejects_router_side_feed() {
+        assert!(
+            !liquid_accepts_from(("plated-conduit", 5, 5, 0), ("liquid-router", 5, 4, 0)),
+            "armored conduit rejects a side router"
+        );
+        assert!(
+            liquid_accepts_from(("conduit", 5, 5, 0), ("liquid-router", 5, 4, 0)),
+            "plain conduit still accepts a side router"
+        );
+    }
+
+    /// `source.block instanceof Conduit`: any conduit source is accepted,
+    /// regardless of the direction it feeds from (`ArmoredConduit.java:25`).
+    #[test]
+    fn armored_conduit_accepts_conduit_sources() {
+        assert!(
+            liquid_accepts_from(("plated-conduit", 5, 5, 0), ("conduit", 5, 4, 1)),
+            "armored conduit accepts a side conduit"
+        );
+        assert!(
+            liquid_accepts_from(("plated-conduit", 5, 5, 0), ("conduit", 4, 5, 0)),
+            "armored conduit accepts a back-edge conduit"
+        );
+    }
+
+    /// `source.block instanceof LiquidJunction` (`ArmoredConduit.java:25`): the
+    /// junction source is accepted even though it sits on the conduit's side.
+    #[test]
+    fn armored_conduit_accepts_junction_source() {
+        assert!(
+            liquid_accepts_from(("plated-conduit", 5, 5, 0), ("liquid-junction", 5, 4, 0)),
+            "armored conduit accepts a side liquid junction"
+        );
+    }
+
+    /// `source.tile.absoluteRelativeTo(tile.x, tile.y) == rotation`
+    /// (`ArmoredConduit.java:26`): a non-conduit on the back edge is accepted.
+    #[test]
+    fn armored_conduit_accepts_non_conduit_from_behind() {
+        assert!(
+            liquid_accepts_from(("plated-conduit", 5, 5, 0), ("liquid-router", 4, 5, 0)),
+            "armored conduit accepts a back-edge router"
+        );
+    }
+
+    /// `Tile.absoluteRelativeTo` (`Tile.java:114-136`) even-size branch: a 2x2
+    /// drill anchored at (4,4) is east of a conduit at (3,5) — direction `2`,
+    /// matching the conduit's rotation — so the armored gate accepts the feed.
+    #[test]
+    fn armored_conduit_absolute_relative_to_handles_even_size_sources() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let drill = harness
+            .content()
+            .block_id("mechanical-drill")
+            .expect("mechanical-drill");
+        let armored = harness
+            .content()
+            .block_id("plated-conduit")
+            .expect("armored");
+        assert!(harness.place(4, 4, drill, 0, true));
+        assert!(harness.place(3, 5, armored, 2, true));
+        let source = harness.build_at(4, 4).expect("drill");
+        let target = harness.build_at(3, 5).expect("conduit");
+        assert!(
+            harness
+                .world
+                .get::<Building>(source)
+                .expect("drill")
+                .proximity
+                .contains(&target),
+            "drill is in the conduit's proximity, so only the direction term can accept"
+        );
+        assert!(
+            crate::world::blocks::liquid::accept_liquid(
+                &harness.world,
+                target,
+                source,
+                LiquidId::WATER
+            ),
+            "even-size source direction is the `x+0.5`/`y+0.5` branch of absoluteRelativeTo"
+        );
+    }
+
+    /// `!source.proximity.contains(this)` (`ArmoredConduit.java:26`, the
+    /// upstream "block-to-conduit through a junction" hack): a source that is
+    /// not linked in proximity is accepted even if it is not behind.
+    #[test]
+    fn armored_conduit_accepts_non_proximate_source() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let armored = harness
+            .content()
+            .block_id("plated-conduit")
+            .expect("armored");
+        let router = harness.content().block_id("liquid-router").expect("router");
+        assert!(harness.place(5, 5, armored, 0, true));
+        assert!(harness.place(0, 0, router, 0, true));
+        let target = harness.build_at(5, 5).expect("target");
+        let source = harness.build_at(0, 0).expect("source");
+        assert!(
+            !harness
+                .world
+                .get::<Building>(source)
+                .expect("source")
+                .proximity
+                .contains(&target),
+            "source is not in the target's proximity"
+        );
+        assert!(
+            crate::world::blocks::liquid::accept_liquid(
+                &harness.world,
+                target,
+                source,
+                LiquidId::WATER
+            ),
+            "unlinked source passes the `!source.proximity.contains(this)` clause"
+        );
+    }
+
+    /// The `armored` flag is set by the armored conduit specs only.
+    #[test]
+    fn armored_flag_matches_the_conduit_specs() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let conduit = harness.content().block_id("conduit").expect("conduit");
+        let armored = harness
+            .content()
+            .block_id("reinforced-conduit")
+            .expect("reinforced-conduit");
+        assert!(harness.place(0, 0, conduit, 0, true));
+        assert!(harness.place(2, 0, armored, 0, true));
+        let plain_e = harness.build_at(0, 0).expect("conduit");
+        let armored_e = harness.build_at(2, 0).expect("armored");
+        assert!(
+            !harness
+                .world
+                .get::<LiquidNode>(plain_e)
+                .expect("node")
+                .armored
+        );
+        assert!(
+            harness
+                .world
+                .get::<LiquidNode>(armored_e)
+                .expect("node")
+                .armored
+        );
     }
 }

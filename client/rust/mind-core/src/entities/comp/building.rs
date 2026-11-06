@@ -164,6 +164,11 @@ pub struct DrillState {
     pub smooth_progress: f32,
     /// `BurstDrillBuild.invertTime` (`1` after a burst, decayed by the loop).
     pub invert_time: f32,
+    /// `WallCrafterBuild.lastEfficiency` (`eff * timeScale * efficiency`; the
+    /// `bar.drillspeed` value upstream, `lastEfficiency * 60 / drillTime`).
+    pub last_efficiency: f32,
+    /// `WallCrafterBuild.totalTime` (spinner rotation; not serialized).
+    pub total_time: f32,
 }
 
 /// `Wall` build state.

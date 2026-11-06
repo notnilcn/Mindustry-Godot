@@ -12,7 +12,7 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::{BlockId, ItemId};
+use crate::content::{BlockId, BlockKind, ItemId};
 use crate::entities::comp::Building;
 use crate::world::behavior::BuildingBehavior;
 use crate::world::block::BlockTable;
@@ -509,15 +509,26 @@ impl BuildingBehavior for ConveyorBehavior {
         let direction = (rel - rotation as i8).abs();
         let facing_ok =
             (direction == 0 && minitem >= ITEM_SPACE) || (direction % 2 == 1 && minitem > 0.7);
-        let source_rotates = world
-            .get::<Building>(source)
-            .and_then(|b| {
-                world
-                    .get_resource::<BlockTable>()
-                    .and_then(|t| t.get(b.block))
-            })
-            .is_some_and(|inst| inst.rotate);
-        facing_ok && !(source_rotates && next == Some(source))
+        let source_inst = world.get::<Building>(source).and_then(|b| {
+            world
+                .get_resource::<BlockTable>()
+                .and_then(|t| t.get(b.block))
+        });
+        let source_rotates = source_inst.is_some_and(|inst| inst.rotate);
+        // `ArmoredConveyor.java:31-33`: `ArmoredConveyorBuild.acceptItem` only
+        // takes from a `Conveyor` (`instanceof`, so any belt orientation) or
+        // through the belt's back edge
+        // (`Edges.getFacingEdge(...).relativeTo(tile) == rotation`).
+        // Plain conveyors have no such gate.
+        let armored_ok = !self.armored
+            || rel == rotation as i8
+            || source_inst.is_some_and(|inst| {
+                matches!(
+                    inst.def.kind,
+                    BlockKind::Conveyor | BlockKind::ArmoredConveyor
+                )
+            });
+        facing_ok && armored_ok && !(source_rotates && next == Some(source))
     }
 
     fn handle_item(&self, world: &mut World, e: Entity, source: Entity, item: ItemId) {
@@ -989,5 +1000,71 @@ mod tests {
         );
         assert_eq!(ConveyorBehavior::belt_speed("armored-conveyor"), Some(0.08));
         assert_eq!(ConveyorBehavior::belt_speed("junction"), None);
+    }
+
+    /// Places `target` then `source` on a clean harness and asks the target
+    /// belt whether it accepts an item from the source.
+    fn belt_accepts_from(target: (&str, i32, i32, u8), source: (&str, i32, i32, u8)) -> bool {
+        let mut harness = crate::world::BuildHarness::new(8, 8, 7);
+        let copper = harness.content().item_id("copper").expect("copper");
+        let target_block = harness.content().block_id(target.0).expect(target.0);
+        let source_block = harness.content().block_id(source.0).expect(source.0);
+        assert!(harness.place(target.1, target.2, target_block, target.3, true));
+        assert!(harness.place(source.1, source.2, source_block, source.3, true));
+        let target_e = harness.build_at(target.1, target.2).expect("target");
+        let source_e = harness.build_at(source.1, source.2).expect("source");
+        transfer::dispatch_accept_item(&harness.world, target_e, source_e, copper)
+    }
+
+    /// `ArmoredConveyor.java:31-33` (`ArmoredConveyorBuild.acceptItem`): a
+    /// side-feeding router is neither a `Conveyor` nor on the back edge, so the
+    /// armored belt rejects it. The same layout on a plain belt is accepted —
+    /// the base `ConveyorBuild.acceptItem` has no source gate.
+    #[test]
+    fn armored_conveyor_rejects_side_router_feed() {
+        assert!(
+            !belt_accepts_from(("armored-conveyor", 5, 5, 0), ("router", 5, 4, 0)),
+            "armored belt rejects a side router"
+        );
+        assert!(
+            belt_accepts_from(("conveyor", 5, 5, 0), ("router", 5, 4, 0)),
+            "plain belt still accepts a side router"
+        );
+    }
+
+    /// `Edges.getFacingEdge(source.tile, tile).relativeTo(tile) == rotation`:
+    /// a non-conveyor feeding through the back edge is accepted.
+    #[test]
+    fn armored_conveyor_accepts_non_conveyor_from_behind() {
+        assert!(
+            belt_accepts_from(("armored-conveyor", 5, 5, 0), ("router", 4, 5, 0)),
+            "armored belt accepts a back-edge feed"
+        );
+    }
+
+    /// `source.block instanceof Conveyor`: a conveyor source is accepted
+    /// regardless of its direction relative to the armored belt.
+    #[test]
+    fn armored_conveyor_accepts_conveyor_source_from_the_side() {
+        assert!(
+            belt_accepts_from(
+                ("armored-conveyor", 5, 5, 0),
+                ("titanium-conveyor", 5, 4, 1)
+            ),
+            "armored belt accepts a side conveyor source"
+        );
+    }
+
+    /// `StackConveyor` (`plastanium-conveyor`) is not a `Conveyor` subclass, so
+    /// it is rejected as a side source like any other non-conveyor.
+    #[test]
+    fn armored_conveyor_rejects_stack_conveyor_side_feed() {
+        assert!(
+            !belt_accepts_from(
+                ("armored-conveyor", 5, 5, 0),
+                ("plastanium-conveyor", 5, 4, 1)
+            ),
+            "armored belt rejects a side stack conveyor"
+        );
     }
 }

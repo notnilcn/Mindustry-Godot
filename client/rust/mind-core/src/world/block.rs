@@ -99,10 +99,27 @@ impl std::fmt::Debug for BlockInstance {
 impl BlockInstance {
     /// Builds the runtime instance from metadata + an optional behavior override.
     pub fn from_def(def: &BlockDef, registry: &BehaviorRegistry) -> Result<Self, BlockError> {
-        let kind_data = BlockKindData::from_def(def);
+        let mut kind_data = BlockKindData::from_def(def);
         let building = building_kind(&kind_data);
         let behavior = resolve_behavior(def, registry);
         let consumers = Consumers::build(&def.consumes);
+        // `WallCrafter.init()` (`WallCrafter.java:103-107`): `hasLiquidBooster =
+        // findConsumer(f -> f instanceof ConsumeLiquidBase && f.booster) != null`.
+        // The port has no `Consume.booster` flag; `optional` stands in for
+        // `.boost()` (the only way vanilla declares an optional consumer).
+        // `ConsumeCoolant` also extends `ConsumeLiquidBase`.
+        if let BlockKindData::WallCrafter(wall) = &mut kind_data {
+            wall.has_liquid_booster = consumers.optional.iter().any(|&index| {
+                consumers.all.get(index).is_some_and(|consumer| {
+                    matches!(
+                        consumer.kind,
+                        crate::world::consumers::ConsumeInstanceKind::Liquid { .. }
+                            | crate::world::consumers::ConsumeInstanceKind::Liquids(_)
+                            | crate::world::consumers::ConsumeInstanceKind::Coolant { .. }
+                    )
+                })
+            });
+        }
         assert_derivations(def)?;
         let mut bars: SmallVec<[BarSpec; 4]> = SmallVec::new();
         if def.health > 0 {

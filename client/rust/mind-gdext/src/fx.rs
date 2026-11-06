@@ -159,6 +159,34 @@ impl MindFx {
         self.base_mut().queue_redraw();
     }
 
+    /// Spawns a drained bus effect (`Effect.at`, payload included) into the
+    /// view pool. Shared by `FxEvent::Effect`/`EffectWithData`; the spawn is
+    /// gated on `renderer.enableEffects` (`Effect.shouldCreate`,
+    /// `Effect.java:142`).
+    fn spawn_bus_effect(
+        &mut self,
+        effect: &mind_core::content::registries::fx_meta::EffectRef,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        data: EffectData,
+    ) {
+        if !self.settings.effects {
+            return;
+        }
+        let id = match effect {
+            mind_core::content::registries::fx_meta::EffectRef::Named(id) => *id,
+            mind_core::content::registries::fx_meta::EffectRef::Inline(_) => EffectId::NONE,
+        };
+        if id == EffectId::NONE {
+            return;
+        }
+        let def = registry().get(id);
+        let snapshot = EmptySnapshot;
+        self.pool.spawn(def, x, y, rotation, color, data, &snapshot);
+    }
+
     /// Executes one primitive; returns whether it was drawn.
     fn draw_prim(&mut self, prim: &mind_core::render::draw::DrawPrim) -> bool {
         // Resolve region textures before `base_mut()` so the cache borrow and
@@ -609,20 +637,15 @@ impl MindFx {
                     y,
                     rotation,
                     color,
-                } => {
-                    let id = match &effect {
-                        mind_core::content::registries::fx_meta::EffectRef::Named(id) => *id,
-                        mind_core::content::registries::fx_meta::EffectRef::Inline(_) => {
-                            EffectId::NONE
-                        }
-                    };
-                    if !self.settings.effects || id == EffectId::NONE {
-                        continue;
-                    }
-                    let def = registry().get(id);
-                    self.pool
-                        .spawn(def, x, y, rotation, color, EffectData::None, &snapshot);
-                }
+                } => self.spawn_bus_effect(&effect, x, y, rotation, color, EffectData::None),
+                FxEvent::EffectWithData {
+                    effect,
+                    x,
+                    y,
+                    rotation,
+                    color,
+                    data,
+                } => self.spawn_bus_effect(&effect, x, y, rotation, color, data),
                 FxEvent::Shake {
                     intensity,
                     duration,

@@ -16,7 +16,7 @@ use crate::content::registries::sound_meta::SoundId;
 use crate::content::{EffectId, Rgba};
 use crate::render::RegionKey;
 
-use super::data::TrailChannelId;
+use super::data::{EffectData, TrailChannelId};
 
 pub use crate::combat::view::FxSink;
 
@@ -57,6 +57,22 @@ pub enum FxEvent {
         rotation: f32,
         /// Tint.
         color: Rgba,
+    },
+    /// `Effect.at(x, y, rotation, color, data)`: an effect carrying a typed
+    /// payload (Java's `e.data`, e.g. the `Fx.lightning` polyline).
+    EffectWithData {
+        /// Effect reference.
+        effect: EffectRef,
+        /// World x.
+        x: f32,
+        /// World y.
+        y: f32,
+        /// Rotation in degrees.
+        rotation: f32,
+        /// Tint.
+        color: Rgba,
+        /// Typed payload (`e.data`).
+        data: EffectData,
     },
     /// `Effect.shake`.
     Shake {
@@ -247,6 +263,25 @@ impl FxSink for FxBus {
         });
     }
 
+    fn effect_data(
+        &self,
+        effect: &EffectRef,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        data: EffectData,
+    ) {
+        self.push(FxEvent::EffectWithData {
+            effect: effect.clone(),
+            x,
+            y,
+            rotation,
+            color,
+            data,
+        });
+    }
+
     fn shake(&self, amount: f32) {
         self.push(FxEvent::Shake {
             intensity: amount,
@@ -355,6 +390,51 @@ mod tests {
         let sink = NoopFxSink;
         emit_named(&sink, EffectId::SMOKE, 0.0, 0.0, 0.0, Rgba::WHITE);
         sink.shake(1.0);
+    }
+
+    /// `Effect.at(..., data)`: the bus keeps the typed payload (`Fx.lightning`
+    /// carries its polyline) and the default sink still records the effect.
+    #[test]
+    fn effect_data_payload_is_carried() {
+        use smallvec::SmallVec;
+
+        let bus = FxBus::new();
+        let color = Rgba::from_rgba8888(0x112233ff);
+        let data = EffectData::Positions(SmallVec::from_slice(&[(1.0, 2.0), (3.0, 4.0)]));
+        bus.effect_data(
+            &EffectRef::Named(EffectId::LIGHTNING),
+            5.0,
+            6.0,
+            7.0,
+            color,
+            data.clone(),
+        );
+        let events = bus.drain();
+        match &events[0] {
+            FxEvent::EffectWithData {
+                effect,
+                x,
+                y,
+                rotation,
+                color: emitted,
+                data: carried,
+            } => {
+                assert_eq!(effect, &EffectRef::Named(EffectId::LIGHTNING));
+                assert_eq!((*x, *y, *rotation), (5.0, 6.0, 7.0));
+                assert_eq!(*emitted, color);
+                assert_eq!(*carried, data);
+            }
+            other => panic!("expected an effect-with-data event: {other:?}"),
+        }
+        // The trait default drops the payload but keeps the effect.
+        NoopFxSink.effect_data(
+            &EffectRef::Named(EffectId::LIGHTNING),
+            0.0,
+            0.0,
+            0.0,
+            color,
+            data,
+        );
     }
 
     #[test]

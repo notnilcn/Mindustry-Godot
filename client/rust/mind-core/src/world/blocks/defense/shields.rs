@@ -18,6 +18,8 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::combat::bullet::CombatCtx;
+use crate::content::Rgba;
+use crate::content::registries::pal;
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
 use crate::world::update::run_timer;
 
@@ -570,7 +572,14 @@ pub struct ShockMineState {
     pub length: i32,
     /// `ShockMine.tendrils`.
     pub tendrils: i32,
-    /// `ShockMine.shots`.
+    /// `ShockMine.lightningColor` (`ShockMine.java:23`); the vanilla block
+    /// keeps the class default `Pal.lancerLaser` (`Blocks.java:1980-1987` does
+    /// not override it).
+    pub lightning_color: Rgba,
+    /// `ShockMine.shots`. Only used by the optional `bullet` burst
+    /// (`ShockMine.java:24,80-84`); the vanilla `shockMine` leaves `bullet`
+    /// null (`Blocks.java:1980`) and the port has no block bullet field, so
+    /// `shots` never fires a burst today. Do not fabricate a bullet.
     pub shots: i32,
     /// `timer(timerDamage, cooldown)` bookkeeping: the `build_time` of the last
     /// trigger (`None` = never, the Java timer's first call fires).
@@ -585,6 +594,7 @@ impl Default for ShockMineState {
             damage: 13.0,
             length: 10,
             tendrils: 6,
+            lightning_color: pal::LANCER_LASER,
             shots: 6,
             last_trigger: None,
         }
@@ -600,7 +610,9 @@ pub fn shock_mine_trigger(ctx: &mut CombatCtx<'_>, e: Entity, state: &ShockMineS
     let Some((x, y)) = position(ctx.world, e) else {
         return;
     };
-    // `Lightning.create(Bullets.damageLightningGround, ...)` per tendril.
+    // `Lightning.create(Bullets.damageLightningGround, team, lightningColor,
+    // damage, x, y, Mathf.random(360f), length)` per tendril
+    // (`ShockMine.java:78-85`); `lightningColor` defaults to `Pal.lancerLaser`.
     for _ in 0..state.tendrils.max(0) {
         let angle = ctx
             .rng
@@ -608,7 +620,7 @@ pub fn shock_mine_trigger(ctx: &mut CombatCtx<'_>, e: Entity, state: &ShockMineS
         let _ = crate::combat::lightning::create(
             ctx,
             team,
-            crate::content::Rgba::WHITE,
+            state.lightning_color,
             state.damage,
             x,
             y,
@@ -1012,6 +1024,92 @@ mod tests {
         // `ShockMineBuild.triggered()` creates `tendrils` lightning bolts.
         shock_mine_trigger(&mut harness.combat_ctx(), mine, &state, 1);
         harness.claim_scratch_spawned();
+    }
+
+    /// PAR-0476: `ShockMine.lightningColor` is `Pal.lancerLaser`
+    /// (`ShockMine.java:23`; the vanilla `shockMine` does not override it,
+    /// `Blocks.java:1980-1987`) and every `triggered()` tendril requests that
+    /// tint (`ShockMine.java:80`).
+    #[test]
+    fn shock_mine_trigger_uses_configured_color() {
+        use std::sync::Arc;
+
+        use crate::content::EffectId;
+        use crate::content::registries::fx_meta::EffectRef;
+        use crate::fx::{FxBus, FxEvent};
+
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let mine = harness.spawn_test_shock_mine(8, 8, 1);
+        let state = harness
+            .build
+            .world
+            .get::<ShockMineState>(mine)
+            .cloned()
+            .expect("shock mine state");
+        assert_eq!(
+            state.lightning_color,
+            pal::LANCER_LASER,
+            "class default is Pal.lancerLaser"
+        );
+        let bus = Arc::new(FxBus::new());
+        harness.set_fx(bus.clone());
+        shock_mine_trigger(&mut harness.combat_ctx(), mine, &state, 1);
+        harness.claim_scratch_spawned();
+        let events = bus.drain();
+        assert_eq!(
+            events.len(),
+            state.tendrils as usize,
+            "one Fx.lightning per tendril"
+        );
+        for event in &events {
+            match event {
+                FxEvent::EffectWithData {
+                    effect: EffectRef::Named(EffectId::LIGHTNING),
+                    color,
+                    data: crate::fx::EffectData::Positions(points),
+                    ..
+                } => {
+                    assert_eq!(*color, pal::LANCER_LASER);
+                    assert_eq!(points.len(), state.length as usize / 2);
+                }
+                other => panic!("expected Fx.lightning with a polyline: {other:?}"),
+            }
+        }
+    }
+
+    /// PAR-0476: the tendril tint follows a non-default `lightningColor`
+    /// instead of being hard-coded to white.
+    #[test]
+    fn shock_mine_trigger_passes_a_non_default_color() {
+        use std::sync::Arc;
+
+        use crate::fx::{FxBus, FxEvent};
+
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let mine = harness.spawn_test_shock_mine(8, 8, 1);
+        let mut state = harness
+            .build
+            .world
+            .get::<ShockMineState>(mine)
+            .cloned()
+            .expect("shock mine state");
+        state.lightning_color = pal::SURGE;
+        state.tendrils = 2;
+        let bus = Arc::new(FxBus::new());
+        harness.set_fx(bus.clone());
+        shock_mine_trigger(&mut harness.combat_ctx(), mine, &state, 1);
+        harness.claim_scratch_spawned();
+        let events = bus.drain();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert!(
+                matches!(
+                    event,
+                    FxEvent::EffectWithData { color, .. } if *color == pal::SURGE
+                ),
+                "tendril carries the configured tint: {event:?}"
+            );
+        }
     }
 
     #[test]

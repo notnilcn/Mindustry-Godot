@@ -1174,3 +1174,48 @@ pub fn inst_hit(emit: &mut FxEmit, e: &EffectContainer, _snap: &dyn ViewSnapshot
         );
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smallvec::SmallVec;
+
+    use crate::content::EffectId;
+    use crate::content::registries::pal as content_pal;
+    use crate::fx::EmptySnapshot;
+    use crate::render::draw::{DrawProgram, PrimKind};
+
+    /// `Fx.lightning` (`Fx.java:189-206`) strokes its polyline with
+    /// `Draw.color(e.color, Color.white, e.fin())`; at `fin == 0` every prim
+    /// carries exactly the tint the emitter requested — the shock mine's
+    /// `Pal.lancerLaser` (`ShockMine.java:23,80`).
+    #[test]
+    fn lightning_body_draws_with_the_effect_color() {
+        let e = EffectContainer {
+            id: EffectId::LIGHTNING,
+            color: content_pal::LANCER_LASER,
+            lifetime: 10.0,
+            data: EffectData::Positions(SmallVec::from_slice(&[
+                (0.0, 0.0),
+                (10.0, 2.0),
+                (20.0, -1.0),
+            ])),
+            ..EffectContainer::default()
+        };
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = FxEmit::new(&mut program, 0.0);
+            lightning(&mut emit, &e, &EmptySnapshot);
+        }
+        // Two segments plus one cap circle per point.
+        assert_eq!(program.len(), 2 + 3);
+        for prim in &program.prims {
+            match &prim.kind {
+                PrimKind::Line { color, .. } | PrimKind::Circle { color, .. } => {
+                    assert_eq!(*color, content_pal::LANCER_LASER);
+                }
+                other => panic!("unexpected Fx.lightning prim: {other:?}"),
+            }
+        }
+    }
+}

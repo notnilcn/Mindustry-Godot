@@ -2135,13 +2135,13 @@ impl MindEditor {
         // `MapEditorDialog.save` -> `handleSaveBuiltin`: a built-in map is
         // never overwritten (`ui.showErrorMessage("@editor.save.overwrite")`,
         // `MapEditorDialog.java:442-445`).
-        if let Some(current) = self.file.as_ref() {
-            if !current.starts_with(&dir) {
-                return dict(vec![
-                    ("ok", false.to_variant()),
-                    ("error", GString::from("overwrite").to_variant()),
-                ]);
-            }
+        if let Some(current) = self.file.as_ref()
+            && !current.starts_with(&dir)
+        {
+            return dict(vec![
+                ("ok", false.to_variant()),
+                ("error", GString::from("overwrite").to_variant()),
+            ]);
         }
         let mut maps = crate::assets::loader::load_map_registry(&root);
         if maps.by_name(&name).is_some_and(|map| !map.custom) {

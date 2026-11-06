@@ -71,6 +71,25 @@ impl SelectRect {
     }
 }
 
+/// The RTS command drag box area (`InputHandler.drawUnitSelection`,
+/// `InputHandler.java:1354-1368`).
+///
+/// Java keeps the press point (`commandRectX`, `commandRectY`) and uses the
+/// live mouse world point as the second corner, so the stored rect carries a
+/// **signed** width/height (`x2 - commandRectX`). It then fills
+/// `Fill.crect(commandRectX, commandRectY, x2 - commandRectX, y2 -
+/// commandRectY)` — `Draw.rect(white, x + w/2, y + h/2, w, h)` mirrors a
+/// negative-size quad, so a left/up drag covers exactly the same area. Returns
+/// that area as `(x1, y1, x2, y2)` ordered low→high per axis, which is what
+/// the Godot world-space fill needs (`canvas::fill_rect`) for every drag
+/// direction. A zero-size rect stays zero-size.
+pub fn command_draw_rect(rect: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = rect;
+    let x2 = x + w;
+    let y2 = y + h;
+    (x.min(x2), y.min(y2), x.max(x2), y.max(y2))
+}
+
 /// `selectUnitsRect`: commandable own-team units inside the rect.
 pub fn select_units_rect(
     units: &[SelectableUnit],
@@ -285,6 +304,34 @@ mod tests {
             &mut out,
         );
         assert_eq!(out.as_slice(), &[1]);
+    }
+
+    #[test]
+    fn command_draw_rect_normalizes_drag_direction() {
+        // Java `Fill.crect(commandRectX, commandRectY, x2 - commandRectX,
+        // y2 - commandRectY)` (`InputHandler.java:1367-1368`): the second
+        // corner is the live mouse, so the stored size is signed.
+        //
+        // Right/down drag: the area is the press point to the mouse point.
+        assert_eq!(
+            command_draw_rect((8.0, 16.0, 32.0, 24.0)),
+            (8.0, 16.0, 40.0, 40.0)
+        );
+        // Left/up drag: same area, mirrored through the press point.
+        assert_eq!(
+            command_draw_rect((8.0, 16.0, -32.0, -24.0)),
+            (-24.0, -8.0, 8.0, 16.0)
+        );
+        // Mixed axes (left/down) keep each axis' direction.
+        assert_eq!(
+            command_draw_rect((8.0, 16.0, -32.0, 24.0)),
+            (-24.0, 16.0, 8.0, 40.0)
+        );
+        // A press with no motion is a zero-size area (nothing to fill).
+        assert_eq!(
+            command_draw_rect((8.0, 16.0, 0.0, 0.0)),
+            (8.0, 16.0, 8.0, 16.0)
+        );
     }
 
     #[test]

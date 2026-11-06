@@ -69,7 +69,11 @@ pub struct InputState {
     pub splan: bool,
     /// `last_schematic` presence.
     pub has_schematic: bool,
-    /// Command drag rectangle `(x, y, w, h)`.
+    /// `InputHandler.commandRect`/`commandRectX/Y`: the command drag rectangle
+    /// `(x, y, w, h)` in world pixels. While the select-rect drag is held this
+    /// is Java's live rect — the raw press point plus `(mouseWorldX - x,
+    /// mouseWorldY - y)`, so `w`/`h` are signed; the release commits the
+    /// tile-snapped selection rect (`selectUnitsRect`).
     pub command_rect: Option<(f32, f32, f32, f32)>,
     /// `tappedOne` (single-unit tap selection).
     pub tapped_one: bool,

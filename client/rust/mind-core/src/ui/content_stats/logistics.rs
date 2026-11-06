@@ -530,7 +530,7 @@ fn junction_capacity(ctx: &StatCtx, id: BlockId) -> f32 {
 
 /// The `ConsumeItems` stacks `findConsumer(c -> c instanceof ConsumeItems)`
 /// returns (the optional boost consumers on the projectors).
-fn booster_items(def: &BlockDef) -> Option<&[ItemStack]> {
+pub(super) fn booster_items(def: &BlockDef) -> Option<&[ItemStack]> {
     def.consumes.iter().find_map(|spec| match &spec.consume {
         Consume::Items(stacks) if !stacks.is_empty() => Some(stacks.as_slice()),
         _ => None,
@@ -540,7 +540,7 @@ fn booster_items(def: &BlockDef) -> Option<&[ItemStack]> {
 /// `StatValues.itemBoosters(unit, timePeriod, speedBoost, rangeBoost, items)`
 /// (`StatValues.java:628-655`): the gray panel with one `displayItem` row per
 /// consumable plus the range/speed boost text.
-fn add_item_boosters(
+pub(super) fn add_item_boosters(
     ctx: &StatCtx,
     stats: &mut Stats,
     unit: &str,

@@ -215,6 +215,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         consumes: vec![
             consume_power(1.0f32),
             consume_liquid("hydrogen", 0.016666668f32),
+            // `Blocks.java:3049`: `itemConsumer = consumeItem(Items.graphite).boost()`
+            // (`Consume.boost()` => optional + booster).
+            consume_optional(consume_item("graphite", 1)),
         ],
         ..spec("large-cliff-crusher", BlockKind::WallCrafter)
     })?;

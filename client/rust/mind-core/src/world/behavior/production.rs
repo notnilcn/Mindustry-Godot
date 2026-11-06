@@ -1296,9 +1296,37 @@ impl BuildingBehavior for BeamDrillBehavior {
     }
 }
 
-/// `WallCrafter` behavior (`WallCrafter$WallCrafterBuild.updateTile`): progress
-/// scales with the summed sand attribute of the tiles in front, and each
-/// completed cycle `offload`s its output.
+/// `WallCrafterBuild.itemValid` (`WallCrafter.java:191`):
+/// `itemConsumer != null && itemConsumer.efficiency(this) > 0`. The port reads
+/// the block's first `ConsumeItems` consumer (the upstream `itemConsumer` field)
+/// and checks its stacks against the item module (`ConsumeItems.efficiency`).
+fn wall_crafter_item_valid(
+    world: &World,
+    e: Entity,
+    inst: &crate::world::block::BlockInstance,
+) -> bool {
+    let Some(stacks) = inst
+        .consumers
+        .all
+        .iter()
+        .find_map(|consumer| match &consumer.kind {
+            crate::world::consumers::ConsumeInstanceKind::Items(stacks) => Some(stacks),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+    world.get::<ItemModule>(e).is_some_and(|items| {
+        stacks
+            .iter()
+            .all(|stack| items.get(stack.item) >= stack.amount)
+    })
+}
+
+/// `WallCrafter` behavior (`WallCrafter$WallCrafterBuild.updateTile`,
+/// `WallCrafter.java:187-223`): progress
+/// scales with the summed sand attribute of the tiles in front, the liquid/item
+/// boosts multiply it, and each completed cycle `offload`s its output.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct WallCrafterBehavior;
 
@@ -1309,7 +1337,7 @@ impl BuildingBehavior for WallCrafterBehavior {
         }
     }
 
-    /// `WallCrafter.shouldConsume` (`WallCrafter.java:225-228`): the output item
+    /// `WallCrafter.shouldConsume` (`WallCrafter.java:226-228`): the output item
     /// buffer full → idle (T1).
     fn should_consume(&self, world: &World, e: Entity) -> bool {
         let Some(inst) = instance(world, e) else {
@@ -1328,54 +1356,97 @@ impl BuildingBehavior for WallCrafterBehavior {
         let Some(inst) = instance(world, e) else {
             return;
         };
-        let (drill_time, attribute, output) = match &inst.kind_data {
-            BlockKindData::WallCrafter(def) => (def.drill_time, def.attribute.clone(), def.output),
-            _ => return,
+        let BlockKindData::WallCrafter(def) = &inst.kind_data else {
+            return;
         };
-        let Some((time_scale, efficiency)) = world
-            .get::<Building>(e)
-            .map(|building| (building.time_scale, building.efficiency))
+        let (
+            drill_time,
+            output,
+            liquid_boost_intensity,
+            item_boost_intensity,
+            boost_item_use_time,
+            has_liquid_booster,
+        ) = (
+            def.drill_time,
+            def.output,
+            def.liquid_boost_intensity,
+            def.item_boost_intensity,
+            def.boost_item_use_time,
+            def.has_liquid_booster,
+        );
+        let Some((time_scale, efficiency, optional_efficiency)) =
+            world.get::<Building>(e).map(|building| {
+                (
+                    building.time_scale,
+                    building.efficiency,
+                    building.optional_efficiency,
+                )
+            })
         else {
             return;
         };
-        let _ = &attribute;
-        let item_capacity = inst.def.item_capacity;
-        // `getEfficiency` is refreshed by `refresh_drill_ore` (placement/rotate);
-        // `facing_amount` carries the sum.
-        let eff = world
+        // `boolean cons = shouldConsume();`
+        let should_consume = self.should_consume(world, e);
+        // `getEfficiency` is rescanned every tick by `refresh_drill_ore` (the
+        // facing pass); the grid-free behavior reads the cached sum.
+        let base_eff = world
             .get::<DrillState>(e)
             .map(|state| state.facing_amount)
             .unwrap_or(0.0);
-        let should_consume = output
-            .map(|item| transfer::item_count(world, e, ItemId::new(item)) < item_capacity)
-            .unwrap_or(false);
+        // `boolean itemValid = itemConsumer != null && itemConsumer.efficiency(this) > 0;`
+        let item_valid = wall_crafter_item_valid(world, e, &inst);
+        // `eff = getEfficiency(...) * lerp(1, liquidBoostIntensity,
+        //  hasLiquidBooster ? optionalEfficiency : 0f) * (itemValid ? itemBoostIntensity : 1f)`
+        let liquid_boost = if has_liquid_booster {
+            1.0 + (liquid_boost_intensity - 1.0) * optional_efficiency
+        } else {
+            1.0
+        };
+        let eff = base_eff
+            * liquid_boost
+            * if item_valid {
+                item_boost_intensity
+            } else {
+                1.0
+            };
+        // `if(itemValid && eff * efficiency > 0 && timer(timerUse,
+        //  boostItemUseTime / timeScale)){ consume(); }` (`timerUse` is building
+        // timer index 1; `timerDump` is index 0).
+        if item_valid
+            && eff * efficiency > 0.0
+            && crate::world::update::run_timer(
+                world,
+                e,
+                1,
+                boost_item_use_time / time_scale.max(0.0001),
+            )
+        {
+            crate::world::update::trigger_consumers(world, e);
+        }
         let edelta = crate::world::update::edelta(world, e);
+        let mut finished = false;
         if let Some(mut state) = world.get_mut::<DrillState>(e) {
-            state.facing_amount = eff;
-            state.last_drill_speed = eff * time_scale * efficiency;
+            // `warmup = Mathf.approachDelta(warmup, Mathf.num(efficiency > 0), 1f / 40f)`
             state.warmup = approach(
                 state.warmup,
                 if efficiency > 0.0 { 1.0 } else { 0.0 },
                 1.0 / 40.0,
             );
-        }
-        // `if(cons && (time += edelta() * eff) >= drillTime){ offload(output); time %= drillTime; }`
-        if should_consume && let Some(item) = output.map(ItemId::new) {
-            let finished = {
-                let Some(mut state) = world.get_mut::<DrillState>(e) else {
-                    return;
-                };
+            // `lastEfficiency = eff * timeScale * efficiency;`
+            state.last_efficiency = eff * time_scale * efficiency;
+            // `totalTime += edelta() * warmup * (eff <= 0f ? 0f : 1f);`
+            state.total_time += edelta * state.warmup * if eff <= 0.0 { 0.0 } else { 1.0 };
+            // `if(cons && (time += edelta() * eff) >= drillTime){ offload(output); time %= drillTime; }`
+            if should_consume && output.is_some() {
                 state.progress += edelta * eff;
                 if state.progress >= drill_time.max(0.0001) {
                     state.progress %= drill_time.max(0.0001);
-                    true
-                } else {
-                    false
+                    finished = true;
                 }
-            };
-            if finished {
-                transfer::offload(world, e, item);
             }
+        }
+        if finished && let Some(item) = output.map(ItemId::new) {
+            transfer::offload(world, e, item);
         }
         // `if(timer(timerDump, dumpTime / timeScale)) dump(output);`
         if crate::world::update::run_timer(world, e, 0, DUMP_TIME / time_scale.max(0.0001))

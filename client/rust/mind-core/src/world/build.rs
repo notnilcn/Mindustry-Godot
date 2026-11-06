@@ -10,7 +10,7 @@
 
 use bevy_ecs::entity::Entity;
 
-use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry, EnvFlag};
+use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry, EnvFlag, PlanetId};
 use crate::ecs::BuildingComp;
 use crate::entities::comp::TeamComp;
 use crate::world::darkness::get_wall_darkness;
@@ -87,6 +87,145 @@ pub fn palette_tint(placeable: bool, affordable: bool, builder: bool) -> i32 {
 /// `Block.canPlaceOn`.
 pub fn can_place_on(_def: &BlockDef, _team: u8, _rot: u8) -> bool {
     true
+}
+
+/// `PlacementFragment.getUnplaceableReason` (`PlacementFragment.java:753-761`)
+/// result: the bundle key of why a displayed block cannot be placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnplaceableReason {
+    /// `!player.isBuilder()` — `@unit.nobuild`.
+    UnitNoBuild,
+    /// `!block.supportsEnv(state.rules.env)` — `@unsupported.environment`.
+    UnsupportedEnvironment,
+    /// `block.isBanned()` — `@banned`.
+    Banned,
+    /// `block.isOverPlacementLimit(player.team())` — `block.limit`, formatted
+    /// with the `Rules.blockLimits` value (`{0}`).
+    Limit(u32),
+}
+
+impl UnplaceableReason {
+    /// Bundle key. Java returns the `@key` string for the fixed reasons and the
+    /// already-formatted `block.limit` text for the limit; the caller formats
+    /// the latter with [`Self::limit`].
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::UnitNoBuild => "@unit.nobuild",
+            Self::UnsupportedEnvironment => "@unsupported.environment",
+            Self::Banned => "@banned",
+            Self::Limit(_) => "block.limit",
+        }
+    }
+
+    /// `{0}` argument for `block.limit` (`None` for the fixed keys).
+    pub fn limit(self) -> Option<u32> {
+        match self {
+            Self::Limit(limit) => Some(limit),
+            _ => None,
+        }
+    }
+}
+
+/// Everything `PlacementFragment.getUnplaceableReason` reads
+/// (`PlacementFragment.java:753-761`).
+#[derive(Debug, Clone, Copy)]
+pub struct PlacementReasonContext<'a> {
+    /// `player.isBuilder()` (`PlayerComp.isBuilder`: a build-capable unit).
+    pub builder: bool,
+    /// `state.isEditor()` (`Rules.editor`).
+    pub editor: bool,
+    /// `state.rules.env`.
+    pub env: i32,
+    /// `player.team()`.
+    pub team: u8,
+    /// `player.team().isAI()` (`Team.isAI`).
+    pub team_is_ai: bool,
+    /// Live placement rules (bans and block limits); `None` keeps only the
+    /// rules-free checks.
+    pub rules: Option<&'a BuildRules>,
+    /// Live per-team block counts (`team.data().getBuildings(block).size`).
+    pub counter: Option<&'a BlockCounter>,
+}
+
+/// `PlacementFragment.getUnplaceableReason` (`PlacementFragment.java:753-761`),
+/// in Java's check order: builder, editor early-out, environment, ban, then the
+/// placement limit.
+pub fn unplaceable_reason(
+    def: &BlockDef,
+    ctx: &PlacementReasonContext<'_>,
+) -> Option<UnplaceableReason> {
+    // `if(!player.isBuilder()) return "@unit.nobuild";`
+    if !ctx.builder {
+        return Some(UnplaceableReason::UnitNoBuild);
+    }
+    // `if(state.isEditor()) return null; //always placeable in editor as long
+    // as there's a builder` — the early-out covers the ban/env/limit checks.
+    if ctx.editor {
+        return None;
+    }
+    // `if(!block.supportsEnv(state.rules.env)) return "@unsupported.environment";`
+    if !supports_env_bits(def, ctx.env) {
+        return Some(UnplaceableReason::UnsupportedEnvironment);
+    }
+    let rules = ctx.rules?;
+    // `if(block.isBanned()) return "@banned";`
+    if rules.is_banned(def.id) {
+        return Some(UnplaceableReason::Banned);
+    }
+    // `if(block.isOverPlacementLimit(player.team())) return
+    // Core.bundle.format("block.limit", state.rules.blockLimits.get(block));`
+    // `Block.isOverPlacementLimit` (`Block.java:1044-1048`) skips the editor
+    // (handled above) and AI teams.
+    if !ctx.team_is_ai
+        && let Some(limit) = rules.limit(ctx.team, def.id)
+        && let Some(counter) = ctx.counter
+        && counter.count(ctx.team, def.id) >= limit
+    {
+        return Some(UnplaceableReason::Limit(limit));
+    }
+    None
+}
+
+/// `PlacementFragment.unlocked(block)` (`PlacementFragment.java:779-782`):
+/// `block.unlockedNowHost() && block.placeablePlayer &&
+/// block.environmentBuildable() && block.supportsEnv(state.rules.env)`.
+///
+/// A `false` result swaps the block-info header to `block.unknown` and hides
+/// the `?` button (`PlacementFragment.java:386-397`). `planet` is
+/// `state.getPlanet()` and `sun` the `Planets.sun` id (both nullable like the
+/// Java objects).
+pub fn placement_unlocked(
+    def: &BlockDef,
+    is_campaign: bool,
+    planet: Option<PlanetId>,
+    sun: Option<PlanetId>,
+    env: i32,
+) -> bool {
+    // `UnlockableContent.unlockedNowHost()` (`UnlockableContent.java:269-271`):
+    // `!state.isCampaign() || unlockedHost()` (singleplayer `unlockedHost()` is
+    // `unlocked || alwaysUnlocked`).
+    (!is_campaign || def.unlock.unlocked())
+        && def.placeable_player
+        && environment_buildable(def, planet, sun)
+        && supports_env_bits(def, env)
+}
+
+/// `Block.environmentBuildable()` = `isOnPlanet(state.getPlanet())`
+/// (`Block.java:1117-1119`, `UnlockableContent.java:132-134`): a null planet
+/// and `Planets.sun` match every block, an empty `shownPlanets` matches all.
+pub fn environment_buildable(
+    def: &BlockDef,
+    planet: Option<PlanetId>,
+    sun: Option<PlanetId>,
+) -> bool {
+    match planet {
+        None => true,
+        Some(planet) => {
+            sun == Some(planet)
+                || def.unlock.shown_planets.is_empty()
+                || def.unlock.shown_planets.contains(&planet)
+        }
+    }
 }
 
 /// Payload pickup gate: `build.block.buildVisibility != BuildVisibility.hidden`
@@ -1069,6 +1208,145 @@ mod tests {
         assert_eq!(palette_tint(true, true, false), 1, "not a builder");
         assert_eq!(palette_tint(false, true, true), 2, "unplaceable wins");
         assert_eq!(palette_tint(false, false, false), 2);
+    }
+
+    /// `PlacementFragment.getUnplaceableReason` (`PlacementFragment.java:753-761`):
+    /// builder, editor, environment, ban, limit — in that order.
+    #[test]
+    fn unplaceable_reason_order_matches_placement_fragment() {
+        let content = crate::content::test_support::test_registry();
+        let conveyor = content.block_by_name("conveyor").expect("conveyor").clone();
+        let env = crate::game::rules::DEFAULT_ENV;
+        let mut rules = BuildRules::default();
+        rules.banned_blocks.push(conveyor.id);
+        let counter = BlockCounter::new();
+        fn context<'a>(
+            builder: bool,
+            editor: bool,
+            env: i32,
+            team_is_ai: bool,
+            rules: &'a BuildRules,
+            counter: &'a BlockCounter,
+        ) -> PlacementReasonContext<'a> {
+            PlacementReasonContext {
+                builder,
+                editor,
+                env,
+                team: rules.default_team,
+                team_is_ai,
+                rules: Some(rules),
+                counter: Some(counter),
+            }
+        }
+        // `if(!player.isBuilder())` is checked before the editor early-out.
+        assert_eq!(
+            unplaceable_reason(
+                &conveyor,
+                &context(false, true, env, false, &rules, &counter)
+            ),
+            Some(UnplaceableReason::UnitNoBuild),
+            "no builder wins over the editor early-out (and the ban)"
+        );
+        // `if(state.isEditor()) return null;` covers the env/ban/limit checks.
+        assert_eq!(
+            unplaceable_reason(&conveyor, &context(true, true, 0, false, &rules, &counter)),
+            None,
+            "editor is always placeable with a builder"
+        );
+        // `!block.supportsEnv(...)` is checked before the ban.
+        assert_eq!(
+            unplaceable_reason(&conveyor, &context(true, false, 0, false, &rules, &counter)),
+            Some(UnplaceableReason::UnsupportedEnvironment),
+            "environment reason wins over the ban"
+        );
+        // `block.isBanned()`.
+        assert_eq!(
+            unplaceable_reason(
+                &conveyor,
+                &context(true, false, env, false, &rules, &counter)
+            ),
+            Some(UnplaceableReason::Banned)
+        );
+        // `block.isOverPlacementLimit(player.team())`.
+        let mut limited = BuildRules::default();
+        limited
+            .block_limits
+            .insert((limited.default_team, conveyor.id), 2);
+        let mut counted = BlockCounter::new();
+        counted.add(limited.default_team, conveyor.id, 2);
+        assert_eq!(
+            unplaceable_reason(
+                &conveyor,
+                &context(true, false, env, false, &limited, &counted)
+            ),
+            Some(UnplaceableReason::Limit(2)),
+            "at the limit"
+        );
+        assert_eq!(
+            unplaceable_reason(
+                &conveyor,
+                &context(true, false, env, true, &limited, &counted)
+            ),
+            None,
+            "AI teams skip the placement limit (Block.java:1044-1048)"
+        );
+        let empty = BlockCounter::new();
+        assert_eq!(
+            unplaceable_reason(
+                &conveyor,
+                &context(true, false, env, false, &limited, &empty)
+            ),
+            None
+        );
+        // The fixed reasons carry no `{0}`; the limit does.
+        assert_eq!(UnplaceableReason::Banned.key(), "@banned");
+        assert_eq!(UnplaceableReason::UnitNoBuild.limit(), None);
+        assert_eq!(UnplaceableReason::Limit(2).key(), "block.limit");
+        assert_eq!(UnplaceableReason::Limit(2).limit(), Some(2));
+    }
+
+    /// `PlacementFragment.unlocked` (`PlacementFragment.java:779-782`) drives the
+    /// `block.unknown` header and the hidden `?` button
+    /// (`PlacementFragment.java:386-397`).
+    #[test]
+    fn placement_unlocked_gates_the_block_unknown_header() {
+        let content = crate::content::test_support::test_registry();
+        let conveyor = content.block_by_name("conveyor").expect("conveyor").clone();
+        let env = crate::game::rules::DEFAULT_ENV;
+        let serpulo = content.planet_id("serpulo");
+        let sun = content.planet_id("sun");
+        assert_eq!(serpulo, content.planet_id("serpulo"));
+        // A custom (non-campaign) game ignores the unlock bit.
+        assert!(placement_unlocked(&conveyor, false, serpulo, sun, env));
+        // Campaign + locked content -> header `block.unknown`, no `?` button.
+        let mut locked = conveyor.clone();
+        locked.unlock.always_unlocked = false;
+        locked.unlock.unlocked = false;
+        assert!(
+            !placement_unlocked(&locked, true, serpulo, sun, env),
+            "locked campaign content shows block.unknown"
+        );
+        assert!(
+            placement_unlocked(&locked, false, serpulo, sun, env),
+            "custom games always report unlockedNowHost()"
+        );
+        // `placeablePlayer` and `environmentBuildable` are part of `unlocked`.
+        let mut not_player = conveyor.clone();
+        not_player.placeable_player = false;
+        assert!(!placement_unlocked(&not_player, false, serpulo, sun, env));
+        let mut wrong_planet = conveyor.clone();
+        let erekir = content.planet_id("erekir");
+        wrong_planet.unlock.shown_planets = erekir.into_iter().collect();
+        assert!(
+            !placement_unlocked(&wrong_planet, false, serpulo, sun, env),
+            "other planets' content is environmentBuildable() == false"
+        );
+        assert!(
+            placement_unlocked(&wrong_planet, false, sun, sun, env),
+            "Planets.sun matches every block (isOnPlanet)"
+        );
+        // `supportsEnv(state.rules.env)`.
+        assert!(!placement_unlocked(&conveyor, false, serpulo, sun, 0));
     }
 
     #[test]

@@ -6,15 +6,21 @@
 //! ShockwaveTower,BaseShield}.java`).
 //!
 //! These are the M7 projector/projector-adjacent blocks the plan-07
-//! [`BuildingBehavior`](crate::world::behavior::BuildingBehavior) tick drives
-//! without a content handle. Content-dependent bullet effects (shield
-//! absorption multipliers, `Fx`) stay on the plan-10 combat pass.
+//! [`BuildingBehavior`](crate::world::behavior::BuildingBehavior) tick drives.
+//! `BaseShield`'s consumers need bullet metadata (`BulletType.absorbable`) and
+//! the view FX seam, supplied through [`BaseShieldEnv`] by the behavior (which
+//! borrows them from the live unit runtime).
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::combat::bullet::{ABSORBED, Bullet};
+use crate::combat::view::FxSink;
+use crate::content::ContentRegistry;
+use crate::entities::comp::unit::comp::{HitboxComp, UnitCore};
+use crate::entities::comp::{Building, Health, Pos, TeamComp, Vel};
+use crate::world::WorldGrid;
 
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha.clamp(0.0, 1.0)
@@ -516,16 +522,39 @@ pub fn base_shield_radius(state: &BaseShieldState) -> f32 {
     state.smooth_radius
 }
 
-/// `BaseShieldBuild.updateTile` (`delta == 1`): grow toward `radius *
-/// efficiency` and absorb enemy bullets passing through.
+/// The live content/grid/FX seam `BaseShield`'s consumers read
+/// (`BaseShield.java:27-57`): `bullet.type.absorbable`, tile collisions for
+/// `unit.move`, and the `Fx.circleColorSpark` sink.
+pub struct BaseShieldEnv<'a> {
+    /// Content registry (`BulletDef.absorbable`).
+    pub content: &'a ContentRegistry,
+    /// Terrain snapshot for `EntityCollisions.move` (`VelComp.move`,
+    /// VelComp.java:65-74).
+    pub grid: &'a WorldGrid,
+    /// View-only effect sink (`Fx.circleColorSpark`).
+    pub fx: &'a dyn FxSink,
+}
+
+/// `smoothRadius = Mathf.lerpDelta(smoothRadius, radius * efficiency, 0.05f)`
+/// (`BaseShield.java:89`). Split out so the plan-07 `BuildHarness` world (no
+/// bullet/unit `UnitRuntime`, hence no content registry) still animates the
+/// dome.
+pub fn update_base_shield_radius(state: &mut BaseShieldState, efficiency: f32) {
+    state.smooth_radius = lerp_delta(state.smooth_radius, state.radius * efficiency, 0.05);
+}
+
+/// `BaseShieldBuild.updateTile` (`delta == 1`, `BaseShield.java:87-99`): grow
+/// toward `radius * efficiency`, absorb absorbable enemy bullets inside the
+/// dome, then repel enemy units overlapping it.
 pub fn update_base_shield(
     world: &mut World,
     e: Entity,
     state: &mut BaseShieldState,
     efficiency: f32,
+    env: &BaseShieldEnv<'_>,
 ) {
-    state.smooth_radius = lerp_delta(state.smooth_radius, state.radius * efficiency, 0.05);
-    let radius = state.smooth_radius;
+    update_base_shield_radius(state, efficiency);
+    let radius = base_shield_radius(state);
     if radius <= 1.0 {
         return;
     }
@@ -533,27 +562,208 @@ pub fn update_base_shield(
         return;
     };
     let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
-    let radius2 = radius * radius;
+    let center = (pos.x, pos.y);
+    absorb_bullets(world, env.content, team, center, radius);
+    // `Units.nearbyEnemies(team, x, y, rad + 10f, unitConsumer)`
+    // (`BaseShield.java:96-97`).
+    repel_units(world, env, team, center, radius);
+}
+
+/// `BaseShield.bulletConsumer` (`BaseShield.java:27-36`): every bullet of
+/// another team whose type is `absorbable` and that is inside the dome is
+/// absorbed. Non-absorbable bullets (`BulletType.absorbable = false`) pass
+/// through untouched.
+fn absorb_bullets(
+    world: &mut World,
+    content: &ContentRegistry,
+    team: u8,
+    center: (f32, f32),
+    radius: f32,
+) {
     let mut targets: Vec<Entity> = Vec::new();
     for entity_ref in world.iter_entities() {
-        if entity_ref.get::<crate::combat::bullet::Bullet>().is_none() {
+        let Some(bullet) = entity_ref.get::<Bullet>() else {
+            continue;
+        };
+        if entity_ref.get::<TeamComp>().map(|t| t.team) == Some(team) {
             continue;
         }
-        if entity_ref.get::<TeamComp>().map(|t| t.team) == Some(team) {
+        // `bullet.type.absorbable`; a bullet without a resolved def cannot be
+        // classified, so it is left alone (upstream types always resolve).
+        if !content.bullet(bullet.def).is_some_and(|def| def.absorbable) {
             continue;
         }
         let Some(bullet_pos) = entity_ref.get::<Pos>() else {
             continue;
         };
-        let dx = bullet_pos.x - pos.x;
-        let dy = bullet_pos.y - pos.y;
-        if dx * dx + dy * dy <= radius2 {
+        let dx = bullet_pos.x - center.0;
+        let dy = bullet_pos.y - center.1;
+        // `bullet.within(paramBuild, paramBuild.radius())`: strict `dst < r`
+        // (`Position.within`, Arc `Position.java:44`).
+        if dx * dx + dy * dy < radius * radius {
             targets.push(entity_ref.id());
         }
     }
+    targets.sort_by_key(|entity| entity.index());
     for target in targets {
-        let _ = world.despawn(target);
+        // `bullet.absorb()` (`BulletComp.java:100-103`): flag it; the bullet
+        // pass later runs `despawned`/`removed` and despawns it.
+        if let Some(mut bullet) = world.get_mut::<Bullet>(target) {
+            bullet.set(ABSORBED);
+        }
     }
+}
+
+/// `BaseShield.unitConsumer` (`BaseShield.java:38-57`) over
+/// `Units.nearbyEnemies(team, x, y, radius + 10, ...)`: live units of other
+/// teams within `(radius + 10) + hitSize / 2` (`Units.java:482-488`).
+fn repel_units(
+    world: &mut World,
+    env: &BaseShieldEnv<'_>,
+    team: u8,
+    center: (f32, f32),
+    radius: f32,
+) {
+    let mut targets: Vec<Entity> = Vec::new();
+    for entity_ref in world.iter_entities() {
+        // `Groups.unit` holds live units only; a unit already flagged dead is
+        // awaiting the death pass and is skipped (`UnitComp.killed`).
+        let Some(core) = entity_ref.get::<UnitCore>() else {
+            continue;
+        };
+        if core.dead {
+            continue;
+        }
+        if entity_ref.get::<TeamComp>().map(|t| t.team) == Some(team) {
+            continue;
+        }
+        let Some(hitbox) = entity_ref.get::<HitboxComp>() else {
+            continue;
+        };
+        let Some(unit_pos) = entity_ref.get::<Pos>() else {
+            continue;
+        };
+        let dx = unit_pos.x - center.0;
+        let dy = unit_pos.y - center.1;
+        let reach = radius + 10.0 + hitbox.hit_size / 2.0;
+        if dx * dx + dy * dy < reach * reach {
+            targets.push(entity_ref.id());
+        }
+    }
+    targets.sort_by_key(|entity| entity.index());
+    for unit in targets {
+        repel_unit(world, env, team, center, radius, unit);
+    }
+}
+
+/// One `BaseShield.unitConsumer` call (`BaseShield.java:38-57`).
+fn repel_unit(
+    world: &mut World,
+    env: &BaseShieldEnv<'_>,
+    team: u8,
+    center: (f32, f32),
+    radius: f32,
+    unit: Entity,
+) {
+    let Some(unit_pos) = world.get::<Pos>(unit).copied() else {
+        return;
+    };
+    let hit_size = world
+        .get::<HitboxComp>(unit)
+        .map_or(0.0, |hitbox| hitbox.hit_size);
+    let dx = unit_pos.x - center.0;
+    let dy = unit_pos.y - center.1;
+    let dst = (dx * dx + dy * dy).sqrt();
+    // `float overlapDst = (unit.hitSize/2f + paramBuild.radius()) - unit.dst(paramBuild);`
+    let overlap = (hit_size / 2.0 + radius) - dst;
+    if overlap <= 0.0 {
+        return;
+    }
+    if overlap > hit_size * 1.5 {
+        // `unit.kill()` for units stuck deep inside the dome
+        // (`BaseShield.java:43-45`).
+        mark_unit_dead(world, unit);
+        return;
+    }
+    // `unit.vel.setZero()`, then `unit.move(Tmp.v1.set(unit).sub(paramBuild)
+    // .setLength(overlapDst + 0.01f))`.
+    if let Some(mut vel) = world.get_mut::<Vel>(unit) {
+        vel.x = 0.0;
+        vel.y = 0.0;
+    }
+    // `Vec2.setLength` is a no-op on a zero vector (Arc `Vec2.java:299-307`),
+    // which is what happens when the unit sits exactly on the dome centre.
+    if dst > 0.0 {
+        let scale = (overlap + 0.01) / dst;
+        move_unit_by(world, env, unit, dx * scale, dy * scale);
+    }
+    // `if(Mathf.chanceDelta(0.12f * Time.delta)) Fx.circleColorSpark.at(
+    // unit.x, unit.y, paramBuild.team.color);`
+    if spark_chance(world, unit) {
+        let (x, y) = world
+            .get::<Pos>(unit)
+            .map_or((unit_pos.x, unit_pos.y), |pos| (pos.x, pos.y));
+        crate::fx::sink::emit_named(
+            env.fx,
+            crate::content::EffectId::CIRCLE_COLOR_SPARK,
+            x,
+            y,
+            0.0,
+            crate::game::team::Team::get(team).color,
+        );
+    }
+}
+
+/// `unit.move(...)` (`VelComp.move`, VelComp.java:61-74): ground units resolve
+/// solid tiles through `EntityCollisions.move`; flying units translate
+/// directly (`ElevationMoveComp.solidity()` is null in the air).
+fn move_unit_by(world: &mut World, env: &BaseShieldEnv<'_>, unit: Entity, dx: f32, dy: f32) {
+    let Some(mut pos) = world.get::<Pos>(unit).copied() else {
+        return;
+    };
+    let hit_size = world
+        .get::<HitboxComp>(unit)
+        .map_or(0.0, |hitbox| hitbox.hit_size);
+    if crate::combat::bullet::unit_is_flying(world, unit) {
+        pos.x += dx;
+        pos.y += dy;
+    } else {
+        let solid = |tx: i32, ty: i32| {
+            !crate::ai::types::ground::unit_can_pass(world, env.grid, env.content, unit, tx, ty)
+        };
+        crate::entities::comp::unit::velocity::collisions_move(&mut pos, hit_size, dx, dy, &solid);
+    }
+    if let Some(mut stored) = world.get_mut::<Pos>(unit) {
+        *stored = pos;
+    }
+}
+
+/// `unit.kill()` (`HealthComp.java:33-40`, `UnitComp.kill`): zero health and
+/// flag the unit dead. The sim's `resolve_deaths` pass (same tick) runs the
+/// `killed`/`destroy` path, including the falling-wreck branch for flying
+/// units (`UnitComp.java:980-991`).
+fn mark_unit_dead(world: &mut World, unit: Entity) {
+    if let Some(mut health) = world.get_mut::<Health>(unit) {
+        health.health = health.health.min(0.0);
+        health.dead = true;
+    }
+    if let Some(mut core) = world.get_mut::<UnitCore>(unit) {
+        core.dead = true;
+    }
+}
+
+/// `Mathf.chanceDelta(0.12f * Time.delta)` for the view-only push spark.
+///
+/// The roll never feeds the simulation, so it uses a deterministic seeded
+/// [`crate::math::ArcRand`] (like `emit_wreck_decals`) instead of the sim RNG
+/// stream, seeded from the unit's `EntitySeq` and the build clock tick.
+fn spark_chance(world: &World, unit: Entity) -> bool {
+    let seq = world
+        .get::<crate::ecs::EntitySeq>(unit)
+        .map_or(0, |seq| seq.0);
+    let tick = crate::world::update::build_time(world) as u64;
+    let mut rand = crate::math::ArcRand::new(seq ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    rand.chance(0.12)
 }
 
 #[cfg(test)]
@@ -593,6 +803,337 @@ mod suppression_tests {
         assert!(
             !is_heal_suppressed(&harness.build.world, wall_e),
             "a wall is not suppressable"
+        );
+    }
+}
+
+#[cfg(test)]
+mod base_shield_tests {
+    use std::sync::{Arc, Mutex};
+
+    use bevy_ecs::entity::Entity;
+
+    use crate::combat::bullet::{ABSORBED, Bullet};
+    use crate::combat::harness::CombatHarness;
+    use crate::combat::view::FxSink;
+    use crate::content::registries::fx_meta::EffectRef;
+    use crate::content::{EffectId, Rgba};
+    use crate::entities::comp::unit::comp::{HitboxComp, UnitCore};
+    use crate::entities::comp::{Health, Pos, TeamComp, Vel};
+    use crate::world::blocks::defense::projectors::{
+        BaseShieldEnv, BaseShieldState, update_base_shield,
+    };
+
+    /// Spawns a `BaseShield` fixture (`shield-projector` dome) at the tile
+    /// centre with a fully grown radius.
+    fn spawn_shield(
+        harness: &mut CombatHarness,
+        tile: (i32, i32),
+        team: u8,
+        radius: f32,
+    ) -> Entity {
+        let (x, y) = CombatHarness::tile_center(tile.0, tile.1);
+        let seq = harness.seq;
+        harness.seq = harness.seq.wrapping_add(1);
+        harness
+            .build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                BaseShieldState {
+                    radius,
+                    smooth_radius: radius,
+                    ..BaseShieldState::default()
+                },
+            ))
+            .id()
+    }
+
+    /// Spawns a real content unit (`UnitType.spawn` bundle: `UnitCore`,
+    /// `HitboxComp`, `Vel`, `Health`).
+    fn spawn_unit(harness: &mut CombatHarness, name: &str, team: u8, x: f32, y: f32) -> Entity {
+        let seq = harness.seq;
+        harness.seq = harness.seq.wrapping_add(1);
+        crate::entities::comp::unit::lifecycle::spawn_unit(
+            &mut harness.build.world,
+            &harness.build.content,
+            seq,
+            name,
+            team,
+            x,
+            y,
+            0.0,
+        )
+        .expect("unit content")
+    }
+
+    /// Drives one `BaseShieldBuild.updateTile` with the harness as the live
+    /// runtime seam (content/grid/FX).
+    fn step_shield(harness: &mut CombatHarness, shield: Entity, efficiency: f32) {
+        let Some(mut state) = harness
+            .build
+            .world
+            .entity_mut(shield)
+            .take::<BaseShieldState>()
+        else {
+            return;
+        };
+        let env = BaseShieldEnv {
+            content: &harness.build.content,
+            grid: &harness.build.grid,
+            fx: harness.fx.as_ref(),
+        };
+        update_base_shield(
+            &mut harness.build.world,
+            shield,
+            &mut state,
+            efficiency,
+            &env,
+        );
+        harness.build.world.entity_mut(shield).insert(state);
+    }
+
+    fn bullet_absorbed(harness: &CombatHarness, bullet: Entity) -> bool {
+        harness
+            .build
+            .world
+            .get::<Bullet>(bullet)
+            .is_some_and(|bullet| bullet.has(ABSORBED))
+    }
+
+    fn unit_pos(harness: &CombatHarness, unit: Entity) -> (f32, f32) {
+        harness
+            .build
+            .world
+            .get::<Pos>(unit)
+            .map_or((0.0, 0.0), |pos| (pos.x, pos.y))
+    }
+
+    /// `BaseShield.bulletConsumer` (`BaseShield.java:27-36`): an absorbable
+    /// enemy bullet inside the dome is absorbed (`bullet.absorb()` sets the
+    /// `absorbed` flag; the bullet pass finishes it).
+    #[test]
+    fn absorbable_enemy_bullet_is_absorbed() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        let def = harness.bullet_id("fuse").expect("fuse");
+        assert!(
+            harness
+                .build
+                .content
+                .bullet(def)
+                .expect("bullet def")
+                .absorbable,
+            "fixture sanity: fuse is absorbable"
+        );
+        let bullet = harness
+            .spawn_bullet("fuse", cx + 10.0, cy, 0.0, 1)
+            .expect("bullet");
+        step_shield(&mut harness, shield, 1.0);
+        assert!(bullet_absorbed(&harness, bullet), "bullet absorbed");
+        // The bullet pass then runs `BulletComp.remove` (`despawned`/`removed`)
+        // and drops the entity.
+        harness.step_bullets_only();
+        assert!(
+            harness.build.world.get_entity(bullet).is_err(),
+            "the absorbed bullet is removed by the bullet pass"
+        );
+    }
+
+    /// PAR-0475: `bullet.type.absorbable` gates the consumer — a
+    /// non-absorbable round passes through the dome untouched.
+    #[test]
+    fn non_absorbable_bullet_passes_through() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let def = harness.bullet_id("fuse").expect("fuse");
+        if let Some(bullet_def) = harness.build.content.bullet_mut(def) {
+            bullet_def.absorbable = false;
+        }
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        let bullet = harness
+            .spawn_bullet("fuse", cx + 10.0, cy, 0.0, 1)
+            .expect("bullet");
+        step_shield(&mut harness, shield, 1.0);
+        assert!(
+            !bullet_absorbed(&harness, bullet),
+            "non-absorbable bullet passes through"
+        );
+        harness.step_bullets_only();
+        assert!(
+            crate::combat::bullet::bullet_alive(&harness.build.world, bullet),
+            "the bullet survives the pass"
+        );
+    }
+
+    /// The consumer also gates on team (`bullet.team != paramBuild.team`).
+    #[test]
+    fn friendly_bullet_is_not_absorbed() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        let bullet = harness
+            .spawn_bullet("fuse", cx + 10.0, cy, 0.0, 0)
+            .expect("bullet");
+        step_shield(&mut harness, shield, 1.0);
+        assert!(
+            !bullet_absorbed(&harness, bullet),
+            "team-0 bullet ignored by a team-0 dome"
+        );
+    }
+
+    /// `BaseShield.unitConsumer` (`BaseShield.java:42-55`): a shallow overlap
+    /// (`overlapDst <= hitSize * 1.5`) zeroes velocity and pushes the unit out
+    /// by `overlapDst + 0.01`.
+    #[test]
+    fn shallow_enemy_unit_is_pushed_out() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        // dagger: hitSize 8 -> overlap 60 + 4 - 58 = 6 <= 12.
+        let unit = spawn_unit(&mut harness, "dagger", 1, cx + 58.0, cy);
+        if let Some(mut vel) = harness.build.world.get_mut::<Vel>(unit) {
+            vel.x = 1.5;
+            vel.y = -0.5;
+        }
+        step_shield(&mut harness, shield, 1.0);
+        let (x, y) = unit_pos(&harness, unit);
+        let dst = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+        assert!(
+            dst >= 60.0 + 4.0,
+            "unit pushed outside the dome: dst = {dst}"
+        );
+        let vel = harness.build.world.get::<Vel>(unit).expect("vel");
+        assert_eq!((vel.x, vel.y), (0.0, 0.0), "velocity zeroed");
+        let health = harness.build.world.get::<Health>(unit).expect("health");
+        assert!(!health.dead, "a shallow overlap is not lethal");
+    }
+
+    /// `BaseShield.java:43-45`: an overlap deeper than `hitSize * 1.5` kills
+    /// the stuck unit (`unit.kill()` => health/dead flags; the sim's
+    /// `resolve_deaths` pass destroys it in the same tick).
+    #[test]
+    fn deep_enemy_unit_is_killed() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        // dagger: hitSize 8 -> overlap 60 + 4 - 40 = 24 > 12.
+        let unit = spawn_unit(&mut harness, "dagger", 1, cx + 40.0, cy);
+        step_shield(&mut harness, shield, 1.0);
+        let health = harness.build.world.get::<Health>(unit).expect("health");
+        assert!(health.dead && health.health <= 0.0, "stuck unit killed");
+        assert!(
+            harness
+                .build
+                .world
+                .get::<UnitCore>(unit)
+                .expect("core")
+                .dead,
+            "UnitComp.killed sets dead"
+        );
+        // Not pushed: the kill branch returns before the move.
+        let (x, _) = unit_pos(&harness, unit);
+        assert!((x - (cx + 40.0)).abs() < 1e-3, "a killed unit is not moved");
+    }
+
+    /// `Units.nearbyEnemies` only visits other teams (`Units.java:482-488`);
+    /// a friendly unit inside the dome is untouched.
+    #[test]
+    fn friendly_unit_is_ignored() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        let unit = spawn_unit(&mut harness, "dagger", 0, cx + 40.0, cy);
+        step_shield(&mut harness, shield, 1.0);
+        let (x, y) = unit_pos(&harness, unit);
+        assert!((x - (cx + 40.0)).abs() < 1e-3 && (y - cy).abs() < 1e-3);
+        assert!(
+            !harness
+                .build
+                .world
+                .get::<Health>(unit)
+                .expect("health")
+                .dead
+        );
+    }
+
+    /// `Mathf.chanceDelta(0.12f * Time.delta)` plays `Fx.circleColorSpark` at
+    /// the pushed unit (`BaseShield.java:52-54`).
+    #[test]
+    fn pushed_unit_emits_circle_color_spark() {
+        #[derive(Default)]
+        struct RecordingSink {
+            effects: Mutex<Vec<EffectId>>,
+        }
+
+        impl FxSink for RecordingSink {
+            fn effect(&self, effect: &EffectRef, _x: f32, _y: f32, _rotation: f32, _color: Rgba) {
+                if let EffectRef::Named(id) = effect {
+                    self.effects.lock().expect("lock").push(*id);
+                }
+            }
+        }
+
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let sink = Arc::new(RecordingSink::default());
+        harness.set_fx(sink.clone());
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        let unit = spawn_unit(&mut harness, "dagger", 1, cx + 58.0, cy);
+        for _ in 0..120 {
+            // The shield pushes the unit out, so re-seat it in the overlap band
+            // and advance the build clock (the view roll is seeded by tick).
+            harness.build.tick();
+            if let Some(mut pos) = harness.build.world.get_mut::<Pos>(unit) {
+                pos.x = cx + 58.0;
+                pos.y = cy;
+            }
+            step_shield(&mut harness, shield, 1.0);
+        }
+        let effects = sink.effects.lock().expect("lock");
+        assert!(
+            effects.contains(&EffectId::CIRCLE_COLOR_SPARK),
+            "expected at least one circleColorSpark over 120 pushed ticks: {effects:?}"
+        );
+    }
+
+    /// `Units.nearbyEnemies(team, x, y, rad + 10f, ...)` also keeps units just
+    /// outside the dome but inside the widened query (big hitbox) — they are
+    /// not overlapping, so nothing happens.
+    #[test]
+    fn unit_outside_the_overlap_band_is_untouched() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let shield = spawn_shield(&mut harness, (20, 16), 0, 60.0);
+        let (cx, cy) = CombatHarness::tile_center(20, 16);
+        // dst 68: inside the `rad + 10 + hitSize/2` query (72) but outside the
+        // `rad + hitSize/2` overlap band (64).
+        let unit = spawn_unit(&mut harness, "dagger", 1, cx + 68.0, cy);
+        step_shield(&mut harness, shield, 1.0);
+        let (x, _) = unit_pos(&harness, unit);
+        assert!(
+            (x - (cx + 68.0)).abs() < 1e-3,
+            "no push outside the overlap"
+        );
+        assert!(
+            !harness
+                .build
+                .world
+                .get::<Health>(unit)
+                .expect("health")
+                .dead
+        );
+        // The fixture's hitbox is the dagger 8 px box.
+        assert_eq!(
+            harness
+                .build
+                .world
+                .get::<HitboxComp>(unit)
+                .expect("hitbox")
+                .hit_size,
+            8.0
         );
     }
 }

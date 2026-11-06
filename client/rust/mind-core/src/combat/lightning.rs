@@ -7,15 +7,18 @@
 //! created, the chain snaps to the farthest enemy building within `hitRange*2`
 //! (up to `maxChain` links) or advances along a randomized angle. Java's static
 //! `lastSeed++` becomes a monotonic [`LightningCounter`] resource so replays are
-//! stable (plan 10 §3.2). Rendering (`Fx.lightning`) is plan 17.
+//! stable (plan 10 §3.2). The branch also emits the `Fx.lightning` view event
+//! (polyline + caller colour) exactly like `Lightning.java:113`.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use smallvec::SmallVec;
 
-use crate::content::Rgba;
 use crate::content::registries::bullets::DAMAGE_LIGHTNING;
+use crate::content::registries::fx_meta::EffectRef;
+use crate::content::{EffectId, Rgba};
 use crate::entities::comp::TeamComp;
+use crate::fx::EffectData;
 use crate::random::Rand;
 
 use super::bullet::{BulletSpawn, CombatCtx};
@@ -38,6 +41,9 @@ pub struct LightningResult {
     pub links: usize,
     /// Chained target entities in order.
     pub hit: Vec<Entity>,
+    /// Requested bolt tint (`Lightning.create(color)`; `Pal.lancerLaser` for a
+    /// shock mine). Carried into the `Fx.lightning` event.
+    pub color: Rgba,
 }
 
 /// Creates a lightning branch (`Lightning.create`).
@@ -61,7 +67,7 @@ pub fn create(
     let mut y = y0;
     let mut rotation = rotation0;
     let mut hit: Vec<Entity> = Vec::new();
-    let mut lines: SmallVec<[(f32, f32); 32]> = SmallVec::new();
+    let mut lines: SmallVec<[(f32, f32); 8]> = SmallVec::new();
 
     let steps = (length / 2).max(0);
     for _ in 0..steps {
@@ -92,11 +98,22 @@ pub fn create(
         }
     }
 
-    let _ = color;
+    // `Fx.lightning.at(x, y, rotation, color, lines)` (`Lightning.java:113`):
+    // the view body draws the polyline in the requested tint.
+    ctx.fx.effect_data(
+        &EffectRef::Named(EffectId::LIGHTNING),
+        x,
+        y,
+        rotation,
+        color,
+        EffectData::Positions(lines),
+    );
+
     LightningResult {
         end: (x, y),
         links: hit.len(),
         hit,
+        color,
     }
 }
 
@@ -187,5 +204,40 @@ mod tests {
         let (ax, ay) = CombatHarness::tile_center(4, 8);
         let result = a.lightning(1, Rgba::WHITE, 10.0, ax, ay, 0.0, 40);
         assert!(result.links <= MAX_CHAIN);
+    }
+
+    /// `Lightning.java:113`: the branch ends with
+    /// `Fx.lightning.at(x, y, rotation, color, lines)` — the caller's colour
+    /// (`Pal.lancerLaser` for a shock mine) and the polyline reach the view
+    /// sink unchanged.
+    #[test]
+    fn lightning_emits_fx_with_the_requested_color() {
+        use std::sync::Arc;
+
+        use crate::content::registries::pal;
+        use crate::fx::{FxBus, FxEvent};
+
+        let mut harness = CombatHarness::new(48, 48, 5);
+        let bus = Arc::new(FxBus::new());
+        harness.set_fx(bus.clone());
+        let (x, y) = CombatHarness::tile_center(4, 4);
+        // A non-default tint must survive the round trip.
+        let color = pal::SURGE;
+        let result = harness.lightning(1, color, 10.0, x, y, 0.0, 10);
+        assert_eq!(result.color, color, "result carries the requested tint");
+        let events = bus.drain();
+        assert_eq!(events.len(), 1, "one Fx.lightning per branch");
+        match &events[0] {
+            FxEvent::EffectWithData {
+                effect: EffectRef::Named(EffectId::LIGHTNING),
+                color: emitted,
+                data: EffectData::Positions(points),
+                ..
+            } => {
+                assert_eq!(*emitted, color, "FX event keeps the tint");
+                assert_eq!(points.len(), 5, "length 10 -> length/2 points");
+            }
+            other => panic!("expected Fx.lightning with a polyline: {other:?}"),
+        }
     }
 }

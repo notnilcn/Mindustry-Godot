@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-05T04:22:38Z",
+  "updated": "2026-11-06T01:02:06Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -56,6 +56,270 @@
       "expected": "Headless boot of res://scenes/game.tscn: 0 `missing required` warnings; dialog_sweep_check prints `DIALOGCHECK: failed=0`; fmt/cargo-check/clippy exit 0.",
       "risk": "node_paths resolution can silently null a dep if a scene path/order is wrong; pre-existing clippy::collapsible_if at editor/mod.rs:2138 (allowed via -A); cargo test -p mind-gdext engine-dependent tests fail without Godot.",
       "notes": "S5 closeout: removed unused MindUiRoot::is_menu_visible; docs updated (mind-gdext/AGENTS.md, client/AGENTS.md, docs/GODOT-SCENES-REFACTOR.md). Verified at a2009258: build exit 0; headless boot 0 missing required, 0 ERROR/SCRIPT ERROR; probe CHECKED 16 nodes null deps 0; SHADERCHECK total=30 failed=0; UICHECK/LAYOUTCHECK/DIALOGCHECK failed=0; cargo test --lib 185 passed/17 engine-unavailable failures.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-204005",
+      "created_at": "2026-11-05T20:40:05Z",
+      "agent": "gaps-43",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-gdext/src/ui,client/rust/mind-core/src/world",
+      "summary": "GAPS #43: PlacementFragment unplaceable-reason row + block.unknown header (PAR-0468, twin-verified)",
+      "files": [
+        "client/rust/mind-core/src/world/build.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-gdext/src/ui/fragments/placement.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core unplaceable && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core placement_unlocked && tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext placement",
+      "expected": "all new tests pass; the placement info box still keeps its normal height with no reason and adds one scarlet reason row for banned/no-builder/env/limit",
+      "risk": "locked-header gating and the added row change the info-box height; check PAR-0449 and the block palette layout",
+      "notes": "Twin evidence runs/PAR-0468 (similarity 92.4); Godot leg used the rules-JSON seed because the Custom Rules Edit overlay stalls the frame loop (new bug, not fixed here).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-205549",
+      "created_at": "2026-11-05T20:55:49Z",
+      "agent": "gaps-17",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 12,
+      "area": "client/rust/mind-core/src/world/blocks",
+      "summary": "GAPS #17: ArmoredConveyor/ArmoredConduit reject side input from non-conveyors (PAR-0469, twin-verified)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/distribution/conveyor.rs",
+        "client/rust/mind-core/src/world/blocks/liquid/mod.rs",
+        "client/rust/mind-core/src/world/blocks/liquid/behavior.rs",
+        "client/rust/mind-core/src/world/blocks/liquid/movement.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core conveyor && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core conduit && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core liquid",
+      "expected": "37 conveyor tests, 15 conduit tests and the liquid suite pass; armored belts/conduits reject side non-conveyor/non-conduit feeds and plain belts keep accepting them",
+      "risk": "item/liquid routing hot path; the armored gate must not reject conveyor->conveyor or conduit->conduit feeds (covered by the new tests). LiquidNode.armored is not serialized (rebuilt by create_state), so no save ABI change.",
+      "notes": "Twin evidence runs/PAR-0469 (similarity 93.6): item-source+router side-feeds an armored belt; control titanium belt carries 3 copper in both clients, armored belt stays empty in both. No broken frame (fix was already in the shared build); unit tests cover pre-fix behaviour.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-212007",
+      "created_at": "2026-11-05T21:20:07Z",
+      "agent": "gaps-customrules",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 18,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "New bug (PAR-0470): Custom Rules Edit/overlays stall the Godot frame loop — defer every dialog bind out of its signal",
+      "files": [
+        "client/rust/mind-gdext/src/ui/dialogs/batch_i.rs",
+        "client/rust/mind-gdext/src/ui/checks.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "dialog-sweep-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext && godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn",
+      "expected": "dialog_sweep_check passes; pressing @edit while the custom_rules dialog is mutably bound opens rules_overlay with no panic; the frame loop stays live",
+      "risk": "UI dialogs: deferred actions run one idle frame later; check every converted custom-rules button/search/overlay path still updates the rules table and closes cleanly",
+      "notes": "Twin evidence runs/PAR-0470 (similarity 90.6): Java + Godot both show the Edit overlay; liveness log in runs/PAR-0470. Root cause was the nested Gd::bind_mut inside pressed/text_changed; pre-fix the overlay never built and break-on-error pinned the frame loop.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-214532",
+      "created_at": "2026-11-05T21:45:32Z",
+      "agent": "gaps-4",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 19,
+      "area": "client/rust/mind-core/src/world/blocks/defense",
+      "summary": "GAPS #4: turret/defense should_consume overrides stop idle power/coolant drain (PAR-0471, twin-verified)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/defense/turrets/behavior.rs",
+        "client/rust/mind-core/src/world/blocks/defense/behaviors.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core should_consume && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core turret && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core projector",
+      "expected": "10 should_consume tests, 75 turret tests and 18 projector tests pass; idle reloaded turrets/projectors report should_consume=false and request 0 power",
+      "risk": "Power accounting path for every turret family (Item/Liquid/Power/Payload/Continuous/ContinuousLiquid/Laser/PointDefense/TractorBeam/Build). PointDefense/Tractor use enabled&&target (their super is ReloadTurret/BaseTurret, not Turret), so idle turrets stop drawing before reload.",
+      "notes": "Twin evidence runs/PAR-0471 (similarity 87.5): lancer + power-source in both clients; Java hover Power bar full at requestedPower 0, orange noOutput diamond in both; Godot structured probe efficiency 0.0 vs potential 1.0 and shared power graph. Caveat: the Godot placement hover table does not render (new open bug recorded in GAPS.md), so the Godot leg uses the structured probe + marker. One-tick lag for RegenProjector.anyTargets is upstream-faithful.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-221832-2",
+      "created_at": "2026-11-05T22:18:32Z",
+      "agent": "gaps-hover",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 26,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "New bug (PAR-0473): placement hover top table never rendered for a hovered world building (typed Dictionary rejection)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/fragments/placement.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext && tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib -- info_box_visibility only_stop_controls top_state_key_tracks",
+      "expected": "3 new tests pass; hovering a world building with no palette selection renders the top info table (hover row + bars) and the selected-block branch still wins",
+      "risk": "Hover/read-model path only; the STOP guard is unchanged (PASS/IGNORE controls still allow world hover). Any other code converting SimHost typed Dictionary returns with strict VarDictionary can hit the same BadDictionaryType; batch_j.rs logic_get_state was flagged as a separate candidate.",
+      "notes": "Twin evidence runs/PAR-0473 (similarity 90.2): Java + Godot both show 'Core: Nucleus / Health / Capacity: 13k' above the palette. Root cause: hover_info_world returns Dictionary<GString,Variant>, strict try_to::<VarDictionary> rejects the typed dictionary; now AnyDictionary.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-224236",
+      "created_at": "2026-11-05T22:42:36Z",
+      "agent": "gaps-47",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 27,
+      "area": "client/rust/mind-gdext/src/render,client/rust/mind-core/src/input",
+      "summary": "GAPS #47: RTS command-mode drag-selection box drawn (PAR-0472, twin-verified)",
+      "files": [
+        "client/rust/mind-core/src/input/rts.rs",
+        "client/rust/mind-core/src/input/mod.rs",
+        "client/rust/mind-core/src/input/client_input.rs",
+        "client/rust/mind-gdext/src/input/desktop.rs",
+        "client/rust/mind-gdext/src/input/mod.rs",
+        "client/rust/mind-gdext/src/render/command_overlay.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core command_draw_rect && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core input:: && tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext placement_view_reports",
+      "expected": "command_draw_rect + input tests pass; a held command-mode drag stores the live signed rect in InputState.command_rect and CommandOverlay draws a Pal.accent 0.3 filled world rect even with no units selected",
+      "risk": "Input drag/selection path; the release still commits the tile-snapped rect and taps clear the live rect. The overlay lives at the plans layer (Java draws it at overlayUI), so bullets/flying units composite above it.",
+      "notes": "Twin evidence runs/PAR-0472 (similarity 86.9): held-drag frames in both clients, Java command mode bound to F in this profile (check settings.bin; boost is Shift). Godot command_rect [710.5,843.5,125,-70] live signed rect, no units selected; heatmap black across the box.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-231529",
+      "created_at": "2026-11-05T23:15:29Z",
+      "agent": "gaps-20",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 38,
+      "area": "client/rust/mind-core/src/world,client/rust/mind-gdext/src",
+      "summary": "GAPS #20: WallCrafter/cliff-crusher attribute boosts, graphite item boost, drillspeed bar (PAR-0474)",
+      "files": [
+        "client/rust/mind-core/src/world/behavior/production.rs",
+        "client/rust/mind-core/src/world/block_kind_data.rs",
+        "client/rust/mind-core/src/world/block.rs",
+        "client/rust/mind-core/src/content/registries/blocks/production.rs",
+        "client/rust/mind-core/src/entities/comp/building.rs",
+        "client/rust/mind-core/src/ui/content_stats/production.rs",
+        "client/rust/mind-core/src/ui/content_stats/logistics.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-core/src/sim/production_tests.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core wall_crafter && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core cliff",
+      "expected": "wall_crafter/cliff tests pass; facing sand attributes + graphite boost scale efficiency and consume graphite; the drillspeed bar shows lastEfficiency*60/drillTime in both clients",
+      "risk": "Production path: facing-attribute refresh is one tick late (pre-existing PAR-0079 design); large-cliff-crusher now optionally consumes graphite (accept_item/consumer parity); the bar is new and adds a BarExtras field. No liquid booster exists vanilla; path is unit-tested with a synthetic consumer.",
+      "notes": "Twin evidence runs/PAR-0474 (pending): large-cliff-crusher on a sand-wall row with power + hydrogen + graphite item-source; bar 7.50 base -> 12.00 boosted. Water boosts nothing.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261105-231529-2",
+      "created_at": "2026-11-05T23:15:29Z",
+      "agent": "gaps-12",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 38,
+      "area": "client/rust/mind-core/src/world/blocks/defense,client/rust/mind-core/src/combat",
+      "summary": "GAPS #12: BaseShield absorbable-only bullets, no explosion absorption, unit repel/kill (PAR-0475)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/defense/projectors.rs",
+        "client/rust/mind-core/src/world/blocks/defense/behaviors.rs",
+        "client/rust/mind-core/src/combat/damage/explosion.rs",
+        "client/rust/mind-core/src/sim/combat_tests.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core base_shield && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core shield && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core explosion",
+      "expected": "base_shield tests pass: absorbable bullets absorbed, non-absorbable/friendly pass, shallow enemy unit pushed, deep unit killed, BaseShield no longer absorbs explosions, ForceProjector still does",
+      "risk": "Shield combat path: bullet absorb uses the ABSORBED flag (one extra update window, shared with ForceProjector); unit kill is deferred to resolve_deaths; spark RNG is view-only; BaseShieldBehavior now needs the live UnitRuntime and falls back to radius-only in harness worlds.",
+      "notes": "Twin evidence runs/PAR-0475 (pending): shield-projector + power-source near the core/wave path; enemy units repelled/killed after the dome grows. Non-absorbable bullet pass-through needs a lancer beam or custom bullet.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-010206",
+      "created_at": "2026-11-06T01:02:06Z",
+      "agent": "gaps-16",
+      "branch": "main",
+      "head": "9b04a6af",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 44,
+      "area": "client/rust/mind-core/src/combat,client/rust/mind-core/src/fx,client/rust/mind-gdext/src",
+      "summary": "GAPS #16: ShockMine lightning colour Pal.lancerLaser + FX colour plumbing (PAR-0476)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/defense/shields.rs",
+        "client/rust/mind-core/src/combat/lightning.rs",
+        "client/rust/mind-core/src/combat/view.rs",
+        "client/rust/mind-core/src/fx/sink.rs",
+        "client/rust/mind-core/src/fx/custom/basic.rs",
+        "client/rust/mind-gdext/src/fx.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core shock_mine && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core lightning && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core fx",
+      "expected": "shock_mine/lightning/fx tests pass; shock-mine tendrils emit Fx.lightning with Pal.lancerLaser and the renderer draws that colour",
+      "risk": "New FX event payload (EffectWithData) and Lightning.create now emits an FX event for every caller (shock mines, wall lightning, explosions, lightning bullets); view-only so checksums/goldens unaffected. Full mind-core suite passed. Build/editor restart pending.",
+      "notes": "Twin pending: build + editor restart, sandbox shock-mine, walk player mech onto it, burst-capture the 4 tendrils in Java and Godot. Java frame should show lancerLaser (blue) vs the old white; pre-fix the port rendered no bolt at all.",
       "status": "pending"
     }
   ]

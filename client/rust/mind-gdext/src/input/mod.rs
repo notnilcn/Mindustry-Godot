@@ -243,6 +243,9 @@ impl INode for MindInput {
         // `pollInputPlayer` L762-768: `overrideLineRotation` clears whenever the
         // frame is not an active placement line.
         self.bridge.sync_line_override();
+        // `drawUnitSelection` L1354-1368: the command drag box's second corner
+        // is the live mouse world point, recomputed every frame.
+        self.bridge.sync_command_rect();
         // Cargo keys repeat while held (`DesktopInput.updateMovement`).
         self.bridge.update_payload_hold(&self.bindings);
         // `DesktopInput.java:591-594`: auto-pause building while the player

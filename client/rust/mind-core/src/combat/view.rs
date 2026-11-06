@@ -15,13 +15,30 @@
 use crate::content::registries::fx_meta::EffectRef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::{EffectId, Rgba};
-use crate::fx::TrailChannelId;
+use crate::fx::{EffectData, TrailChannelId};
 
 /// Combat effect sink (plan-17 playback boundary; no-op in headless).
 pub trait FxSink: Send + Sync {
     /// Plays a named or inline effect (`Effect.at`).
     fn effect(&self, effect: &EffectRef, x: f32, y: f32, rotation: f32, color: Rgba) {
         let _ = (effect, x, y, rotation, color);
+    }
+
+    /// Plays an effect with a typed payload (`Effect.at(x, y, rotation, color,
+    /// data)`; Java's `e.data`, e.g. the `Fx.lightning` polyline). The default
+    /// forwards to [`FxSink::effect`] and drops the payload so position-only
+    /// sinks keep working.
+    fn effect_data(
+        &self,
+        effect: &EffectRef,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        data: EffectData,
+    ) {
+        let _ = data;
+        self.effect(effect, x, y, rotation, color);
     }
 
     /// Adds screen shake (`Effect.shake`).

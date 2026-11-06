@@ -19,14 +19,30 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
-use crate::entities::comp::{Pos, TeamComp};
+use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::{BuildingReader, BuildingWriter};
 
 use super::{
-    TurretAmmo, TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
-    handle_liquid, handle_payload, save,
+    TurretAmmo, TurretConfig, TurretKind, TurretState, accept_item, accept_liquid, accept_payload,
+    handle_item, handle_liquid, handle_payload, save,
 };
+
+/// `Building.enabled` (`BuildingComp.java:761-763`), defaulting to `true` for
+/// fixture entities that carry no `Building` component.
+fn building_enabled(world: &World, e: Entity) -> bool {
+    world
+        .get::<Building>(e)
+        .is_none_or(|building| building.enabled)
+}
+
+/// `TurretBuild.isActive()` (`Turret.java:455-457`):
+/// `(target != null || wasShooting) && enabled && activationTimer <= 0`.
+fn turret_is_active(world: &World, e: Entity, state: &TurretState) -> bool {
+    (state.target.is_some() || state.was_shooting)
+        && building_enabled(world, e)
+        && state.activation_timer <= 0.0
+}
 
 /// `ItemTurretBuild`/`LiquidTurretBuild`/`PowerTurretBuild` behavior.
 pub struct TurretBehavior {
@@ -189,6 +205,62 @@ impl BuildingBehavior for TurretBehavior {
     fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
         if let Some(mut state) = world.get_mut::<TurretState>(e) {
             let _ = save::read(r, &mut state, revision);
+        }
+    }
+
+    /// `TurretBuild.shouldConsume` (`Turret.java:370-372`) plus the per-class
+    /// overrides of the continuous/laser/point-defense/tractor/build families.
+    ///
+    /// Reads ECS state only (T1). The consumption pass runs before
+    /// `update_tile` (`BuildingComp.update`), so these read last tick's state
+    /// exactly like upstream.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(state) = world.get::<TurretState>(e) else {
+            return true;
+        };
+        match self.config.kind {
+            // `TurretBuild.shouldConsume` (`Turret.java:370-372`):
+            // `isShooting || reloadCounter < reload`. `ItemTurret`,
+            // `LiquidTurret`, `PowerTurret` and `PayloadAmmoTurret` do not
+            // override it.
+            TurretKind::Item | TurretKind::Liquid | TurretKind::Power | TurretKind::PayloadAmmo => {
+                state.is_shooting || state.reload_counter < self.config.reload
+            }
+            // `ContinuousTurretBuild.shouldConsume` (`ContinuousTurret.java:65-67`):
+            // `isShooting`. `ContinuousLiquidTurretBuild` (`ContinuousLiquidTurret.java:108-110`)
+            // adds its fuel latch: `super.shouldConsume() && activated`. The
+            // port dispatches both classes as `TurretKind::Continuous` and
+            // distinguishes them by the liquid ammo table (as
+            // `update_continuous` does).
+            TurretKind::Continuous => {
+                if matches!(self.config.ammo, TurretAmmo::Liquid(_)) {
+                    state.is_shooting && state.activated
+                } else {
+                    state.is_shooting
+                }
+            }
+            // `LaserTurretBuild.shouldConsume` (`LaserTurret.java:53-57`):
+            // `bullets.any() || isActive() ? true : isShooting` — still draws
+            // power while a beam bullet is around or the turret is active.
+            TurretKind::Laser => {
+                !state.bullets.is_empty() || turret_is_active(world, e, state) || state.is_shooting
+            }
+            // `PointDefenseBuild.shouldConsume` (`PointDefenseTurret.java:105-107`):
+            // `super.shouldConsume() && target != null`. The superclass chain is
+            // `PointDefenseTurret -> ReloadTurret -> BaseTurret`, none of which
+            // override `shouldConsume`, so `super` is `BuildingComp`'s default
+            // `enabled` — the turret reload rule does not apply here.
+            TurretKind::PointDefense => building_enabled(world, e) && state.bullet_target.is_some(),
+            // `TractorBeamBuild.shouldConsume` (`TractorBeamTurret.java:145-147`):
+            // `super.shouldConsume() && target != null`, where the superclass
+            // chain is `TractorBeamTurret -> BaseTurret` (`enabled`).
+            TurretKind::TractorBeam => building_enabled(world, e) && state.unit_target.is_some(),
+            // `BuildTurretBuild.shouldConsume` (`BuildTurret.java:229-231`):
+            // `unit.plans().size > 0 && !isHealSuppressed()`.
+            TurretKind::Build => {
+                !state.build_plans.is_empty()
+                    && !crate::world::blocks::defense::projectors::is_heal_suppressed(world, e)
+            }
         }
     }
 
@@ -524,6 +596,389 @@ mod tests {
         assert_eq!(
             super::super::peek_ammo(world, turret),
             Some(slag_ammo.bullet)
+        );
+    }
+
+    // ---- shouldConsume (`Turret.java:370-372` + class overrides) ----------
+
+    /// Resolves the registered behavior for a vanilla block name (the instance
+    /// the sim dispatches `BuildingBehavior::should_consume` through).
+    fn behavior(harness: &CombatHarness, name: &str) -> Arc<dyn BuildingBehavior> {
+        let block = harness.content().block_id(name).expect("block id");
+        harness
+            .build
+            .table()
+            .instance(block)
+            .expect("block instance")
+            .behavior
+            .clone()
+    }
+
+    /// Places a real block (so the entity carries `Building` + family state) and
+    /// returns `(entity, behavior)`.
+    fn placed(
+        harness: &mut CombatHarness,
+        name: &str,
+        x: i32,
+        y: i32,
+    ) -> (Entity, Arc<dyn BuildingBehavior>) {
+        let block = harness.content().block_id(name).expect("block id");
+        assert!(harness.place(x, y, block, 0, true), "place {name}");
+        let entity = harness.build_at(x, y).expect("placed entity");
+        let behavior = behavior(harness, name);
+        (entity, behavior)
+    }
+
+    fn turret_state(harness: &CombatHarness, e: Entity) -> &TurretState {
+        harness.build.world.get::<TurretState>(e).expect("state")
+    }
+
+    fn turret_state_mut(harness: &mut CombatHarness, e: Entity) -> &mut TurretState {
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(e)
+            .expect("state")
+            .into_inner()
+    }
+
+    /// `TurretBuild.shouldConsume` (`Turret.java:370-372`):
+    /// `isShooting || reloadCounter < reload` for the item/liquid/power/payload
+    /// families: a reloaded idle turret draws nothing, a reloading or firing one
+    /// does.
+    #[test]
+    fn generic_turret_should_consume_matches_java() {
+        for name in ["duo", "lancer", "wave"] {
+            let mut harness = CombatHarness::new(16, 16, 7);
+            let (turret, behavior) = placed(&mut harness, name, 8, 8);
+            let reload = turret_state(&harness, turret).config.reload;
+            // Idle: reloadCounter >= reload and not shooting.
+            {
+                let state = turret_state_mut(&mut harness, turret);
+                state.reload_counter = reload;
+                state.is_shooting = false;
+            }
+            assert!(
+                !behavior.should_consume(&harness.build.world, turret),
+                "{name}: reloaded, idle turret consumes nothing"
+            );
+            // `reloadCounter < reload` still consumes while reloading.
+            turret_state_mut(&mut harness, turret).reload_counter = reload - 1.0;
+            assert!(
+                behavior.should_consume(&harness.build.world, turret),
+                "{name}: reload in progress consumes"
+            );
+            // `isShooting` consumes even at a full reload.
+            {
+                let state = turret_state_mut(&mut harness, turret);
+                state.reload_counter = reload;
+                state.is_shooting = true;
+            }
+            assert!(
+                behavior.should_consume(&harness.build.world, turret),
+                "{name}: shooting consumes"
+            );
+        }
+    }
+
+    /// `ContinuousTurretBuild.shouldConsume` (`ContinuousTurret.java:65-67`):
+    /// `isShooting` only — no reload term.
+    #[test]
+    fn continuous_turret_should_consume_only_while_shooting() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, behavior) = placed(&mut harness, "lustre", 8, 8);
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = false;
+            // Reload does not matter for a continuous turret.
+            state.reload_counter = 0.0;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "idle continuous beam consumes nothing"
+        );
+        turret_state_mut(&mut harness, turret).is_shooting = true;
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "firing continuous beam consumes"
+        );
+    }
+
+    /// `ContinuousLiquidTurretBuild.shouldConsume`
+    /// (`ContinuousLiquidTurret.java:108-110`): `super.shouldConsume() &&
+    /// activated` — the beam must be firing AND the fuel latch set.
+    #[test]
+    fn continuous_liquid_turret_should_consume_needs_latch() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, behavior) = placed(&mut harness, "sublimate", 8, 8);
+        // Firing without enough fuel: `activated == false`.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = true;
+            state.activated = false;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "unlit continuous-liquid beam consumes nothing"
+        );
+        // Latched but not firing: `super.shouldConsume()` is false.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = false;
+            state.activated = true;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "latched idle turret consumes nothing"
+        );
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = true;
+            state.activated = true;
+        }
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "lit firing beam consumes"
+        );
+    }
+
+    /// `LaserTurretBuild.shouldConsume` (`LaserTurret.java:53-57`):
+    /// `bullets.any() || isActive() ? true : isShooting`, with
+    /// `isActive() = (target != null || wasShooting) && enabled &&
+    /// activationTimer <= 0` (`Turret.java:455-457`).
+    #[test]
+    fn laser_turret_should_consume_beam_or_active() {
+        use crate::world::blocks::defense::turrets::BeamEntry;
+
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, behavior) = placed(&mut harness, "meltdown", 8, 8);
+        // Idle: no beam, no target/wasShooting, not shooting, activation done.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = false;
+            state.bullets.clear();
+            state.target = None;
+            state.was_shooting = false;
+            state.activation_timer = 0.0;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "idle laser consumes nothing"
+        );
+        // The reload term of the base turret rule does not apply to lasers.
+        turret_state_mut(&mut harness, turret).reload_counter = 0.0;
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "reloading alone does not power a laser"
+        );
+        // `isShooting` (the fallback).
+        turret_state_mut(&mut harness, turret).is_shooting = true;
+        assert!(behavior.should_consume(&harness.build.world, turret));
+        turret_state_mut(&mut harness, turret).is_shooting = false;
+        // `bullets.any()`: a live beam keeps drawing power.
+        let (bx, by) = CombatHarness::tile_center(10, 8);
+        let bullet = harness
+            .spawn_bullet("meltdown_laser", bx, by, 0.0, 1)
+            .expect("beam bullet");
+        turret_state_mut(&mut harness, turret)
+            .bullets
+            .push(BeamEntry {
+                bullet,
+                x: 0.0,
+                y: 0.0,
+                rotation: 0.0,
+                life: 1.0,
+            });
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "a beam bullet in flight keeps consuming"
+        );
+        turret_state_mut(&mut harness, turret).bullets.clear();
+        // `isActive()` via `target != null`.
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, wall, 0, true), "target wall");
+        let wall_entity = harness.build_at(12, 8).expect("wall entity");
+        turret_state_mut(&mut harness, turret).target = Some(wall_entity);
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "an acquired target activates the laser"
+        );
+        // `isActive()` via `wasShooting`.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.target = None;
+            state.was_shooting = true;
+        }
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "wasShooting activates the laser"
+        );
+        // `activationTimer > 0` blocks `isActive()`.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.was_shooting = false;
+            state.target = Some(wall_entity);
+            state.activation_timer = 5.0;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "activation timer suppresses isActive"
+        );
+        // Disabled gates `isActive()` (`enabled` term), even with a target.
+        {
+            let state = turret_state_mut(&mut harness, turret);
+            state.activation_timer = 0.0;
+        }
+        harness
+            .build
+            .world
+            .get_mut::<Building>(turret)
+            .expect("building")
+            .enabled = false;
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "disabled laser is not active"
+        );
+    }
+
+    /// `PointDefenseBuild.shouldConsume` (`PointDefenseTurret.java:105-107`):
+    /// `super.shouldConsume() && target != null`, where `super` resolves to
+    /// `BuildingComp.shouldConsume()` (`enabled`) — not the turret reload rule.
+    #[test]
+    fn point_defense_should_consume_only_with_target() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, behavior) = placed(&mut harness, "segment", 8, 8);
+        {
+            // Shooting + an unfinished reload must still NOT consume without a
+            // bullet target: the base `Turret` rule is not in this chain.
+            let state = turret_state_mut(&mut harness, turret);
+            state.is_shooting = true;
+            state.reload_counter = 0.0;
+            state.bullet_target = None;
+        }
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "no bullet target means no point-defense drain"
+        );
+        let (bx, by) = CombatHarness::tile_center(10, 8);
+        let bullet = harness
+            .spawn_bullet("fuse", bx, by, 180.0, 2)
+            .expect("enemy bullet");
+        turret_state_mut(&mut harness, turret).bullet_target = Some(bullet);
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "an intercepted bullet target consumes"
+        );
+        harness
+            .build
+            .world
+            .get_mut::<Building>(turret)
+            .expect("building")
+            .enabled = false;
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "disabled point defense consumes nothing"
+        );
+    }
+
+    /// `TractorBeamBuild.shouldConsume` (`TractorBeamTurret.java:145-147`):
+    /// `super.shouldConsume() && target != null` (`BaseTurret` -> `enabled`).
+    #[test]
+    fn tractor_beam_should_consume_only_with_target() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, behavior) = placed(&mut harness, "parallax", 8, 8);
+        turret_state_mut(&mut harness, turret).unit_target = None;
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "no unit target means no tractor drain"
+        );
+        let (ux, uy) = CombatHarness::tile_center(10, 8);
+        let unit = harness.spawn_test_unit(ux, uy, 2, Vec::new());
+        turret_state_mut(&mut harness, turret).unit_target = Some(unit);
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "a grabbed unit consumes"
+        );
+        harness
+            .build
+            .world
+            .get_mut::<Building>(turret)
+            .expect("building")
+            .enabled = false;
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "disabled tractor beam consumes nothing"
+        );
+    }
+
+    /// `BuildTurretBuild.shouldConsume` (`BuildTurret.java:229-231`):
+    /// `unit.plans().size > 0 && !isHealSuppressed()`.
+    #[test]
+    fn build_turret_should_consume_only_with_plans() {
+        use crate::world::plan::BuildPlan;
+
+        let mut harness = CombatHarness::new(24, 24, 7);
+        let (turret, behavior) = placed(&mut harness, "build-tower", 12, 12);
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "a build tower with no plans consumes nothing"
+        );
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(super::super::add_build_plan(
+            &mut harness.build.world,
+            turret,
+            BuildPlan::place(14, 14, 0, wall)
+        ));
+        assert!(
+            behavior.should_consume(&harness.build.world, turret),
+            "a queued build plan consumes"
+        );
+        // `isHealSuppressed()` disables the drain even with plans queued.
+        let (tx, ty) = CombatHarness::tile_center(12, 12);
+        crate::world::blocks::defense::projectors::apply_suppression(
+            &mut harness.build.world,
+            2,
+            tx,
+            ty,
+            40.0,
+            600.0,
+        );
+        assert!(
+            !behavior.should_consume(&harness.build.world, turret),
+            "a heal-suppressed build tower consumes nothing"
+        );
+    }
+
+    /// The override is wired into `BuildingComp.updateConsumption`: a reloaded,
+    /// idle turret stores `should_consume = false` on its `Building` component,
+    /// which is what `ConsumePower.requestedPower` reads to zero the graph draw.
+    #[test]
+    fn idle_turret_building_should_consume_clears() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (turret, _behavior) = placed(&mut harness, "duo", 8, 8);
+        // First tick: `reloadCounter` starts at 0 (`ReloadTurret.java:26`), so
+        // the turret is still reloading and consumes.
+        harness.tick();
+        assert!(
+            harness
+                .build
+                .world
+                .get::<Building>(turret)
+                .expect("building")
+                .should_consume,
+            "a reloading turret consumes"
+        );
+        let reload = turret_state(&harness, turret).config.reload;
+        turret_state_mut(&mut harness, turret).reload_counter = reload;
+        harness.tick();
+        assert!(
+            !harness
+                .build
+                .world
+                .get::<Building>(turret)
+                .expect("building")
+                .should_consume,
+            "a reloaded idle turret consumes nothing"
         );
     }
 }

@@ -3996,6 +3996,75 @@ fn fire_damage_respects_block_health_multiplier() {
     );
 }
 
+/// PAR-0475: a powered `shield-projector` runs the `BaseShield.unitConsumer`
+/// (`BaseShield.java:38-57`) through the live `BuildingBehavior` path (it
+/// borrows the content/grid/FX seam from the unit runtime): a shallow overlap
+/// pushes the enemy unit out, a deep overlap kills it through
+/// `unit.kill()` -> `resolve_deaths`.
+#[test]
+fn shield_projector_repels_and_kills_enemy_units() {
+    use crate::world::blocks::defense::projectors::BaseShieldState;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let shield = place(&mut sim, 20, 20, "shield-projector", 1);
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let radius = sim
+        .ecs
+        .0
+        .get::<BaseShieldState>(shield)
+        .map(|state| state.smooth_radius)
+        .expect("shield state");
+    assert!(radius > 150.0, "a powered dome grows: {radius}");
+    let (cx, cy) = sim
+        .ecs
+        .0
+        .get::<Pos>(shield)
+        .map(|pos| (pos.x, pos.y))
+        .expect("shield pos");
+
+    // dagger hitSize 8: `overlapDst = 4 + radius - (radius - 2) = 6 <= 12`,
+    // so it is pushed out, not killed.
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, cx + radius - 2.0, cy, 180.0)
+        .expect("dagger");
+    sim.tick().expect("tick");
+    let pushed_radius = sim
+        .ecs
+        .0
+        .get::<BaseShieldState>(shield)
+        .map(|state| state.smooth_radius)
+        .expect("shield state");
+    let (px, py) = sim
+        .ecs
+        .0
+        .get::<Pos>(dagger)
+        .map(|pos| (pos.x, pos.y))
+        .expect("dagger pos");
+    let dst = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+    assert!(
+        dst >= pushed_radius + 4.0,
+        "shallow unit pushed outside the dome: dst = {dst}, radius = {pushed_radius}"
+    );
+    assert!(
+        !sim.ecs.0.get::<Health>(dagger).expect("dagger health").dead,
+        "a shallow overlap is not lethal"
+    );
+
+    // A unit stuck deep inside (`overlapDst > hitSize * 1.5`) is killed
+    // (`unit.kill()`); `resolve_deaths` destroys it in the same tick.
+    let stuck = sim
+        .spawn_live_unit("dagger", 2, cx + radius * 0.25, cy, 180.0)
+        .expect("stuck dagger");
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(stuck).is_err(),
+        "a deep unit is killed by the dome"
+    );
+}
+
 /// G01 T14: a charged force projector absorbs the death explosion
 /// (`ForceBuild.absorbExplosion`): the wall under the shield is undamaged.
 #[test]

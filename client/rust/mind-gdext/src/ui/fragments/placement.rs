@@ -35,7 +35,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use godot::builtin::Side;
+use godot::builtin::{AnyDictionary, Side};
 use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::object::ConnectFlags;
 use godot::classes::text_server::AutowrapMode;
@@ -104,6 +104,11 @@ const TINT_DARK_GRAY: Color = Color::from_rgba(0.247, 0.247, 0.247, 1.0);
 
 /// Palette tint refresh cadence in frames (Java updates every frame).
 const TINT_INTERVAL: i32 = 10;
+
+/// `Color.scarlet` (`arc/graphics/Color.java:52`, `0xff341c`) used by the
+/// `getUnplaceableReason` row's `Icon.cancel`
+/// (`PlacementFragment.java:426`).
+const COLOR_SCARLET: Color = Color::from_rgba8(0xff, 0x34, 0x1c, 0xff);
 
 /// `Tex.buttonEdge2` 9-patch padding (splits 12) and the inner
 /// `topTable.margin(5)` (`PlacementFragment.java:358`): content starts 17 px in.
@@ -195,6 +200,11 @@ pub struct MindPlacementFragment {
     top_requirements: Vec<Value>,
     /// Last live re-read of the requirement `have` counts (msec).
     top_refreshed_ms: i64,
+    /// `topTable.collapser(...)` reason row (`PlacementFragment.java:421-432`):
+    /// the scarlet `Icon.cancel` + `getUnplaceableReason` label. Hidden (and
+    /// therefore zero-height) when there is no reason.
+    top_reason_row: Option<Gd<MarginContainer>>,
+    top_reason_label: Option<Gd<RichTextLabel>>,
     /// Hovered building tile; `-1` while not over a building.
     #[init(val = Vector2i::new(-1, -1))]
     hover_tile: Vector2i,
@@ -1350,7 +1360,16 @@ impl MindPlacementFragment {
                 display.clear();
             }
         }
-        let mut hover = VarDictionary::new();
+        // `Displayable hover` in `hasInfoBox()`: the payload is a host-built
+        // dictionary, read type-agnostically. `MindSimHost.hover_info_world`
+        // builds a `Dictionary<GString, Variant>`, and gdext marks that builtin
+        // as a *typed* dictionary on Godot 4.4+ (`Dictionary::default` ->
+        // `dictionary_set_typed(String, Variant)`), which the strict
+        // `Variant::try_to::<VarDictionary>()` rejects through
+        // `Dictionary::with_checked_type` (PAR-0473). `AnyDictionary` accepts
+        // any key/value typing, so a producer-side type change cannot silently
+        // blank the info box again.
+        let mut hover = VarDictionary::new().upcast_any_dictionary();
         if display.is_empty()
             && let Some(node) = host.as_mut()
         {
@@ -1362,7 +1381,7 @@ impl MindPlacementFragment {
                         "hover_info_world",
                         &[world.x.to_variant(), world.y.to_variant()],
                     );
-                    if let Ok(info) = info.try_to::<VarDictionary>()
+                    if let Ok(info) = info.try_to::<AnyDictionary>()
                         && !dict_str(&info, "kind").is_empty()
                     {
                         hover = info;
@@ -1372,7 +1391,7 @@ impl MindPlacementFragment {
                 && let Some(tile) = self.mouse_tile()
             {
                 let info = node.call("hover_info", &[tile.x.to_variant(), tile.y.to_variant()]);
-                if let Ok(info) = info.try_to::<VarDictionary>()
+                if let Ok(info) = info.try_to::<AnyDictionary>()
                     && !dict_str(&info, "kind").is_empty()
                 {
                     hover = info;
@@ -1387,22 +1406,17 @@ impl MindPlacementFragment {
         {
             self.hover_tile = tile;
         }
-        if display.is_empty() && hover.is_empty() {
+        if !has_info_box(&display, &dict_str(&hover, "kind")) {
             self.set_top_visible(false);
             return;
         }
         self.set_top_visible(true);
-        let state = if !display.is_empty() {
-            format!("b:{display}")
-        } else {
-            format!(
-                "h:{}:{}:{},{}",
-                dict_str(&hover, "kind"),
-                dict_str(&hover, "name"),
-                self.hover_tile.x,
-                self.hover_tile.y
-            )
-        };
+        let state = top_state_key(
+            &display,
+            &dict_str(&hover, "kind"),
+            &dict_str(&hover, "name"),
+            self.hover_tile,
+        );
         if state == self.top_state {
             if !display.is_empty() {
                 self.refresh_top_amounts(Some(&display));
@@ -1427,12 +1441,12 @@ impl MindPlacementFragment {
         }
     }
 
-    /// The world tile under the cursor, or `None` while any `STOP` control holds
+    /// The world tile under the cursor, or `None` while a `STOP` control holds
     /// the mouse (`Core.scene.hasMouse(...)` guard in `hovered()`).
     fn mouse_tile(&self) -> Option<Vector2i> {
         let hovered = self.base().get_tree().get_root().gui_get_hovered_control();
         if let Some(hovered) = hovered
-            && hovered.get_mouse_filter() == MouseFilter::STOP
+            && world_hover_blocked(hovered.get_mouse_filter())
         {
             return None;
         }
@@ -1454,7 +1468,7 @@ impl MindPlacementFragment {
     fn mouse_world(&self) -> Option<Vector2> {
         let hovered = self.base().get_tree().get_root().gui_get_hovered_control();
         if let Some(hovered) = hovered
-            && hovered.get_mouse_filter() == MouseFilter::STOP
+            && world_hover_blocked(hovered.get_mouse_filter())
         {
             return None;
         }
@@ -1472,8 +1486,32 @@ impl MindPlacementFragment {
             .ok()
     }
 
+    /// `MindSimHost.block_placement_info_json(block)`: the block-info header
+    /// unlock state + `getUnplaceableReason` row (`PlacementFragment.java:
+    /// 380-432,753-761,779-782`). An absent/unknown host keeps the block
+    /// unlocked (name + `?`), the pre-gap behavior.
+    fn block_placement_info(&self, display: &str) -> Value {
+        let Some(mut host) = self.host() else {
+            return Value::Object(serde_json::Map::new());
+        };
+        if !host.has_method("block_placement_info_json") {
+            return Value::Object(serde_json::Map::new());
+        }
+        let Ok(payload) = host
+            .call(
+                "block_placement_info_json",
+                &[GString::from(display).to_variant()],
+            )
+            .try_to_relaxed::<GString>()
+        else {
+            return Value::Object(serde_json::Map::new());
+        };
+        serde_json::from_str::<Value>(&payload.to_string())
+            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
+    }
+
     /// Rebuilds the header + rows for a state change (`topTable.clear()` path).
-    fn rebuild_top(&mut self, display: &str, hover: &VarDictionary) {
+    fn rebuild_top(&mut self, display: &str, hover: &AnyDictionary) {
         let Some(top_rows) = self.top_rows.clone() else {
             return;
         };
@@ -1483,6 +1521,8 @@ impl MindPlacementFragment {
         }
         self.top_amounts.clear();
         self.top_requirements.clear();
+        self.top_reason_row = None;
+        self.top_reason_label = None;
         self.hover_bars.clear();
         self.consume_valid.borrow_mut().clear();
         self.set_top_bottom_margin(TOP_PAD + TOP_MARGIN);
@@ -1490,17 +1530,21 @@ impl MindPlacementFragment {
             self.build_hover_row(hover);
             return;
         }
-        self.build_block_header(display);
+        let info = self.block_placement_info(display);
+        self.build_block_header(display, &info);
         self.build_requirement_rows(display);
+        self.build_reason_row(&info);
         self.refresh_top_amounts(None);
     }
 
     /// Header: 32 px icon, 190 px name label (`localizedName` + key combo),
-    /// `?` button.
-    fn build_block_header(&mut self, display: &str) {
+    /// `?` button. A locked block shows `block.unknown` and no `?` button
+    /// (`PlacementFragment.java:386-397`).
+    fn build_block_header(&mut self, display: &str, info: &Value) {
         let Some(mut top_rows) = self.top_rows.clone() else {
             return;
         };
+        let unlocked = json_bool(info, "unlocked", true);
         // code-instantiated: header cells are rebuilt per displayed block
         // (`topTable.clear()`; plan 14 §3.5).
         let mut header = HBoxContainer::new_alloc();
@@ -1523,34 +1567,111 @@ impl MindPlacementFragment {
         label.set_custom_minimum_size(Vector2::new(190.0, 0.0));
         label.set_h_size_flags(SizeFlags::FILL);
         label.set_v_size_flags(SizeFlags::SHRINK_CENTER);
-        let markup = kit::tm(&format!("@block.{display}.name")).to_string();
-        label.set_text(&GString::from(
-            format!("{markup}{}", self.key_combo(display)).as_str(),
-        ));
+        // `!unlocked(displayBlock) ? Core.bundle.get("block.unknown") :
+        // displayBlock.localizedName + keyCombo`.
+        let text = if unlocked {
+            format!(
+                "{}{}",
+                kit::tm(&format!("@block.{display}.name")),
+                self.key_combo(display)
+            )
+        } else {
+            kit::tm("block.unknown").to_string()
+        };
+        label.set_text(&GString::from(text.as_str()));
         header.add_child(&label);
         let mut spacer = Control::new_alloc();
         spacer.set_h_size_flags(SizeFlags::EXPAND_FILL);
         header.add_child(&spacer);
-        // `header.button("?", Styles.flatBordert, ...).size(8 * 5).padTop(-5)
-        // .padRight(-5)`: the cell reserves 35x35 and the 40 px button pokes
-        // 5 px into the top/right table margin.
-        let mut info_cell = Control::new_alloc();
-        info_cell.set_custom_minimum_size(Vector2::new(35.0, 35.0));
-        info_cell.set_v_size_flags(SizeFlags::SHRINK_CENTER);
-        info_cell.set_mouse_filter(MouseFilter::IGNORE);
-        let mut info = factory::button("?");
-        info.set_name("blockinfo");
-        self.apply_flat_bordered(&info);
-        info.set_position(Vector2::new(0.0, -5.0));
-        info.set_size(Vector2::new(40.0, 40.0));
-        info.set_tooltip_text(&self.bundle("database", "Database"));
-        let mut arguments = Array::<Variant>::new();
-        arguments.push(&GString::from(display).to_variant());
-        let callable = self.base().callable("_open_content_info").bindv(&arguments);
-        let _ = info.connect("pressed", &callable);
-        info_cell.add_child(&info);
-        header.add_child(&info_cell);
+        // `if(unlocked(displayBlock)) header.button("?", ...)`: a locked block
+        // has no info button at all.
+        if unlocked {
+            // `header.button("?", Styles.flatBordert, ...).size(8 * 5)
+            // .padTop(-5).padRight(-5)`: the cell reserves 35x35 and the 40 px
+            // button pokes 5 px into the top/right table margin.
+            let mut info_cell = Control::new_alloc();
+            info_cell.set_custom_minimum_size(Vector2::new(35.0, 35.0));
+            info_cell.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+            info_cell.set_mouse_filter(MouseFilter::IGNORE);
+            let mut info = factory::button("?");
+            info.set_name("blockinfo");
+            self.apply_flat_bordered(&info);
+            info.set_position(Vector2::new(0.0, -5.0));
+            info.set_size(Vector2::new(40.0, 40.0));
+            info.set_tooltip_text(&self.bundle("database", "Database"));
+            let mut arguments = Array::<Variant>::new();
+            arguments.push(&GString::from(display).to_variant());
+            let callable = self.base().callable("_open_content_info").bindv(&arguments);
+            let _ = info.connect("pressed", &callable);
+            info_cell.add_child(&info);
+            header.add_child(&info_cell);
+        }
         top_rows.add_child(&header);
+    }
+
+    /// `topTable.collapser(...)` (`PlacementFragment.java:421-432`):
+    /// `[Icon.cancel][scarlet] reason` under the requirement rows. The row is
+    /// built once per displayed block and hidden when the reason is null, so
+    /// the normal info-box height is unchanged.
+    fn build_reason_row(&mut self, info: &Value) {
+        let Some(mut top_rows) = self.top_rows.clone() else {
+            return;
+        };
+        // code-instantiated: the reason row follows the displayed block
+        // (`topTable.clear()`; plan 14 §3.5).
+        let mut margin = MarginContainer::new_alloc();
+        // `b.marginTop(2f)`.
+        margin.add_theme_constant_override("margin_top", 2);
+        let mut row = HBoxContainer::new_alloc();
+        // `b.image(Icon.cancel).padRight(2)`.
+        row.add_theme_constant_override("separation", 2);
+        let mut icon: Gd<RichTextLabel> = MindRichLabel::new_alloc().upcast();
+        icon.set_text(&kit::glyph("cancel"));
+        icon.add_theme_color_override("default_color", COLOR_SCARLET);
+        icon.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+        let mut icon_control: Gd<Control> = icon.clone().upcast();
+        kit::icons::apply_icon_font(&mut icon_control);
+        row.add_child(&icon);
+        let mut label: Gd<RichTextLabel> = MindRichLabel::new_alloc().upcast();
+        // `b.label(() -> reason).width(190f).wrap()`.
+        label.set_custom_minimum_size(Vector2::new(190.0, 0.0));
+        label.set_autowrap_mode(AutowrapMode::WORD_SMART);
+        label.set_h_size_flags(SizeFlags::EXPAND_FILL);
+        row.add_child(&label);
+        margin.add_child(&row);
+        top_rows.add_child(&margin);
+        self.top_reason_row = Some(margin);
+        self.top_reason_label = Some(label);
+        self.apply_reason(info);
+    }
+
+    /// Renders `getUnplaceableReason` from `block_placement_info_json` into the
+    /// collapser row: `block.limit` is formatted with its `{0}` limit, the
+    /// fixed reasons resolve through the bundle (`@unit.nobuild`,
+    /// `@unsupported.environment`, `@banned`), and a null reason hides the row.
+    fn apply_reason(&mut self, info: &Value) {
+        let reason = info
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let text = if reason.is_empty() {
+            String::new()
+        } else if reason == "block.limit" {
+            kit::tm_format("block.limit", &[&json_i64(info, "limit", 0).to_string()]).to_string()
+        } else {
+            kit::tm(reason).to_string()
+        };
+        if let Some(mut row) = self.top_reason_row.clone() {
+            let visible = !text.is_empty();
+            if row.is_visible() != visible {
+                row.set_visible(visible);
+            }
+        }
+        if let Some(mut label) = self.top_reason_label.clone()
+            && label.get_text().to_string() != text
+        {
+            label.set_text(&GString::from(text.as_str()));
+        }
     }
 
     /// `Styles.flatBordert`: `up = pane`, `over = flatDownBase` (the accent
@@ -1655,9 +1776,9 @@ impl MindPlacementFragment {
         }
     }
 
-    /// Refreshes requirement amounts (core inventory changes live). Re-reads
-    /// `have` from the sim at most every `TOP_REFRESH_MS`; `None` keeps the
-    /// cached rows.
+    /// Refreshes requirement amounts (core inventory changes live) and the
+    /// `getUnplaceableReason` row. Re-reads both from the sim at most every
+    /// `TOP_REFRESH_MS`; `None` keeps the cached rows.
     fn refresh_top_amounts(&mut self, display: Option<&str>) {
         let now = now_ms();
         if let Some(display) = display.filter(|value| !value.is_empty())
@@ -1681,6 +1802,12 @@ impl MindPlacementFragment {
                         }
                     }
                 }
+            }
+            // The ban/limit/builder state can change under a displayed block
+            // (`getUnplaceableReason` re-evaluates every frame in Java).
+            let info = self.block_placement_info(display);
+            if !info.is_null() {
+                self.apply_reason(&info);
             }
         }
         for index in 0..self.top_amounts.len() {
@@ -1729,7 +1856,7 @@ impl MindPlacementFragment {
     }
 
     /// Hover row: 32 px icon + `Displayable` label (`Tile.display` name).
-    fn build_hover_row(&mut self, hover: &VarDictionary) {
+    fn build_hover_row(&mut self, hover: &AnyDictionary) {
         let Some(mut top_rows) = self.top_rows.clone() else {
             return;
         };
@@ -2291,12 +2418,54 @@ fn json_arg_text(value: &Value) -> String {
 }
 
 /// Reads a `String` from a probe dictionary with GDScript's `str(...)`
-/// coercion.
-fn dict_str(dict: &VarDictionary, key: &str) -> String {
+/// coercion. `AnyDictionary` (not `VarDictionary`) so gdext's typed-dictionary
+/// metadata on a `Dictionary<GString, Variant>` return value does not reject
+/// the payload (PAR-0473).
+fn dict_str(dict: &AnyDictionary, key: &str) -> String {
     dict.get(key)
         .and_then(|value| value.try_to_relaxed::<GString>().ok())
         .map(|value| value.to_string())
         .unwrap_or_default()
+}
+
+/// `Core.scene.hasMouse(...)` in `PlacementFragment.hovered()`: a `STOP`
+/// control consumes the pointer, so the world behind it is not hoverable. A
+/// `PASS` control (the full-rect `hud` root and the placement fragment's own
+/// root, both `mouse_filter = 1` in the `.tscn`) and an `IGNORE` layer fall
+/// through, matching Arc's `Table` hit test: `Table` is `Touchable.childrenOnly`
+/// (`Table.java:59`), so only an explicitly `Touchable.enabled` ancestor such as
+/// the top table (`PlacementFragment.java:438`) blocks the world.
+fn world_hover_blocked(filter: MouseFilter) -> bool {
+    filter == MouseFilter::STOP
+}
+
+/// `PlacementFragment.hasInfoBox()` (`PlacementFragment.java:784-787`):
+/// `control.input.block != null || menuHoverBlock != null || hover != null`.
+/// `menuHoverBlock` is the palette-cell hover, which the port renders from the
+/// selected block, so the visible condition is "a block is selected or a
+/// displayable is hovered".
+fn has_info_box(display: &str, hover_kind: &str) -> bool {
+    !display.is_empty() || !hover_kind.is_empty()
+}
+
+/// `PlacementFragment.lastDisplayState` (+ `wasHovered`): the key the header
+/// rebuild compares against. A selected block wins (`displayBlock != null`);
+/// otherwise the hovered displayable and its tile, because the
+/// `BuildingComp.display` bar rows are read from `hover_tile`.
+fn top_state_key(
+    display: &str,
+    hover_kind: &str,
+    hover_name: &str,
+    hover_tile: Vector2i,
+) -> String {
+    if !display.is_empty() {
+        format!("b:{display}")
+    } else {
+        format!(
+            "h:{hover_kind}:{hover_name}:{},{}",
+            hover_tile.x, hover_tile.y
+        )
+    }
 }
 
 /// Java `Icon` field name -> port glyph alias (`downOpen` -> `down-open`);
@@ -2420,5 +2589,59 @@ mod tests {
     fn equality_matches_godot_is_equal_approx() {
         assert!(is_equal_approx(12.0, 12.0));
         assert!(!is_equal_approx(12.0, 12.01));
+    }
+
+    #[test]
+    fn info_box_visibility_matches_has_info_box() {
+        // `hasInfoBox()` false only when nothing is selected and nothing is
+        // hovered. PAR-0473: the host returned a `building` payload but the
+        // strict dictionary conversion dropped it, so this predicate saw an
+        // empty hover and the top table stayed hidden.
+        assert!(!has_info_box("", ""));
+        // Hovered world building / drop shows the box with no block selected
+        // (`hovered != null`).
+        assert!(has_info_box("", "building"));
+        assert!(has_info_box("", "tile"));
+        assert!(has_info_box("", "unit"));
+        // A selected block always shows it (`control.input.block != null`).
+        assert!(has_info_box("lancer", ""));
+        // The block branch wins over a simultaneous hover.
+        assert_eq!(
+            top_state_key("lancer", "building", "core-nucleus", Vector2i::new(98, 101)),
+            "b:lancer"
+        );
+    }
+
+    #[test]
+    fn only_stop_controls_block_world_hover() {
+        // `Core.scene.hasMouse(...)`: the top table (`Touchable.enabled`) blocks;
+        // the full-rect HUD/placement roots (`mouse_filter = 1`) and `IGNORE`
+        // layers fall through, so a world hover still reaches the sim.
+        assert!(world_hover_blocked(MouseFilter::STOP));
+        assert!(!world_hover_blocked(MouseFilter::PASS));
+        assert!(!world_hover_blocked(MouseFilter::IGNORE));
+    }
+
+    #[test]
+    fn top_state_key_tracks_hover_kind_name_and_tile() {
+        let core = Vector2i::new(98, 101);
+        assert_eq!(
+            top_state_key("", "building", "core-nucleus", core),
+            "h:building:core-nucleus:98,101"
+        );
+        // A different hover target or tile rebuilds (the bar rows follow the
+        // tile; `lastDisplayState`/`wasHovered` would otherwise keep stale bars).
+        assert_ne!(
+            top_state_key("", "building", "core-nucleus", core),
+            top_state_key("", "building", "lancer", core)
+        );
+        assert_ne!(
+            top_state_key("", "building", "core-nucleus", core),
+            top_state_key("", "building", "core-nucleus", Vector2i::new(99, 101))
+        );
+        assert_ne!(
+            top_state_key("", "building", "core-nucleus", core),
+            top_state_key("", "tile", "core-nucleus", core)
+        );
     }
 }

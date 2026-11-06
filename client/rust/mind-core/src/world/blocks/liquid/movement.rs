@@ -17,10 +17,11 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::LiquidId;
+use crate::content::{BlockKind, LiquidId};
 use crate::entities::comp::Building;
-use crate::world::WorldGrid;
+use crate::world::block::BlockTable;
 use crate::world::modules::LiquidModule;
+use crate::world::{TilePos, WorldGrid};
 
 use super::LiquidNode;
 
@@ -128,7 +129,115 @@ pub fn accept_liquid(world: &World, entity: Entity, source: Entity, liquid: Liqu
             return false;
         }
     }
+    if node.armored && !armored_conduit_accepts(world, entity, source) {
+        return false;
+    }
     node.filter.is_empty() || node.filter.contains(&liquid)
+}
+
+/// `ArmoredConduit.ArmoredConduitBuild.acceptLiquid`
+/// (`ArmoredConduit.java:23-27`), the source gate ANDed onto
+/// [`accept_liquid`]:
+///
+/// ```text
+/// super.acceptLiquid(source, liquid) && (tile == null
+///     || source.block instanceof Conduit
+///     || source.block instanceof DirectionLiquidBridge
+///     || source.block instanceof LiquidJunction
+///     || source.tile.absoluteRelativeTo(tile.x, tile.y) == rotation
+///     || !source.proximity.contains(this))
+/// ```
+fn armored_conduit_accepts(world: &World, entity: Entity, source: Entity) -> bool {
+    let Some(source_building) = world.get::<Building>(source) else {
+        return true;
+    };
+    let Some(building) = world.get::<Building>(entity) else {
+        return true;
+    };
+    // `tile == null` (unplaced/payload-carried builds).
+    if building.tile == TilePos::EMPTY {
+        return true;
+    }
+    let source_kind = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(source_building.block))
+        .map(|inst| inst.def.kind);
+    if matches!(
+        source_kind,
+        Some(
+            BlockKind::Conduit
+                | BlockKind::ArmoredConduit
+                | BlockKind::DirectionLiquidBridge
+                | BlockKind::LiquidJunction
+        )
+    ) {
+        return true;
+    }
+    // `source.tile.absoluteRelativeTo(tile.x, tile.y) == rotation`
+    // (`Building.relativeTo` delegates to `Tile.absoluteRelativeTo`).
+    if tile_absolute_relative_to(world, source, building.tile.x(), building.tile.y())
+        == building.rotation as i8
+    {
+        return true;
+    }
+    // TODO hack (upstream): allows block-to-conduit input through a junction.
+    !source_building.proximity.contains(&entity)
+}
+
+/// `Tile.absoluteRelativeTo(int cx, int cy)` (`Tile.java:114-136`).
+///
+/// [`relative_to_dir`] ports the odd-size branch; even-size blocks carry a
+/// half-tile anchor offset (`Building.tile` is the footprint's min corner), so
+/// this mirrors the `x+0.5f`/`y+0.5f` branch exactly for the armored gate.
+fn tile_absolute_relative_to(world: &World, source: Entity, cx: i16, cy: i16) -> i8 {
+    let Some(building) = world.get::<Building>(source) else {
+        return -1;
+    };
+    let size = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(building.block))
+        .map(|inst| inst.def.size.max(1))
+        .unwrap_or(1);
+    let x = building.tile.x() as i32;
+    let y = building.tile.y() as i32;
+    let (cx, cy) = (cx as i32, cy as i32);
+    if size % 2 == 1 {
+        if (x - cx).abs() > (y - cy).abs() {
+            if x < cx {
+                return 0;
+            }
+            if x > cx {
+                return 2;
+            }
+        } else {
+            if y < cy {
+                return 1;
+            }
+            if y > cy {
+                return 3;
+            }
+        }
+    } else {
+        // `if(Math.abs(x - cx + 0.5f) > Math.abs(y - cy + 0.5f))`
+        let fx = x as f32 + 0.5;
+        let fy = y as f32 + 0.5;
+        if (fx - cx as f32).abs() > (fy - cy as f32).abs() {
+            if fx <= cx as f32 - 1.0 {
+                return 0;
+            }
+            if fx >= cx as f32 + 1.0 {
+                return 2;
+            }
+        } else {
+            if fy <= cy as f32 - 1.0 {
+                return 1;
+            }
+            if fy >= cy as f32 + 1.0 {
+                return 3;
+            }
+        }
+    }
+    -1
 }
 
 /// `Building.handleLiquid`.

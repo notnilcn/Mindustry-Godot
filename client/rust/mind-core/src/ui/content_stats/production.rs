@@ -204,6 +204,10 @@ fn family_body(ctx: &StatCtx, id: BlockId, def: &BlockDef, stats: &mut Stats) {
                     wall.drill_time,
                     &wall.attribute,
                     wall.output,
+                    wall.liquid_boost_intensity,
+                    wall.item_boost_intensity,
+                    wall.boost_item_use_time,
+                    wall.has_liquid_booster,
                 );
             }
         }
@@ -612,9 +616,12 @@ fn solid_pump_stats(
     );
 }
 
-/// `WallCrafter.setStats` (`WallCrafter.java:76-100`). The port's wall crafters
-/// have no item consumer (`cliff-crusher`), so the item-booster branch is
-/// inert; the liquid branch uses the same `speedBoosters` shape.
+/// `WallCrafter.setStats` (`WallCrafter.java:76-101`).
+///
+/// `cliff-crusher` declares no booster consumers; `large-cliff-crusher` has the
+/// `consumeItem(graphite).boost()` item consumer (`Blocks.java:3049`) and a
+/// plain (non-booster) hydrogen consumer, so only the item branch fires.
+#[allow(clippy::too_many_arguments)]
 fn wall_crafter_stats(
     ctx: &StatCtx,
     stats: &mut Stats,
@@ -622,6 +629,10 @@ fn wall_crafter_stats(
     drill_time: f32,
     attribute: &str,
     output: Option<u16>,
+    liquid_boost_intensity: f32,
+    item_boost_intensity: f32,
+    boost_item_use_time: f32,
+    has_liquid_booster: bool,
 ) {
     if let Some(item) = output {
         stats.add(
@@ -648,12 +659,51 @@ fn wall_crafter_stats(
         60.0 / drill_time * def.size as f32,
         StatUnit::ItemsSecond,
     );
-    if let Some((liquid, amount)) = liquid_booster(def) {
-        stats.add(
-            Stat::Booster,
-            values::speed_boosters(ctx, "{0}x speed", &[(liquid, amount)], 1.6, false),
+    // `boolean consItems = itemConsumer != null;` — `ConsumeItems.boost()` adds a
+    // base `Stat.booster` row through `super.setStats()`, which Java replaces
+    // here with `StatValues.itemBoosters`.
+    if let Some(items) = super::logistics::booster_items(def) {
+        stats.remove(Stat::Booster);
+        super::logistics::add_item_boosters(
+            ctx,
+            stats,
+            &format!("{{0}}{}", ctx.unit_label(StatUnit::TimesSpeed)),
+            boost_item_use_time,
+            item_boost_intensity,
+            0.0,
+            items,
         );
     }
+    // `if(liquidBoostIntensity != 1 && findConsumer(f -> f instanceof
+    //  ConsumeLiquidBase && f.booster) instanceof ConsumeLiquidBase consBase)`.
+    if has_liquid_booster
+        && liquid_boost_intensity != 1.0
+        && let Some((liquid, amount)) = wall_crafter_liquid_booster(def)
+    {
+        stats.remove(Stat::Booster);
+        stats.add(
+            Stat::Booster,
+            values::speed_boosters(
+                ctx,
+                "{0}x speed",
+                &[(liquid, amount)],
+                liquid_boost_intensity,
+                false,
+            ),
+        );
+    }
+}
+
+/// `findConsumer(f -> f instanceof ConsumeLiquidBase && f.booster)`: the port
+/// has no `Consume.booster` flag, so an optional liquid consumer stands in for
+/// `.boost()` (the only way vanilla declares one).
+fn wall_crafter_liquid_booster(def: &BlockDef) -> Option<(LiquidId, f32)> {
+    def.consumes.iter().find_map(|spec| match &spec.consume {
+        Consume::Liquid { liquid, amount } if spec.optional && !spec.ignore => {
+            Some((*liquid, *amount))
+        }
+        _ => None,
+    })
 }
 
 /// `ItemSource.setStats` (`ItemSource.java:45-49`).
@@ -1088,6 +1138,39 @@ mod tests {
             .find(|(existing, _)| *existing == stat)
             .map(|(_, values)| values.clone())
             .unwrap_or_default()
+    }
+
+    /// PAR-0474: `WallCrafter.setStats` (`WallCrafter.java:76-101`) replaces
+    /// `Stat.booster` with the `StatValues.itemBoosters` panel when the block
+    /// has an `itemConsumer` (`large-cliff-crusher`'s graphite), and emits no
+    /// booster row for `cliff-crusher`. `large-cliff-crusher`'s hydrogen
+    /// consumer is required, not `.boost()`ed, so no liquid speed row appears.
+    #[test]
+    fn wall_crafter_stats_use_the_item_booster_panel() {
+        let registry = registry();
+        let bundle = bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let large = registry
+            .block_id("large-cliff-crusher")
+            .expect("large-cliff-crusher");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(large));
+        let booster = row(&stats, Stat::Booster);
+        assert_eq!(booster.len(), 1, "one item-booster panel: {booster:?}");
+        assert!(
+            booster[0].iter().any(|cell| matches!(
+                cell,
+                Cell::Panel { cells }
+                    if cells.iter().any(
+                        |cell| matches!(cell, Cell::Text { t } if t.contains("1.6"))
+                    )
+            )),
+            "`itemBoosters(\"{{0}} times speed\", 80, 1.6, 0, graphite)` panel: {booster:?}"
+        );
+        // `cliff-crusher` declares no item/liquid booster consumer.
+        let small = registry.block_id("cliff-crusher").expect("cliff-crusher");
+        let small_stats = content_stats(&ctx, crate::content::ContentRef::block(small));
+        assert!(row(&small_stats, Stat::Booster).is_empty());
     }
 
     #[test]

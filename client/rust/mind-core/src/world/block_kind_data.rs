@@ -178,7 +178,7 @@ pub struct FrackerDef {
 }
 
 /// `WallCrafter` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WallCrafterDef {
     /// `WallCrafter.drillTime`.
     pub drill_time: f32,
@@ -186,6 +186,32 @@ pub struct WallCrafterDef {
     pub attribute: String,
     /// Item output (`WallCrafter.output`).
     pub output: Option<u16>,
+    /// `WallCrafter.liquidBoostIntensity` (`1.6f`).
+    pub liquid_boost_intensity: f32,
+    /// `WallCrafter.itemBoostIntensity` (`1.6f`).
+    pub item_boost_intensity: f32,
+    /// `WallCrafter.boostItemUseTime` (`120f`; the item-boost consumer timer).
+    pub boost_item_use_time: f32,
+    /// `WallCrafter.hasLiquidBooster`, set in `init()` from
+    /// `findConsumer(f -> f instanceof ConsumeLiquidBase && f.booster) != null`.
+    /// `false` for both vanilla cliff crushers: `large-cliff-crusher`'s hydrogen
+    /// consumer is required, not `.boost()`ed.
+    pub has_liquid_booster: bool,
+}
+
+impl Default for WallCrafterDef {
+    fn default() -> Self {
+        // `WallCrafter.java:28-49` field defaults (`attribute = Attribute.sand`).
+        Self {
+            drill_time: 150.0,
+            attribute: String::from("sand"),
+            output: None,
+            liquid_boost_intensity: 1.6,
+            item_boost_intensity: 1.6,
+            boost_item_use_time: 120.0,
+            has_liquid_booster: false,
+        }
+    }
 }
 
 /// `Separator` family knobs.
@@ -1090,7 +1116,13 @@ impl BlockKindData {
                 }
             }
             "cliff-crusher" => self.set_wall_crafter(110.0, Some(item("sand"))),
-            "large-cliff-crusher" => self.set_wall_crafter(48.0, Some(item("sand"))),
+            "large-cliff-crusher" => {
+                self.set_wall_crafter(48.0, Some(item("sand")));
+                // `Blocks.java:3051`: `boostItemUseTime = 60f / 0.75f`.
+                if let BlockKindData::WallCrafter(def) = self {
+                    def.boost_item_use_time = 60.0 / 0.75;
+                }
+            }
             "incinerator" => {
                 if let BlockKindData::Incinerator(def) = self {
                     def.power_usage = 0.5;

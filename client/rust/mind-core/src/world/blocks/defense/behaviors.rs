@@ -7,8 +7,9 @@
 //! [`super::shields`] and [`super::projectors`]; these wrappers insert the
 //! family state at construction and drive it from the normal plan-07
 //! `update_buildings` tick, so placed projectors/mines work outside the combat
-//! harness. Bullet absorption that needs bullet metadata (absorbable flags,
-//! shield damage multipliers) stays on the combat pass.
+//! harness. The `ForceProjector`/`BaseShield` bullet consumers read bullet
+//! metadata (`absorbable`, shield damage multipliers) from the live unit
+//! runtime's content registry.
 
 use std::sync::Arc;
 
@@ -27,8 +28,9 @@ use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::modules::PowerModule;
 
 use super::projectors::{
-    BaseShieldState, OverdriveProjectorState, RegenProjectorState, ShockwaveTowerState,
-    update_base_shield, update_overdrive_projector, update_regen_projector, update_shockwave_tower,
+    BaseShieldEnv, BaseShieldState, OverdriveProjectorState, RegenProjectorState,
+    ShockwaveTowerState, update_base_shield, update_base_shield_radius, update_overdrive_projector,
+    update_regen_projector, update_shockwave_tower,
 };
 use super::shields::{
     ForceProjectorState, MendProjectorState, ShieldWallState, ShockMineState, TargetDummyState,
@@ -666,6 +668,15 @@ impl BuildingBehavior for RegenProjectorBehavior {
         update_regen_projector(world, e, &mut state, eff, optional);
         world.entity_mut(e).insert(state);
     }
+
+    /// `RegenProjectorBuild.shouldConsume` (`RegenProjector.java:181-183`):
+    /// `anyTargets` — power/items are only drawn while something in range is
+    /// damaged (`update_regen_projector` recomputes the flag each tick).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<RegenProjectorState>(e)
+            .is_some_and(|state| state.any_targets)
+    }
 }
 
 /// `ShockwaveTower` behavior (`ShockwaveTowerBuild`).
@@ -716,6 +727,14 @@ impl BuildingBehavior for ShockwaveTowerBehavior {
         update_shockwave_tower(world, e, &mut state, potential);
         world.entity_mut(e).insert(state);
     }
+
+    /// `ShockwaveTowerBuild.shouldConsume` (`ShockwaveTower.java:124-126`):
+    /// `reloadCounter < reload` — the tower charges between waves.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<ShockwaveTowerState>(e)
+            .is_some_and(|state| state.reload_counter < state.reload)
+    }
 }
 
 /// `BaseShield` behavior (`BaseShieldBuild`).
@@ -735,7 +754,24 @@ impl BuildingBehavior for BaseShieldBehavior {
             return;
         };
         let eff = efficiency(world, e);
-        update_base_shield(world, e, &mut state, eff);
+        // `BaseShieldBuild.updateTile` reads `bullet.type.absorbable`, resolves
+        // `unit.move` tile collisions and plays `Fx.circleColorSpark`, so it
+        // needs the live runtime's content/grid/FX seam (same borrow as
+        // `ForceProjectorBehavior::update_tile`).
+        match world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>() {
+            Some(runtime) => {
+                let env = BaseShieldEnv {
+                    content: &runtime.content,
+                    grid: &runtime.grid,
+                    fx: runtime.fx.as_ref(),
+                };
+                update_base_shield(world, e, &mut state, eff, &env);
+                world.insert_non_send(runtime);
+            }
+            // No unit runtime (plan-07 `BuildHarness` world): there are no
+            // bullets or units to consume, so only the dome animation runs.
+            None => update_base_shield_radius(&mut state, eff),
+        }
         world.entity_mut(e).insert(state);
     }
     fn version(&self, _world: &World, _e: Entity) -> u8 {
@@ -1199,6 +1235,107 @@ mod tests {
             .map(|health| health.health)
             .unwrap_or(0.0);
         assert!(healed > 50.0, "regen projector healed the wall: {healed}");
+    }
+
+    /// `RegenProjectorBuild.shouldConsume` (`RegenProjector.java:181-183`):
+    /// `anyTargets` — a projector with nothing damaged in range draws nothing.
+    #[test]
+    fn regen_projector_should_consume_only_with_damaged_targets() {
+        use crate::entities::comp::Health;
+
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let regen = harness
+            .content()
+            .block_id("regen-projector")
+            .expect("regen-projector");
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(4, 4, regen, 0, true));
+        assert!(harness.place(7, 4, wall, 0, true));
+        let projector = harness.build_at(4, 4).expect("projector");
+        let target = harness.build_at(7, 4).expect("wall");
+        let should_consume = |harness: &BuildHarness| {
+            harness
+                .world
+                .get::<Building>(projector)
+                .expect("projector building")
+                .should_consume
+        };
+        // Full-health target: `anyTargets == false`.
+        harness.tick();
+        harness.tick();
+        assert!(!should_consume(&harness), "no damaged target -> no drain");
+        // Damage the wall: `updateTile` sets `anyTargets`, and the NEXT
+        // consumption pass (which runs before `updateTile`) sees it.
+        if let Some(mut health) = harness.world.get_mut::<Health>(target) {
+            health.health = 50.0;
+        }
+        harness.tick();
+        assert!(
+            !should_consume(&harness),
+            "the consumption pass reads the previous tick's flag"
+        );
+        harness.tick();
+        assert!(
+            should_consume(&harness),
+            "a damaged target in range draws power"
+        );
+        // Heal it: the flag clears, and consumption stops one pass later.
+        if let Some(mut health) = harness.world.get_mut::<Health>(target) {
+            health.health = health.max_health;
+        }
+        harness.tick();
+        harness.tick();
+        assert!(
+            !should_consume(&harness),
+            "no damaged target -> no drain again"
+        );
+    }
+
+    /// `ShockwaveTowerBuild.shouldConsume` (`ShockwaveTower.java:124-126`):
+    /// `reloadCounter < reload`.
+    #[test]
+    fn shockwave_tower_should_consume_while_charging() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let tower = harness
+            .content()
+            .block_id("shockwave-tower")
+            .expect("shockwave-tower");
+        assert!(harness.place(5, 5, tower, 0, true));
+        let entity = harness.build_at(5, 5).expect("tower");
+        let should_consume = |harness: &BuildHarness| {
+            harness
+                .world
+                .get::<Building>(entity)
+                .expect("tower building")
+                .should_consume
+        };
+        let reload = harness
+            .world
+            .get::<ShockwaveTowerState>(entity)
+            .expect("tower state")
+            .reload;
+        // Charged (`reloadCounter >= reload`): idle.
+        harness
+            .world
+            .get_mut::<ShockwaveTowerState>(entity)
+            .expect("tower state")
+            .reload_counter = reload;
+        harness.tick();
+        assert!(
+            !should_consume(&harness),
+            "a charged shockwave tower draws nothing"
+        );
+        // Charging back up: consumes.
+        harness
+            .world
+            .get_mut::<ShockwaveTowerState>(entity)
+            .expect("tower state")
+            .reload_counter = 0.0;
+        harness.tick();
+        assert!(
+            should_consume(&harness),
+            "a charging shockwave tower draws power"
+        );
     }
 
     /// `shockwave-tower` deals one wave of damage to nearby enemy bullets.
