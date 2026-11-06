@@ -6863,13 +6863,15 @@ impl MindSimHost {
 
     /// Player-core item counts as JSON (`{item-name: amount}`) for the HUD core
     /// display (`CoreItemsDisplay`). Appended for `MindHud`; read-only. Mirrors
-    /// `player.team().core()`: the first core block in entity order.
+    /// `CoreItemsDisplay.java:33` `player.team().core()` (`Team.java:83-85`):
+    /// the **player team's** first core in entity order, never an enemy or
+    /// derelict core's inventory (PAR-0485 / CG-ECON-02).
     #[func]
     pub fn core_items_json(&self) -> GString {
         let Some(content) = self.content_snapshot.as_ref() else {
             return GString::from("{}");
         };
-        GString::from(core_items_json(&self.sim, content).as_str())
+        GString::from(core_items_json(&self.sim, content, self.player_team()).as_str())
     }
 
     /// Live core items of `team` as `(content name, amount)` (`Team.items()`:
@@ -10273,11 +10275,17 @@ pub(crate) fn command_panel(
     })
 }
 
-/// First core block's item counts as a JSON object (empty when there is no core
-/// or content boot failed). See [`MindSimHost::core_items_json`].
-fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
+/// `team`'s first core block item counts as a JSON object (empty when the team
+/// has no core or content boot failed). `player.team().core()` semantics
+/// (`Team.java:83-85`): only the requested team's cores are considered, so an
+/// enemy/derelict core earlier in entity order never leaks into the HUD
+/// (PAR-0485 / CG-ECON-02). See [`MindSimHost::core_items_json`].
+fn core_items_json(sim: &Sim, content: &ContentRegistry, team: u8) -> String {
     let world = &sim.ecs.0;
     for (_id, entity, comp) in sim.ecs.entities_by_seq() {
+        if comp.team.0 != team {
+            continue;
+        }
         let Some(def) = content.block(comp.block) else {
             continue;
         };
@@ -12312,8 +12320,75 @@ mod tests {
             module.add(copper, 25, 1000);
             sim.ecs.0.entity_mut(entity).insert(module);
         }
-        let json = core_items_json(&sim, &registry);
+        let team = sim
+            .ecs
+            .0
+            .get::<BuildingComp>(entity)
+            .map(|comp| comp.team.0)
+            .unwrap_or(mind_core::ecs::TeamId::SHARDED.0);
+        let json = core_items_json(&sim, &registry, team);
         assert!(json.contains("\"copper\":25"), "unexpected JSON: {json}");
+    }
+
+    /// PAR-0485 / CG-ECON-02: `CoreItemsDisplay` reads `player.team().core()`
+    /// (`CoreItemsDisplay.java:33`, `Team.java:83-85`), never "the first
+    /// CoreBlock in ECS order". A derelict/enemy core placed earlier must not
+    /// supply the HUD inventory.
+    #[test]
+    fn core_items_json_uses_the_player_team_core() {
+        let registry = base_registry();
+        let Some(core) = registry.block_id("core-shard") else {
+            panic!("core-shard missing");
+        };
+        let Some(copper) = registry.item_id("copper") else {
+            panic!("copper missing");
+        };
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        // Enemy/derelict core first in entity order, stocked differently.
+        if let Err(error) = sim.apply(Command::Place {
+            x: 4,
+            y: 4,
+            block: core,
+        }) {
+            panic!("place enemy core failed: {error}");
+        }
+        let Some(enemy) = sim.grid.tile(4, 4).build else {
+            panic!("enemy core entity missing");
+        };
+        {
+            let mut module = ItemModule::with_items(registry.items().len());
+            module.add(copper, 10, 1000);
+            sim.ecs.0.entity_mut(enemy).insert(module);
+        }
+        if let Some(mut comp) = sim.ecs.0.get_mut::<BuildingComp>(enemy) {
+            comp.team = mind_core::ecs::TeamId(2);
+        }
+        // The player's core, second in entity order.
+        if let Err(error) = sim.apply(Command::Place {
+            x: 12,
+            y: 12,
+            block: core,
+        }) {
+            panic!("place player core failed: {error}");
+        }
+        let Some(player_core) = sim.grid.tile(12, 12).build else {
+            panic!("player core entity missing");
+        };
+        {
+            let mut module = ItemModule::with_items(registry.items().len());
+            module.add(copper, 25, 1000);
+            sim.ecs.0.entity_mut(player_core).insert(module);
+        }
+        let team = sim
+            .ecs
+            .0
+            .get::<BuildingComp>(player_core)
+            .map(|comp| comp.team.0)
+            .unwrap_or(mind_core::ecs::TeamId::SHARDED.0);
+        let json = core_items_json(&sim, &registry, team);
+        assert_eq!(json, "{\"copper\":25}", "player core inventory only");
+        // A team with no core reads empty (never another team's core).
+        assert_eq!(core_items_json(&sim, &registry, 77), "{}");
     }
 
     #[test]

@@ -19,7 +19,7 @@ use crate::world::modules::ItemModule;
 use crate::world::update::delta;
 
 use super::super::distribution::transfer;
-use super::super::storage::storage_block::StorageBuild;
+use super::super::storage::storage_block::{self, StorageBuild};
 
 /// `Unloader.ContainerStat`.
 #[derive(Debug, Clone, Default)]
@@ -72,12 +72,17 @@ fn same_team(world: &World, a: Entity, b: Entity) -> bool {
         .is_some_and(|(x, y)| x.team == y.team)
 }
 
+/// `other.items != null`, resolved through the linked core for a core-owned
+/// storage: Java aliases that pointer (`CoreBlock.java:764-770`), so a linked
+/// container reports the core's module.
 fn has_items(world: &World, e: Entity) -> bool {
-    world.get::<ItemModule>(e).is_some()
+    storage_block::has_items(world, e)
 }
 
+/// `other.items.get(item)`, resolved through the linked core for a core-owned
+/// storage (`isPossibleItem`/`unloadAccumulate` read the shared pool).
 fn item_count(world: &World, e: Entity, item: ItemId) -> i32 {
-    world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0)
+    storage_block::item_count(world, e, item)
 }
 
 /// `UnloaderBuild.comparator`. Ascending order: unload-from is the last element.
@@ -471,5 +476,84 @@ mod tests {
             .build_at(5, 4)
             .map(|e| crate::world::config::read_config(&harness.world, e));
         assert_eq!(read, Some(ConfigValue::Item(copper)));
+    }
+
+    /// PAR-0484 / CG-ECON-01 end-to-end: core -> touching container -> unloader
+    /// -> belts -> vault. Java's unloader reads the aliased core module
+    /// (`Unloader.java:113-160`, `CoreBlock.java:764-770`), so the lane fills
+    /// from the core; the traded items must come out of the core pool, not be
+    /// duplicated.
+    #[test]
+    fn unloader_drains_a_core_linked_container() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let copper = harness.content().item_id("copper").expect("copper");
+        let core = harness
+            .content()
+            .block_id("core-shard")
+            .expect("core-shard");
+        let container = harness.content().block_id("container").expect("container");
+        let unloader = harness.content().block_id("unloader").expect("unloader");
+        let conveyor = harness.content().block_id("conveyor").expect("conveyor");
+        let vault = harness.content().block_id("vault").expect("vault");
+        // core-shard 3x3 centered (2,4) -> footprint (1,3)..(3,5); the 2x2
+        // container at (4,4) touches it, the unloader touches the container,
+        // and belts (7..9,4) lead to the vault at (11,4).
+        assert!(harness.place(2, 4, core, 0, true));
+        assert!(harness.place(4, 4, container, 0, true));
+        assert!(harness.place(6, 4, unloader, 0, true));
+        assert!(harness.place(11, 4, vault, 0, true));
+        for x in 7..=9 {
+            assert!(harness.place(x, 4, conveyor, 0, true));
+        }
+        let core_e = harness.build_at(2, 4).expect("core");
+        let storage_e = harness.build_at(4, 4).expect("container");
+        assert_eq!(
+            harness
+                .world
+                .get::<StorageBuild>(storage_e)
+                .and_then(|state| state.linked_core),
+            Some(core_e)
+        );
+        harness
+            .world
+            .get_mut::<ItemModule>(core_e)
+            .expect("core items")
+            .add(copper, 100, 4300);
+        let vault_e = harness.build_at(11, 4).expect("vault");
+        for _ in 0..600 {
+            harness.tick();
+        }
+        let drained = harness
+            .world
+            .get::<ItemModule>(vault_e)
+            .map(|m| m.total)
+            .unwrap_or(0);
+        let core_left = harness
+            .world
+            .get::<ItemModule>(core_e)
+            .map(|m| m.total)
+            .unwrap_or(0);
+        // Items still in transit on the three belts count toward the same pool.
+        let on_belts: i32 = (7..=9)
+            .filter_map(|x| harness.build_at(x, 4))
+            .filter_map(|e| {
+                harness
+                    .world
+                    .get::<crate::world::blocks::distribution::conveyor::ConveyorBuild>(e)
+                    .map(|belt| i32::from(belt.len))
+            })
+            .sum();
+        assert!(drained > 0, "vault total={drained}");
+        assert!(core_left < 100, "the unloader drained the shared core pool");
+        assert_eq!(
+            drained + core_left + on_belts,
+            100,
+            "the lane moves core items, never duplicates them"
+        );
+        assert_eq!(
+            harness.world.get::<ItemModule>(storage_e).map(|m| m.total),
+            Some(0),
+            "the linked container keeps no shadow stock"
+        );
     }
 }

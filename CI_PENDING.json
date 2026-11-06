@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T06:43:24Z",
+  "updated": "2026-11-06T07:47:03Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -530,6 +530,104 @@
       "expected": "all three filter/map tests pass; a fresh campaign preset load (serpulo:170) reports world_gen_debug seed >= 0, boulders ~100 (snow/basalt mix) and ore 618; Load Game/sector resume still report seed -1 and no filter pass",
       "risk": "Map::filters now quote_bare_keys every genfilters tag and block_id applies SaveVersion.fallback; malformed tags still fall back to the default stack, but a wrongly 'fixed' name could retarget a filter (check groundZero's flooronto:sand -> sand-floor and the editor's strict-JSON round-trip via filter_options_json/write_filters). map_gen_seed now recorded for preset loads, so any golden that asserts -1 for a preset sector changes.",
       "notes": "PAR-0483 / CG-GEN-01. Fresh GZ after fix: boulders 107 (Java 118, per-load RNG), ore 618, authored core tile intact. Evidence runs/PAR-0483/20261106-164210-run.md. PAR-0482 (weather) refuted separately, no code change.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-074131",
+      "created_at": "2026-11-06T07:41:31Z",
+      "agent": "camp-data",
+      "branch": "main",
+      "head": "504c9c81",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 8,
+      "area": "client/rust/mind-core/src/game",
+      "summary": "CG-SECTOR-03: compute SectorInfo.resources from the tile grid (World.setSectorRules)",
+      "files": [
+        "client/rust/mind-core/src/game/sector.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib game::sector",
+      "expected": "12 passed incl. scan_sector_resources_matches_set_sector_rules; sector_record_json resources non-empty after a fresh GZ launch",
+      "risk": "per-save O(tiles) grid scan; sorted water-as-liquid ordering; generated-sector darkness terms",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-074131-2",
+      "created_at": "2026-11-06T07:41:31Z",
+      "agent": "camp-data",
+      "branch": "main",
+      "head": "504c9c81",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 9,
+      "area": "client/rust/mind-gdext/src/ui/dialogs",
+      "summary": "CG-UI-07: planet page Escape clears the sector selection before hiding (PlanetDialog.java:91-102)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "cargo check -p mind-gdext; in-engine: planet page with a sector selected, Escape (deselect, page stays), Escape (close)",
+      "expected": "first Escape keeps the page with footer children 6->5; second hides it",
+      "risk": "blocks_escape now has a deselect side effect (only MindUiRoot::on_escape calls it); deferred rebuild in planet_process",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-074703",
+      "created_at": "2026-11-06T07:47:03Z",
+      "agent": "camp-econ",
+      "branch": "main",
+      "head": "504c9c81",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-core/src/world/blocks/storage",
+      "summary": "Core-linked storage joins the core item pool (PAR-0484/CG-ECON-01)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/storage/storage_block.rs",
+        "client/rust/mind-core/src/world/blocks/storage/unloader.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib unloader",
+      "expected": "11 unloader/storage tests pass incl. linked_storage_reads_and_takes_through_the_core, unlinked_storage_keeps_its_own_module, unloader_drains_a_core_linked_container",
+      "risk": "Unloader provider reads now resolve linked StorageBuild modules through CoreBuild; check other unloader/storage scenarios (directional unloader, storage forwarding) and the campaign handleCoreItem double-count",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-074703-2",
+      "created_at": "2026-11-06T07:47:03Z",
+      "agent": "camp-econ",
+      "branch": "main",
+      "head": "504c9c81",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 10,
+      "area": "client/rust/mind-gdext/src",
+      "summary": "Core-items HUD reads the player team's core (PAR-0485/CG-ECON-02)",
+      "files": [
+        "client/rust/mind-gdext/src/sim_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-gdext core_items_json",
+      "expected": "2 core_items_json tests pass; HUD JSON is the player team's first core (empty when that team has no core)",
+      "risk": "core_items_json now team-filtered; check HUD core display on attack/two-team maps and the campaign research seam that shares the core-item read path",
       "status": "pending"
     }
   ]

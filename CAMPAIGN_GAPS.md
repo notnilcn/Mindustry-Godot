@@ -39,13 +39,13 @@ or an ordering-dependent inference).
 | 5 | Launching to another sector never saves the sector you leave | **P1** | **FIXED** — verified in-engine, PAR-0481 (Java leg blocked) |
 | 6 | Authored sector maps skip `genfilters` (groundZero loses its scatter boulders) | **P1** | **FIXED** — twin-verified, PAR-0483 |
 | 7 | Authored sector weather is overwritten on every fresh landing | **P1** | **REFUTED** — Java overwrites it too, PAR-0482 |
-| 8 | Core + adjacent container/vault is not one item pool; unloader layouts dead-end | **P1** | code-confirmed |
-| 9 | `SectorInfo.resources` is never computed (sector panel/core info rows empty) | **P2** | code-confirmed |
+| 8 | Core + adjacent container/vault is not one item pool; unloader layouts dead-end | **P1** | **FIXED** — verified in-engine, PAR-0484 (Java leg blocked) |
+| 9 | `SectorInfo.resources` is never computed (sector panel/core info rows empty) | **P2** | **FIXED** — twin-verified, PAR-0501 |
 | 10 | Configure Loadout manual resource editor is inert; launch cost priced from the wrong loadout list | **P1** | code-confirmed |
 | 11 | Planet page "Resume" reloads the sector from disk instead of resuming the live world | **P1** | **FIXED** — twin-verified, PAR-0490 |
 | 12 | Campaign-complete overlay never appears at capture time | **P1** | code-confirmed |
 | 13 | Timer objectives print ticks as `mm:ss` and never count down | **P1** | **FIXED** — in-engine verified, PAR-0492 (Java leg blocked) |
-| 14 | Core-items HUD/state read the first core in entity order, not the player's core | **P1** | code-confirmed |
+| 14 | Core-items HUD/state read the first core in entity order, not the player's core | **P1** | **FIXED** — verified in-engine, PAR-0485 (Java leg blocked) |
 | 15 | A crash/unclean exit resumes with an empty core and wave 1 (sector record written only at autosave/quit) | **P1** | **FIXED** — twin-verified, PAR-0486 |
 | 16 | A save loaded from the Load dialog never becomes the current slot: no autosave/exit save/playtime | **P1** | **FIXED** — twin-verified, PAR-0487 |
 
@@ -299,7 +299,7 @@ state/ordering deltas, not a missing subsystem.
   does the water/null fixups.
 - **Verification.** Land, save, reopen the planet page → stats dialog; Java has
   an icon row, Godot has none.
-- **Status.** Code-confirmed. (Same finding as CG-GEN-03/CG-DATA-02.)
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0501` (similarity 92.7).** `scan_sector_resources` ports `World.setSectorRules` (non-dark floor/overlay/wall drops + floor liquids, static-wall suppression, dedupe, items-then-liquids order); `CoreSnapshot.resources` is filled by `core_snapshot_of` and `SectorInfoState::prepare` writes `info.resources`, so launch/autosave/capture/game-over/exit all persist it. Fresh GZ record: `["copper","lead","scrap","water"]`; both clients render the `Resources:` icon row in the stats dialog. See `runs/PAR-0501/`.
 
 ### CG-SECTOR-04 — First wave is timed from the outgoing sector's rules — **P2 (likely)**
 - **Symptom.** The opening grace timer does not match the destination's
@@ -622,7 +622,7 @@ dependency-objective behaviour.
   `blocks_escape` only covers `chooser_active`, so `gx/ui/root.rs:1675-1683`
   closes the dialog. Java `PlanetDialog.java:91-102` deselects first, then
   hides.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0502` (similarity 57.7; the delta is the pre-existing planet-globe rendering).** `planet_escape_step` ports Java's reveal-truncate → deselect → fall-through-to-hide; `PlanetDialog::blocks_escape` runs it so the first Escape keeps the page (footer children 6→5, dialog visible) and the second hides it. Probe: `{visible:true, footer:5}` then `{visible:false}`; Java shows the same two-step. See `runs/PAR-0502/`.
 
 ### CG-UI-08 — No "available" toast when a capture makes tech nodes available — **P2 (likely)**
 - Captures toast only unlocked content (`gx/campaign.rs:836-853`); Java also
@@ -748,7 +748,7 @@ finding.
 - **Verification.** GZ: core + touching container + adjacent unloader + conveyor
   into a turret; mine/belt 50 copper, step 600. Godot's lane stays empty and
   `core_items_json` stays 50; Java's lane fills.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — in-engine verified on Godot (`PAR-0484`); ledger `verified`, not twin (Java leg blocked).** Storage helpers (`item_holder`/`has_items`/`item_count`) resolve a linked storage's module through its core, `StorageBehavior::remove_stack` dispatches to the core behavior, and the unloader's provider/take path uses them. This is a route-level equivalent of Java's `t.items = items` aliasing, not a component alias (the R2 decision is documented in the module). Before/after on a custom sandbox GZ map: core stayed `{copper:150}`, turret ammo 0 → core `{copper:127}`, turret ammo 30 at tick 12 096, lane visibly loaded. Three unit tests; no duplication. The Java in-engine leg is unreachable here (fresh custom-game starts have no usable builder and campaign GZ locks container/unloader). See `runs/PAR-0484/`.
 
 ### CG-ECON-02 — Core-items HUD/state read the first core in entity order, not the player's core — **P1**
 - `gx/sim_host.rs:10242-10269` (`core_items_json`) returns the first
@@ -758,7 +758,7 @@ finding.
   derelict/wave core the HUD can show the wrong inventory.
 - **Verification.** Attack sector or a map with an enemy core: compare
   `core_items_json` vs `player_core_items_json` in the same frame.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — in-engine verified on Godot (`PAR-0485`); ledger `verified`, not twin (no Java two-core scene on this host).** `core_items_json` now takes a team and filters `comp.team.0 == team`; the `#[func]` passes `self.player_team()` (Java `CoreItemsDisplay.java:33`, `Team.java:83-85`). Probe on an editor-made "Two Cores" map (crux first in map order, 777 copper; player sharded 125): `core_items_json={"copper":125}`, crux `{"copper":777}`. Two unit tests. See `runs/PAR-0485/`.
 
 ### CG-ECON-03 — Multi-core teams: first-core-only HUD/sector record vs all-core objectives — **P2**
 - `mc/game/sector.rs:60-131` `core_snapshot_of` keeps only the first core;
@@ -1007,8 +1007,8 @@ chains; `seeded` items carry the code evidence and a `source` anchor back here.
 | CG-SECTOR-02 | PAR-0481 | verified | CG-UI-01 | PAR-0490 | twin-verified |
 | CG-GEN-05 | PAR-0482 | verified (refuted) | CG-UI-04 | PAR-0491 | seeded |
 | CG-GEN-01 | PAR-0483 | twin-verified | CG-TUT-04 | PAR-0492 | verified |
-| CG-ECON-01 | PAR-0484 | seeded | CG-UI-02 | PAR-0493 | seeded |
-| CG-ECON-02 | PAR-0485 | seeded | CG-UI-03 | PAR-0494 | twin-verified |
+| CG-ECON-01 | PAR-0484 | verified | CG-UI-02 | PAR-0493 | seeded |
+| CG-ECON-02 | PAR-0485 | verified | CG-UI-03 | PAR-0494 | twin-verified |
 
 The other findings in §3–§9 remain doc-only (they need a Java leg or a deeper
 save state to verify) and are the natural next batch for the twin queue.
@@ -1043,6 +1043,10 @@ full recipes in `runs/<PAR>/`.
 | New: research parent masking (P2) | PAR-0500 | twin-verified (92.1) | `tech_tree::research_parent_unlocked` resolves `UnlockFields.tech_node` (last-created node), so the popup prints `Research Silicon` instead of `Research ???` | `runs/PAR-0500/`, `parity/twin/PAR-0500/` |
 | CG-GEN-01 (P1) | PAR-0483 | twin-verified (74.4) | preset launches load through `decode_map_bytes` with a recorded seed; `Map::filters` quotes bare-key Arc JSON; `filters::builtin::block_id` applies Java's `SaveVersion.fallback` chain; GZ boulders 0 → 107 (Java 118) | `runs/PAR-0483/`, `parity/twin/PAR-0483/` |
 | CG-GEN-05 (P1) | PAR-0482 | **refuted** (Java also replaces authored weather on a fresh preset landing; port order already matches) | no code change; Java probe `playNewSector("saltFlats")` → `rules.weather=[]` | `runs/PAR-0482/`, `parity/twin/PAR-0482/` |
+| CG-SECTOR-03 (P2) | PAR-0501 | twin-verified (92.7) | `scan_sector_resources` ports `World.setSectorRules`; `CoreSnapshot.resources` + `SectorInfoState::prepare` persist the sorted ore/liquid list | `runs/PAR-0501/`, `parity/twin/PAR-0501/` |
+| CG-UI-07 (P2) | PAR-0502 | twin-verified (57.7; planet-globe delta) | `planet_escape_step` ports Java's reveal-truncate → deselect → hide; first Escape keeps the page, second closes it | `runs/PAR-0502/`, `parity/twin/PAR-0502/` |
+| CG-ECON-01 (P1) | PAR-0484 | verified (Godot; Java custom-game builder blocked) | storage helpers resolve a linked storage through its core, `remove_stack` dispatches to the core, unloader provider/take use them; route-level equivalent of Java's module alias (no ECS alias) | `runs/PAR-0484/` |
+| CG-ECON-02 (P1) | PAR-0485 | verified (Godot; no Java two-core scene) | `core_items_json` filters the player team's core (`comp.team.0 == team`); probe returns the player's 125, not the first crux core's 777 | `runs/PAR-0485/` |
 
 Partial progress this pass: **CG-TECH-01 / PAR-0488** — the launch-loadout editor
 wiring landed (stacks endpoint read, `set_launch_resources` facade,
@@ -1054,6 +1058,12 @@ New bugs recorded while fixing (still open in `TWIN-VERIFICATION.json`):
 - **PAR-0495** (P2, mismatch) — a mid-session sector reload leaves the world
   renderer blank until the process restarts (observed while staging PAR-0492;
   not investigated).
+- **PAR-0503** (P2, mismatch) — a played sector with waves is not marked
+  attacked: no `Under attack!` panel row / `Threat:` stats row, because
+  `mc/ui/campaign.rs` passes `None` to `Sector::is_attacked`
+  (`campaign.rs:945,1074,1138`) while Java returns `rules.waves ||
+  rules.attackMode` when `isBeingPlayed()` (`Sector.java:145-151`). Visible in
+  the PAR-0501/0502 pairs.
 - Not filed, pre-existing, noted in PAR-0498: `get_mine_result` never falls back
   to `tile.floor().itemDrop`, so the `playerUnmineable` floor gate is currently
   unobservable in vanilla.

@@ -8,6 +8,19 @@
 //! `getMaximumAccepted`/`itemTaken`/`removeStack`), the incineration effect hook
 //! and the `overwrote` merge. The `linked_core` field is assigned by `CoreBlock`
 //! proximity unification (M5).
+//!
+//! **R2 item-pool deviation (PAR-0484 / CG-ECON-01).** Java aliases the module
+//! pointer of a core-owned storage (`CoreBlock.java:764-770`: `t.items = items`),
+//! so the storage *is* the core pool: reads, `removeStack`, `canUnload` and the
+//! unloader's provider checks all see the core's items. ECS components cannot be
+//! aliased, so the observable contract is reconstructed by resolving item
+//! accesses through [`StorageBuild::linked_core`] instead (helpers
+//! [`item_holder`]/[`has_items`]/[`item_count`], used by [`super::unloader`]);
+//! the storage's own `ItemModule` stays empty for a linked build. Unlinked
+//! storages keep their own module exactly as before. This is the same
+//! no-component-aliasing deviation documented in
+//! [`super::core_block`]'s R2 note; the `TeamInventory` resource remains the
+//! long-term follow-up.
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
@@ -35,6 +48,38 @@ pub struct StorageBehavior;
 
 fn linked_core(world: &World, e: Entity) -> Option<Entity> {
     world.get::<StorageBuild>(e).and_then(|b| b.linked_core)
+}
+
+/// Entity whose `ItemModule` backs `e`'s item storage.
+///
+/// Java aliases a core-owned storage's `items` pointer to the core's module
+/// (`CoreBlock.java:764-770`), so every read/take on the storage observes the
+/// core pool. Because ECS components cannot alias (see the R2 note above),
+/// reads resolve through [`StorageBuild::linked_core`] instead: a linked
+/// storage delegates to its core, everything else keeps its own module. A
+/// stale link (core destroyed before the storage re-proximities) falls back to
+/// the storage itself so reads stay defined.
+pub fn item_holder(world: &World, e: Entity) -> Entity {
+    match linked_core(world, e) {
+        Some(core) if world.get::<ItemModule>(core).is_some() => core,
+        _ => e,
+    }
+}
+
+/// `StorageBuild.items != null` probe against the resolved holder
+/// ([`item_holder`]): a linked storage reports the core's module.
+pub fn has_items(world: &World, e: Entity) -> bool {
+    world.get::<ItemModule>(item_holder(world, e)).is_some()
+}
+
+/// `items.get(item)` against the resolved holder ([`item_holder`]): a linked
+/// storage reports the core's count (`Unloader.isPossibleItem` /
+/// `unloadAccumulate` read `other.items`).
+pub fn item_count(world: &World, e: Entity, item: ItemId) -> i32 {
+    world
+        .get::<ItemModule>(item_holder(world, e))
+        .map(|module| module.get(item))
+        .unwrap_or(0)
 }
 
 impl BuildingBehavior for StorageBehavior {
@@ -105,7 +150,14 @@ impl BuildingBehavior for StorageBehavior {
     }
 
     fn remove_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) -> i32 {
-        transfer::default_remove_stack(world, e, item, amount)
+        match linked_core(world, e) {
+            // Java's linked storage *is* the core module, so `removeStack`
+            // (`StorageBlock.java:84-92`: `super.removeStack` then the sector
+            // count) takes from the core pool. Route through the core behavior
+            // so `handleCoreItem` bookkeeping stays on one path.
+            Some(core) => transfer::dispatch_remove_stack(world, core, item, amount),
+            None => transfer::default_remove_stack(world, e, item, amount),
+        }
     }
 
     fn accept_stack(
@@ -161,5 +213,109 @@ impl BuildingBehavior for StorageBehavior {
                 items.add(item, amount, capacity.max(0));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::BuildHarness;
+
+    /// PAR-0484 / CG-ECON-01: Java aliases a core-owned storage's `items`
+    /// pointer to the core module (`CoreBlock.java:764-770`), so reads and
+    /// takes on the storage observe the shared pool. Without ECS aliasing the
+    /// same contract is reconstructed through `linked_core`: the storage's own
+    /// module stays empty while [`item_count`]/[`has_items`] and `removeStack`
+    /// resolve through the core.
+    #[test]
+    fn linked_storage_reads_and_takes_through_the_core() {
+        let mut harness = BuildHarness::new(24, 24, 7);
+        let core = harness
+            .content()
+            .block_id("core-shard")
+            .expect("core-shard");
+        let container = harness.content().block_id("container").expect("container");
+        let copper = harness.content().item_id("copper").expect("copper");
+        // core-shard 3x3 centered at (6,6) -> footprint (5,5)..(7,7); the 2x2
+        // container at (8,6) touches it at (7,6)/(7,7).
+        assert!(harness.place(6, 6, core, 0, true));
+        assert!(harness.place(8, 6, container, 0, true));
+        let core_e = harness.build_at(6, 6).expect("core");
+        let storage_e = harness.build_at(8, 6).expect("container");
+        assert_eq!(
+            harness
+                .world
+                .get::<StorageBuild>(storage_e)
+                .and_then(|state| state.linked_core),
+            Some(core_e),
+            "container must be owned by the touching core"
+        );
+        // The linked storage's own module is never filled; the pool is the core.
+        assert_eq!(
+            harness
+                .world
+                .get::<ItemModule>(storage_e)
+                .map(|m| m.get(copper)),
+            Some(0)
+        );
+        harness
+            .world
+            .get_mut::<ItemModule>(core_e)
+            .expect("core items")
+            .add(copper, 40, 4300);
+        assert!(has_items(&harness.world, storage_e));
+        assert_eq!(item_holder(&harness.world, storage_e), core_e);
+        assert_eq!(item_count(&harness.world, storage_e, copper), 40);
+        // `StorageBlock.removeStack` (`StorageBlock.java:84-92`) takes from the
+        // shared module.
+        let taken = transfer::dispatch_remove_stack(&mut harness.world, storage_e, copper, 7);
+        assert_eq!(taken, 7);
+        assert_eq!(item_count(&harness.world, storage_e, copper), 33);
+        assert_eq!(
+            harness
+                .world
+                .get::<ItemModule>(core_e)
+                .map(|m| m.get(copper)),
+            Some(33),
+            "the core module is the one pool"
+        );
+        assert_eq!(
+            harness.world.get::<ItemModule>(storage_e).map(|m| m.total),
+            Some(0),
+            "no shadow copy in the storage module"
+        );
+    }
+
+    /// The unlinked storage path is unchanged: its own module is the pool.
+    #[test]
+    fn unlinked_storage_keeps_its_own_module() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let container = harness.content().block_id("container").expect("container");
+        let copper = harness.content().item_id("copper").expect("copper");
+        assert!(harness.place(4, 4, container, 0, true));
+        let storage_e = harness.build_at(4, 4).expect("container");
+        assert_eq!(
+            harness
+                .world
+                .get::<StorageBuild>(storage_e)
+                .and_then(|state| state.linked_core),
+            None
+        );
+        harness
+            .world
+            .get_mut::<ItemModule>(storage_e)
+            .expect("storage items")
+            .add(copper, 40, 300);
+        assert_eq!(item_holder(&harness.world, storage_e), storage_e);
+        assert_eq!(item_count(&harness.world, storage_e, copper), 40);
+        let taken = transfer::dispatch_remove_stack(&mut harness.world, storage_e, copper, 7);
+        assert_eq!(taken, 7);
+        assert_eq!(
+            harness
+                .world
+                .get::<ItemModule>(storage_e)
+                .map(|m| m.get(copper)),
+            Some(33)
+        );
     }
 }

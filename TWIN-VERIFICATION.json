@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T06:46:32Z",
+  "updated": "2026-11-06T07:46:48Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -22205,13 +22205,19 @@
     },
     "PAR-0484": {
       "title": "Core-linked container/vault does not join the core item pool (unloader layouts dead-end)",
-      "status": "seeded",
+      "status": "verified",
       "fork": {
         "java": [
           {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:11 HOME=runs/campaign-gaps/java-home-econ ... java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648"
+            }
+          },
+          {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "CoreBlock.java:764-770 aliases t.items = items for owned storages; StorageBlock.java:54-92 + Unloader.java:113-160 read/take the shared pool. Java in-engine leg blocked (custom-game map start has no builder; campaign GZ locks container/unloader)."
             }
           }
         ]
@@ -22219,26 +22225,81 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "godot_game",
             "params": {
-              "text": "see runs/PAR-0484"
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var c=get_node(\"/root/Spine/MindCampaign\"); c.call(\"start_map_mode\",\"Ground Zero\",\"sandbox\",false,\"\")"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "h.call(\"place_block\",131,54,\"container\"); h.call(\"place_block\",133,54,\"unloader\"); h.call(\"place_block\",134,54,\"conveyor\"); h.call(\"place_block\",135,54,\"conveyor\"); h.call(\"place_block\",136,54,\"conveyor\"); h.call(\"place_block\",137,54,\"duo\"); h.call(\"debug_add_core_items\",\"copper\",150)"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"core\":str(h.call(\"core_items_json\")),\"container\":str(h.call(\"building_items_json\",131,54)),\"turret\":str(h.call(\"building_debug\",137,54))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
             }
           }
         ]
       },
       "severity": "P1",
       "gap": "mc/world/blocks/storage/core_block.rs:215 only records linked_core/capacity; unloader.rs:290-311 requires item_count(other,item)>0 and storage_block.rs:70-92 only forwards inbound items. Java CoreBlock.java:764-770 aliases t.items = core items.",
-      "source": "CAMPAIGN_GAPS.md#cg-econ-01"
+      "source": "CAMPAIGN_GAPS.md#cg-econ-01",
+      "claimed_by": "camp-econ",
+      "claimed_at": "2026-11-06T06:55:03Z",
+      "fix": "storage_block.rs: item_holder/has_items/item_count resolve a linked storage's module to its core; StorageBehavior::remove_stack dispatches to the core behavior. unloader.rs: has_items/item_count use the storage helpers so isPossibleItem/unloadAccumulate (provider checks + take) see the shared core pool. R2 no-alias deviation documented in the module comment.",
+      "evidence": [
+        "client/rust/mind-core/src/world/blocks/storage/storage_block.rs",
+        "client/rust/mind-core/src/world/blocks/storage/unloader.rs",
+        "runs/PAR-0484/20261106-174636-run.md",
+        "runs/PAR-0484/godot-probe.json",
+        "runs/PAR-0484/godot/20261106-172006-01-action.png",
+        "tests: linked_storage_reads_and_takes_through_the_core, unlinked_storage_keeps_its_own_module, unloader_drains_a_core_linked_container (cargo test -p mind-core --lib unloader: 11 passed)",
+        "java leg blocked: custom-game Ground Zero sandbox starts without a usable builder (plans never construct) and campaign Ground Zero locks container/unloader"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T07:46:48Z",
+          "by": "camp-econ",
+          "text": "verified: Godot in-engine before/after probe (core 150->127, container {}, turret ammo 30) + 3 unit tests; Java leg blocked (custom-game map start has no usable builder; campaign GZ locks container/unloader). No AVIF pair fabricated. See runs/PAR-0484/."
+        }
+      ]
     },
     "PAR-0485": {
       "title": "Core-items HUD/state read the first CoreBlock in entity order, not the player's core",
-      "status": "seeded",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "CoreItemsDisplay.java:33 reads player.team().core() (Team.java:83-85). A Java two-core scene needs a custom map with an enemy core; the Java custom-game map start on this host has no usable builder (see PAR-0484) and campaign attack sectors are locked on a fresh profile, so no Java frame was captured."
             }
           }
         ]
@@ -22246,16 +22307,61 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "godot_exec",
             "params": {
-              "text": "see runs/PAR-0485"
+              "action": "eval",
+              "params": {
+                "code": "var e=get_node(\"/root/Spine/MindEditor\"); e.call(\"begin_new\",32,32); e.call(\"set_tool\",\"pencil\"); e.call(\"set_draw_team\",\"crux\"); e.call(\"set_draw_block\",\"core-shard\"); e.call(\"map_view_touch\",14,10); e.call(\"map_view_flush\"); e.call(\"set_draw_team\",\"sharded\"); e.call(\"map_view_touch\",26,10); e.call(\"map_view_flush\"); e.call(\"set_tag\",\"name\",\"Two Cores\"); e.call(\"export_map\",\"user://maps/two-cores.msav\")"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "c.call(\"start_map_mode\",\"Two Cores\",\"sandbox\",false,\"\"); h.call(\"debug_add_building_items\",14,10,\"copper\",777); h.call(\"debug_add_building_items\",26,10,\"copper\",25)"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"core_items_json\":str(h.call(\"core_items_json\")),\"crux\":str(h.call(\"building_items_json\",14,10)),\"player\":str(h.call(\"building_items_json\",26,10))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
             }
           }
         ]
       },
       "severity": "P1",
       "gap": "gx/sim_host.rs:10242-10269 core_items_json has no team filter; Java CoreItemsDisplay.java:33 uses player.team().core().",
-      "source": "CAMPAIGN_GAPS.md#cg-econ-02"
+      "source": "CAMPAIGN_GAPS.md#cg-econ-02",
+      "claimed_by": "camp-econ",
+      "claimed_at": "2026-11-06T06:55:03Z",
+      "fix": "sim_host.rs core_items_json(sim, content, team) filters comp.team.0 == team; the #[func] passes self.player_team(). Doc cites CoreItemsDisplay.java:33 player.team().core() (Team.java:83-85).",
+      "evidence": [
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "runs/PAR-0485/20261106-174636-run.md",
+        "runs/PAR-0485/godot-probe.json",
+        "runs/PAR-0485/godot/20261106-174607-01-action.png",
+        "tests: core_items_json_uses_the_player_team_core, core_items_json_reports_the_core_inventory (cargo test -p mind-gdext core_items_json: 2 passed)",
+        "probe: core_items_json={copper:125} while the first-in-entity-order crux core holds 777"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T07:46:48Z",
+          "by": "camp-econ",
+          "text": "verified: Godot in-engine two-core probe (crux core first in entity order holds 777, player core 125; core_items_json=125) + 2 unit tests; Java two-core scene unreachable on this host. No AVIF pair fabricated. See runs/PAR-0485/."
+        }
+      ]
     },
     "PAR-0486": {
       "title": "A crash/unclean exit resumes the sector with an empty core and wave 1",
@@ -23961,6 +24067,803 @@
         "runs/PAR-0500/java/20261106-162621-02-core-foundation-popup.png"
       ],
       "fix": "tech_tree::research_parent_unlocked resolves content.techNode via UnlockFields.tech_node (the last-created node, matching Java UnlockableContent.techNode) instead of the first tech.nodes match; MindCampaign delegates; unit test research_parent_uses_last_created_tech_node (silicon last node parent sand always unlocked vs first parent graphite locked)"
+    },
+    "PAR-0501": {
+      "title": "CG-SECTOR-03: SectorInfo.resources is never computed (no resource icon row in the sector stats panel)",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:12 LIBGL_ALWAYS_SOFTWARE=1 HOME=$PWD/runs/campaign-gaps/java-home-data XDG_DATA_HOME=$PWD/runs/campaign-gaps/java-home-data/.local/share XDG_CONFIG_HOME=$PWD/runs/campaign-gaps/java-home-data/.config XDG_CACHE_HOME=$PWD/runs/campaign-gaps/java-home-data/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648 > runs/campaign-gaps/java-data.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/campaign-gaps/java-data.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py move Mindustry 1300 100; window_ctl.py resize Mindustry 1152 648"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1530 250  # Play (window 230,150)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1787 250  # Campaign (window 487,150)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1876 711  # chooser OK (window 576,611); Serpulo is preselected"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1876 716  # Launch (window 576,616) -> Ground Zero lands"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1878 425  # Ground Zero hex (window 578,325) on the in-game page (N)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1878 662  # Stats button (window 578,562)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0501/java/16-stats.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 487,
+                        "y": 150
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 487,
+                        "y": 150
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 487,
+                        "y": 150
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 410,
+                        "y": 270
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 410,
+                        "y": 270
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 410,
+                        "y": 270
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 611
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 611
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 611
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 616
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "N",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "N",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = JSON.parse_string(get_node(\"/root/Spine/MindCampaign\").sector_record_json(\"serpulo\", 170).strip_edges())\nreturn {\"resources\": str(d.get(\"resources\")), \"hasSave\": str(d.get(\"hasSave\"))}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "mc/io/json/rules.rs:1057 defines resources: Vec<String> but nothing writes it; SectorInfoState::prepare (mc/game/sector.rs:434-479) does not fill it. Java World.setSectorRules (up/core/World.java:306-329) scans every non-dark tile for floor/overlay/wall drops + liquids, sorts by content type then id; Sector.java:105-118 does the water/null fixups. Readers exist but always see an empty list.",
+      "source": "CAMPAIGN_GAPS.md#cg-sector-03",
+      "similarity": 92.7,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0501/java/01-action.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0501/godot/01-action.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0501/20261106-173200-run.md",
+        "sector_record_json(\"serpulo\",170).resources = [\"copper\",\"lead\",\"scrap\",\"water\"], hasSave true (fresh launch save; also in settings.bin serpulo-s-170-info)",
+        "runs/PAR-0501/godot/07-gz-selected.png: selected-sector panel 'Resources:' + copper/lead/scrap/water icons",
+        "runs/PAR-0501/java/10-gz-selected.png: Java panel 'Resources:' + the same four icons",
+        "runs/PAR-0501/godot/08-stats.png vs runs/PAR-0501/java/16-stats.png: both stats dialogs show the @sectors.resources icon row; diff 0.07281 -> similarity 92.7",
+        "pre-existing deltas outside this finding: Java's 'Threat: Low'/'Under attack!' while being played, playtime_ms 0 in the port, description wrap width"
+      ],
+      "fix": "mind-core: SectorInfo.resources now computed. `scan_sector_resources(&WorldGrid,&ContentRegistry)` ports World.setSectorRules' scan (World.java:306-329): non-dark tiles contribute floor/overlay item drops + floor liquid drops, suppressed by a static wall (cacheLayer==walls), plus wall drops; deduped, sorted items-then-liquids by content id. CoreSnapshot.resources carries it, core_snapshot_of fills it from the loaded grid and SectorInfoState::prepare writes it (World.java:328), so launch saves, autosaves, captures, game-over and exit all persist it; `fixup_resources` applies Sector.loadInfo's dedupe/empty-drop on load (the legacy water block name is structurally a liquid). Unit tests scan_sector_resources_matches_set_sector_rules + load_info_fixes_up_resources. Validated by cargo test -p mind-core --lib game::sector (12 passed) and tools/build.sh + in-engine twin walk."
+    },
+    "PAR-0502": {
+      "title": "CG-UI-07: Escape closes the planet page instead of clearing the sector selection",
+      "status": "twin-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:12 LIBGL_ALWAYS_SOFTWARE=1 HOME=$PWD/runs/campaign-gaps/java-home-data XDG_DATA_HOME=$PWD/runs/campaign-gaps/java-home-data/.local/share XDG_CONFIG_HOME=$PWD/runs/campaign-gaps/java-home-data/.config XDG_CACHE_HOME=$PWD/runs/campaign-gaps/java-home-data/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar -maximized false -width 1152 -height 648 > runs/campaign-gaps/java-data.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/campaign-gaps/java-data.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py move Mindustry 1300 100; window_ctl.py resize Mindustry 1152 648"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1530 250  # Play (window 230,150) x2 (first click only focuses)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1787 250  # Campaign (window 487,150)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py click 1878 425  # Ground Zero hex (window 578,325) -> sector panel appears"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0502/java/01-selected.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py focus; java_input.py key escape  # PlanetDialog.java:91-102 -> selectSector(null)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0502/java/02-deselected.png"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "java_input.py focus; java_input.py key escape  # selected == null -> hide()"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "window_ctl.py raise Mindustry; capture_screen.py --window-title Mindustry --output runs/PAR-0502/java/03-closed.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "N",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "N",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 2,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": true,
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 325
+                      },
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "pressed": false,
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn {\"visible\": d.is_visible(), \"footer\": d.get_node(\"Center/Panel/Layout/Buttons\").get_child_count()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Escape",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Escape",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn {\"visible\": d.is_visible(), \"footer\": d.get_node(\"Center/Panel/Layout/Buttons\").get_child_count()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Escape",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "key",
+              "params": {
+                "key": "Escape",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"visible\": get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\").is_visible()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ]
+      },
+      "severity": "P2",
+      "gap": "gx/ui/dialogs/batch_c.rs:3335 planet_handle_reveal_escape returns unless new_presets.len() > 1 and never clears selected_sector; :561 blocks_escape only covers chooser_active, so gx/ui/root.rs:1675-1683 closes the dialog. Java PlanetDialog.java:91-102 deselects first (selected != null -> select(null)), then hides on the next Escape.",
+      "source": "CAMPAIGN_GAPS.md#cg-ui-07",
+      "similarity": 57.7,
+      "images": {
+        "java": [
+          "parity/twin/PAR-0502/java/01-action.avif",
+          "parity/twin/PAR-0502/java/02-selected.avif"
+        ],
+        "godot": [
+          "parity/twin/PAR-0502/godot/01-action.avif",
+          "parity/twin/PAR-0502/godot/02-selected.avif"
+        ]
+      },
+      "evidence": [
+        "runs/PAR-0502/20261106-173400-run.md",
+        "Godot probe: selection present -> footer 6 children; Escape #1 -> {visible:true, footer:5} (panel gone, page stays); Escape #2 -> {visible:false}",
+        "runs/PAR-0502/godot/02-deselected.png vs runs/PAR-0502/java/02-deselected.png: both pages stay open with the sector panel cleared (diff 0.42345 -> similarity 57.7)",
+        "runs/PAR-0502/godot/01-selected.png / runs/PAR-0502/java/01-selected.png: selected sector panel on both clients",
+        "Java: PlanetDialog.java:91-102 (keyDown) deselects on the first Escape and hides on the second",
+        "similarity is dominated by the pre-existing planet rendering delta (PAR-0436 family: port globe larger/brighter with a stronger rim, lighter background); page chrome and behaviour match"
+      ],
+      "fix": "gx/ui/dialogs/batch_c.rs: `planet_escape_step` ports PlanetDialog.java:91-102 (reveal truncate -> deselect -> fall through to hide); `PlanetDialog::blocks_escape` runs it so MindUiRoot::on_escape keeps the page on the first press, and the deselect rebuild (planet_show_planet with select_default=false) runs next frame in `planet_process` because the escape path only has &self. `planet_handle_reveal_escape` shares the step; the first-run chooser keeps Escape blocked. selection_cleared_pending is reset in shown/hidden. Unit/build: tools/build.sh passed; verified in-engine on both clients (see evidence)."
+    },
+    "PAR-0503": {
+      "title": "Campaign sector views: a played sector with waves is not marked attacked (no 'Under attack!' / Threat row like Java)",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0503"
+            }
+          }
+        ]
+      },
+      "claimed_by": "camp-data",
+      "claimed_at": "2026-11-06T07:33:25Z",
+      "severity": "P2",
+      "gap": "Java `Sector.isAttacked()` (`up/type/Sector.java:145-151`) returns `state.rules.waves || state.rules.attackMode` while the sector is being played, so the in-game planet page marks the live sector 'Under attack!' and the stats dialog adds the Threat row (`PlanetDialog.updateSelected` / `showStats`). The port's campaign views pass `None` for the playing rules (`mc/ui/campaign.rs:945` `attacked: sector.is_attacked(None)`, `:1074` lockdown, `:1138`), so a played sector with waves reads attacked=false: no 'Under attack!' in the sector panel and no `sectors.threat` row in the stats dialog, while Java shows both. Found while twin-verifying PAR-0501/PAR-0502 (the delta is visible in `runs/PAR-0501/{java,godot}/*-stats.png` and the selected-panel frames).",
+      "source": "CAMPAIGN_GAPS.md#cg-sector-03 (found in the PAR-0501/PAR-0502 twin walk)"
     }
   },
   "recipes": {

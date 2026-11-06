@@ -511,6 +511,9 @@ struct PlanetState {
     accelerator_y: i64,
     /// Last `Time.get_ticks_msec()` the reveal loop ran (frame delta source).
     last_tick_ms: u64,
+    /// Escape cleared the sector selection; the frame tick rebuilds the page
+    /// (`selectSector(null)`) once the dialog can be bound again.
+    selection_cleared_pending: bool,
     /// `(planet, campaign_views_json)` cache of the dialog's campaign reads.
     views: VarDictionary,
     views_planet: String,
@@ -559,7 +562,12 @@ impl DialogController for PlanetDialog {
     }
 
     fn blocks_escape(&self) -> bool {
-        self.state.borrow().chooser_active
+        // `PlanetDialog.java:91-102` handles Escape inside the dialog's own
+        // key listener; the port's escape entry point is `MindUiRoot`'s
+        // `on_escape`, which asks the top dialog before closing it. A consumed
+        // press keeps the page (the deselect rebuild runs next frame in
+        // `planet_process`); otherwise the page hides.
+        planet_escape_step(&mut self.state.borrow_mut())
     }
 }
 
@@ -638,6 +646,10 @@ fn planet_shown(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     let mut st = state.borrow_mut();
     // `PlanetDialog.show`: no sector selected when the page opens.
     st.selected_sector = -1;
+    // An Escape pressed in the same frame the page closed must not fire a
+    // stale deselect rebuild on the next open (it would clear `newPresets`
+    // before the reveal starts).
+    st.selection_cleared_pending = false;
     st.launch_mode = dialog.context_string("mode").to_string();
     if st.launch_mode.is_empty() {
         st.launch_mode = String::from("look");
@@ -687,6 +699,7 @@ fn planet_shown(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
 fn planet_hidden(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     let mut st = state.borrow_mut();
     st.launch_mode = String::from("look");
+    st.selection_cleared_pending = false;
     planet_remove_sector_list(&mut st);
     planet_set_planet_view_active(dialog, &mut st, false);
     planet_restore_stage(&mut st);
@@ -3175,10 +3188,24 @@ fn planet_start_preset_reveal(dialog: &mut MindDialog, st: &mut PlanetState) {
     }
 }
 
-/// `_process`: the `newPresets` reveal loop (`PlanetDialog.java:986-1003`).
+/// `_process`: the `newPresets` reveal loop (`PlanetDialog.java:986-1003`) plus
+/// the deferred deselect rebuild (`PlanetDialog.java:94` `selectSector(null)`).
 fn planet_process(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     let mut st = state.borrow_mut();
-    if st.new_presets.is_empty() || !dialog.base().is_visible() {
+    if !dialog.base().is_visible() {
+        return;
+    }
+    if st.selection_cleared_pending {
+        // The Escape press ran inside `blocks_escape(&self)`, so it cannot
+        // rebuild the page itself; do it here with the dialog bound.
+        st.selection_cleared_pending = false;
+        let planet = st.selected_planet.clone();
+        if !planet.is_empty() {
+            planet_show_planet(dialog, state, &mut st, &planet, false);
+        }
+        return;
+    }
+    if st.new_presets.is_empty() {
         return;
     }
     let Some(mut view) = planet_view() else {
@@ -3364,7 +3391,35 @@ fn planet_input(
     }
 }
 
-/// Escape during the reveal keeps only the first entry (`PlanetDialog.java:92`).
+/// One Escape press on the planet page (`PlanetDialog.java:91-102`): while the
+/// reveal runs it keeps only the first entry (the last sector); then a selected
+/// sector is cleared — `selectSector(null)` hides the detail/action panel and
+/// the frame tick rebuilds the page without a selection; only when nothing is
+/// selected does the press fall through to hiding the dialog. Returns whether
+/// the press was consumed (the port's `blocks_escape` contract).
+///
+/// The first-run chooser keeps its Escape blocked (the campaign choice is
+/// mandatory; `_show_select` has no back action), unchanged from before.
+fn planet_escape_step(st: &mut PlanetState) -> bool {
+    if st.chooser_active {
+        return true;
+    }
+    if st.new_presets.len() > 1 {
+        st.new_presets.truncate(1);
+        st.preset_show = 0.0;
+        st.reveal_showed = false;
+        return true;
+    }
+    if st.selected_sector >= 0 {
+        st.selected_sector = -1;
+        st.selection_cleared_pending = true;
+        return true;
+    }
+    false
+}
+
+/// Escape during the planet page (`PlanetDialog.java:91-102`), reached when the
+/// dialog root itself gets the key (`gui_input`).
 fn planet_handle_reveal_escape(
     dialog: &mut MindDialog,
     st: &mut PlanetState,
@@ -3373,12 +3428,9 @@ fn planet_handle_reveal_escape(
     if !key.is_pressed() || key.is_echo() || key.get_keycode() != godot::global::Key::ESCAPE {
         return;
     }
-    if st.new_presets.len() <= 1 {
+    if !planet_escape_step(st) {
         return;
     }
-    st.new_presets.truncate(1);
-    st.preset_show = 0.0;
-    st.reveal_showed = false;
     if let Some(mut viewport) = dialog.base().get_viewport() {
         viewport.set_input_as_handled();
     }

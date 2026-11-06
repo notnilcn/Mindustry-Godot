@@ -56,6 +56,115 @@ pub struct CoreSnapshot {
     pub any_launch_pads: bool,
     /// Launch pads with `efficiency > 0` (`pads.contains(t -> t.efficiency > 0)`).
     pub active_launch_pads: usize,
+    /// Known resources on the loaded map (`sector.info.resources`): the
+    /// sorted, deduped [`scan_sector_resources`] of the tile grid.
+    pub resources: Vec<String>,
+}
+
+/// `Block.isStatic()`: `cacheLayer == CacheLayer.walls` (`Block.java:1121`).
+fn is_static_block(
+    content: &crate::content::ContentRegistry,
+    block: crate::content::BlockId,
+) -> bool {
+    content
+        .block(block)
+        .is_some_and(|def| def.cache_layer == crate::render::layer::CacheLayerId::Walls)
+}
+
+/// `World.getDarkness` for the sector resource scan (`World.java:484-529`).
+///
+/// `World.setSectorRules` clears `rules.limitMapArea` around the scan
+/// (`World.java:311-313`), so the border term measures against the map edge;
+/// the static-wall and generated-sector polygon terms are the grid's own.
+fn sector_scan_darkness(
+    grid: &crate::world::WorldGrid,
+    content: &crate::content::ContentRegistry,
+    x: i32,
+    y: i32,
+) -> f32 {
+    crate::world::darkness::border_darkness(grid, grid.border_darkness, None, x, y)
+        .max(crate::world::darkness::get_static_darkness(
+            grid, content, x, y,
+        ))
+        .max(crate::world::darkness::sector_polygon_darkness(grid, x, y))
+}
+
+/// `World.setSectorRules`'s resource scan (`World.java:306-329`).
+///
+/// Every non-dark tile contributes its floor/overlay item drops and floor
+/// liquid drop unless a static wall (ore-wall overlays included) covers it, plus
+/// that wall's own drop (`Tile.wallDrop`). The result is the content-name list
+/// Java stores in `sector.info.resources`, deduped (`ObjectSet`) and sorted by
+/// `(ContentType, id)`: items first, then liquids, ids ascending
+/// (`World.java:328`; `ContentType.item` ordinal 0, `liquid` ordinal 4).
+///
+/// Fixups (`Sector.loadInfo`, `Sector.java:105-118`): the list holds only item
+/// and liquid names, so the port never stores the legacy `Blocks.water` entry
+/// that Java remaps to `Liquids.water` — `water` is a liquid by construction —
+/// and names that do not resolve to live content are dropped (Java's null
+/// entries). Deterministic: no iteration-order dependence.
+pub fn scan_sector_resources(
+    grid: &crate::world::WorldGrid,
+    content: &crate::content::ContentRegistry,
+) -> Vec<String> {
+    let mut items: Vec<u16> = Vec::new();
+    let mut liquids: Vec<u16> = Vec::new();
+    for y in 0..grid.tiles.height {
+        for x in 0..grid.tiles.width {
+            if sector_scan_darkness(grid, content, x, y) >= 3.0 {
+                continue;
+            }
+            let tile = grid.tiles.get(x, y);
+            if !is_static_block(content, tile.block) {
+                if let Some(item) = content.block(tile.floor).and_then(|def| def.item_drop) {
+                    items.push(item.raw());
+                }
+                if let Some(item) = content.block(tile.overlay).and_then(|def| def.item_drop) {
+                    items.push(item.raw());
+                }
+                if let Some(liquid) = content.block(tile.floor).and_then(|def| def.liquid_drop) {
+                    liquids.push(liquid.raw());
+                }
+            }
+            if let Some(item) = tile.wall_drop(content) {
+                items.push(item.raw());
+            }
+        }
+    }
+    items.sort_unstable();
+    items.dedup();
+    liquids.sort_unstable();
+    liquids.dedup();
+    items
+        .into_iter()
+        .filter_map(|raw| {
+            content
+                .item(crate::content::ItemId::new(raw))
+                .map(|item| item.name.clone())
+        })
+        .chain(liquids.into_iter().filter_map(|raw| {
+            content
+                .liquid(crate::content::LiquidId::new(raw))
+                .map(|liquid| liquid.name.clone())
+        }))
+        .collect()
+}
+
+/// `Sector.loadInfo`'s resource fixups (`Sector.java:105-118`) on a persisted
+/// name list: duplicates collapse and empty entries (Java's deserialized `null`
+/// content, `info.resources.contains(u -> u == null)`) are dropped. The legacy
+/// `Blocks.water` → `Liquids.water` remap needs no port action: no block is
+/// named `water`, so the name already resolves as the liquid.
+pub fn fixup_resources(resources: &mut Vec<String>) {
+    resources.retain(|name| !name.is_empty());
+    let mut seen: Vec<String> = Vec::with_capacity(resources.len());
+    resources.retain(|name| {
+        if seen.contains(name) {
+            return false;
+        }
+        seen.push(name.clone());
+        true
+    });
 }
 
 /// Builds the [`CoreSnapshot`] that `SectorInfo.prepare` consumes from the live
@@ -71,6 +180,7 @@ pub fn core_snapshot_of(
         best_core_type: "air".to_owned(),
         width: sim.grid.tiles.width,
         height: sim.grid.tiles.height,
+        resources: scan_sector_resources(&sim.grid, content),
         ..CoreSnapshot::default()
     };
     snapshot.has_spawns = world
@@ -455,6 +565,11 @@ impl SectorInfoState {
         self.info.last_width = core.width;
         self.info.last_height = core.height;
         self.info.light_coverage = core.light_coverage;
+        // `World.setSectorRules` (`World.java:328`): the loaded map's known
+        // resources replace the record's list on every prepare (`SectorInfo`
+        // is written with them, so the planet page's `@sectors.resources` row
+        // has content).
+        self.info.resources = core.resources.clone();
         // `SectorInfo.java:226-228` + `:244-249`.
         self.info.last_preset_name = preset_name.map(str::to_owned);
         if core.active_launch_pads == 0 {
@@ -607,6 +722,7 @@ impl Sector {
     /// `Sector.loadInfo`.
     pub fn load_info(&mut self, settings: &SettingsStore, planet_name: &str) {
         self.info.info = settings.get_json_or(&self.info_key(planet_name), SectorInfo::default);
+        fixup_resources(&mut self.info.info.resources);
     }
 
     /// `Sector.saveInfo`.
@@ -934,6 +1050,7 @@ mod tests {
             light_coverage: 3.5,
             any_launch_pads: true,
             active_launch_pads: 1,
+            resources: vec!["copper".to_owned(), "water".to_owned()],
         };
         state.prepare(&core, false, Some("groundZero"));
         assert_eq!(state.info.items.get("copper"), Some(&250));
@@ -942,6 +1059,11 @@ mod tests {
         assert_eq!(unpack_position(state.info.spawn_position), (32, 48));
         assert_eq!(state.info.light_coverage, 3.5);
         assert_eq!(state.info.last_preset_name.as_deref(), Some("groundZero"));
+        assert_eq!(
+            state.info.resources,
+            vec!["copper".to_owned(), "water".to_owned()],
+            "prepare writes the scanned resources (`World.java:328`)"
+        );
 
         state.info.wave = 7;
         state.info.win_wave = -1;
@@ -1041,6 +1163,81 @@ mod tests {
         state.prepare(&core, false, None);
         assert_eq!(state.info.export.get("copper").map(|s| s.mean), Some(3.0));
         assert_eq!(state.info.last_preset_name, None);
+    }
+
+    /// CG-SECTOR-03: `World.setSectorRules`'s tile resource scan
+    /// (`World.java:306-329`): floor/overlay/wall drops + floor liquids on
+    /// non-dark tiles only, deduped and sorted (items by id, then liquids),
+    /// with the static-wall suppression rules.
+    #[test]
+    fn scan_sector_resources_matches_set_sector_rules() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+        let content = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let id = |name: &str| content.block_id(name).expect("block");
+        let mut grid = crate::world::WorldGrid::new(8, 8);
+        // Isolate the static-wall darkness term: the border term would darken
+        // the outer two rings of an 8x8 map (`World.java:487-503`).
+        grid.border_darkness = false;
+
+        // Ore overlay on buildable ground -> `tile.overlay().itemDrop`.
+        grid.tiles.get_mut(2, 2).overlay = id("ore-copper");
+        // A second copper tile must not duplicate the entry (`ObjectSet`).
+        grid.tiles.get_mut(2, 3).floor = id("stone");
+        grid.tiles.get_mut(2, 3).overlay = id("ore-copper");
+        // Floor drop -> `tile.floor().itemDrop`.
+        grid.tiles.get_mut(3, 3).floor = id("sand-floor");
+        // Wall ore -> `tile.wallDrop()` regardless of the floor.
+        grid.tiles.get_mut(4, 4).block = id("ore-wall-thorium");
+        // Floor liquid -> `tile.floor().liquidDrop`.
+        grid.tiles.get_mut(5, 5).floor = id("deep-water");
+        // A non-static building does not suppress the drops under it.
+        grid.tiles.get_mut(1, 6).floor = id("stone");
+        grid.tiles.get_mut(1, 6).overlay = id("ore-lead");
+        grid.tiles.get_mut(1, 6).block = id("conveyor");
+        // A static wall suppresses the floor/overlay/liquid drops beneath it...
+        grid.tiles.get_mut(6, 6).floor = id("sand-floor");
+        grid.tiles.get_mut(6, 6).block = id("sand-wall");
+        grid.tiles.get_mut(6, 7).floor = id("deep-water");
+        grid.tiles.get_mut(6, 7).block = id("sand-wall");
+        // ...and a dark (>= 3) static tile is skipped entirely.
+        grid.tiles.get_mut(0, 0).floor = id("sand-floor");
+        grid.tiles.get_mut(0, 0).block = id("sand-wall");
+        grid.tiles.get_mut(0, 0).data = 4;
+
+        assert_eq!(
+            scan_sector_resources(&grid, &content),
+            vec![
+                "copper".to_owned(),
+                "lead".to_owned(),
+                "sand".to_owned(),
+                "thorium".to_owned(),
+                "water".to_owned(),
+            ],
+            "items sort by id before liquids (`World.java:328`)"
+        );
+    }
+
+    /// `Sector.loadInfo`'s fixups (`Sector.java:105-118`) on a persisted list:
+    /// duplicates collapse and empty entries drop; `water` stays a liquid.
+    #[test]
+    fn load_info_fixes_up_resources() {
+        let mut settings = SettingsStore::new();
+        let mut sector = Sector::new(PlanetId::new(5), 3);
+        sector.info.info.resources = vec![
+            "copper".to_owned(),
+            String::new(),
+            "copper".to_owned(),
+            "water".to_owned(),
+        ];
+        sector.save_info(&mut settings, "serpulo").unwrap();
+        let mut loaded = Sector::new(PlanetId::new(5), 3);
+        loaded.load_info(&settings, "serpulo");
+        assert_eq!(
+            loaded.info.info.resources,
+            vec!["copper".to_owned(), "water".to_owned()]
+        );
     }
 
     #[test]
