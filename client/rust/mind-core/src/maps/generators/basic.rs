@@ -8,8 +8,9 @@
 //! and `pass` hands the closure a `&mut BasicGenerator` plus a [`Draw`] view so
 //! the `floor`/`block`/`ore` mutation semantics are preserved exactly.
 //!
-//! Deferred (named): `getDarkness`-dependent `trimDark` takes an explicit
-//! darkness closure; `decoration`/`pathfind` use plan-06 data only.
+//! Deferred (named): `decoration`/`pathfind` use plan-06 data only;
+//! `trimDark` takes an explicit darkness closure (see [`GenerationDarkness`]
+//! for the Java `World.getDarkness` border + sector-polygon terms).
 
 use crate::content::{BlockDef, BlockId, ContentRegistry};
 use crate::determinism::SimRng;
@@ -930,14 +931,16 @@ impl BasicGenerator {
     }
 
     /// `BasicGenerator.trimDark`; `darkness` is supplied by the caller (plan 12).
+    ///
+    /// Java reads the live `World.getDarkness`; a generator only owns `Tiles`,
+    /// so callers pass the darkness closure. Use [`GenerationDarkness`] for the
+    /// border + generated-sector polygon terms Java sees at trim time.
     pub fn trim_dark<D: Fn(i32, i32) -> f32>(
         &mut self,
         tiles: &mut Tiles,
         content: &ContentRegistry,
         darkness: D,
     ) {
-        let width = tiles.width;
-        let height = tiles.height;
         for index in 0..tiles.len() {
             let (x, y) = {
                 let tile = tiles.geti(index);
@@ -953,8 +956,23 @@ impl BasicGenerator {
                 let wall = planet_wall(content, tiles.geti(index).floor);
                 tiles.geti_mut(index).block = wall;
             }
-            let _ = (width, height);
         }
+    }
+
+    /// [`Self::trim_dark`] with the darkness terms Java has during generation:
+    /// `rules.borderDarkness` (always on for the planet generators — only
+    /// `AsteroidGenerator` disables it) and the generated-sector polygon
+    /// (`World.java:484-529`). `World.addDarkness` runs in `endMapLoad` after
+    /// `trimDark`, so the static-wall term is 0 here exactly like Java.
+    pub fn trim_dark_sector(
+        &mut self,
+        tiles: &mut Tiles,
+        content: &ContentRegistry,
+        polygon: Option<crate::world::SectorPolygon>,
+        border: bool,
+    ) {
+        let darkness = GenerationDarkness::new(tiles.width, tiles.height, polygon, border);
+        self.trim_dark(tiles, content, |x, y| darkness.get(content, x, y));
     }
 
     /// `BasicGenerator.inverseFloodFill`.
@@ -997,6 +1015,38 @@ impl BasicGenerator {
     pub fn begin(&mut self, tiles: &Tiles) {
         self.width = tiles.width;
         self.height = tiles.height;
+    }
+}
+
+/// The `World.getDarkness` terms live while a generator runs (GAPS #28/#29).
+///
+/// Java reads the singleton `World`; the Rust generators only hold `&mut
+/// Tiles`, so this keeps a scratch `crate::world::WorldGrid` with just the
+/// fields `getDarkness` consults (`tiles.width`/`tiles.height`,
+/// `borderDarkness`, `sector_polygon`). Its tiles stay air, so the static-wall
+/// term is 0 — exactly like Java between `resize` and the `endMapLoad`
+/// `addDarkness` pass.
+pub struct GenerationDarkness {
+    grid: crate::world::WorldGrid,
+}
+
+impl GenerationDarkness {
+    /// Builds the generation-time darkness inputs for a `width`x`height` grid.
+    pub fn new(
+        width: i32,
+        height: i32,
+        polygon: Option<crate::world::SectorPolygon>,
+        border: bool,
+    ) -> Self {
+        let mut grid = crate::world::WorldGrid::new(width, height);
+        grid.sector_polygon = polygon;
+        grid.border_darkness = border;
+        Self { grid }
+    }
+
+    /// `World.getDarkness` at `(x, y)` for the generation-time inputs.
+    pub fn get(&self, content: &ContentRegistry, x: i32, y: i32) -> f32 {
+        crate::world::darkness::get_darkness(&self.grid, content, x, y)
     }
 }
 
@@ -1138,5 +1188,75 @@ mod tests {
         assert_eq!(tiles.get(0, 0).block, wall);
         assert_eq!(tiles.get(0, 0).overlay, ore);
         assert_eq!(tiles.get(1, 0).block, BlockId::AIR);
+    }
+
+    /// GAPS #28: `trimDark` sees `World.getDarkness`'s border term
+    /// (`rules.borderDarkness = true` for every planet generator but asteroid),
+    /// so the two-tile map edge becomes the floor's wall.
+    #[test]
+    fn trim_dark_sector_applies_border_darkness() {
+        let content = crate::content::test_support::test_registry();
+        let floor = content.block_id("stone").unwrap_or(BlockId::AIR);
+        let wall = content.block_id("stone-wall").unwrap_or(BlockId::AIR);
+        let mut tiles = Tiles::new(8, 8);
+        for tile in tiles.array_mut() {
+            tile.floor = floor;
+        }
+        let mut generator = BasicGenerator::new(Box::new(SimplexNoise { seed: 1 }));
+        generator.trim_dark_sector(&mut tiles, &content, None, true);
+        assert_eq!(tiles.get(0, 0).block, wall, "map edge is dark");
+        assert_eq!(tiles.get(1, 4).block, wall, "edgeDst 1 -> darkness 2");
+        assert_eq!(tiles.get(4, 4).block, BlockId::AIR, "interior stays clear");
+
+        // Without the border term and without a polygon there is nothing to trim.
+        let mut clear = Tiles::new(8, 8);
+        for tile in clear.array_mut() {
+            tile.floor = floor;
+        }
+        generator.trim_dark_sector(&mut clear, &content, None, false);
+        assert!(clear.iter().all(|tile| tile.block == BlockId::AIR));
+    }
+
+    /// GAPS #28: the generated-sector polygon term darkens tiles outside the
+    /// projected polygon; `trimDark` walls those and leaves enclosed tiles air.
+    #[test]
+    fn trim_dark_sector_applies_polygon_darkness() {
+        let content = crate::content::test_support::test_registry();
+        let floor = content.block_id("stone").unwrap_or(BlockId::AIR);
+        let wall = content.block_id("stone-wall").unwrap_or(BlockId::AIR);
+        let polygon = crate::world::SectorPolygon {
+            rotation: 0.0,
+            sides: 6,
+            size: 16,
+        };
+        let darkness = GenerationDarkness::new(16, 16, Some(polygon), false);
+        assert!(
+            darkness.get(&content, 0, 0) > 0.0,
+            "corner is outside the polygon"
+        );
+        // A tile clear of darkness in its whole d4 neighbourhood stays air.
+        let clear_tile = (0..16)
+            .flat_map(|x| (0..16).map(move |y| (x, y)))
+            .find(|&(x, y)| {
+                darkness.get(&content, x, y) == 0.0
+                    && D4
+                        .iter()
+                        .all(|(dx, dy)| darkness.get(&content, x + dx, y + dy) == 0.0)
+            })
+            .expect("polygon interior has clear tiles");
+
+        let mut tiles = Tiles::new(16, 16);
+        for tile in tiles.array_mut() {
+            tile.floor = floor;
+        }
+        let mut generator = BasicGenerator::new(Box::new(SimplexNoise { seed: 1 }));
+        generator.trim_dark_sector(&mut tiles, &content, Some(polygon), false);
+        assert_eq!(tiles.get(0, 0).block, wall, "polygon corner walled");
+        assert_eq!(
+            tiles.get(clear_tile.0, clear_tile.1).block,
+            BlockId::AIR,
+            "enclosed tile {:?} stays clear",
+            clear_tile
+        );
     }
 }

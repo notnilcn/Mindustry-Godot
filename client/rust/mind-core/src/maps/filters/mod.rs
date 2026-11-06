@@ -1429,4 +1429,78 @@ mod tests {
         // Invalid JSON passes through unchanged.
         assert_eq!(normalize_filter_numbers("not json"), "not json");
     }
+
+    /// GAPS #30: `CoreSpawnFilter` shuffles every `CoreBlock` tile and removes
+    /// all but `amount` (`CoreSpawnFilter.java:31-47`). The team gate is
+    /// omitted because Java's filter runs before building teams load; see the
+    /// `apply_tiles` comment.
+    #[test]
+    fn core_spawn_filter_keeps_amount() {
+        let content = test_registry();
+        let core = content.block_id("core-shard").expect("core-shard");
+        let stone = content.block_id("stone").expect("stone");
+        let mut tiles = Tiles::new(5, 5);
+        for tile in tiles.array_mut() {
+            tile.floor = stone;
+        }
+        for (x, y) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
+            tiles.get_mut(x, y).block = core;
+        }
+        let mut stack: Vec<Box<dyn GenerateFilter>> =
+            vec![Box::new(builtin::CoreSpawnFilter { seed: 0, amount: 2 })];
+        let mut rng = SimRng::new(9);
+        apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+        let remaining = (0..tiles.len())
+            .filter(|index| tiles.geti(*index).block == core)
+            .count();
+        assert_eq!(remaining, 2, "exactly `amount` cores kept");
+        for index in 0..tiles.len() {
+            let block = tiles.geti(index).block;
+            assert!(
+                block == core || block == BlockId::AIR,
+                "removed cores are cleared, not replaced"
+            );
+        }
+    }
+
+    /// GAPS #30: `SpawnPathFilter` carves the A* route between a core and a
+    /// `spawn` overlay (`SpawnPathFilter.java:29-55`): solid tiles cost 100 and
+    /// the passability gate is `!floor.isDeep()`.
+    #[test]
+    fn spawn_path_filter_carves_path() {
+        let content = test_registry();
+        let core = content.block_id("core-shard").expect("core-shard");
+        let wall = content.block_id("stone-wall").expect("stone-wall");
+        let stone = content.block_id("stone").expect("stone");
+        let spawn = content.block_id("spawn").expect("spawn");
+        let mut tiles = Tiles::new(7, 7);
+        for tile in tiles.array_mut() {
+            tile.floor = stone;
+            tile.block = wall;
+        }
+        tiles.get_mut(0, 3).block = core;
+        let end = tiles.get_mut(6, 3);
+        end.block = BlockId::AIR;
+        end.overlay = spawn;
+
+        let mut stack: Vec<Box<dyn GenerateFilter>> = vec![Box::new(builtin::SpawnPathFilter {
+            seed: 0,
+            radius: 0,
+            block: BlockId::AIR,
+        })];
+        let mut rng = SimRng::new(3);
+        apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+
+        // The straight route is optimal (7 tiles x 100 vs. a detour).
+        for x in 1..=6 {
+            assert_eq!(
+                tiles.get(x, 3).block,
+                BlockId::AIR,
+                "path tile ({x}, 3) carved"
+            );
+        }
+        assert_eq!(tiles.get(0, 3).block, core, "path excludes the start tile");
+        assert_eq!(tiles.get(3, 2).block, wall, "off-path wall untouched");
+        assert_eq!(tiles.get(6, 3).overlay, spawn, "spawn overlay preserved");
+    }
 }

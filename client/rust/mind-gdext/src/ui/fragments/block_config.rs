@@ -848,19 +848,27 @@ impl MindBlockConfigFragment {
             "stat.armor",
             &value_at(&values, 2).to_string(),
             "digits",
+            "",
         );
         let reset = self.dummy_field(
             &mut body,
             "stat.resettime",
             &fixed(value_at(&values, 3) as f64 / 60.0, 2),
             "floats",
+            "@unit.seconds",
         );
         let mut size_bits = value_at(&values, 4);
         if size_bits == 0 {
             size_bits = float_to_bits(12.0);
         }
         let size_blocks = bits_to_float(size_bits) / TILESIZE;
-        let hit = self.dummy_field(&mut body, "stat.hitsize", &fixed(size_blocks, 2), "floats");
+        let hit = self.dummy_field(
+            &mut body,
+            "stat.hitsize",
+            &fixed(size_blocks, 2),
+            "floats",
+            "@unit.blocks",
+        );
         let mut buttons = HBoxContainer::new_alloc();
         body.add_child(&buttons);
         let mut ok = Button::new_alloc();
@@ -884,12 +892,16 @@ impl MindBlockConfigFragment {
         ok.connect("pressed", &callable);
     }
 
+    /// One `TargetDummy` label + field row; `unit_key` appends the trailing
+    /// `StatUnit` label Java puts next to the reset time / hit size fields
+    /// (`TargetDummy.java:247-262`).
     fn dummy_field(
         &self,
         body: &mut Gd<VBoxContainer>,
         label_key: &str,
         value: &str,
         filter: &str,
+        unit_key: &str,
     ) -> Gd<LineEdit> {
         let mut row = HBoxContainer::new_alloc();
         body.add_child(&row);
@@ -905,6 +917,12 @@ impl MindBlockConfigFragment {
             field.set_virtual_keyboard_type(VirtualKeyboardType::NUMBER);
         }
         row.add_child(&field);
+        if !unit_key.is_empty() {
+            let mut unit = Label::new_alloc();
+            unit.set_text(&kit::t(unit_key));
+            unit.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+            row.add_child(&unit);
+        }
         field
     }
 

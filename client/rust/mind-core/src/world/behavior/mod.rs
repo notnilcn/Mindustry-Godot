@@ -214,6 +214,19 @@ pub trait BuildingBehavior: Send + Sync + std::any::Any {
         false
     }
 
+    /// `Building.setProp(LAccess, double)` override hook (GAPS #15); `true` =
+    /// the family handled the numeric property and the base table must not run.
+    fn logic_set_prop(
+        &self,
+        world: &mut World,
+        e: Entity,
+        a: crate::logic::LAccess,
+        v: f64,
+    ) -> bool {
+        let _ = (world, e, a, v);
+        false
+    }
+
     /// `ItemBridge.linkValid(tile, other, true)` for bridge families; `false`
     /// for every other block (T11 bridge chaining).
     fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
@@ -270,6 +283,13 @@ pub trait BuildingBehavior: Send + Sync + std::any::Any {
 
     /// `Building.dropped()` (payload drop).
     fn dropped(&self, world: &mut World, e: Entity) {
+        let _ = (world, e);
+    }
+
+    /// `Building.pickedUp()` (`BuildingComp.java:1849-1851`): called right
+    /// before the building is removed for a payload pickup (`Control.java:254`,
+    /// `PayloadComp.java:112`). GAPS #15.
+    fn picked_up(&self, world: &mut World, e: Entity) {
         let _ = (world, e);
     }
 

@@ -661,6 +661,44 @@ pub struct LogicClientInfo {
     pub name: String,
 }
 
+/// Local player view/selection state for the `LAccess` unit senses
+/// (`UnitComp.sense`: `cameraX`/`cameraY`/`cameraWidth`/`cameraHeight`,
+/// `selectedBlock`, `selectedRotation`, `pingX`/`pingY`/`pingText`;
+/// `UnitComp.java:287-330`).
+///
+/// Java reads these through the unit's `Player` controller (`player.con.viewX`
+/// / `player.selectedBlock` / `player.pingX`). The port's `Sim` has no camera
+/// (the gdext host owns `CameraState`), so the host injects this resource each
+/// frame and [`crate::sim::Sim::set_selected_block`] maintains the placement
+/// half from the native UI; core defaults make every sense
+/// `0`/`null` (Java's non-player result).
+#[derive(Clone, Debug, Default, PartialEq, bevy_ecs::prelude::Resource)]
+pub struct LogicPlayerView {
+    /// Camera centre x in world pixels (`player.con.viewX`).
+    pub camera_x: f32,
+    /// Camera centre y in world pixels (`player.con.viewY`).
+    pub camera_y: f32,
+    /// Camera view width in world pixels (`player.con.viewWidth`).
+    pub camera_w: f32,
+    /// Camera view height in world pixels (`player.con.viewHeight`).
+    pub camera_h: f32,
+    /// `player.selectedBlock` (`null` = no placement block selected).
+    pub selected_block: Option<crate::content::BlockId>,
+    /// `player.selectedRotation`.
+    pub selected_rotation: u8,
+    /// `player.pingX`/`player.pingY` in world pixels while pinging.
+    pub ping: Option<(f32, f32)>,
+    /// `player.pingText` while pinging.
+    pub ping_text: Option<String>,
+}
+
+impl LogicPlayerView {
+    /// `player.isPinging()`: a ping position or text is active.
+    pub fn is_pinging(&self) -> bool {
+        self.ping.is_some() || self.ping_text.is_some()
+    }
+}
+
 /// Scalar rows of the content `sense` tables
 /// (`Block.sense`, `UnitType.sense`, `Item.sense`, `Liquid.sense`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

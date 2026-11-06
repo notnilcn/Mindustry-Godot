@@ -72,6 +72,9 @@ pub fn read_power_info(world: &World, entity: Entity) -> Option<PowerParams> {
         .get::<PowerProduction>(entity)
         .map(|production| production.0)
         .unwrap_or(0.0);
+    // `ConsumePowerDynamic.requestedPower` (`ConsumePowerDynamic.java:26`):
+    // the owner behavior's live request wins over the static `ConsumePower`.
+    let dynamic_usage = world.get::<super::PowerDynamicUsage>(entity).map(|u| u.0);
 
     let (outputs, consumes, buffered, capacity, usage, conductive, insulated) =
         if let Some(info) = world.get::<PowerNodeInfo>(entity) {
@@ -109,6 +112,7 @@ pub fn read_power_info(world: &World, entity: Entity) -> Option<PowerParams> {
                 def.insulated,
             )
         };
+    let usage = dynamic_usage.unwrap_or(usage);
 
     Some(PowerParams {
         has_power: true,

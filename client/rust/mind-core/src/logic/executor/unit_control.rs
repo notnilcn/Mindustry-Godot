@@ -18,6 +18,7 @@ use crate::entities::comp::unit::{HitboxComp, UnitCore};
 use crate::entities::comp::{Pos, TeamComp, Unit};
 use crate::logic::enums::LUnitControl;
 use crate::logic::value::{LogicObject, VarRef};
+use crate::logic::world::{LogicWorldEvent, LogicWorldState};
 
 /// `LogicAI.logicControlTimeout` (10 s at 60 Hz).
 pub const UNIT_TIMEOUT_KEEP: f32 = 600.0;
@@ -543,9 +544,36 @@ pub fn apply_control(
             update_timeout(exec, world, unit);
         }
         LUnitControl::PayEnter => {
-            // `Call.unitBuildingControlSelect` (unit enters a controllable
-            // building) has no port path yet: it needs the building-unit
-            // possession seam (I01 T12). Deferred, recorded in the summary.
+            // `Building build = world.buildWorld(unit.x, unit.y); if(build !=
+            // null && unit.team() == build.team && build.canControlSelect(unit))
+            // Call.unitBuildingControlSelect(unit, build)` (LExecutor.java:441-446).
+            // The port's only `onControlSelect` implementor is `CoreBlock`
+            // (I01 T12), whose respawn path lives on `Sim`: emit the request and
+            // let `drain_logic_world_events` apply it as the player. The
+            // `PayloadConveyor`/`PayloadBlock` `handleUnitPayload` half needs the
+            // unit-payload runtime (plan 08; `dump_unit_payload` is still a stub).
+            let Some(pos) = world.get::<Pos>(unit).copied() else {
+                return;
+            };
+            let Some(build) = tile_at_world(world, pos.x, pos.y).and_then(|tile| tile.build) else {
+                return;
+            };
+            let unit_team = world.get::<TeamComp>(unit).map(|team| team.team);
+            let build_team = world.get::<TeamComp>(build).map(|team| team.team);
+            if unit_team.is_none() || unit_team != build_team {
+                return;
+            }
+            if world
+                .get::<crate::world::blocks::storage::core_block::CoreBuild>(build)
+                .is_none()
+            {
+                return;
+            }
+            if let Some(mut state) = world.get_resource_mut::<LogicWorldState>()
+                && state.is_host
+            {
+                state.emit(LogicWorldEvent::ControlSelect { unit, build });
+            }
         }
         LUnitControl::Build => {
             let enabled =

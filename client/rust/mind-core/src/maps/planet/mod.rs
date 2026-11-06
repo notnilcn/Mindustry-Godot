@@ -198,6 +198,7 @@ pub fn generate_sector_with_seed(
         has_enemy_base: extras.has_enemy_base,
         has_base: extras.has_base,
         rect: Some(rect),
+        sides,
     });
     let params = WorldParams {
         seed_offset,
@@ -206,6 +207,15 @@ pub fn generate_sector_with_seed(
         ..WorldParams::default()
     };
     let mut grid = WorldGrid::new(size, size);
+    // `World.getDarkness`'s generated-sector polygon term is live while the
+    // generator runs (`World.loadSector` sets `state.rules.sector` before
+    // `loadGenerator`, `World.java:266`), so it must be attached before
+    // `trimDark`; the host keeps the same values for post-generation queries.
+    grid.sector_polygon = (sides > 0).then_some(crate::world::SectorPolygon {
+        rotation: rect.rotation,
+        sides: sides as i32,
+        size,
+    });
     grid.begin_map_load();
     generator.generate(&mut grid.tiles, &params, content);
     let mut rules = Rules::default();
@@ -252,6 +262,33 @@ mod tests {
         let content = content();
         assert!(
             generate_sector("does-not-exist", 0, &content, SectorGenExtras::default()).is_none()
+        );
+    }
+
+    /// GAPS #28: the generated-sector polygon is attached *before* the
+    /// generator runs (`World.loadSector` sets `state.rules.sector` first), so
+    /// `trimDark`/`addWeather` see `World.getDarkness`'s polygon term.
+    #[test]
+    fn generate_sector_attaches_polygon_before_generation() {
+        let content = content();
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        let def = content.planet_by_name("serpulo").expect("serpulo");
+        let planet_grid = PlanetGrid::create(def.sector_tiles as usize);
+        let rect = make_rect(&planet_grid, 1, def.radius);
+        let sides = planet_grid
+            .tiles
+            .get(1)
+            .map(|tile| tile.corners.len())
+            .expect("sector tile");
+        assert_eq!(
+            generated.grid.sector_polygon,
+            Some(crate::world::SectorPolygon {
+                rotation: rect.rotation,
+                sides: sides as i32,
+                size: generated.grid.tiles.width,
+            }),
+            "polygon matches Sector.rect + tile.corners + Sector.getSize"
         );
     }
 

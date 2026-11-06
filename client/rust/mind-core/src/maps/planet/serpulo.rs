@@ -7,9 +7,10 @@
 //! Deviations (OD6-A/OD6-B, structural parity): `state.rules.*`,
 //! `Schematics.placeLaunchLoadout`, `Waves.generate`, `BaseGenerator` ruins and
 //! `Planets.serpulo.sectors` reads are plan-11/12 hooks and are not applied
-//! (they do not change the base terrain); `world.getDarkness` is zero until
-//! plan 12's sector polygon lands; plan 02 lacks `Floor.liquidDrop`, so the
-//! name-keyed `block_info::is_liquid` table stands in for `liquidDrop != null`.
+//! (they do not change the base terrain); `trimDark` reads `World.getDarkness`'s
+//! border + generated-sector polygon terms at generation time (GAPS #28); plan
+//! 02 lacks `Floor.liquidDrop`, so the name-keyed `block_info::is_liquid` table
+//! stands in for `liquidDrop != null`.
 
 use crate::content::{BlockDef, BlockId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
@@ -1644,7 +1645,12 @@ impl WorldGenerator for SerpuloPlanetGenerator {
             tile.overlay = ore;
         }
 
-        self.planet.base.trim_dark(tiles, content, |_, _| 0.0);
+        // `trimDark()` (`SerpuloPlanetGenerator.java:549`): `World.getDarkness`
+        // at generation time = border darkness + the sector polygon (GAPS #28).
+        let polygon = self.sector.polygon(tiles.width);
+        self.planet
+            .base
+            .trim_dark_sector(tiles, content, polygon, true);
         self.planet.base.median(tiles, content, 2, 0.5);
         self.planet
             .base

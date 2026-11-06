@@ -9,6 +9,7 @@
 //! lives in [`projectors`]/[`behaviors`].
 
 pub mod behaviors;
+pub mod build_turret_plans;
 pub mod projectors;
 pub mod shields;
 pub mod turrets;

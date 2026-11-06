@@ -168,6 +168,11 @@ impl MindUi {
     #[signal]
     fn player_action(player: GString, action: GString);
 
+    /// Emitted when a ban/admin roster requests a relay action (plan 21):
+    /// `action` is `unban`/`unadmin`, `identifier` the `PlayerInfo.id`.
+    #[signal]
+    fn admin_action(action: GString, identifier: GString);
+
     /// Registers a dialog node under a manifest name (`UiRoot` boot) and records
     /// its manifest `pause` flag for the governor.
     #[func]
@@ -598,6 +603,29 @@ impl MindUi {
     #[func]
     pub fn player_list_json(&self) -> GString {
         GString::from("[]")
+    }
+
+    /// Forwards a ban/admin roster action (`BansDialog`'s `unbanPlayerID`,
+    /// `AdminsDialog`'s `unAdminPlayer`) to the relay seam; false when nothing
+    /// is listening, so the shell never fakes a server action. The listener is
+    /// plan 21's relay wiring (the same seam as [`Self::player_action`]).
+    #[func]
+    pub fn admin_action(&mut self, action: GString, identifier: GString) -> bool {
+        let node = self.to_gd();
+        let connections = node.get_signal_connection_list("admin_action");
+        if connections.is_empty() {
+            log::info!(
+                "[ui] admin_action {} on {} gated on plan 21 relay",
+                action,
+                identifier
+            );
+            return false;
+        }
+        let _ = self.base_mut().emit_signal(
+            "admin_action",
+            &[action.to_variant(), identifier.to_variant()],
+        );
+        true
     }
 
     /// Executes a console line through the Rust command registry (OD1).

@@ -5,8 +5,9 @@
 //!
 //! Ported from `maps/filters/{Noise,Scatter,Terrain,Distort,RiverNoise,Ore,
 //! OreMedian,Median,Blend,Mirror,Clear,CoreSpawn,EnemySpawn,SpawnPath,Logic,
-//! RandomItem}Filter.java`. `apply` bodies match upstream exactly; post filters
-//! whose data lives in plans 07/11/12/13 are documented no-op hooks.
+//! RandomItem}Filter.java`. `apply` bodies match upstream exactly; `LogicFilter`
+//! (plan 13) and `RandomItemFilter` (unused upstream) stay documented no-op
+//! hooks, while `CoreSpawnFilter`/`SpawnPathFilter` are live tile-level ports.
 //!
 //! Module-layout deviation: the plan sketched one file per filter; this module
 //! groups them (no ABI/behavior change) to keep the port reviewable.
@@ -15,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::content::{BlockId, ContentRegistry};
+use crate::content::{BlockId, BlockKind, ContentRegistry};
 use crate::determinism::RngStream;
 use crate::determinism::SimRng;
 use crate::world::tiles::Tiles;
@@ -1481,7 +1482,8 @@ impl_filter!(
     ]
 );
 
-/// `CoreSpawnFilter` (post; needs plan 12's team/rules + plan 07's buildings).
+/// `CoreSpawnFilter` (post): keeps `amount` shuffled `CoreBlock` tiles
+/// (`CoreSpawnFilter.java:31-47`).
 #[derive(Debug, Clone)]
 pub struct CoreSpawnFilter {
     /// Seed.
@@ -1524,14 +1526,43 @@ impl GenerateFilter for CoreSpawnFilter {
     }
     fn apply_tiles(
         &mut self,
-        _tiles: &mut Tiles,
+        tiles: &mut Tiles,
         _input: &mut GenerateInput<'_>,
-        _content: &ContentRegistry,
-        _rng: &mut SimRng,
+        content: &ContentRegistry,
+        rng: &mut SimRng,
     ) {
-        // Cores are buildings (plan 07) on team `rules.defaultTeam` (plan 12);
-        // both land after 06, so this is a documented hook.
-        log::debug!("CoreSpawnFilter is a plan-07/12 hook; no-op in mind-core M5");
+        // `CoreSpawnFilter.apply`: every center tile whose block is a
+        // `CoreBlock` on `state.rules.defaultTeam`, shuffled, keeping `amount`.
+        //
+        // Deviation: `Tile` carries no team/building in the port (`MapSource`
+        // projects teams from the ECS; `world/map_source.rs`), and Java's own
+        // filter runs from `World.FilterContext.end()` inside `readMap`, before
+        // `SaveVersion.readEntities` restores building teams — at that point
+        // every tile's team is `Team.derelict`. The team gate is therefore
+        // omitted here: multiblock non-center tiles are already air in a loaded
+        // map (only centers are set), so every `CoreBlock` tile is a center.
+        let mut spawns: Vec<usize> = Vec::new();
+        for index in 0..tiles.len() {
+            let tile = tiles.geti(index);
+            let is_core = content
+                .block(tile.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock);
+            if is_core {
+                spawns.push(index);
+            }
+        }
+        // `spawns.shuffle()`: Java uses Arc's global `Mathf.rand`; the port
+        // draws from the recorded `MapGen` stream (deviation §2.3.5).
+        for i in (1..spawns.len()).rev() {
+            let j = rng.random(RngStream::MapGen, (i + 1) as i32) as usize;
+            spawns.swap(i, j);
+        }
+        let used = (spawns.len() as i32).min(self.amount).max(0) as usize;
+        // `tiles.getp(pos).remove()` -> `setBlock(air)`. The center-only core
+        // footprint of a loaded map leaves nothing else to clear.
+        for index in spawns.into_iter().skip(used) {
+            tiles.geti_mut(index).block = BlockId::AIR;
+        }
     }
 }
 
@@ -1609,7 +1640,8 @@ impl GenerateFilter for EnemySpawnFilter {
     }
 }
 
-/// `SpawnPathFilter` (post; needs plan 11's A* + plan 12's teams).
+/// `SpawnPathFilter` (post): carves a `block` disc along an A* path from every
+/// core to every `spawn` overlay (`SpawnPathFilter.java:29-55`).
 #[derive(Debug, Clone)]
 pub struct SpawnPathFilter {
     /// Seed.
@@ -1665,13 +1697,82 @@ impl GenerateFilter for SpawnPathFilter {
     }
     fn apply_tiles(
         &mut self,
-        _tiles: &mut Tiles,
+        tiles: &mut Tiles,
         _input: &mut GenerateInput<'_>,
-        _content: &ContentRegistry,
+        content: &ContentRegistry,
         _rng: &mut SimRng,
     ) {
-        log::debug!("SpawnPathFilter is a plan-11/12 hook; no-op in mind-core M5");
+        // `SpawnPathFilter.apply`: cores are `CoreBlock` tiles that are not on
+        // `state.rules.waveTeam`; spawns are `Blocks.spawn` overlays. As with
+        // `CoreSpawnFilter`, tile teams are unavailable in the port and Java's
+        // filter runs before the entity region (every team is `derelict`), so
+        // the wave-team gate cannot exclude anything and is omitted.
+        let spawn_block = content.block_id("spawn");
+        let mut cores: Vec<(i32, i32)> = Vec::new();
+        let mut spawns: Vec<(i32, i32)> = Vec::new();
+        for index in 0..tiles.len() {
+            let tile = tiles.geti(index);
+            let (x, y) = (i32::from(tile.x), i32::from(tile.y));
+            if content
+                .block(tile.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+            {
+                cores.push((x, y));
+            }
+            if spawn_block == Some(tile.overlay) {
+                spawns.push((x, y));
+            }
+        }
+
+        let radius = self.radius.max(0);
+        for &core in &cores {
+            for &spawn in &spawns {
+                // `Astar.pathfind(core, spawn, t -> t.solid() ? 100 : 1,
+                // Astar.manhattan, tile -> !tile.floor().isDeep())`.
+                let path = crate::maps::generators::astar::pathfind(
+                    tiles,
+                    core,
+                    spawn,
+                    |_, to| if tile_solid(content, to) { 100.0 } else { 1.0 },
+                    |tile| {
+                        !content
+                            .block(tile.floor)
+                            .is_some_and(super::block_info::is_deep)
+                    },
+                );
+                for (px, py) in path {
+                    for dx in -radius..=radius {
+                        for dy in -radius..=radius {
+                            let wx = px + dx;
+                            let wy = py + dy;
+                            if !crate::maps::generators::basic::within(dx, dy, radius)
+                                || !tiles.in_bounds(wx, wy)
+                            {
+                                continue;
+                            }
+                            let index = tiles.index(wx, wy);
+                            // `!other.synthetic()`: never overwrite a block
+                            // with update/destructible behavior.
+                            if content
+                                .block(tiles.geti(index).block)
+                                .is_some_and(super::block_info::synthetic)
+                            {
+                                continue;
+                            }
+                            tiles.geti_mut(index).block = self.block;
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+/// `Tile.solid()` for the `SpawnPathFilter` path cost (`Block.solid ||
+/// Floor.solid`; filter-time tiles carry no building).
+fn tile_solid(content: &ContentRegistry, tile: &crate::world::tile::Tile) -> bool {
+    content.block(tile.block).is_some_and(|def| def.solid)
+        || content.block(tile.floor).is_some_and(|def| def.solid)
 }
 
 /// `LogicFilter` (post; needs plan 13's script runner).

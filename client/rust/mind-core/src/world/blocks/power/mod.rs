@@ -109,6 +109,18 @@ impl PowerNodeInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Default, Component)]
 pub struct PowerProduction(pub f32);
 
+/// `ConsumePowerDynamic.requestedPower` (`ConsumePowerDynamic.java:26`): a
+/// behavior-supplied per-tick power usage.
+///
+/// Java's `Block.consumePowerDynamic(usage)` replaces the static `consPower`
+/// with a lambda; the port keeps the static consumer for the `hasPower`/
+/// `consumesPower`/`consPower` graph classification and lets the owning
+/// behavior write the current request here each tick. [`read_power_info`]
+/// overrides `PowerParams.usage` with this value when present (the graph then
+/// applies the usual `shouldConsume()` gate).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Component)]
+pub struct PowerDynamicUsage(pub f32);
+
 /// `PowerNode` configuration (`maxNodes`/`laserRange`/`autolink`).
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PowerNodeConfig {

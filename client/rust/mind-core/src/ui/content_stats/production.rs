@@ -426,8 +426,9 @@ fn attribute_crafter_stats(
         return;
     };
     let scale = crafter.boost_scale * (def.size * def.size) as f32;
-    // `baseEfficiency <= 0.0001f ? Stat.tiles : Stat.affinities`; the port has
-    // no `displayEfficiency`, so `startZero = false` (the Java default).
+    // `baseEfficiency <= 0.0001f ? Stat.tiles : Stat.affinities`, with the
+    // final `!displayEfficiency` argument controlling the `[accent]+` start
+    // (`AttributeCrafter.java:77-85`, `StatValues.blocks`).
     let stat = if crafter.base_efficiency <= 0.0001 {
         Stat::Tiles
     } else {
@@ -435,7 +436,14 @@ fn attribute_crafter_stats(
     };
     stats.add(
         stat,
-        attribute_block_cells(ctx, attribute, def.floating, scale, false, true),
+        attribute_block_cells(
+            ctx,
+            attribute,
+            def.floating,
+            scale,
+            !crafter.display_efficiency,
+            true,
+        ),
     );
 }
 

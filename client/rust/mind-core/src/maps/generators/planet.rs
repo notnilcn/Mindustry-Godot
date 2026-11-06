@@ -145,6 +145,13 @@ pub trait SectorView {
     fn planet_name(&self) -> Option<&str> {
         None
     }
+
+    /// Tile corner count (`Sector.tile.corners.length`; hexagon = 6), used by
+    /// the `World.getDarkness` sector-polygon term at generation time. `0`
+    /// (the default) disables the polygon term (`Sector` has no corners).
+    fn sides(&self) -> usize {
+        0
+    }
 }
 
 /// A flat identity [`SectorView`] (blank/test sector).
@@ -165,6 +172,8 @@ pub struct FlatSectorView {
     /// Full projected plane when built from a `PlanetGrid` tile
     /// (`Sector.makeRect`); `None` keeps the flat default plane.
     pub rect: Option<SectorRect>,
+    /// Tile corner count (`Sector.tile.corners.length`); `0` = no polygon.
+    pub sides: usize,
 }
 
 impl Default for FlatSectorView {
@@ -177,7 +186,22 @@ impl Default for FlatSectorView {
             has_enemy_base: false,
             has_base: false,
             rect: None,
+            sides: 0,
         }
+    }
+}
+
+impl FlatSectorView {
+    /// The `World.getDarkness` sector-polygon input for a generated grid of
+    /// `size` tiles (`Sector.rect.rotation` + `tile.corners.length` +
+    /// `Sector.getSize`). `None` when the view has no corner count, which keeps
+    /// the polygon term off for blank/test sectors and preset maps.
+    pub fn polygon(&self, size: i32) -> Option<crate::world::SectorPolygon> {
+        (self.sides > 0).then_some(crate::world::SectorPolygon {
+            rotation: self.rect().rotation,
+            sides: self.sides as i32,
+            size,
+        })
     }
 }
 
@@ -191,6 +215,10 @@ impl SectorView for FlatSectorView {
             radius: self.radius,
             ..SectorRect::default()
         })
+    }
+
+    fn sides(&self) -> usize {
+        self.sides
     }
 
     fn threat(&self) -> f32 {
@@ -556,14 +584,15 @@ impl PlanetGenerator {
 /// weather for a freshly generated sector. Ties at equal counts break by block
 /// id ascending (Java `ObjectIntMap` order is hash-based; deviation).
 ///
-/// The `World.getDarkness` sector-circle term is omitted (needs Arc 2-D
-/// `Noise.noise`, not ported; it only affects edge tiles of numbered sectors).
+/// Darkness is `World.getDarkness` (`World.java:484-536`): the border term,
+/// the generated-sector polygon term (Arc `Noise` edge, `grid.sector_polygon`)
+/// and the static-wall term, maxed in Java order.
 pub fn add_weather(
     grid: &crate::world::WorldGrid,
     content: &ContentRegistry,
     rules: &crate::io::json::rules::Rules,
 ) -> Vec<crate::io::json::rules::WeatherEntry> {
-    use crate::world::darkness::{border_darkness, get_static_darkness};
+    use crate::world::darkness::{border_darkness, get_static_darkness, sector_polygon_darkness};
 
     let water = content.liquid_id("water");
     let limit = rules.limit_map_area.then_some((
@@ -578,6 +607,7 @@ pub fn add_weather(
         let x = i32::from(tile.x);
         let y = i32::from(tile.y);
         let darkness = border_darkness(grid, rules.border_darkness, limit, x, y)
+            .max(sector_polygon_darkness(grid, x, y))
             .max(get_static_darkness(grid, content, x, y));
         if darkness >= 3.0 {
             continue;
@@ -879,6 +909,42 @@ mod tests {
         // border ring (700) wins.
         let entries = add_weather(&grid, &content, &rules);
         assert_eq!(weather_names(&entries), vec!["snowing".to_owned()]);
+    }
+
+    /// `PlanetGenerator.addWeather` reads the full `World.getDarkness`: a
+    /// water floor on a generated-sector-polygon-dark tile is not counted, so
+    /// it cannot trigger rain/fog (GAPS #29).
+    #[test]
+    fn add_weather_skips_sector_polygon_dark() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let mut grid = weather_grid(&content, "stone");
+        let water = content.block_id("shallow-water").expect("shallow-water");
+        // One water tile far outside the sector polygon.
+        grid.tiles.get_mut(1, 1).floor = water;
+        // Without the polygon term the water counts (`content.contains(water)`).
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(
+            weather_names(&entries),
+            vec!["rain".to_owned(), "fog".to_owned()]
+        );
+        // A generated-sector polygon makes that tile dark (>= 3), so it is
+        // skipped; the remaining stone tiles produce no weather.
+        grid.sector_polygon = Some(crate::world::SectorPolygon {
+            rotation: 0.0,
+            sides: 6,
+            size: 2,
+        });
+        assert!(
+            crate::world::darkness::sector_polygon_darkness(&grid, 1, 1) >= 3.0,
+            "corner tile is outside the sector polygon"
+        );
+        let entries = add_weather(&grid, &content, &rules);
+        assert!(
+            entries.is_empty(),
+            "polygon-dark tiles must not count: {:?}",
+            weather_names(&entries)
+        );
     }
 
     #[test]

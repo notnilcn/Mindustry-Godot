@@ -3,8 +3,17 @@
 
 //! List select, admin/ban lists, trace info and campaign complete.
 
-use godot::classes::{DisplayServer, HBoxContainer, RichTextLabel, VBoxContainer};
-use godot::obj::{NewAlloc, Singleton};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use godot::builtin::Side;
+use godot::classes::control::SizeFlags;
+use godot::classes::text_server::AutowrapMode;
+use godot::classes::{
+    Control, DisplayServer, HBoxContainer, PanelContainer, RichTextLabel, StyleBox,
+    StyleBoxTexture, VBoxContainer,
+};
+use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
 use super::super::dialog::{DialogController, MindDialog};
@@ -198,152 +207,575 @@ impl ListSelectDialog {
 }
 
 // ---------------------------------------------------------------------------
-// BansDialog / AdminsDialog
+// BansDialog / AdminsDialog (`BansDialog.java`, `AdminsDialog.java`)
 // ---------------------------------------------------------------------------
 
-/// Ban list + unban.
+/// `float w = 400f, h = 80f` (`BansDialog.java:22`, `AdminsDialog.java:22`).
+const ROSTER_ROW_WIDTH: f32 = 400.0;
+const ROSTER_ROW_HEIGHT: f32 = 80.0;
+/// `width(w - h - 24f)`: the wrapped label cell inside the 80 px row.
+const ROSTER_LABEL_WIDTH: f32 = ROSTER_ROW_WIDTH - ROSTER_ROW_HEIGHT - 24.0;
+/// `res.margin(14f)` (`BansDialog.java:31`, `AdminsDialog.java:31`).
+const ROSTER_MARGIN: f32 = 14.0;
+/// `button(Icon.cancel, ...).size(h).pad(-14f)`: the 14 px negative pad leaves
+/// an `80 - 2 * 14 = 52` px icon inside the 80 px cell.
+const ROSTER_CANCEL_SIZE: f32 = ROSTER_ROW_HEIGHT - ROSTER_MARGIN * 2.0;
+/// `Tex.button`'s nine-patch split (the theme builder's 12 px `button`).
+const ROSTER_BUTTON_SPLIT: f32 = 12.0;
+/// The one-time `confirm_result` hook installed on a roster dialog node.
+const ROSTER_CONFIRM_META: &str = "_mind_misc_roster_confirm";
+
+/// One `Administration.PlayerInfo` roster row: the identity the unban/unadmin
+/// action takes plus the last IP/name the dialog prints.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RosterEntry {
+    id: String,
+    ip: String,
+    name: String,
+}
+
+/// Which roster a dialog renders (`BansDialog` or `AdminsDialog`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RosterKind {
+    Bans,
+    Admins,
+}
+
+impl RosterKind {
+    /// `super("@server.bans")` / `super("@server.admins")`.
+    fn title_key(self) -> &'static str {
+        match self {
+            Self::Bans => "@server.bans",
+            Self::Admins => "@server.admins",
+        }
+    }
+
+    /// `@server.bans.none` / `@server.admins.none` (the empty-list row).
+    fn empty_key(self) -> &'static str {
+        match self {
+            Self::Bans => "@server.bans.none",
+            Self::Admins => "@server.admins.none",
+        }
+    }
+
+    /// The context key the roster rows ride on (`banned` / `admins`).
+    fn context_key(self) -> &'static str {
+        match self {
+            Self::Bans => "banned",
+            Self::Admins => "admins",
+        }
+    }
+
+    /// The `MindUi.admin_action` verb (`unbanPlayerID` / `unAdminPlayer`).
+    fn action(self) -> &'static str {
+        match self {
+            Self::Bans => "unban",
+            Self::Admins => "unadmin",
+        }
+    }
+
+    /// `ui.showConfirm` body (`@confirmunban` / `@confirmunadmin`).
+    fn confirm_text(self, entry: &RosterEntry) -> String {
+        match self {
+            Self::Bans => kit::t("@confirmunban").to_string(),
+            Self::Admins => kit::tm_format("@confirmunadmin", &[entry.name.as_str()]).to_string(),
+        }
+    }
+
+    /// The row label markup (`BansDialog.java:34`, `AdminsDialog.java:34`).
+    fn row_text(self, entry: &RosterEntry) -> String {
+        kit::markup_text(&self.row_markup(entry)).to_string()
+    }
+
+    /// [`Self::row_text`] before the Mindustry markup is translated to BBCode.
+    fn row_markup(self, entry: &RosterEntry) -> String {
+        match self {
+            Self::Bans => format!(
+                "IP: [lightgray]{}\n[]Name: [lightgray]{}",
+                entry.ip, entry.name
+            ),
+            Self::Admins => format!("[lightgray]{}", entry.name),
+        }
+    }
+}
+
+/// The roster view state (the dialog re-reads its context on every `shown`).
+#[derive(Default)]
+struct RosterState {
+    entries: Vec<RosterEntry>,
+    /// The identity waiting for the `@confirm` answer.
+    pending: String,
+}
+
+/// Reads `banned`/`admins` context rows: `PlayerInfo` dictionaries
+/// (`id`/`lastIP`/`lastName`; `uuid`/`ip`/`name` accepted) or bare names.
+fn roster_entries(value: Option<Variant>) -> Vec<RosterEntry> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Ok(rows) = value.try_to::<VarArray>() else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    for row in rows.iter_shared() {
+        if let Ok(info) = row.try_to::<VarDictionary>() {
+            let entry = RosterEntry {
+                id: dict_text(&info, &["id", "uuid"]),
+                ip: dict_text(&info, &["lastIP", "ip"]),
+                name: dict_text(&info, &["lastName", "name"]),
+            };
+            if !entry.id.is_empty() || !entry.name.is_empty() {
+                entries.push(entry);
+            }
+            continue;
+        }
+        if let Ok(name) = row.try_to::<GString>()
+            && !name.is_empty()
+        {
+            entries.push(RosterEntry {
+                name: name.to_string(),
+                ..RosterEntry::default()
+            });
+        }
+    }
+    entries
+}
+
+/// The first non-empty `GString` field among `keys`.
+fn dict_text(dict: &VarDictionary, keys: &[&str]) -> String {
+    for key in keys {
+        if let Some(value) = dict.get(*key)
+            && let Ok(text) = value.try_to::<GString>()
+        {
+            return text.to_string();
+        }
+    }
+    String::new()
+}
+
+/// `Tex.button` row background: the 12 px nine-patch split with the table's
+/// `margin(14f)` content inset.
+fn roster_style() -> Gd<StyleBox> {
+    let mut style = StyleBoxTexture::new_gd();
+    if let Some(texture) = kit::icon_texture("button") {
+        style.set_texture(&texture);
+    }
+    for side in [Side::LEFT, Side::TOP, Side::RIGHT, Side::BOTTOM] {
+        style.set_texture_margin(side, ROSTER_BUTTON_SPLIT);
+        style.set_content_margin(side, ROSTER_MARGIN);
+    }
+    style.upcast()
+}
+
+/// `BansDialog`: the ban list with one `Icon.cancel` unban button per row.
 #[derive(Default)]
 pub struct BansDialog {
-    rows: Option<Gd<MindTable>>,
+    state: Rc<RefCell<RosterState>>,
 }
 
 impl DialogController for BansDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
-        dialog.set_title_key("@server.bans");
-        dialog.should_pause = false;
-        self.rows = Some(dialog.content_table());
-        dialog.add_close_button(210.0);
+        roster_ready(dialog, &self.state, RosterKind::Bans);
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let Some(mut rows) = self.rows.clone() else {
-            return;
-        };
-        rows.bind_mut().clear();
-        let banned = string_array(dialog.context_value("banned"));
-        if banned.is_empty() {
-            let label = factory::label(&kit::t("@server.bans.none").to_string());
-            rows.bind_mut().add(&label).pad(8.0);
-            return;
-        }
-        for entry in banned {
-            // code-instantiated: ban rows are data-driven from the admin view.
-            let label = factory::label(&format!("[lightgray]{entry}"));
-            rows.bind_mut().add(&label).grow_x().pad(4.0);
-            rows.bind_mut().row();
-        }
+        roster_shown(dialog, &self.state, RosterKind::Bans);
     }
 }
 
-/// Admin list + unadmin.
+/// `AdminsDialog`: the admin roster with one `Icon.cancel` unadmin button.
 #[derive(Default)]
 pub struct AdminsDialog {
-    rows: Option<Gd<MindTable>>,
+    state: Rc<RefCell<RosterState>>,
 }
 
 impl DialogController for AdminsDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
-        dialog.set_title_key("@server.admins");
-        dialog.should_pause = false;
-        self.rows = Some(dialog.content_table());
-        dialog.add_close_button(210.0);
+        roster_ready(dialog, &self.state, RosterKind::Admins);
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let Some(mut rows) = self.rows.clone() else {
-            return;
-        };
-        rows.bind_mut().clear();
-        let admins = string_array(dialog.context_value("admins"));
-        if admins.is_empty() {
-            let label = factory::label(&kit::t("@server.admins.none").to_string());
-            rows.bind_mut().add(&label).pad(8.0);
-            return;
-        }
-        for entry in admins {
-            // code-instantiated: roster rows are data-driven from the admin view.
-            let label = factory::label(&format!("[lightgray]{entry}"));
-            rows.bind_mut().add(&label).grow_x().pad(4.0);
-            rows.bind_mut().row();
-        }
+        roster_shown(dialog, &self.state, RosterKind::Admins);
     }
 }
 
+/// `BansDialog`/`AdminsDialog` constructor tail: title, close button and the
+/// confirm answer hook. Both upstream dialogs are `addCloseButton()` +
+/// `shown(this::setup)` only.
+fn roster_ready(dialog: &mut MindDialog, state: &Rc<RefCell<RosterState>>, kind: RosterKind) {
+    dialog.set_title_key(kind.title_key());
+    dialog.should_pause = false;
+    dialog.clear_buttons();
+    dialog.add_close_button(210.0);
+    roster_connect_confirm(dialog, state, kind);
+}
+
+/// `shown(this::setup)`: reload the roster from the dialog context and draw it.
+fn roster_shown(dialog: &mut MindDialog, state: &Rc<RefCell<RosterState>>, kind: RosterKind) {
+    let entries = roster_entries(dialog.context_value(kind.context_key()));
+    {
+        let mut st = state.borrow_mut();
+        st.entries = entries;
+        st.pending.clear();
+    }
+    roster_render(dialog, state, kind);
+}
+
+/// `setup()`: the empty-list label or one 400x80 `Tex.button` row per entry.
+fn roster_render(dialog: &mut MindDialog, state: &Rc<RefCell<RosterState>>, kind: RosterKind) {
+    dialog.clear_content();
+    let mut table = dialog.content_table();
+    let entries = state.borrow().entries.clone();
+    if entries.is_empty() {
+        let label = factory::label(&kit::t(kind.empty_key()).to_string());
+        table.bind_mut().add(&label).pad(8.0);
+        return;
+    }
+    for entry in entries {
+        let row = roster_row(dialog, state, kind, &entry);
+        table
+            .bind_mut()
+            .add(&row)
+            .width(ROSTER_ROW_WIDTH)
+            .height(ROSTER_ROW_HEIGHT);
+        table.bind_mut().row();
+    }
+}
+
+/// One `Table res = new Table(Tex.button)` row: the wrapped IP/name label, the
+/// growing spacer and the `Icon.cancel` action.
+fn roster_row(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<RosterState>>,
+    kind: RosterKind,
+    entry: &RosterEntry,
+) -> Gd<PanelContainer> {
+    // code-instantiated: roster rows are server-driven admin views.
+    let mut panel = PanelContainer::new_alloc();
+    panel.add_theme_stylebox_override("panel", &roster_style());
+    let mut row = HBoxContainer::new_alloc();
+    row.add_theme_constant_override("separation", 0);
+    let label = factory::label(&kind.row_text(entry));
+    let mut label_rich: Gd<RichTextLabel> = label.clone().upcast();
+    label_rich.set_autowrap_mode(AutowrapMode::WORD_SMART);
+    label_rich.set_custom_minimum_size(Vector2::new(ROSTER_LABEL_WIDTH, 0.0));
+    label_rich.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+    row.add_child(&label);
+    // `res.add().growX()`.
+    let mut spacer = Control::new_alloc();
+    spacer.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    row.add_child(&spacer);
+    let mut cancel = factory::glyph_button("cancel", "X", "emptyi");
+    cancel.set_custom_minimum_size(Vector2::new(ROSTER_CANCEL_SIZE, ROSTER_CANCEL_SIZE));
+    let target = dialog.to_gd();
+    let state_for = state.clone();
+    let entry_for = entry.clone();
+    let callable = Callable::from_fn("roster_unlist", move |_args: &[&Variant]| {
+        roster_confirm(&target, &state_for, kind, &entry_for);
+        Variant::nil()
+    });
+    cancel.connect("pressed", &callable);
+    row.add_child(&cancel);
+    panel.add_child(&row);
+    panel
+}
+
+/// The `Icon.cancel` action: ask `@confirm` first (`showConfirm`) and answer
+/// through [`roster_connect_confirm`].
+fn roster_confirm(
+    dialog: &Gd<MindDialog>,
+    state: &Rc<RefCell<RosterState>>,
+    kind: RosterKind,
+    entry: &RosterEntry,
+) {
+    let _ = dialog;
+    state.borrow_mut().pending = entry.id.clone();
+    let text = kind.confirm_text(entry);
+    if let Some(mut ui) = kit::ui() {
+        let _ = ui.call("show_confirm", &[text.to_variant()]);
+    }
+}
+
+/// `confirm_result` -> the pending unban/unadmin, forwarded on the relay seam.
+fn roster_connect_confirm(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<RosterState>>,
+    kind: RosterKind,
+) {
+    let Some(mut ui) = kit::ui() else {
+        return;
+    };
+    if !ui.has_signal("confirm_result") || dialog.base().has_meta(ROSTER_CONFIRM_META) {
+        return;
+    }
+    let target = dialog.to_gd();
+    let state_for = state.clone();
+    let callable = Callable::from_fn("roster_confirm_result", move |args: &[&Variant]| {
+        let confirmed = args
+            .first()
+            .map(|value| value.to::<bool>())
+            .unwrap_or(false);
+        let target_for = target.clone();
+        let state_for = state_for.clone();
+        // The answer is emitted from inside a `MindUi` mutable borrow.
+        defer_action("roster_confirm_apply", move || {
+            roster_apply_confirm(&target_for, &state_for, kind, confirmed);
+        });
+        Variant::nil()
+    });
+    ui.connect("confirm_result", &callable);
+    dialog
+        .base_mut()
+        .set_meta(ROSTER_CONFIRM_META, &true.to_variant());
+}
+
+/// Applies an answered confirm: `unbanPlayerID`/`unAdminPlayer` through the
+/// `MindUi.admin_action` relay seam, then re-draws the roster like `setup()`.
+fn roster_apply_confirm(
+    dialog: &Gd<MindDialog>,
+    state: &Rc<RefCell<RosterState>>,
+    kind: RosterKind,
+    confirmed: bool,
+) {
+    let pending = {
+        let mut st = state.borrow_mut();
+        std::mem::take(&mut st.pending)
+    };
+    if confirmed && !pending.is_empty() && admin_action(kind.action(), &pending) {
+        // The relay listener accepted the request: drop the row like the Java
+        // `setup()` re-read of `netServer.admins`.
+        state
+            .borrow_mut()
+            .entries
+            .retain(|entry| entry.id != pending);
+    }
+    if !dialog.is_instance_valid() {
+        return;
+    }
+    let mut node = dialog.clone();
+    let mut bound = node.bind_mut();
+    roster_render(&mut bound, state, kind);
+}
+
+/// Forwards an admin roster action to `MindUi.admin_action`; false when the
+/// relay seam has no listener (the shell never fakes a server action).
+fn admin_action(action: &str, identifier: &str) -> bool {
+    let Some(mut ui) = kit::ui() else {
+        return false;
+    };
+    if !ui.has_method("admin_action") {
+        return false;
+    }
+    ui.call(
+        "admin_action",
+        &[
+            GString::from(action).to_variant(),
+            GString::from(identifier).to_variant(),
+        ],
+    )
+    .try_to::<bool>()
+    .unwrap_or(false)
+}
+
+/// A queued one-shot action (`Callable.call_deferred` payload).
+type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
+/// A `Callable` that queues `action` for the idle phase (`call_deferred`).
+fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
+    let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
+    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
+        let queued = slot.borrow_mut().take();
+        if let Some(action) = queued {
+            action();
+        }
+        Variant::nil()
+    });
+    callable.call_deferred(&[]);
+}
+
 // ---------------------------------------------------------------------------
-// TraceDialog
+// TraceDialog (`TraceDialog.java`)
 // ---------------------------------------------------------------------------
 
-/// Player trace info with per-field copy buttons.
+/// `Table table = new Table(Tex.clear); table.margin(14)` (`TraceDialog.java:21`).
+const TRACE_MARGIN: f32 = 14.0;
+/// `float s = 28f` (`TraceDialog.java:29`): the copy-button cell.
+const TRACE_COPY_SIZE: f32 = 28.0;
+/// `table.pane(...).padLeft(20f)` for the IP/name history lists.
+const TRACE_LIST_INDENT: f32 = 20.0;
+
+/// Player trace info (`TraceDialog`): the copyable player/IP/language/ID rows,
+/// the formatted scalar rows and the IP/name history lists.
 #[derive(Default)]
-pub struct TraceDialog {
-    table: Option<Gd<MindTable>>,
-}
+pub struct TraceDialog;
 
 impl DialogController for TraceDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@trace");
         dialog.should_pause = false;
-        self.table = Some(dialog.content_table());
+        dialog.clear_buttons();
         dialog.add_close_button(210.0);
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let Some(mut table) = self.table.clone() else {
-            return;
-        };
-        table.bind_mut().clear();
-        let player_name = dialog.context_string("player");
+        dialog.clear_content();
+        let mut table = dialog.content_table();
+        table.bind_mut().margin(TRACE_MARGIN);
+        let player = dialog.context_string("player").to_string();
         let info = dialog
             .context_value("info")
-            .map(|value| value.to::<VarDictionary>())
+            .and_then(|value| value.try_to::<VarDictionary>().ok())
             .unwrap_or_default();
-        self.add_copy_row(&mut table, &player_name);
-        self.add_copy_value(&mut table, &info, "ip");
-        self.add_copy_value(&mut table, &info, "locale");
-        self.add_copy_value(&mut table, &info, "uuid");
-        self.add_scalar(&mut table, "trace.modclient", info.get("modded"));
-        self.add_scalar(&mut table, "trace.mobile", info.get("mobile"));
-        self.add_scalar(&mut table, "trace.times.joined", info.get("timesJoined"));
-        self.add_scalar(&mut table, "trace.times.kicked", info.get("timesKicked"));
+        // `TraceDialog.java:31-45`: one copyable `bundle.format` line each.
+        for (key, value) in trace_field_rows(
+            &player,
+            &dict_text(&info, &["ip"]),
+            &dict_text(&info, &["locale"]),
+            &dict_text(&info, &["uuid"]),
+        ) {
+            trace_copy_row(&mut table, key, &value);
+        }
+        // `TraceDialog.java:47-50`: the four scalar lines.
+        for (key, value) in trace_scalar_rows(
+            bool_value(info.get("modded")),
+            bool_value(info.get("mobile")),
+            count_value(info.get("timesJoined")),
+            count_value(info.get("timesKicked")),
+        ) {
+            let text = kit::tm_format(key, &[value.as_str()]).to_string();
+            let label = factory::label(&text);
+            table.bind_mut().add(&label).pad(1.0).left();
+            table.bind_mut().row();
+        }
+        // `TraceDialog.java:52-63`: `@trace.ips` / `@trace.names` panes.
+        for (key, values) in trace_list_rows(
+            list_strings(info.get("ips")),
+            list_strings(info.get("names")),
+        ) {
+            let header = factory::label(&kit::t(key).to_string());
+            table.bind_mut().add(&header).pad(1.0).left();
+            table.bind_mut().row();
+            // code-instantiated: the IP/name history is trace data.
+            let mut column = VBoxContainer::new_alloc();
+            for value in values {
+                let label = factory::label(&format!("[lightgray]{value}"));
+                column.add_child(&label);
+            }
+            table
+                .bind_mut()
+                .add(&column)
+                .pad(1.0)
+                .pad_left(TRACE_LIST_INDENT)
+                .left();
+            table.bind_mut().row();
+        }
     }
 }
 
-impl TraceDialog {
-    fn add_copy_row(&self, table: &mut Gd<MindTable>, value: &GString) {
-        // code-instantiated: trace fields are data-driven from the trace info.
-        let mut row = HBoxContainer::new_alloc();
-        let copy_text = kit::t("@copy").to_string();
-        let mut button = factory::button(&copy_text);
-        let value_for_copy = value.clone();
-        let callable = Callable::from_fn("copy_trace", move |_args: &[&Variant]| {
-            DisplayServer::singleton().clipboard_set(&value_for_copy);
-            if let Some(mut ui) = kit::ui() {
-                let _ = ui.call("show_info", &[kit::t("@copied").to_variant()]);
+/// One `TraceDialog` copy row: `Icon.copySmall` 28x28 then the formatted text.
+fn trace_copy_row(table: &mut Gd<MindTable>, key: &str, value: &str) {
+    // code-instantiated: trace fields are data-driven from the trace info.
+    let mut row = HBoxContainer::new_alloc();
+    row.add_theme_constant_override("separation", 4);
+    let mut button = factory::glyph_button("copy", "@copy", "emptyi");
+    button.set_custom_minimum_size(Vector2::new(TRACE_COPY_SIZE, TRACE_COPY_SIZE));
+    let value_for_copy = GString::from(value);
+    let callable = Callable::from_fn("copy_trace", move |_args: &[&Variant]| {
+        DisplayServer::singleton().clipboard_set(&value_for_copy);
+        if let Some(mut ui) = kit::ui() {
+            let _ = ui.call("show_info_fade", &[kit::t("@copied").to_variant()]);
+        }
+    });
+    button.connect("pressed", &callable);
+    row.add_child(&button);
+    let text = kit::tm_format(key, &[value]).to_string();
+    let mut label = factory::label(&text);
+    label.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+    row.add_child(&label);
+    table.bind_mut().add(&row).pad(1.0).left();
+    table.bind_mut().row();
+}
+
+/// The copyable trace lines in Java order (`TraceDialog.java:31-45`):
+/// `trace.playername`, `trace.ip`, `trace.language`, `trace.id`.
+fn trace_field_rows(
+    player: &str,
+    ip: &str,
+    locale: &str,
+    uuid: &str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("@trace.playername", player.to_string()),
+        ("@trace.ip", ip.to_string()),
+        ("@trace.language", locale.to_string()),
+        ("@trace.id", uuid.to_string()),
+    ]
+}
+
+/// The scalar trace lines in Java order (`TraceDialog.java:47-50`).
+fn trace_scalar_rows(
+    modded: bool,
+    mobile: bool,
+    joined: i64,
+    kicked: i64,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("@trace.modclient", modded.to_string()),
+        ("@trace.mobile", mobile.to_string()),
+        ("@trace.times.joined", joined.to_string()),
+        ("@trace.times.kicked", kicked.to_string()),
+    ]
+}
+
+/// The IP/name history lists in Java order (`TraceDialog.java:52-63`).
+fn trace_list_rows(ips: Vec<String>, names: Vec<String>) -> Vec<(&'static str, Vec<String>)> {
+    vec![("@trace.ips", ips), ("@trace.names", names)]
+}
+
+/// A `String[]` trace field as text rows.
+fn list_strings(value: Option<Variant>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Ok(array) = value.try_to::<VarArray>() else {
+        return Vec::new();
+    };
+    array
+        .iter_shared()
+        .map(|entry| variant_text(&entry))
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// A Java `boolean` trace field (`false` when absent).
+fn bool_value(value: Option<Variant>) -> bool {
+    match value {
+        Some(value) => {
+            if let Ok(flag) = value.try_to::<bool>() {
+                flag
+            } else if let Ok(number) = value.try_to::<i64>() {
+                number != 0
+            } else {
+                variant_text(&value) == "true"
             }
-        });
-        button.connect("pressed", &callable);
-        row.add_child(&button);
-        let label = factory::label(&value.to_string());
-        row.add_child(&label);
-        table.bind_mut().add(&row).grow_x().pad(2.0);
-        table.bind_mut().row();
+        }
+        None => false,
     }
+}
 
-    fn add_copy_value(&self, table: &mut Gd<MindTable>, info: &VarDictionary, key: &str) {
-        let value = info
-            .get(key)
-            .map(|value| value.to::<GString>())
-            .unwrap_or_default();
-        self.add_copy_row(table, &value);
-    }
-
-    fn add_scalar(&self, table: &mut Gd<MindTable>, key: &str, value: Option<Variant>) {
-        let text = value
-            .map(|value| variant_text(&value))
-            .unwrap_or_else(|| "false".to_string());
-        let label = factory::label(&format!("{}: {text}", kit::t(key)));
-        table.bind_mut().add(&label).grow_x().pad(2.0);
-        table.bind_mut().row();
+/// A Java `int` trace field (`0` when absent).
+fn count_value(value: Option<Variant>) -> i64 {
+    match value {
+        Some(value) => {
+            if let Ok(number) = value.try_to::<i64>() {
+                number
+            } else if let Ok(number) = value.try_to::<f64>() {
+                number as i64
+            } else {
+                0
+            }
+        }
+        None => 0,
     }
 }
 
@@ -482,5 +914,70 @@ mod tests {
     fn pane_colors_are_stable() {
         use super::super::super::kit::styles;
         assert_eq!(styles::ACCENT, styles::ACCENT);
+    }
+
+    #[test]
+    fn roster_kinds_match_the_upstream_actions() {
+        assert_eq!(RosterKind::Bans.context_key(), "banned");
+        assert_eq!(RosterKind::Admins.context_key(), "admins");
+        assert_eq!(RosterKind::Bans.action(), "unban");
+        assert_eq!(RosterKind::Admins.action(), "unadmin");
+        assert_eq!(RosterKind::Bans.empty_key(), "@server.bans.none");
+        assert_eq!(RosterKind::Admins.empty_key(), "@server.admins.none");
+    }
+
+    #[test]
+    fn roster_row_markup_matches_the_java_strings() {
+        let entry = RosterEntry {
+            id: "uuid-1".into(),
+            ip: "1.2.3.4".into(),
+            name: "Alice".into(),
+        };
+        assert_eq!(
+            RosterKind::Bans.row_markup(&entry),
+            "IP: [lightgray]1.2.3.4\n[]Name: [lightgray]Alice"
+        );
+        assert_eq!(RosterKind::Admins.row_markup(&entry), "[lightgray]Alice");
+    }
+
+    #[test]
+    fn trace_rows_follow_the_java_order() {
+        let fields = trace_field_rows("Alice", "1.2.3.4", "en", "u-1");
+        let keys: Vec<&str> = fields.iter().map(|(key, _)| *key).collect();
+        assert_eq!(
+            keys,
+            [
+                "@trace.playername",
+                "@trace.ip",
+                "@trace.language",
+                "@trace.id"
+            ]
+        );
+        assert_eq!(fields[0].1, "Alice");
+        assert_eq!(fields[1].1, "1.2.3.4");
+        assert_eq!(fields[2].1, "en");
+        assert_eq!(fields[3].1, "u-1");
+        let scalars = trace_scalar_rows(false, true, 3, 1);
+        let values: Vec<&str> = scalars.iter().map(|(_, value)| value.as_str()).collect();
+        assert_eq!(values, ["false", "true", "3", "1"]);
+    }
+
+    #[test]
+    fn trace_lists_read_ips_and_names() {
+        let lists = trace_list_rows(
+            vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()],
+            vec!["Alice".to_string()],
+        );
+        assert_eq!(lists[0].0, "@trace.ips");
+        assert_eq!(lists[0].1, ["1.1.1.1", "2.2.2.2"]);
+        assert_eq!(lists[1].0, "@trace.names");
+        assert_eq!(lists[1].1, ["Alice"]);
+    }
+
+    #[test]
+    fn trace_scalars_default_to_java_primitive_values() {
+        let scalars = trace_scalar_rows(false, false, 0, 0);
+        let values: Vec<&str> = scalars.iter().map(|(_, value)| value.as_str()).collect();
+        assert_eq!(values, ["false", "false", "0", "0"]);
     }
 }

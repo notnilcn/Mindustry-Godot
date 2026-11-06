@@ -212,6 +212,19 @@ pub struct Sim {
     /// Last 64 drained logic-event kind tags (host debug probe; H06 T1).
     pub logic_event_log: std::collections::VecDeque<String>,
 
+    /// Bullets created by the world-processor `bullet` instruction, drained by
+    /// the sim each tick (`SpawnBulletI` consumer half; the live spawn itself
+    /// runs synchronously in [`crate::logic::world::run_spawn_bullet`] so the
+    /// instruction result is set). Hosts/tests pop it with
+    /// [`Sim::take_logic_bullet_spawns`].
+    pub logic_bullet_spawns: Vec<(crate::content::BulletId, Entity)>,
+
+    /// `SyncI` records drained this tick (`Call.syncVariable` network payload;
+    /// the local half applies the value to the owning executor's variable, the
+    /// server-side `LExecutor.syncVariable` write). Hosts/tests pop it with
+    /// [`Sim::take_logic_sync_events`].
+    pub logic_sync_events: Vec<crate::logic::world::LogicSyncEvent>,
+
     /// Set when a world-processor `setblock` mutated tiles (H06 T8): the host
     /// frame pump marks the renderer dirty and clears it.
     pub logic_world_changed: bool,
@@ -310,6 +323,8 @@ impl Sim {
             commands_applied: 0,
             logic_ui_events: Vec::new(),
             logic_event_log: std::collections::VecDeque::new(),
+            logic_bullet_spawns: Vec::new(),
+            logic_sync_events: Vec::new(),
             logic_world_changed: false,
             pending_events: Vec::new(),
             event_log: Vec::new(),
@@ -1508,10 +1523,98 @@ impl Sim {
                         _ => {}
                     }
                 }
+                // `SpawnBulletI` host consumer: the live entity was created
+                // synchronously in `run_spawn_bullet` (via
+                // [`spawn_logic_bullet`]) so the instruction result is set;
+                // here the drained record is kept for the host/debug probe.
+                LogicWorldEvent::SpawnBullet { def, entity, .. } => {
+                    if let Some(entity) = entity {
+                        self.logic_bullet_spawns.push((def, entity));
+                    }
+                }
+                // `SyncI`: `Call.syncVariable(build, id, value)` is a
+                // server-target remote that writes the authoritative executor
+                // variable (`LExecutor.java:2047-2060`). The local half does
+                // that same write (idempotent in single-player, where the
+                // variable already holds the value); the record stays in
+                // `logic_sync_events` for the (unported) plan-18/21 relay.
+                LogicWorldEvent::Sync(event) => {
+                    self.apply_logic_sync(&event);
+                    self.logic_sync_events.push(*event);
+                }
+                // `ClientDataI`: `Call.clientLogicData[Un]reliable` is a
+                // client-target remote relayed to `NetServer.logicClientData
+                // Handlers` (`NetServer.java:698-705`). The port has no relay,
+                // so the local half delivers to the registered handler bus;
+                // an empty bus is Java's no-handler no-op.
+                LogicWorldEvent::ClientData(event) => {
+                    if let Some(mut bus) = self
+                        .ecs
+                        .0
+                        .remove_resource::<crate::logic::world::LogicClientDataBus>()
+                    {
+                        bus.deliver(&event);
+                        self.ecs.0.insert_resource(bus);
+                    }
+                }
+                // `ucontrol payEnter` → `Call.unitBuildingControlSelect`
+                // (`LExecutor.java:441-446`): the port's `onControlSelect`
+                // implementor is `CoreBlock` (respawn the player at the core).
+                LogicWorldEvent::ControlSelect { unit, build } => {
+                    if self.player_unit == Some(unit) {
+                        let _ = self.control_select_core(build);
+                    }
+                }
                 // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
                 _ => {}
             }
         }
+    }
+
+    /// Applies `SyncI`'s server-target write locally (`LExecutor.syncVariable`,
+    /// `LExecutor.java:2047-2060`): the owning processor's executor variable is
+    /// set from the synced payload.
+    fn apply_logic_sync(&mut self, event: &crate::logic::world::LogicSyncEvent) {
+        let tile = crate::world::WorldGrid::unpack(event.building_pos);
+        let Some(entity) = self.grid.entity_at(tile) else {
+            return;
+        };
+        let Some(mut state) = self
+            .ecs
+            .0
+            .get_mut::<crate::logic::blocks::logic_block::LogicBlockState>(entity)
+        else {
+            return;
+        };
+        if event.var_id < 0 {
+            return;
+        }
+        let Some(cell) = state.executor.arena.cells.get_mut(event.var_id as usize) else {
+            return;
+        };
+        if cell.constant {
+            return;
+        }
+        if event.is_obj {
+            cell.is_obj = true;
+            cell.obj = event.obj.clone();
+        } else {
+            cell.is_obj = false;
+            cell.obj = None;
+            cell.num = event.num;
+        }
+    }
+
+    /// Pops the bullets created by the logic `bullet` instruction since the
+    /// last call (`SpawnBulletI` host consumer half).
+    pub fn take_logic_bullet_spawns(&mut self) -> Vec<(crate::content::BulletId, Entity)> {
+        std::mem::take(&mut self.logic_bullet_spawns)
+    }
+
+    /// Pops the `sync` records drained since the last call (`SyncI` network
+    /// payload; plan-18/21 relay sends these to the host).
+    pub fn take_logic_sync_events(&mut self) -> Vec<crate::logic::world::LogicSyncEvent> {
+        std::mem::take(&mut self.logic_sync_events)
     }
 
     /// Monotonic update counter (`GameState.updateId`).
@@ -2595,7 +2698,46 @@ impl Sim {
     pub fn set_selected_block(&mut self, block: BlockId) -> Result<(), SimError> {
         self.content.name(block).map_err(SimError::from)?;
         self.selected_block = block;
+        self.with_logic_player_view(|view| view.selected_block = Some(block));
         Ok(())
+    }
+
+    /// `player.selectedRotation` (`LAccess::SelectedRotation` sense source).
+    pub fn set_selected_rotation(&mut self, rotation: u8) {
+        self.with_logic_player_view(|view| view.selected_rotation = rotation.rem_euclid(4));
+    }
+
+    /// Replaces the `LAccess` player view (camera/ping/selection state;
+    /// [`crate::logic::globals::LogicPlayerView`]).
+    ///
+    /// The gdext host owns the real camera and input selection state, so it
+    /// pushes this each frame; `set_selected_block` keeps the placement half
+    /// fresh on its own.
+    pub fn set_logic_player_view(&mut self, view: crate::logic::globals::LogicPlayerView) {
+        self.ecs.0.insert_resource(view);
+    }
+
+    /// Mutable access to the `LAccess` player view, inserting a default first.
+    pub fn with_logic_player_view<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::logic::globals::LogicPlayerView) -> R,
+    ) -> R {
+        if self
+            .ecs
+            .0
+            .get_resource::<crate::logic::globals::LogicPlayerView>()
+            .is_none()
+        {
+            self.ecs
+                .0
+                .insert_resource(crate::logic::globals::LogicPlayerView::default());
+        }
+        let mut view = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::globals::LogicPlayerView>()
+            .expect("inserted above");
+        f(&mut view)
     }
 
     /// Wall/block at a tile.
@@ -2877,6 +3019,56 @@ impl Sim {
 /// Entity kind byte used by the checksum stream (`0 = building`).
 pub const KIND_BUILDING: u8 = 0;
 
+/// Applies a world-processor `SpawnBulletI` request synchronously
+/// (`LExecutor.SpawnBulletI` → `BulletType.create`, `LExecutor.java:1712`).
+///
+/// The sim owns the live bullet half: the [`unit_runtime::UnitRuntime`] holds
+/// the content registry, grid snapshot, combat RNG, FX sink and entity
+/// sequence, exactly like [`Sim::with_combat_ctx`]. The request is issued from
+/// [`crate::logic::world::run_spawn_bullet`] *inside* the VM instruction so
+/// the instruction's `result` variable receives the spawned bullet before the
+/// next instruction (Java's immediate `result.setobj(type.create(...))`).
+///
+/// Returns `None` without an installed unit runtime or when the bullet def is
+/// unknown/removed; the new bullet joins `runtime.bullets` so the next
+/// `UpdateBullets` pass runs it.
+pub(crate) fn spawn_logic_bullet(
+    world: &mut bevy_ecs::world::World,
+    spawn: &crate::combat::bullet::BulletSpawn,
+) -> Option<Entity> {
+    let mut runtime = world.remove_non_send::<unit_runtime::UnitRuntime>()?;
+    let audio = world
+        .remove_resource::<crate::audio::AudioSinkRes>()
+        .unwrap_or_else(crate::audio::AudioSinkRes::noop);
+    let mut spawned: Vec<Entity> = Vec::new();
+    let result = {
+        let unit_runtime::UnitRuntime {
+            content,
+            grid,
+            rng,
+            fx,
+            seq,
+            ..
+        } = &mut runtime;
+        let mut ctx = crate::combat::bullet::CombatCtx {
+            world,
+            content,
+            grid,
+            rng,
+            fx: fx.as_ref(),
+            audio: &audio,
+            seq,
+            spawned: &mut spawned,
+        };
+        ctx.spawn(spawn)
+    };
+    world.insert_resource(audio);
+    runtime.bullets_created += spawned.len() as u64;
+    runtime.bullets.extend(spawned);
+    world.insert_non_send(runtime);
+    result
+}
+
 #[cfg(test)]
 mod combat_tests;
 #[cfg(test)]
@@ -2885,3 +3077,299 @@ mod logic_campaign_tests;
 mod production_tests;
 #[cfg(test)]
 mod tests;
+
+/// Local sinks for the privileged logic event log (#27): `sync` (server-target
+/// executor write) and `clientdata` (per-channel handler bus), plus the
+/// `ucontrol payEnter` → core control-select consumer.
+#[cfg(test)]
+mod logic_sink_tests {
+    use super::*;
+
+    fn sink_sim() -> Sim {
+        let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
+        let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+        sim.grid.fill(stone, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.ecs
+            .0
+            .insert_resource(crate::logic::world::LogicWorldState {
+                headless: false,
+                ..crate::logic::world::LogicWorldState::new()
+            });
+        sim
+    }
+
+    /// #27: `SyncI` drains into the local executor write *and* the host queue
+    /// (`Call.syncVariable`, `LExecutor.java:2047-2060`).
+    #[test]
+    fn sync_event_writes_executor_variable_and_reaches_the_host_queue() {
+        use crate::logic::blocks::logic_block::LogicBlockState;
+        use crate::logic::world::{LogicSyncEvent, LogicWorldEvent};
+
+        let mut sim = sink_sim();
+        let id = sim
+            .world_block_id("micro-processor")
+            .expect("micro-processor");
+        sim.command(crate::determinism::SimCommand::Place {
+            x: 5,
+            y: 5,
+            block: id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("placed");
+        let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("entity");
+        let var = {
+            let mut state = sim
+                .ecs
+                .0
+                .get_mut::<LogicBlockState>(entity)
+                .expect("logic state");
+            let var = state.executor.arena.put_var("x");
+            state.executor.arena.get_mut(var).num = 0.0;
+            var
+        };
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+            .expect("state")
+            .emit(LogicWorldEvent::Sync(Box::new(LogicSyncEvent {
+                building_pos: TilePos::new(5, 5).pack(),
+                var_name: "x".to_owned(),
+                var_id: var as i32,
+                is_obj: false,
+                num: 42.0,
+                obj: None,
+            })));
+        sim.tick().expect("tick");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<LogicBlockState>(entity)
+                .expect("state")
+                .executor
+                .arena
+                .get(var)
+                .num,
+            42.0
+        );
+        let events = sim.take_logic_sync_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].var_name, "x");
+        assert_eq!(events[0].num, 42.0);
+    }
+
+    /// #27: `ClientDataI` drains into the registered per-channel handlers
+    /// (`NetServer.logicClientDataHandlers`, `NetServer.java:131,605-607,698-705`).
+    #[test]
+    fn client_data_event_reaches_registered_handlers() {
+        use crate::logic::world::{ClientLogicDataEvent, LogicClientDataBus, LogicWorldEvent};
+        use std::sync::{Arc, Mutex};
+
+        let mut sim = sink_sim();
+        let received = Arc::new(Mutex::new(Vec::<String>::new()));
+        let mut bus = LogicClientDataBus::default();
+        let sink = Arc::clone(&received);
+        bus.add_handler("chan", move |event| {
+            sink.lock()
+                .expect("lock")
+                .push(format!("{}:{}", event.channel, event.num));
+        });
+        sim.ecs.0.insert_resource(bus);
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+            .expect("state")
+            .emit(LogicWorldEvent::ClientData(Box::new(
+                ClientLogicDataEvent {
+                    channel: "chan".to_owned(),
+                    is_obj: false,
+                    num: 7.0,
+                    obj: None,
+                    reliable: true,
+                },
+            )));
+        sim.tick().expect("tick");
+        assert_eq!(*received.lock().expect("lock"), vec!["chan:7".to_owned()]);
+        assert!(
+            sim.logic_event_log.iter().any(|kind| kind == "clientdata"),
+            "{:?}",
+            sim.logic_event_log
+        );
+    }
+
+    /// #27: `ucontrol payEnter` emits `ControlSelect`; the sim consumer runs
+    /// `CoreBlock.onControlSelect` (respawn at the core) for the player unit.
+    #[test]
+    fn pay_enter_control_select_respawns_the_player_at_the_core() {
+        use crate::logic::world::LogicWorldEvent;
+        use crate::world::TilePos;
+
+        let mut sim = sink_sim();
+        sim.install_unit_runtime().expect("unit runtime");
+        let core_id = sim.world_block_id("core-shard").expect("core-shard");
+        sim.command(crate::determinism::SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: core_id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("placed");
+        let core = sim.grid.entity_at(TilePos::new(10, 10)).expect("core");
+        let old = sim
+            .spawn_player_unit("alpha", 1, 200.0, 200.0, 0.0)
+            .expect("player unit");
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+            .expect("state")
+            .emit(LogicWorldEvent::ControlSelect {
+                unit: old,
+                build: core,
+            });
+        sim.tick().expect("tick");
+        let player = sim.player_unit.expect("respawned player");
+        assert_ne!(player, old, "the old unit was released");
+        let (cx, cy) = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::Pos>(core)
+            .map(|pos| (pos.x, pos.y))
+            .expect("core pos");
+        let (px, py) = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::Pos>(player)
+            .map(|pos| (pos.x, pos.y))
+            .expect("player pos");
+        assert!(
+            (px - cx).abs() < 1.0 && (py - cy).abs() < 1.0,
+            "respawned at the core ({px}, {py}) vs ({cx}, {cy})"
+        );
+    }
+}
+
+/// #65: the `team_ai_system` host applies `BaseBuilderAI`'s
+/// `fill_core_items`/`spawn_core_unit` actions
+/// (`game/runtime.rs::run_team_base_builder`).
+#[cfg(test)]
+mod team_ai_host_tests {
+    use super::*;
+
+    fn host_world() -> (bevy_ecs::world::World, Entity) {
+        use crate::ecs::BuildingComp;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        use crate::world::limits::{BlockCounter, BuildRules};
+
+        let registry = crate::world::harness::BuildHarness::load_content();
+        let table = crate::world::block::BlockTable::build_default(&registry).expect("table");
+        let mut world = bevy_ecs::world::World::new();
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = crate::world::harness::BuildHarness::load_content();
+        let runtime = UnitRuntime::new(runtime_content, &grid, &world, 2, false);
+        world.insert_non_send(runtime);
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core = core_inst.spawn(
+            &mut world,
+            3,
+            TilePos::new(16, 16),
+            2,
+            0,
+            registry.items().len(),
+            registry.liquids().len(),
+        );
+        world.entity_mut(core).insert(BuildingComp {
+            pos: TilePos::new(16, 16),
+            block: registry.block_id("core-shard").expect("core id"),
+            team: TeamId(2),
+            rot: 0,
+        });
+        world.insert_resource(table);
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(BlockCounter::new());
+        world.insert_resource(crate::game::runtime::BaseCatalog::default());
+        (world, core)
+    }
+
+    fn host_campaign(world: &mut bevy_ecs::world::World, core: Entity) {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let content = crate::world::harness::BuildHarness::load_content();
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        let rule = session.rules.team_rule_mut(2);
+        rule.build_ai = true;
+        rule.fill_items = true;
+        rule.ai_core_spawn = true;
+        session.teams.register_core(core, TeamId(2), &session.rules);
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+    }
+
+    /// One host `team_ai_system` call fills the team's first core with every
+    /// item up to `getMaximumAccepted` (`BaseBuilderAI.java:53-58`).
+    #[test]
+    fn base_builder_host_fills_the_first_core() {
+        use crate::world::modules::ItemModule;
+
+        let (mut world, core) = host_world();
+        host_campaign(&mut world, core);
+        assert_eq!(
+            world.get::<ItemModule>(core).map(|items| items.total),
+            Some(0)
+        );
+        crate::game::runtime::team_ai_system(&mut world);
+        let copper = crate::world::harness::BuildHarness::load_content()
+            .item_id("copper")
+            .expect("copper");
+        let total = world
+            .get::<ItemModule>(core)
+            .map(|items| items.get(copper))
+            .unwrap_or(0);
+        assert!(total > 0, "the host filled the core (copper {total})");
+    }
+
+    /// After the `BaseBuilderAI` 360-tick spawn interval the host creates the
+    /// core unit at a random core (`BaseBuilderAI.java:61-72`).
+    #[test]
+    fn base_builder_host_spawns_a_core_unit() {
+        use crate::entities::comp::TeamComp;
+        use crate::entities::comp::unit::comp::UnitTypeComp;
+        use crate::sim::unit_runtime::UnitRuntime;
+
+        let (mut world, core) = host_world();
+        host_campaign(&mut world, core);
+        for _ in 0..360 {
+            crate::game::runtime::team_ai_system(&mut world);
+        }
+        let alpha = crate::world::harness::BuildHarness::load_content()
+            .unit_id("alpha")
+            .expect("alpha");
+        let runtime = world.get_non_send::<UnitRuntime>().expect("unit runtime");
+        let spawned = runtime
+            .units
+            .iter()
+            .filter(|entity| {
+                world
+                    .get::<UnitTypeComp>(**entity)
+                    .is_some_and(|comp| comp.type_id == alpha)
+                    && world
+                        .get::<TeamComp>(**entity)
+                        .is_some_and(|comp| comp.team == 2)
+            })
+            .count();
+        assert_eq!(spawned, 1, "the host spawned the core unit");
+    }
+}

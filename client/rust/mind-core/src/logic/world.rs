@@ -14,10 +14,12 @@
 //! disk; this module owns the *world* half the VM needs without a `PlaySession`
 //! borrow: [`LogicWorldState`] is a bevy `Resource` installed by the harness/host
 //! that carries the mutable rules/markers plus a deterministic event log. Sinks
-//! that require `ContentRegistry`/plan 10-11-17 harnesses (unit/bullet spawn,
-//! status, FX, audio) are recorded as typed [`LogicWorldEvent`]s and host-gated,
-//! matching the D2 relay/command design (`HIGH_LEVEL_PLAN` §2.2, plan 13 §8 R10);
-//! the owning harness applies them. `MessageState` is the deviation-5 seam.
+//! are recorded as typed [`LogicWorldEvent`]s for the host/checksum log; the
+//! ones the sim can apply with the live runtime reachable (unit spawn, bullet
+//! spawn, status, setblock, waves) are also applied synchronously so the
+//! instruction's result/state matches Java, while pure presentation sinks
+//! (messages, FX, audio, cutscenes) stay host-gated. `MessageState` is the
+//! deviation-5 seam.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
@@ -125,6 +127,59 @@ pub struct ClientLogicDataEvent {
     pub reliable: bool,
 }
 
+/// Local `clientdata` handler registry (the single-player half of
+/// `NetServer.logicClientDataHandlers`, `NetServer.java:131,605-607,698-705`).
+///
+/// Java's `Call.clientLogicDataReliable/Unreliable` are `@Remote(targets =
+/// Loc.client)` calls: the server relays them to every client, where each
+/// registered per-channel handler runs. The port has no relay (plan 18/21), so
+/// the sim delivers `LogicWorldEvent::ClientData` records to handlers
+/// registered here — mods/hosts get the same local callback surface, and with
+/// no handler the instruction is a no-op (Java's empty handler map).
+#[derive(Default, bevy_ecs::prelude::Resource)]
+pub struct LogicClientDataBus {
+    handlers: Vec<(String, Box<dyn FnMut(&ClientLogicDataEvent) + Send + Sync>)>,
+}
+
+impl std::fmt::Debug for LogicClientDataBus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogicClientDataBus")
+            .field("channels", &self.handlers.len())
+            .finish()
+    }
+}
+
+impl LogicClientDataBus {
+    /// `netServer.addLogicDataHandler(type, handler)`.
+    pub fn add_handler(
+        &mut self,
+        channel: impl Into<String>,
+        handler: impl FnMut(&ClientLogicDataEvent) + Send + Sync + 'static,
+    ) {
+        self.handlers.push((channel.into(), Box::new(handler)));
+    }
+
+    /// Delivers one record to every handler registered for its channel, in
+    /// registration order (`clientLogicDataReliable`'s loop).
+    pub fn deliver(&mut self, event: &ClientLogicDataEvent) {
+        for (channel, handler) in &mut self.handlers {
+            if *channel == event.channel {
+                handler(event);
+            }
+        }
+    }
+
+    /// Number of registered handlers (diagnostics).
+    pub fn len(&self) -> usize {
+        self.handlers.len()
+    }
+
+    /// Whether no handler is registered.
+    pub fn is_empty(&self) -> bool {
+        self.handlers.is_empty()
+    }
+}
+
 /// A deterministic, checksummable privileged-world side effect.
 ///
 /// Entity/audio/FX sinks are recorded rather than applied directly because the
@@ -164,11 +219,16 @@ pub enum LogicWorldEvent {
         effect: bool,
     },
     /// `SpawnBulletI`.
+    ///
+    /// The live spawn runs synchronously in [`run_spawn_bullet`] (so the
+    /// instruction's `result` variable receives the bullet, Java
+    /// `LExecutor.java:1712`); this event is the deterministic log record the
+    /// sim/host observes (`LogicWorldEvent::kind() == "bullet"`).
     SpawnBullet {
-        /// Bullet source (unit type / turret / content).
-        from: Option<LogicObject>,
-        /// Weapon/ammo index or item.
-        index: Option<LogicObject>,
+        /// Resolved bullet content (`type.create`'s `BulletType`).
+        def: crate::content::BulletId,
+        /// Spawned bullet entity (`None` when the def was rejected/removed).
+        entity: Option<Entity>,
         /// World x.
         x: f32,
         /// World y.
@@ -177,8 +237,8 @@ pub enum LogicWorldEvent {
         rotation: f32,
         /// Team.
         team: u8,
-        /// Owner object (`null` = derive from team).
-        owner: Option<LogicObject>,
+        /// Owner entity (`null` = derive from team).
+        owner: Option<Entity>,
         /// Damage override (`-1` = default).
         damage: f32,
         /// Velocity scale.
@@ -189,6 +249,15 @@ pub enum LogicWorldEvent {
         aim_x: f32,
         /// Aim y (world pixels).
         aim_y: f32,
+    },
+    /// `ucontrol payEnter`: `Call.unitBuildingControlSelect(unit, build)`
+    /// (`LExecutor.java:441-446`). The sim applies it (the core respawn path
+    /// lives on `Sim`, not on a bare `World`).
+    ControlSelect {
+        /// Unit entering the building.
+        unit: Entity,
+        /// Building entered.
+        build: Entity,
     },
     /// `ApplyEffectI`.
     ApplyStatus {
@@ -374,6 +443,7 @@ impl LogicWorldEvent {
             LogicWorldEvent::SetBlock { .. } => "setblock",
             LogicWorldEvent::SpawnUnit { .. } => "spawn",
             LogicWorldEvent::SpawnBullet { .. } => "bullet",
+            LogicWorldEvent::ControlSelect { .. } => "controlselect",
             LogicWorldEvent::ApplyStatus { .. } => "status",
             LogicWorldEvent::WeatherSet { .. } => "weatherset",
             LogicWorldEvent::SpawnWave { .. } => "spawnwave",
@@ -629,6 +699,7 @@ pub fn object_key(obj: &LogicObject) -> String {
     match obj {
         LogicObject::Building(e) => format!("building:{}", e.index().index()),
         LogicObject::Unit(e) => format!("unit:{}", e.index().index()),
+        LogicObject::Bullet(e) => format!("bullet:{}", e.index().index()),
         LogicObject::Content(c) => format!("content:{}:{}", c.type_.name(), c.id),
         LogicObject::Team(team) => format!("team:{team}"),
         LogicObject::Str(s) => format!("str:{s}"),
@@ -1205,7 +1276,7 @@ pub fn run_spawn_unit(
 pub fn run_spawn_bullet(
     exec: &mut Executor,
     world: &mut World,
-    _result: VarRef,
+    result: VarRef,
     from: VarRef,
     index: VarRef,
     x: VarRef,
@@ -1219,31 +1290,155 @@ pub fn run_spawn_bullet(
     aim_x: VarRef,
     aim_y: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    if !state.is_host {
+    // `if(net.client()) return`: the live bullet is server-authoritative; the
+    // port's `is_host` flag is the single-player/host equivalent.
+    let is_host = world
+        .get_resource::<LogicWorldState>()
+        .is_some_and(|state| state.is_host);
+    if !is_host {
         return;
     }
-    let owner_obj = obj_of(exec, owner);
+    let owner_entity = owner_entity_of(obj_of(exec, owner).as_ref());
+    // `Team teamVal = team.team(); if(teamVal == null && ownerVal instanceof
+    // Teamc t) teamVal = t.team(); if(teamVal == null) teamVal = derelict;`
     let team_id = match exec.arena.get(team.id()).team() {
         Some(team) => team,
-        None => crate::game::team::DERELICT.0,
+        None => owner_entity
+            .and_then(|entity| {
+                world
+                    .get::<TeamComp>(entity)
+                    .map(|team_comp| team_comp.team)
+            })
+            .unwrap_or(crate::game::team::DERELICT.0),
     };
-    state.emit(LogicWorldEvent::SpawnBullet {
-        from: obj_of(exec, from),
-        index: obj_of(exec, index),
+    let from_obj = obj_of(exec, from);
+    let index_num = numi(exec, index);
+    let index_obj = obj_of(exec, index);
+    // `if(type == null) return` (Java returns before setting `result`).
+    let Some(def) = resolve_bullet_type(world, from_obj.as_ref(), index_num, index_obj.as_ref())
+    else {
+        return;
+    };
+    let spawn = crate::combat::bullet::BulletSpawn {
+        def,
+        owner: owner_entity,
+        // The 8-arg `create(owner, team, ...)` overload passes `shooter = null`,
+        // so `BulletComp.shooter` falls back to `owner`
+        // (`BulletType.java:966`).
+        shooter: owner_entity,
+        team: team_id,
         x: exec.arena.get(x.id()).numf_world(),
         y: exec.arena.get(y.id()).numf_world(),
-        rotation: num(exec, rotation) as f32,
-        team: team_id,
-        owner: owner_obj,
+        angle: num(exec, rotation) as f32,
         damage: num(exec, damage) as f32,
         velocity_scl: num(exec, velocity_scl) as f32,
-        life_scl: num(exec, life_scl) as f32,
+        lifetime_scl: num(exec, life_scl) as f32,
         aim_x: exec.arena.get(aim_x.id()).numf_world(),
         aim_y: exec.arena.get(aim_y.id()).numf_world(),
-    });
+        ..crate::combat::bullet::BulletSpawn::default()
+    };
+    // The sim owns the live bullet half (`spawn_logic_bullet`); it runs
+    // synchronously here so `result` receives the entity before the next
+    // instruction, matching `type.create(...)`'s immediate `result.setobj`.
+    let entity = crate::sim::spawn_logic_bullet(world, &spawn);
+    out_obj(exec, result, entity.map(LogicObject::Bullet));
+    if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
+        state.emit(LogicWorldEvent::SpawnBullet {
+            def,
+            entity,
+            x: spawn.x,
+            y: spawn.y,
+            rotation: spawn.angle,
+            team: team_id,
+            owner: owner_entity,
+            damage: spawn.damage,
+            velocity_scl: spawn.velocity_scl,
+            life_scl: spawn.lifetime_scl,
+            aim_x: spawn.aim_x,
+            aim_y: spawn.aim_y,
+        });
+    }
+}
+
+/// `owner.obj() instanceof Entityc` for the bullet spawn's `owner` slot.
+fn owner_entity_of(owner: Option<&LogicObject>) -> Option<Entity> {
+    match owner {
+        Some(LogicObject::Building(entity))
+        | Some(LogicObject::Unit(entity))
+        | Some(LogicObject::Bullet(entity)) => Some(*entity),
+        _ => None,
+    }
+}
+
+/// `SpawnBulletI`'s source switch (`LExecutor.java:1682-1703`):
+///
+/// - `UnitType` → `weapons[index].bullet` (numeric `index`);
+/// - `ItemTurret`/`LiquidTurret`/`ContinuousLiquidTurret` → the ammo entry for
+///   the `index` content object (item/liquid);
+/// - `PowerTurret`/`ContinuousTurret` → `shootType` (the port's
+///   [`TurretAmmo::Power`]);
+/// - anything else → `None` (Java falls through and returns).
+fn resolve_bullet_type(
+    world: &World,
+    from: Option<&LogicObject>,
+    index_num: i32,
+    index_obj: Option<&LogicObject>,
+) -> Option<crate::content::BulletId> {
+    use crate::content::ContentType;
+    match from? {
+        LogicObject::Content(content_ref) if content_ref.type_ == ContentType::Unit => {
+            // Unit weapon tables live in the content registry (the sim's unit
+            // runtime owns the only live copy).
+            let content = &world
+                .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()?
+                .content;
+            let def = content.unit(crate::content::UnitTypeId::new(content_ref.id))?;
+            // `int index = weapon.numi(); type = index < 0 || index >=
+            // u.weapons.size ? null : u.weapons.get(index).bullet`.
+            let index = usize::try_from(index_num).ok()?;
+            def.weapons.get(index).map(|weapon| weapon.bullet.id)
+        }
+        LogicObject::Building(entity) => {
+            use crate::world::blocks::defense::turrets::{TurretAmmo, TurretState};
+            let state = world.get::<TurretState>(*entity)?;
+            match &state.config.ammo {
+                TurretAmmo::Item(entries) => {
+                    let item = match index_obj {
+                        Some(LogicObject::Content(content_ref))
+                            if content_ref.type_ == ContentType::Item =>
+                        {
+                            Some(crate::content::ItemId::new(content_ref.id))
+                        }
+                        _ => None,
+                    };
+                    entries
+                        .iter()
+                        .find(|entry| Some(entry.item) == item)
+                        .map(|entry| entry.bullet)
+                }
+                TurretAmmo::Liquid(entries) => {
+                    let liquid = match index_obj {
+                        Some(LogicObject::Content(content_ref))
+                            if content_ref.type_ == ContentType::Liquid =>
+                        {
+                            Some(crate::content::LiquidId::new(content_ref.id))
+                        }
+                        _ => None,
+                    };
+                    entries
+                        .iter()
+                        .find(|entry| Some(entry.liquid) == liquid)
+                        .map(|entry| entry.bullet)
+                }
+                // `PowerTurret.shootType` / `ContinuousTurret.shootType`.
+                TurretAmmo::Power(ammo) => Some(ammo.bullet),
+                // `PayloadAmmoTurret` is not one of the Java `instanceof`
+                // branches.
+                TurretAmmo::Payload(_) => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// `ApplyEffectI` — applies/clears the status live (`LExecutor.java:1765-1776`)
@@ -2350,5 +2545,103 @@ mod tests {
         });
         let exec = run_code(&mut world, "localeprint \"z.k\"\n");
         assert_eq!(exec.text_buffer, "from-bundle");
+    }
+
+    /// #25: `SpawnBulletI` resolves a unit type's weapon bullet and creates a
+    /// live bullet (`LExecutor.java:1675-1712`); the result variable receives a
+    /// [`LogicObject::Bullet`] and the event carries the resolved def.
+    #[test]
+    fn spawn_bullet_instruction_creates_a_live_bullet() {
+        use crate::sim::unit_runtime::UnitRuntime;
+
+        let content = crate::world::harness::BuildHarness::load_content();
+        let dagger = content.unit_by_name("dagger").expect("dagger").clone();
+        let dagger_bullet = dagger.weapons.first().expect("weapon").bullet.id;
+        let grid = crate::world::WorldGrid::new(32, 32);
+        let mut world = World::new();
+        let runtime = UnitRuntime::new(content.clone(), &grid, &world, 2, false);
+        world.insert_non_send(runtime);
+        world.insert_resource(LogicWorldState {
+            headless: false,
+            ..LogicWorldState::new()
+        });
+        let globals = crate::logic::globals::GlobalVars::with_content(&content);
+        let asm = Assembler::assemble_with(
+            "bullet result @dagger 0 64 64 0 2 null 10 1 1 -1 -1\nstop\n",
+            true,
+            globals,
+        )
+        .expect("assemble");
+        let mut exec = Executor::new();
+        exec.privileged = true;
+        exec.load(asm);
+        exec.run(&mut world, 16);
+
+        let result = exec
+            .arena
+            .by_name
+            .get("result")
+            .and_then(|id| exec.arena.get(*id).obj.clone());
+        let Some(LogicObject::Bullet(bullet)) = result else {
+            panic!("result is not a bullet object: {result:?}");
+        };
+        let component = world
+            .get::<crate::combat::bullet::Bullet>(bullet)
+            .expect("bullet component");
+        assert_eq!(component.def, dagger_bullet);
+        assert_eq!(component.damage, 10.0);
+        assert_eq!(world.get::<TeamComp>(bullet).map(|team| team.team), Some(2));
+        let runtime = world.get_non_send::<UnitRuntime>().expect("unit runtime");
+        assert_eq!(runtime.bullets, vec![bullet]);
+        assert_eq!(runtime.bullets_created, 1);
+        let state = world.get_resource::<LogicWorldState>().expect("state");
+        assert_eq!(state.count("bullet"), 1);
+        assert!(matches!(
+            state.events.last(),
+            Some(LogicWorldEvent::SpawnBullet {
+                def,
+                entity: Some(entity),
+                ..
+            }) if *def == dagger_bullet && *entity == bullet
+        ));
+    }
+
+    /// #25: an unknown source/bullet is a no-op (`if(type == null) return`)
+    /// and leaves `result` null.
+    #[test]
+    fn spawn_bullet_instruction_rejects_unknown_sources() {
+        let content: crate::content::ContentRegistry =
+            crate::world::harness::BuildHarness::load_content();
+        let grid = crate::world::WorldGrid::new(16, 16);
+        let mut world = World::new();
+        let runtime =
+            crate::sim::unit_runtime::UnitRuntime::new(content.clone(), &grid, &world, 2, false);
+        world.insert_non_send(runtime);
+        world.insert_resource(LogicWorldState::new());
+        let globals = crate::logic::globals::GlobalVars::with_content(&content);
+        let asm = Assembler::assemble_with(
+            "bullet result @conveyor 0 64 64 0 2 null 10 1 1 -1 -1\nstop\n",
+            true,
+            globals,
+        )
+        .expect("assemble");
+        let mut exec = Executor::new();
+        exec.privileged = true;
+        exec.load(asm);
+        exec.run(&mut world, 8);
+        let result = exec
+            .arena
+            .by_name
+            .get("result")
+            .map(|id| exec.arena.get(*id).obj.clone());
+        assert_eq!(result, Some(None), "result stays null");
+        assert!(
+            world
+                .get_resource::<LogicWorldState>()
+                .expect("state")
+                .events
+                .iter()
+                .all(|event| !matches!(event, LogicWorldEvent::SpawnBullet { .. }))
+        );
     }
 }

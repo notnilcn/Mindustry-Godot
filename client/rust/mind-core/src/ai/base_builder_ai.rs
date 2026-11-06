@@ -798,6 +798,57 @@ mod tests {
         assert_eq!(plans[0].block, wall);
     }
 
+    /// #65: the `aiCoreSpawn` action fires on the 360-tick timer while the
+    /// team has a core and is below `cores * coreUnitMultiplier`, and stops at
+    /// the cap. The host applies it in `game/runtime.rs`
+    /// (`spawn_core_unit_at_random_core`, read-verified; that file is not owned
+    /// by `ai`).
+    #[test]
+    fn update_reports_core_unit_spawn_on_the_timer() {
+        let harness = BuildHarness::new(32, 32, 9);
+        let bases = BaseRegistry::new();
+        let mut rng = ArcRand::new(1);
+        let mut plans = VecDeque::new();
+        let cores = [TilePos::new(16, 16)];
+        let mut rule = TeamRule::default();
+        rule.ai_core_spawn = true;
+        let mut inputs = BaseBuildInput {
+            content: &harness.content,
+            grid: &harness.grid,
+            table: harness.table(),
+            build_rules: &harness.rules,
+            counter: &harness.counter,
+            team_rule: &rule,
+            rules: &Rules::default(),
+            team: 0,
+            cores: &cores,
+            spawns: &[],
+            enemy_core_field: None,
+            enemy_cores: &[],
+            core_unit_count: 0,
+            bases: &bases,
+            rng: &mut rng,
+        };
+        let mut builder = BaseBuilderAi::new();
+        let mut spawned = 0;
+        for _ in 0..360 {
+            if builder.update(&mut inputs, &mut plans).spawn_core_unit {
+                spawned += 1;
+            }
+        }
+        assert_eq!(spawned, 1, "one spawn action per 360-tick interval");
+
+        // At the `cores.len() * coreUnitMultiplier` cap the action stays off.
+        inputs.core_unit_count = cores.len() as i32 * 2;
+        let mut capped = 0;
+        for _ in 0..720 {
+            if builder.update(&mut inputs, &mut plans).spawn_core_unit {
+                capped += 1;
+            }
+        }
+        assert_eq!(capped, 0, "cap reached: no core unit spawn");
+    }
+
     /// Java scatters candidate positions by up to 150 **tiles**
     /// (`BaseBuilderAI.java:159-160`, `Tmp.v1.rnd(Mathf.random(150))` added to
     /// the core's tile position). The pixel-scatter regression capped the

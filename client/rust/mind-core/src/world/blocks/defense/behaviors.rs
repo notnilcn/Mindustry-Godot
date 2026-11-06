@@ -208,6 +208,57 @@ impl BuildingBehavior for ForceProjectorBehavior {
             state.phase_heat = phase_heat;
         }
     }
+
+    /// `ForceBuild.setProp(shield)` (`ForceProjector.java:157-163`): a logic
+    /// `setprop @shield` writes back as `buildup` against the current
+    /// phase-boosted capacity.
+    fn logic_set_prop(
+        &self,
+        world: &mut World,
+        e: Entity,
+        a: crate::logic::LAccess,
+        v: f64,
+    ) -> bool {
+        if a != crate::logic::LAccess::Shield {
+            return false;
+        }
+        let Some(mut state) = world.get_mut::<ForceProjectorState>(e) else {
+            return false;
+        };
+        let capacity = state.shield_health + state.phase_shield_boost * state.phase_heat;
+        state.buildup = (capacity - v as f32).max(0.0);
+        true
+    }
+
+    /// `ForceBuild.overwrote(previous)` (`ForceProjector.java:334-340`): a
+    /// rebuilt dome keeps the previous build's `broken`/`buildup` when the
+    /// first overwritten build is the same block.
+    fn overwrote(&self, world: &mut World, e: Entity, previous: &[Entity]) {
+        let Some(&first) = previous.first() else {
+            return;
+        };
+        let same_block = world.get::<Building>(first).map(|b| b.block)
+            == world.get::<Building>(e).map(|b| b.block);
+        if !same_block {
+            return;
+        }
+        let Some(previous_state) = world.get::<ForceProjectorState>(first).cloned() else {
+            return;
+        };
+        if let Some(mut state) = world.get_mut::<ForceProjectorState>(e) {
+            state.broken = previous_state.broken;
+            state.buildup = previous_state.buildup;
+        }
+    }
+
+    /// `ForceBuild.pickedUp` (`ForceProjector.java:194-199`): shrink the dome
+    /// instantly (`radscl = warmup = 0`).
+    fn picked_up(&self, world: &mut World, e: Entity) {
+        if let Some(mut state) = world.get_mut::<ForceProjectorState>(e) {
+            state.radscl = 0.0;
+            state.warmup = 0.0;
+        }
+    }
 }
 
 impl ForceProjectorBehavior {
@@ -360,6 +411,14 @@ impl BuildingBehavior for ShieldWallBehavior {
             if shield > 0.0 {
                 state.shield_radius = 1.0;
             }
+        }
+    }
+
+    /// `ShieldWallBuild.pickedUp` (`ShieldWall.java:96-98`): the shield pops
+    /// (no dome) while the wall is carried.
+    fn picked_up(&self, world: &mut World, e: Entity) {
+        if let Some(mut state) = world.get_mut::<ShieldWallState>(e) {
+            state.shield_radius = 0.0;
         }
     }
 }
@@ -1335,6 +1394,161 @@ mod tests {
         assert!(
             should_consume(&harness),
             "a charging shockwave tower draws power"
+        );
+    }
+
+    /// GAPS #15: `ForceBuild.setProp(shield)` (`ForceProjector.java:157-163`)
+    /// maps a logic `setprop @shield` value back to `buildup` against the
+    /// current phase-boosted capacity.
+    #[test]
+    fn force_projector_set_prop_shield_maps_to_buildup() {
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let block = harness
+            .content()
+            .block_id("force-projector")
+            .expect("force-projector");
+        assert!(harness.place(6, 6, block, 0, true));
+        let entity = harness.build_at(6, 6).expect("projector");
+        let behavior = harness
+            .table()
+            .instance(block)
+            .expect("instance")
+            .behavior
+            .clone();
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(entity) {
+            state.phase_heat = 0.0;
+            state.buildup = 0.0;
+        }
+        assert!(behavior.logic_set_prop(
+            &mut harness.world,
+            entity,
+            crate::logic::LAccess::Shield,
+            600.0
+        ));
+        // `force-projector.shieldHealth = 750` (`Blocks.java:1966-1974`).
+        assert_eq!(
+            harness
+                .world
+                .get::<ForceProjectorState>(entity)
+                .expect("state")
+                .buildup,
+            150.0
+        );
+        // Other accessors fall through to the base `setProp` table.
+        assert!(!behavior.logic_set_prop(
+            &mut harness.world,
+            entity,
+            crate::logic::LAccess::Health,
+            1.0
+        ));
+    }
+
+    /// GAPS #15: `ForceBuild.overwrote` (`ForceProjector.java:334-340`) keeps
+    /// the previous dome's `broken`/`buildup` when the first overwritten build
+    /// is the same block.
+    #[test]
+    fn force_projector_overwrote_keeps_previous_state() {
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let block = harness
+            .content()
+            .block_id("force-projector")
+            .expect("force-projector");
+        let wall_block = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(4, 4, block, 0, true));
+        assert!(harness.place(10, 10, block, 0, true));
+        assert!(harness.place(14, 4, wall_block, 0, true));
+        let previous = harness.build_at(4, 4).expect("previous");
+        let rebuilt = harness.build_at(10, 10).expect("rebuilt");
+        let wall = harness.build_at(14, 4).expect("wall");
+        let behavior = harness
+            .table()
+            .instance(block)
+            .expect("instance")
+            .behavior
+            .clone();
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(previous) {
+            state.broken = false;
+            state.buildup = 123.0;
+        }
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(rebuilt) {
+            state.broken = true;
+            state.buildup = 0.0;
+        }
+        behavior.overwrote(&mut harness.world, rebuilt, &[previous]);
+        let state = harness
+            .world
+            .get::<ForceProjectorState>(rebuilt)
+            .expect("state");
+        assert!(!state.broken, "previous dome was not broken");
+        assert_eq!(state.buildup, 123.0);
+        // `previous.first().block == block` gate: a different block is ignored.
+        behavior.overwrote(&mut harness.world, rebuilt, &[wall]);
+        assert_eq!(
+            harness
+                .world
+                .get::<ForceProjectorState>(rebuilt)
+                .expect("state")
+                .buildup,
+            123.0
+        );
+    }
+
+    /// GAPS #15: `ForceBuild.pickedUp` (`ForceProjector.java:194-199`) and
+    /// `ShieldWallBuild.pickedUp` (`ShieldWall.java:96-98`) collapse the domes.
+    #[test]
+    fn picked_up_hooks_collapse_the_shields() {
+        use crate::world::blocks::defense::shields::{ForceProjectorState, ShieldWallState};
+
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let force_block = harness
+            .content()
+            .block_id("force-projector")
+            .expect("force-projector");
+        let wall_block = harness
+            .content()
+            .block_id("shielded-wall")
+            .expect("shielded-wall");
+        assert!(harness.place(4, 4, force_block, 0, true));
+        assert!(harness.place(10, 4, wall_block, 0, true));
+        let force = harness.build_at(4, 4).expect("force");
+        let wall = harness.build_at(10, 4).expect("wall");
+        let force_behavior = harness
+            .table()
+            .instance(force_block)
+            .expect("instance")
+            .behavior
+            .clone();
+        let wall_behavior = harness
+            .table()
+            .instance(wall_block)
+            .expect("instance")
+            .behavior
+            .clone();
+        if let Some(mut state) = harness.world.get_mut::<ForceProjectorState>(force) {
+            state.radscl = 1.0;
+            state.warmup = 1.0;
+        }
+        if let Some(mut state) = harness.world.get_mut::<ShieldWallState>(wall) {
+            state.shield_radius = 1.0;
+        }
+        force_behavior.picked_up(&mut harness.world, force);
+        wall_behavior.picked_up(&mut harness.world, wall);
+        let force_state = harness
+            .world
+            .get::<ForceProjectorState>(force)
+            .expect("force state");
+        assert_eq!((force_state.radscl, force_state.warmup), (0.0, 0.0));
+        assert_eq!(
+            harness
+                .world
+                .get::<ShieldWallState>(wall)
+                .expect("wall state")
+                .shield_radius,
+            0.0
         );
     }
 

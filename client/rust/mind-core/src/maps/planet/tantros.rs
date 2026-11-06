@@ -4,9 +4,9 @@
 //! `TantrosPlanetGenerator` (plan 06 §3.11). Ported from
 //! `maps/planet/TantrosPlanetGenerator.java`.
 //!
-//! Deferred (named): `addWeather` and `Schematics.placeLaunchLoadout` are
-//! plan-12 hooks; `world.getDarkness`-driven wall trim uses a zero darkness
-//! (no sector polygon yet), so floors are exact and walls are a subset.
+//! Deferred (named): `addWeather` is empty here like Java; the
+//! `Schematics.placeLaunchLoadout` placement is a plan-12 hook. Wall trim reads
+//! `World.getDarkness`'s border + generated-sector polygon terms.
 
 use crate::content::{BlockId, ContentRegistry};
 use crate::determinism::RngStream;
@@ -150,12 +150,19 @@ impl WorldGenerator for TantrosPlanetGenerator {
             },
         );
 
-        // `generate()`: trim walls from darkness (zero darkness for now) and
-        // place the launch loadout (plan-12 hook).
-        generator.base.pass(tiles, content, |planet, draw, x, y| {
+        // `generate()` (`TantrosPlanetGenerator.java:66-78`): wall tiles where
+        // any `Geometry.d8` neighbour has `world.getDarkness > 0` — border
+        // darkness + the sector polygon, same as `trimDark` (GAPS #28).
+        let darkness = crate::maps::generators::basic::GenerationDarkness::new(
+            tiles.width,
+            tiles.height,
+            sector.polygon(tiles.width),
+            true,
+        );
+        generator.base.pass(tiles, content, |_planet, draw, x, y| {
             let mut max = 0.0f32;
             for (dx, dy) in crate::maps::generators::basic::D8 {
-                max = max.max(sector_darkness(x + dx, y + dy));
+                max = max.max(darkness.get(content, x + dx, y + dy));
             }
             if max > 0.0
                 && let Some(def) = content.block(draw.floor)
@@ -163,7 +170,6 @@ impl WorldGenerator for TantrosPlanetGenerator {
             {
                 draw.block = wall;
             }
-            let _ = planet;
         });
     }
 }
@@ -184,11 +190,6 @@ fn get_block_static(seed: i32, content: &ContentRegistry, position: [f32; 3]) ->
     let row = (temp * ARR.len() as f32).clamp(0.0, (ARR.len() - 1) as f32) as usize;
     let col = (height * ARR[0].len() as f32).clamp(0.0, (ARR[0].len() - 1) as f32) as usize;
     content.block_id(ARR[row][col]).unwrap_or(BlockId::AIR)
-}
-
-/// Sector darkness at `(x, y)`; plan 12 supplies the real polygon falloff.
-fn sector_darkness(_x: i32, _y: i32) -> f32 {
-    0.0
 }
 
 #[cfg(test)]
@@ -235,7 +236,9 @@ mod tests {
             // Golden history (L08 T1 protocol, batched L06 regen): 7762880fe0716320
             // 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 and uses unsigned
             // shifts, javap arc.util.noise.Simplex): -> e53960b4602d5ec2.
-            "e53960b4602d5ec2"
+            // GAPS #28 (the generate() pass now reads World.getDarkness' border
+            // term, TantrosPlanetGenerator.java:66-78): -> fc23d73c0e7c2ee4.
+            "fc23d73c0e7c2ee4"
         );
     }
 }

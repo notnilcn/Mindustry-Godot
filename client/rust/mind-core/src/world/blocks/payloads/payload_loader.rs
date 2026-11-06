@@ -17,7 +17,7 @@ use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::block::BlockTable;
 use crate::world::blocks::distribution::transfer;
 use crate::world::blocks::liquid::{LiquidNode, accept_liquid, current_liquid};
-use crate::world::blocks::power::read_power_info;
+use crate::world::blocks::power::{PowerDynamicUsage, read_power_info};
 use crate::world::modules::{ItemModule, LiquidModule, PowerModule};
 use crate::world::update::{edelta, run_timer};
 
@@ -91,6 +91,29 @@ pub(crate) fn liquid_capacity(world: &World, e: Entity) -> f32 {
 /// consumer (`consPower.buffered`).
 pub fn has_battery(world: &World, payload_entity: Entity) -> bool {
     read_power_info(world, payload_entity).is_some_and(|params| params.buffered)
+}
+
+/// `PayloadLoader.init`'s `consumePowerDynamic` lambda (`PayloadLoader.java:78-81`):
+/// `shouldConsume() ? (hasBattery() && !exporting ? maxPowerConsumption +
+/// basePowerUse : basePowerUse) : 0`.
+///
+/// `basePowerUse` is the loader's static `consumePower(2f)` (`Blocks.java:6730`).
+pub fn dynamic_power_usage(world: &World, e: Entity, behavior: &PayloadLoaderBehavior) -> f32 {
+    let holder = world.get::<PayloadHolder>(e).copied().unwrap_or_default();
+    let Some(payload) = holder.payload else {
+        return 0.0;
+    };
+    let exporting = world
+        .get::<PayloadLoaderBuild>(e)
+        .is_some_and(|state| state.exporting);
+    let battery = payload
+        .entity
+        .is_some_and(|entity| has_battery(world, entity));
+    if battery && !exporting {
+        behavior.max_power_consumption + behavior.base_power_use
+    } else {
+        behavior.base_power_use
+    }
 }
 
 /// Ensures the loader/unloader owns a plan-09 [`LiquidNode`] so external
@@ -199,6 +222,16 @@ pub fn loader_should_export(world: &World, e: Entity) -> bool {
 
 /// `PayloadLoaderBuild.updateTile` core (shared with the unloader's base call).
 pub fn loader_update(world: &mut World, e: Entity, behavior: &PayloadLoaderBehavior) {
+    // `consumePowerDynamic` (`PayloadLoader.java:80`): publish the live request
+    // for the next power-graph pass (`UpdatePowerGraph` runs before
+    // `UpdateBuildings`, so this is the previous tick's value — the graph
+    // already reads `shouldConsumePower`/status the same way).
+    let usage = dynamic_power_usage(world, e, behavior);
+    if let Some(mut dynamic) = world.get_mut::<PowerDynamicUsage>(e) {
+        dynamic.0 = usage;
+    } else {
+        world.entity_mut(e).insert(PowerDynamicUsage(usage));
+    }
     payload_block_update(world, e);
     if loader_should_export(world, e) {
         move_out_payload(world, e);
@@ -388,6 +421,14 @@ impl BuildingBehavior for PayloadLoaderBehavior {
         loader_update(world, e, self);
     }
 
+    /// `PayloadLoaderBuild.shouldConsume` (`PayloadLoader.java:239-241`):
+    /// `payload != null`.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<PayloadHolder>(e)
+            .is_some_and(|holder| holder.payload.is_some())
+    }
+
     fn accept_item(
         &self,
         world: &World,
@@ -544,5 +585,70 @@ mod tests {
             .map(|m| m.status)
             .unwrap_or(0.0);
         assert!(status > 0.2, "payload battery should be charged: {status}");
+        // GAPS #22: the live `consumePowerDynamic` request reaches the graph.
+        assert_eq!(
+            harness
+                .world
+                .get::<PowerDynamicUsage>(loader_e)
+                .map(|usage| usage.0),
+            Some(42.0),
+            "battery payload requests maxPowerConsumption + basePowerUse"
+        );
+    }
+
+    /// GAPS #22 (`PayloadLoader.init` `consumePowerDynamic`,
+    /// `PayloadLoader.java:78-81`): no payload -> 0; a battery payload ->
+    /// `maxPowerConsumption + basePowerUse`; exporting -> `basePowerUse`.
+    #[test]
+    fn loader_publishes_dynamic_power_usage() {
+        let mut harness = harness();
+        let loader = harness
+            .content()
+            .block_id("payload-loader")
+            .expect("payload-loader");
+        let battery = harness.content().block_id("battery").expect("battery");
+        assert!(harness.place(6, 6, loader, 0, true));
+        let loader_e = harness.build_at(6, 6).expect("loader");
+
+        harness.tick();
+        assert_eq!(
+            harness
+                .world
+                .get::<PowerDynamicUsage>(loader_e)
+                .map(|usage| usage.0),
+            Some(0.0),
+            "no payload -> shouldConsume false -> 0 power"
+        );
+
+        let payload_entity =
+            super::super::create_build_payload(&mut harness.world, battery, 0).expect("payload");
+        let payload = PayloadRef {
+            entity: Some(payload_entity),
+            content: battery.raw(),
+            is_block: true,
+        };
+        super::super::handle_payload(&mut harness.world, loader_e, loader_e, payload);
+        harness.tick();
+        assert_eq!(
+            super::read_power_info(&harness.world, loader_e)
+                .map(|params| params.usage)
+                .unwrap_or(-1.0),
+            42.0,
+            "the graph reads the dynamic request through read_power_info"
+        );
+
+        // `exporting` flips the request back to the static base usage.
+        if let Some(mut state) = harness.world.get_mut::<PayloadLoaderBuild>(loader_e) {
+            state.exporting = true;
+        }
+        harness.tick();
+        assert_eq!(
+            harness
+                .world
+                .get::<PowerDynamicUsage>(loader_e)
+                .map(|usage| usage.0),
+            Some(2.0),
+            "exporting -> basePowerUse"
+        );
     }
 }

@@ -1187,6 +1187,7 @@ impl Instruction {
                 } else if let Some(
                     t @ (LogicObject::Building(_)
                     | LogicObject::Unit(_)
+                    | LogicObject::Bullet(_)
                     | LogicObject::Content(_)
                     | LogicObject::Team(_)),
                 ) = &target

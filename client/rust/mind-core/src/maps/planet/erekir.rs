@@ -6,11 +6,12 @@
 //!
 //! `state.rules.*` and `Schematics.placeLaunchLoadout` run in
 //! `place_structures` (L06 T6.2; Java's Erekir generator has no
-//! `Waves.generate`). `world.getDarkness` is zero until plan 12's sector
-//! polygon lands. The `steam` floor attribute is populated for the 8
-//! Erekir vents (plan 02), so [`steam_attr`] now skips existing steam tiles when
+//! `Waves.generate`). `trimDark` reads `World.getDarkness`'s border +
+//! generated-sector polygon terms at generation time (GAPS #28). The `steam`
+//! floor attribute is populated for the 8 Erekir vents (plan 02), so
+//! [`steam_attr`] now skips existing steam tiles when
 //! placing vents (the `world_gen_erekir` golden moved `b8fd9327d1d0b300` →
-//! `daf8a3e078b79de7`).
+//! `daf8a3e078b79de7` → `6863f0a306c44873`).
 
 use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
@@ -714,7 +715,12 @@ impl WorldGenerator for ErekirPlanetGenerator {
             }
         }
 
-        self.planet.base.trim_dark(tiles, content, |_, _| 0.0);
+        // `trimDark()` (`ErekirPlanetGenerator.java:306`): border darkness +
+        // the sector polygon (GAPS #28).
+        let polygon = self.sector.polygon(tiles.width);
+        self.planet
+            .base
+            .trim_dark_sector(tiles, content, polygon, true);
 
         // Steam vents.
         let mut vent_count = 0;
@@ -1044,7 +1050,9 @@ mod tests {
             // 38dc36f1 (L02 T1, Floor.decoration, Blocks.java:705-822): -> 7e34db8a547d410e;
             // 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 and uses unsigned
             // shifts, javap arc.util.noise.Simplex): -> 56a0d8a4ad4d4a1d.
-            "56a0d8a4ad4d4a1d"
+            // GAPS #28 (trimDark now reads World.getDarkness' borderDarkness term,
+            // ErekirPlanetGenerator.java:306): -> 6863f0a306c44873.
+            "6863f0a306c44873"
         );
     }
 }

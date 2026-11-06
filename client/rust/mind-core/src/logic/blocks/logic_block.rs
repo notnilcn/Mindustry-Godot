@@ -499,7 +499,7 @@ fn type_name_of(cell: &LVar) -> &'static str {
         Some(LogicObject::Unit(_)) => "unit",
         // Java `Align`/`LUnitControl`/... are enums (`instanceof Enum`).
         Some(LogicObject::Enum(_) | LogicObject::Align(_)) => "enum",
-        Some(LogicObject::Query(_)) => "unknown",
+        Some(LogicObject::Query(_) | LogicObject::Bullet(_)) => "unknown",
     }
 }
 

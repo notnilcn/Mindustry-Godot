@@ -88,7 +88,10 @@ pub fn write_object(w: &mut EntityWriter, world: &World, value: &LogicObject) ->
         }
         LogicObject::Align(v) => typeio::write_object(w, &TypeValue::Double(*v as f64)),
         // Upstream `TypeIO.writeObject` rejects arbitrary enums; write null.
-        LogicObject::Enum(_) | LogicObject::Query(_) => typeio::write_object(w, &TypeValue::Null),
+        // Bullets are written as null too (`TypeIO.java:179`).
+        LogicObject::Enum(_) | LogicObject::Query(_) | LogicObject::Bullet(_) => {
+            typeio::write_object(w, &TypeValue::Null)
+        }
     }
 }
 

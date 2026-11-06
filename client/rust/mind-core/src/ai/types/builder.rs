@@ -9,7 +9,8 @@
 //! to the core when idle under fire. The actual construct progress runs in
 //! `Sim::update_builders` (`sim/builder.rs`), now for every builder unit.
 //!
-//! Deferred (documented): the build-turret hold-position scan and `PrebuildAI`
+//! The build-turret hold-position scan (`holdPosition` stance: pick the first
+//! reachable team plan instead of the head) is ported. Deferred: `PrebuildAI`
 //! (T17 spawns the defenders, behaviour deferred by the plan).
 
 use bevy_ecs::entity::Entity;
@@ -460,6 +461,20 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
                     false,
                 );
             }
+        } else if !plan_within(
+            pos,
+            plan.x,
+            plan.y,
+            def.build_range - crate::config::TILESIZE as f32,
+        ) && !crate::game::runtime::rules_of(ctx.world)
+            .is_some_and(|rules| rules.infinite_resources)
+        {
+            // `hold`: "discard the plan, it's too far away to reach while
+            // holding position. try the next one" (BuilderAI.java:132-135).
+            if let Some(mut plans) = ctx.world.get_mut::<BuilderPlans>(unit) {
+                plans.plans.pop_front();
+            }
+            state.last_plan = None;
         }
         // Java falls through to the boost tail (BuilderAI.java:231-233).
         apply_builder_boosting(ctx, unit, &def, moving);
@@ -523,12 +538,54 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
     }
     state.rebuild_timer = state.rebuild_period;
 
-    let Some(head) = ctx
+    let team_plans: Vec<crate::game::teams::BlockPlan> = ctx
         .world
         .get_resource::<crate::game::runtime::CampaignRuntime>()
         .and_then(|campaign| campaign.session.teams.get_or_null(crate::ecs::TeamId(team)))
-        .and_then(|data| data.plans.front().cloned())
-    else {
+        .map(|data| data.plans.iter().cloned().collect())
+        .unwrap_or_default();
+    if team_plans.is_empty() {
+        return;
+    }
+
+    if hold {
+        // `if(hold)`: build-turret behaviour — scan the queue in order and take
+        // the first plan in `buildRange` that passes `Build.validPlace`
+        // (`BuilderAI.java:193-212`). The chosen plan moves to the tail so the
+        // next unit builds something else.
+        let picked = pick_hold_plan(&team_plans, pos, def.build_range, |plan| {
+            valid_place(
+                ctx,
+                team,
+                plan.block,
+                plan.x as i32,
+                plan.y as i32,
+                plan.rotation.rem_euclid(4) as u8,
+            )
+        });
+        if let Some(index) = picked {
+            let plan = &team_plans[index];
+            state.last_plan = Some(TilePos::new(plan.x, plan.y));
+            let mut unit_plan = UnitBuildPlan::place(
+                plan.x,
+                plan.y,
+                plan.rotation.rem_euclid(4) as u8,
+                plan.block,
+            );
+            if let Some(config) = plan.config.clone() {
+                unit_plan.config = config;
+            }
+            if let Some(mut plans) = ctx.world.get_mut::<BuilderPlans>(unit) {
+                plans.add_build(unit_plan, false);
+            }
+            move_team_plan_to_tail(ctx, team, index);
+        }
+        // No reachable plan this tick: keep holding, try again next period.
+        apply_builder_boosting(ctx, unit, &def, moving);
+        return;
+    }
+
+    let Some(head) = team_plans.first().cloned() else {
         return;
     };
 
@@ -608,6 +665,34 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
     apply_builder_boosting(ctx, unit, &def, moving);
 }
 
+/// `unit.within(block.x * tilesize, block.y * tilesize, range)` for a
+/// `BlockPlan` position (the port's plan positions are tile origins on both
+/// sides of the check, matching the rest of this file).
+fn plan_within(pos: crate::entities::comp::Pos, x: i16, y: i16, range: f32) -> bool {
+    let ts = crate::config::TILESIZE as f32;
+    let dx = x as f32 * ts - pos.x;
+    let dy = y as f32 * ts - pos.y;
+    dx * dx + dy * dy <= range * range
+}
+
+/// `blocks.addLast(blocks.removeIndex(i))`: moves the chosen hold-position plan
+/// to the tail of the team queue so the next builder picks another one
+/// (`BuilderAI.java:203-205`).
+fn move_team_plan_to_tail(ctx: &mut AiCtx, team: u8, index: usize) {
+    let Some(mut campaign) = ctx
+        .world
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    else {
+        return;
+    };
+    let data = campaign.session.teams.get(crate::ecs::TeamId(team));
+    if index < data.plans.len() {
+        if let Some(plan) = data.plans.remove(index) {
+            data.plans.push_back(plan);
+        }
+    }
+}
+
 /// `BuilderAI.updateUnit` boost tail (`BuilderAI.java:231-233`): a non-flying
 /// builder boosts while `boostWhenBuilding`, moving, on a duct/damaged/deep
 /// floor. Like the MinerAI port (`miner.rs`), the per-kind floor terms are
@@ -646,6 +731,19 @@ fn apply_builder_boosting(
     {
         core.boosting = boosting;
     }
+}
+
+/// `if(hold)`'s plan scan (`BuilderAI.java:193-212`): the index of the first
+/// team plan within `range` of `pos` that `valid` accepts.
+fn pick_hold_plan(
+    plans: &[crate::game::teams::BlockPlan],
+    pos: Pos,
+    range: f32,
+    mut valid: impl FnMut(&crate::game::teams::BlockPlan) -> bool,
+) -> Option<usize> {
+    plans
+        .iter()
+        .position(|plan| plan_within(pos, plan.x, plan.y, range) && valid(plan))
 }
 
 #[cfg(test)]
@@ -723,6 +821,43 @@ mod tests {
         assert!(
             !run(&mut harness, &flying_def, true),
             "flying builders are untouched by the tail"
+        );
+    }
+
+    /// #64: the `holdPosition` branch picks the first *reachable* team plan
+    /// instead of the queue head (`BuilderAI.java:193-212`).
+    #[test]
+    fn hold_scan_skips_out_of_range_and_invalid_plans() {
+        use crate::game::teams::BlockPlan;
+
+        let ts = crate::config::TILESIZE as f32;
+        let pos = Pos {
+            x: 10.0 * ts,
+            y: 10.0 * ts,
+        };
+        let plan = |x: i16, y: i16| BlockPlan {
+            x,
+            y,
+            rotation: 0,
+            block: BlockId::AIR,
+            config: None,
+            removed: false,
+        };
+        let plans = vec![
+            plan(30, 30), // out of range
+            plan(11, 10), // in range but fails valid_place
+            plan(12, 10), // first reachable + valid
+            plan(13, 10), // later valid
+        ];
+        let picked = pick_hold_plan(&plans, pos, 40.0, |plan| plan.x != 11);
+        assert_eq!(picked, Some(2), "first in-range valid plan wins");
+
+        // Without a range hit (and with every plan invalid), nothing is picked.
+        assert_eq!(pick_hold_plan(&plans, pos, 40.0, |_| false), None);
+        assert_eq!(
+            pick_hold_plan(&plans, pos, 4.0, |_| true),
+            None,
+            "all plans are outside the 4 px build range"
         );
     }
 }

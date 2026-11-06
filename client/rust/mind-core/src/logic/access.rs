@@ -340,8 +340,70 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
     match target {
         LogicObject::Building(e) => sense_building(world, *e, a),
         LogicObject::Unit(e) => sense_unit(world, *e, a),
+        LogicObject::Bullet(e) => sense_bullet(world, *e, a),
         LogicObject::Content(c) => sense_content_accessor(world, *c, a),
         LogicObject::Team(id) => sense_team(*id, a),
+        _ => Sensed::Obj(None),
+    }
+}
+
+/// `BulletComp.sense` (`entities/comp/BulletComp.java:354-380`).
+///
+/// Upstream has no `senseObject` override, so every object accessor is Java's
+/// `noSensed` (null).
+fn sense_bullet(world: &World, e: Entity, a: LAccess) -> Sensed {
+    use crate::combat::bullet::Bullet;
+    let Some(bullet) = world.get::<Bullet>(e) else {
+        return Sensed::Obj(None);
+    };
+    let (px, py) = world
+        .get::<Pos>(e)
+        .map(|pos| (pos.x, pos.y))
+        .unwrap_or((0.0, 0.0));
+    let vel = world.get::<crate::entities::comp::Vel>(e).copied();
+    let def = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .and_then(|runtime| runtime.content.bullet(bullet.def))
+        .cloned();
+    match a {
+        // `rotation`: `vel.isZero(0.001f) ? rotation : vel.angle()`.
+        LAccess::Rotation => {
+            let value = match vel {
+                Some(vel) if vel.x * vel.x + vel.y * vel.y > 0.001 * 0.001 => {
+                    vel.y.atan2(vel.x).to_degrees() as f64
+                }
+                _ => bullet.rotation as f64,
+            };
+            Sensed::Num(value)
+        }
+        // `health -> damage`, `maxHealth -> type.damage`.
+        LAccess::Health => Sensed::Num(bullet.damage as f64),
+        LAccess::MaxHealth => Sensed::Num(def.map(|def| def.damage as f64).unwrap_or(0.0)),
+        LAccess::X => Sensed::Num((px / 8.0) as f64),
+        LAccess::Y => Sensed::Num((py / 8.0) as f64),
+        LAccess::VelocityX => {
+            Sensed::Num(vel.map(|vel| (vel.x * 60.0 / 8.0) as f64).unwrap_or(0.0))
+        }
+        LAccess::VelocityY => {
+            Sensed::Num(vel.map(|vel| (vel.y * 60.0 / 8.0) as f64).unwrap_or(0.0))
+        }
+        // `dead -> !isAdded() ? 1 : 0` (the sensed entity is live here).
+        LAccess::Dead => Sensed::Num(0.0),
+        LAccess::Team => Sensed::Num(entity_team(world, e).unwrap_or(0) as f64),
+        LAccess::Range => Sensed::Num(def.map(|def| def.range as f64).unwrap_or(0.0)),
+        LAccess::ShootX => Sensed::Num((bullet.aim.0 / 8.0) as f64),
+        LAccess::ShootY => Sensed::Num((bullet.aim.1 / 8.0) as f64),
+        // `speed -> type.speed * 60 / tilesize`.
+        LAccess::Speed => Sensed::Num(
+            def.map(|def| (def.speed * 60.0 / 8.0) as f64)
+                .unwrap_or(0.0),
+        ),
+        // `size -> type.hitSize / tilesize`.
+        LAccess::Size => Sensed::Num(def.map(|def| (def.hit_size / 8.0) as f64).unwrap_or(0.0)),
+        LAccess::Color => Sensed::Num(team_color_bits(entity_team(world, e).unwrap_or(0))),
+        LAccess::BulletLifetime => Sensed::Num(bullet.lifetime as f64),
+        LAccess::BulletTime => Sensed::Num(bullet.time as f64),
+        // Java default `Float.NaN` -> null; no `senseObject` rows.
         _ => Sensed::Obj(None),
     }
 }
@@ -750,11 +812,14 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .unwrap_or(0.0),
         ),
         // `cameraX.. -> this instanceof ControlBlock c ? c.unit().sense(sensor)
-        // : 0` (`BuildingComp.java:2130`): the proxy unit is only a `Player`
-        // controller while possessed, and the port has no possessed-turret
-        // camera mirror, so every building reads `0`.
+        // : 0` (`BuildingComp.java:2130`): a transferred-control building's
+        // proxy unit reads the local player view; every other building is `0`.
         LAccess::CameraX | LAccess::CameraY | LAccess::CameraWidth | LAccess::CameraHeight => {
-            Sensed::Num(0.0)
+            Sensed::Num(if building_is_player_controlled(world, e) {
+                player_camera_sense(world, a)
+            } else {
+                0.0
+            })
         }
         // `shooting`/`boosting`/`mining` are not base `BuildingComp.sense`
         // rows (turrets override `shooting`): Java's `default -> NaN` (null).
@@ -1038,6 +1103,39 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
             )
         }
         LAccess::Flag => Sensed::Num(core.map(|c| c.flag).unwrap_or(0.0)),
+        // `cameraX/Y/Width/Height -> controller instanceof Player player ?
+        // World.conv(player.con == null ? Core.camera.position : player.con.view)
+        // : 0` (`UnitComp.java:287-290`). The gdext host injects the view
+        // through `LogicPlayerView`; non-player units read 0.
+        LAccess::CameraX | LAccess::CameraY | LAccess::CameraWidth | LAccess::CameraHeight => {
+            let value = if is_player_unit(world, e) {
+                player_camera_sense(world, a)
+            } else {
+                0.0
+            };
+            Sensed::Num(value)
+        }
+        // `selectedRotation -> controller instanceof Player p ? p.selectedRotation
+        // : 0` (`UnitComp.java:309`).
+        LAccess::SelectedRotation => Sensed::Num(if is_player_unit(world, e) {
+            player_view(world)
+                .map(|view| view.selected_rotation as f64)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        }),
+        // `pingX/pingY -> p.isPinging() ? World.conv(p.pingX) : NaN`
+        // (`UnitComp.java:310-311`).
+        LAccess::PingX | LAccess::PingY => Sensed::Num(if is_player_unit(world, e) {
+            player_view(world)
+                .and_then(|view| view.ping)
+                .map(|(x, y)| (if a == LAccess::PingX { x } else { y }) as f64 / 8.0)
+                .unwrap_or(f64::NAN)
+        } else {
+            f64::NAN
+        }),
+        // `color -> Color.toDoubleBits(team.color...)` (`UnitComp.java:308`).
+        LAccess::Color => Sensed::Num(team_color_bits(entity_team(world, e).unwrap_or(0))),
         // `payloads().size` / `payloadUsed()/64` / `payloadCapacity/64`.
         LAccess::PayloadCount => Sensed::Num(
             world
@@ -1178,9 +1276,72 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
             });
             Sensed::Obj(value.map(LogicObject::Building))
         }
+        // `breaking -> isBuilding() && buildPlan().breaking ?
+        // buildPlan().tile().build : null` (`UnitComp.java:328`).
+        LAccess::Breaking => {
+            let plan = world
+                .get::<crate::sim::builder::BuilderPlans>(e)
+                .and_then(|plans| plans.plans.front());
+            let value = plan.filter(|plan| plan.breaking).and_then(|plan| {
+                world
+                    .get_resource::<crate::world::WorldGrid>()
+                    .and_then(|grid| grid.tiles.getn(plan.x as i32, plan.y as i32))
+                    .and_then(|tile| tile.build)
+            });
+            Sensed::Obj(value.map(LogicObject::Building))
+        }
+        // `selectedBlock -> controller instanceof Player p ? p.selectedBlock :
+        // null` (`UnitComp.java:329`). The placement circle's block content.
+        LAccess::SelectedBlock => {
+            let value = if is_player_unit(world, e) {
+                player_view(world)
+                    .and_then(|view| view.selected_block)
+                    .map(|block| LogicObject::Content(crate::content::ContentRef::block(block)))
+            } else {
+                None
+            };
+            Sensed::Obj(value)
+        }
+        // `pingText -> controller instanceof Player p && p.isPinging() ?
+        // p.pingText : null` (`UnitComp.java:330`).
+        LAccess::PingText => Sensed::Obj(if is_player_unit(world, e) {
+            player_view(world)
+                .filter(|view| view.is_pinging())
+                .and_then(|view| view.ping_text.clone())
+                .map(LogicObject::Str)
+        } else {
+            None
+        }),
         // Java `UnitComp.senseObject` default: null.
         _ => Sensed::Obj(None),
     }
+}
+
+/// The local `LAccess` player view (`UnitComp.sense` camera/ping/selection
+/// rows). `None` falls back to Java's non-player `0`/`null`.
+fn player_view(world: &World) -> Option<&crate::logic::globals::LogicPlayerView> {
+    world.get_resource::<crate::logic::globals::LogicPlayerView>()
+}
+
+/// Whether `e` is controlled by the `Player` controller
+/// (`controller instanceof Player`).
+fn is_player_unit(world: &World, e: Entity) -> bool {
+    crate::entities::comp::unit::ai_kind_of(world, e) == Some(crate::ai::AiKind::Player)
+}
+
+/// `World.conv(player.con.viewX/viewY/viewWidth/viewHeight)`
+/// (`UnitComp.java:287-290`).
+fn player_camera_sense(world: &World, a: LAccess) -> f64 {
+    let Some(view) = player_view(world) else {
+        return 0.0;
+    };
+    let value = match a {
+        LAccess::CameraX => view.camera_x,
+        LAccess::CameraY => view.camera_y,
+        LAccess::CameraWidth => view.camera_w,
+        _ => view.camera_h,
+    };
+    (value / 8.0) as f64
 }
 
 /// Unit type def of a unit entity (`Unit.type`).
@@ -1195,6 +1356,87 @@ pub fn set_prop_num(world: &mut World, target: &LogicObject, a: LAccess, v: f64)
     match target {
         LogicObject::Building(e) => set_prop_building_num(world, *e, a, v),
         LogicObject::Unit(e) => set_prop_unit_num(world, *e, a, v),
+        LogicObject::Bullet(e) => set_prop_bullet_num(world, *e, a, v),
+        _ => false,
+    }
+}
+
+/// `BulletComp.setProp(LAccess, double)` (`BulletComp.java:382-394`).
+fn set_prop_bullet_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
+    use crate::combat::bullet::Bullet;
+    match a {
+        LAccess::Health => {
+            if let Some(mut bullet) = world.get_mut::<Bullet>(e) {
+                bullet.damage = v as f32;
+                return true;
+            }
+            false
+        }
+        LAccess::X | LAccess::Y => {
+            if let Some(mut pos) = world.get_mut::<Pos>(e) {
+                if a == LAccess::X {
+                    pos.x = v as f32 * 8.0;
+                } else {
+                    pos.y = v as f32 * 8.0;
+                }
+                return true;
+            }
+            false
+        }
+        LAccess::VelocityX | LAccess::VelocityY => {
+            if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(e) {
+                let value = (v * 8.0 / 60.0) as f32;
+                if a == LAccess::VelocityX {
+                    vel.x = value;
+                } else {
+                    vel.y = value;
+                }
+                return true;
+            }
+            false
+        }
+        LAccess::Rotation => {
+            if let Some(mut bullet) = world.get_mut::<Bullet>(e) {
+                // `rotation = (float)value` (does not rotate the velocity).
+                bullet.rotation = v as f32;
+                return true;
+            }
+            false
+        }
+        LAccess::Team => {
+            if let Some(mut team) = world.get_mut::<TeamComp>(e) {
+                team.team = v as u8;
+                return true;
+            }
+            false
+        }
+        // `speed -> vel.setLength((float)value * 8f)`.
+        LAccess::Speed => {
+            if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(e) {
+                let length = vel.x * vel.x + vel.y * vel.y;
+                if length > 0.0 {
+                    let scale = (v as f32 * 8.0) / length.sqrt();
+                    vel.x *= scale;
+                    vel.y *= scale;
+                }
+                return true;
+            }
+            false
+        }
+        LAccess::BulletLifetime => {
+            if let Some(mut bullet) = world.get_mut::<Bullet>(e) {
+                bullet.lifetime = v as f32;
+                return true;
+            }
+            false
+        }
+        LAccess::BulletTime => {
+            if let Some(mut bullet) = world.get_mut::<Bullet>(e) {
+                bullet.time = v as f32;
+                return true;
+            }
+            false
+        }
         _ => false,
     }
 }
@@ -1410,6 +1652,15 @@ pub fn set_prop_obj(world: &mut World, target: &LogicObject, a: LAccess, v: &Log
             false
         }
         LogicObject::Unit(e) => {
+            if matches!(a, LAccess::Team)
+                && let Some(mut t) = world.get_mut::<TeamComp>(*e)
+            {
+                t.team = *team;
+                return true;
+            }
+            false
+        }
+        LogicObject::Bullet(e) => {
             if matches!(a, LAccess::Team)
                 && let Some(mut t) = world.get_mut::<TeamComp>(*e)
             {
@@ -1817,6 +2068,287 @@ mod tests {
                 .get::<Building>(se)
                 .and_then(|b| b.last_disabler),
             Some(pe)
+        );
+    }
+
+    /// #26: `UnitComp.sense` camera/ping/selection/colour rows read the
+    /// host-injected [`crate::logic::globals::LogicPlayerView`] for a `Player`
+    /// unit and return Java's `0`/`NaN`/`null` for every other unit.
+    #[test]
+    fn player_unit_view_senses_match_java() {
+        use crate::content::BlockId;
+        use crate::sim::Sim;
+
+        let mut sim = Sim::new(7, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_unit_runtime().expect("unit runtime");
+        let unit = sim
+            .spawn_player_unit("dagger", 1, 64.0, 64.0, 0.0)
+            .expect("player unit");
+        let conveyor = sim.world_block_id("conveyor").expect("conveyor");
+        let mut view = crate::logic::globals::LogicPlayerView {
+            camera_x: 160.0,
+            camera_y: 96.0,
+            camera_w: 320.0,
+            camera_h: 180.0,
+            selected_block: Some(BlockId::new(conveyor)),
+            selected_rotation: 2,
+            ping: Some((80.0, 96.0)),
+            ping_text: Some("here".to_owned()),
+        };
+        sim.set_logic_player_view(view.clone());
+        let target = LogicObject::Unit(unit);
+
+        // `World.conv` = /8 for the camera and ping positions.
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraX),
+            Sensed::Num(20.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraY),
+            Sensed::Num(12.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraWidth),
+            Sensed::Num(40.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraHeight),
+            Sensed::Num(22.5)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::SelectedRotation),
+            Sensed::Num(2.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::PingX),
+            Sensed::Num(10.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::PingY),
+            Sensed::Num(12.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::PingText),
+            Sensed::Obj(Some(LogicObject::Str("here".into())))
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::SelectedBlock),
+            Sensed::Obj(Some(LogicObject::Content(
+                crate::content::ContentRef::block(BlockId::new(conveyor))
+            )))
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Color),
+            Sensed::Num(team_color_bits(1))
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Breaking),
+            Sensed::Obj(None)
+        );
+
+        // Clearing the ping falls back to NaN/null.
+        view.ping = None;
+        view.ping_text = None;
+        sim.set_logic_player_view(view);
+        assert!(matches!(
+            sense(&sim.ecs.0, &target, LAccess::PingX),
+            Sensed::Num(value) if value.is_nan()
+        ));
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::PingText),
+            Sensed::Obj(None)
+        );
+
+        // A non-player unit always reads 0/NaN/null.
+        let ai = sim
+            .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+            .expect("ai unit");
+        let target = LogicObject::Unit(ai);
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraX),
+            Sensed::Num(0.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::SelectedRotation),
+            Sensed::Num(0.0)
+        );
+        assert!(matches!(
+            sense(&sim.ecs.0, &target, LAccess::PingY),
+            Sensed::Num(value) if value.is_nan()
+        ));
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::SelectedBlock),
+            Sensed::Obj(None)
+        );
+    }
+
+    /// #26: a player-possessed control block reads its proxy unit's camera
+    /// (`BuildingComp.sense cameraX -> c.unit().sense(sensor)`); an ordinary
+    /// building stays `0`.
+    #[test]
+    fn building_camera_sense_follows_the_controlled_unit() {
+        use crate::content::BlockId;
+        use crate::sim::Sim;
+
+        let mut sim = Sim::new(7, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let turret_id = sim.world_block_id("duo").expect("duo");
+        sim.command(crate::determinism::SimCommand::Place {
+            x: 4,
+            y: 4,
+            block: turret_id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("place");
+        let turret = sim
+            .grid
+            .entity_at(crate::world::TilePos::new(4, 4))
+            .expect("turret");
+        let plant = sim.world_block_id("conveyor").expect("conveyor");
+        sim.command(crate::determinism::SimCommand::Place {
+            x: 8,
+            y: 8,
+            block: plant,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("place");
+        let other = sim
+            .grid
+            .entity_at(crate::world::TilePos::new(8, 8))
+            .expect("conveyor");
+
+        let vision = crate::logic::globals::LogicPlayerView {
+            camera_x: 128.0,
+            camera_y: 64.0,
+            camera_w: 64.0,
+            camera_h: 32.0,
+            ..Default::default()
+        };
+        sim.set_logic_player_view(vision);
+        let target = LogicObject::Building(turret);
+        // Uncontrolled: Java returns 0.
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraX),
+            Sensed::Num(0.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &LogicObject::Building(other), LAccess::CameraX),
+            Sensed::Num(0.0)
+        );
+
+        // Possess the turret: its detached block proxy must carry the
+        // `Player` marker (`TurretBuild.unit`, Turret.java:297).
+        let player_unit = sim
+            .spawn_player_unit("dagger", 1, 64.0, 64.0, 0.0)
+            .expect("player unit");
+        sim.ecs
+            .0
+            .get_mut::<crate::world::blocks::defense::turrets::TurretState>(turret)
+            .expect("turret state")
+            .block_unit = Some(player_unit);
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraX),
+            Sensed::Num(16.0)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::CameraWidth),
+            Sensed::Num(8.0)
+        );
+    }
+
+    /// #25: `BulletComp.sense`/`setProp` rows for a live bullet.
+    #[test]
+    fn bullet_sense_and_setprop_rows() {
+        use crate::content::BlockId;
+        use crate::sim::Sim;
+
+        let mut sim = Sim::new(7, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_unit_runtime().expect("unit runtime");
+        let (def, def_damage, def_range, def_speed, def_hit) = {
+            let content = &sim.unit_runtime().expect("runtime").content;
+            let def = content.bullets()[0].clone();
+            (def.id, def.damage, def.range, def.speed, def.hit_size)
+        };
+        let spawn = crate::combat::bullet::BulletSpawn {
+            def,
+            team: 1,
+            x: 64.0,
+            y: 32.0,
+            angle: 0.0,
+            ..Default::default()
+        };
+        let bullet = crate::sim::spawn_logic_bullet(&mut sim.ecs.0, &spawn).expect("bullet");
+        let target = LogicObject::Bullet(bullet);
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Health),
+            Sensed::Num(def_damage as f64)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::MaxHealth),
+            Sensed::Num(def_damage as f64)
+        );
+        assert_eq!(sense(&sim.ecs.0, &target, LAccess::X), Sensed::Num(8.0));
+        assert_eq!(sense(&sim.ecs.0, &target, LAccess::Y), Sensed::Num(4.0));
+        assert_eq!(sense(&sim.ecs.0, &target, LAccess::Team), Sensed::Num(1.0));
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Range),
+            Sensed::Num(def_range as f64)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Speed),
+            Sensed::Num((def_speed * 60.0 / 8.0) as f64)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Size),
+            Sensed::Num((def_hit / 8.0) as f64)
+        );
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::Color),
+            Sensed::Num(team_color_bits(1))
+        );
+        assert_eq!(sense(&sim.ecs.0, &target, LAccess::Dead), Sensed::Num(0.0));
+        assert_eq!(
+            sense(&sim.ecs.0, &target, LAccess::BulletTime),
+            Sensed::Num(0.0)
+        );
+
+        // `setprop`: health -> damage, bulletTime/bulletLifetime, team.
+        assert!(set_prop_num(&mut sim.ecs.0, &target, LAccess::Health, 3.0));
+        assert!(set_prop_num(
+            &mut sim.ecs.0,
+            &target,
+            LAccess::BulletLifetime,
+            120.0
+        ));
+        assert!(set_prop_num(
+            &mut sim.ecs.0,
+            &target,
+            LAccess::BulletTime,
+            7.0
+        ));
+        assert!(set_prop_num(&mut sim.ecs.0, &target, LAccess::Team, 2.0));
+        assert!(set_prop_obj(
+            &mut sim.ecs.0,
+            &target,
+            LAccess::Team,
+            &LogicObject::Team(3)
+        ));
+        let component = sim
+            .ecs
+            .0
+            .get::<crate::combat::bullet::Bullet>(bullet)
+            .expect("bullet");
+        assert_eq!(component.damage, 3.0);
+        assert_eq!(component.lifetime, 120.0);
+        assert_eq!(component.time, 7.0);
+        assert_eq!(
+            sim.ecs.0.get::<TeamComp>(bullet).map(|team| team.team),
+            Some(3)
         );
     }
 }

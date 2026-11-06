@@ -274,6 +274,28 @@ impl Unlockable for SectorPresetDef {
 /// survival submission `sector-serpulo-202` and the three direct names, in
 /// upstream call order (after the Serpulo presets, before Erekir;
 /// `SectorPresets.java:161`).
+///
+/// **Known content-ID deviation (GAPS #31, blocked ABI item).** Java registers
+/// `registerSurvival(202, ...)` *before* the megabases
+/// (`SectorSubmissions.java:70-73`), while the port appends it after them.
+/// Content IDs are append-only, so reordering now would renumber 8 published
+/// `SectorPreset` content IDs (save/rules/STDB/parity references). The 8 slots
+/// differ only in which preset owns them:
+///
+/// | dense id | Java | port |
+/// |---|---|---|
+/// | 67 | `sector-serpulo-202` | `sector-serpulo-246` |
+/// | 68 | `sector-serpulo-246` | `sector-serpulo-244` |
+/// | 69 | `sector-serpulo-244` | `sector-serpulo-242` |
+/// | 70 | `sector-serpulo-242` | `sector-serpulo-243` |
+/// | 71 | `sector-serpulo-243` | `sector-serpulo-247` |
+/// | 72 | `sector-serpulo-247` | `sector-serpulo-245` |
+/// | 73 | `sector-serpulo-245` | `sector-serpulo-27` |
+/// | 74 | `sector-serpulo-27` | `sector-serpulo-202` |
+///
+/// IDs before 67 and from `fallenVessel` (75) onward match Java. The dense
+/// order is pinned by `sector_submission_order_is_pinned`; the fix is an ABI
+/// migration (ID remap table + save/STDB/parity sweep), not a source reorder.
 pub fn register_sector_submissions(
     registry: &mut ContentRegistry,
     bundle: &dyn BundleView,
@@ -1031,5 +1053,50 @@ mod tests {
         assert!(!fallen.require_unlock);
         assert_eq!(fallen.capture_wave, 70);
         assert_eq!(fallen.file_name, None);
+    }
+
+    /// GAPS #31: the submission block's dense `SectorPreset` content IDs are a
+    /// published ABI (maps/rules/saves/STDB reference them). Java registers
+    /// `registerSurvival(202)` before the megabases; the port appends it after
+    /// them, so the 8 slots 67-74 hold a different preset. This test pins the
+    /// port's current ids so an accidental reorder fails loudly; the actual
+    /// Java-order fix is a blocked ABI migration (documented on
+    /// [`register_sector_submissions`]).
+    #[test]
+    fn sector_submission_order_is_pinned() {
+        let registry = test_registry();
+        // 29 Serpulo presets occupy 0-28; the first 38 submissions 29-66.
+        let pinned = [
+            ("sector-serpulo-246", 67),
+            ("sector-serpulo-244", 68),
+            ("sector-serpulo-242", 69),
+            ("sector-serpulo-243", 70),
+            ("sector-serpulo-247", 71),
+            ("sector-serpulo-245", 72),
+            ("sector-serpulo-27", 73),
+            ("sector-serpulo-202", 74),
+            ("fallenVessel", 75),
+            ("geothermalStronghold", 76),
+            ("cruxscape", 77),
+            ("onset", 78),
+        ];
+        for (name, index) in pinned {
+            let preset = registry
+                .sector_by_name(name)
+                .unwrap_or_else(|| panic!("{name} missing"));
+            assert_eq!(preset.id.index(), index, "{name} dense content id");
+        }
+        // Java's `SectorSubmissions.registerSectors()` order puts the survival
+        // entry at 67 and shifts the megabases down one; the port cannot change
+        // that append-only. Record it as the known deviation.
+        assert_eq!(
+            registry
+                .sector_by_name("sector-serpulo-202")
+                .unwrap()
+                .id
+                .index(),
+            74,
+            "port submits registerSurvival(202) after the megabases"
+        );
     }
 }

@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
@@ -94,6 +95,82 @@ fn liquid_capacity(world: &World, e: Entity) -> f32 {
         .unwrap_or(0.0)
 }
 
+/// `AttributeCrafterBuild.attrsum` (`AttributeCrafter.java:105`): the summed
+/// floor attribute over the block footprint. Java refreshes it in
+/// `onProximityUpdate`; the port's behavior hook cannot see the live grid, so
+/// [`refresh_drill_ore`] (the grid-taking placement/load pass) fills it in.
+#[derive(Debug, Clone, Copy, Component, Default, PartialEq)]
+pub struct AttributeCrafterState {
+    /// `attrsum = sumAttribute(attribute, tile.x, tile.y)`.
+    pub attr_sum: f32,
+}
+
+/// `SolidPumpBuild` draw/bar state (`SolidPump.java:76-80`) plus
+/// `FrackerBuild.accumulator` (`Fracker.java:24`). Kept in the behavior module
+/// so the `PumpState` ABI (entities/comp) stays append-only for other owners.
+#[derive(Debug, Clone, Copy, Component, Default, PartialEq)]
+pub struct SolidPumpState {
+    /// `SolidPumpBuild.lastPump`: `maxPump / Time.delta` for the bar.
+    pub last_pump: f32,
+    /// `SolidPumpBuild.pumpTime` (rotator draw; `warmup * edelta`).
+    pub pump_time: f32,
+    /// `FrackerBuild.accumulator`: advances by `delta() * efficiency`.
+    pub accumulator: f32,
+}
+
+/// `Attribute` id (`AttributeCrafterDef.attribute`) -> content attribute.
+fn attribute_for_index(index: i16) -> Option<crate::content::Attribute> {
+    let name = crate::world::attributes::ATTRIBUTE_NAMES.get(usize::try_from(index).ok()?)?;
+    crate::world::attributes::attribute_from_name(name)
+}
+
+/// `AttributeCrafterBuild.efficiencyMultiplier()` (`AttributeCrafter.java:110`):
+/// `baseEfficiency + min(maxBoost, boostScale * attrsum) + attribute.env()`.
+///
+/// Returns `1.0` for every non-`AttributeCrafter` crafter (the
+/// `GenericCrafterBuild.getProgressIncrease` times-one).
+fn attribute_crafter_efficiency_multiplier(
+    world: &World,
+    e: Entity,
+    inst: &crate::world::block::BlockInstance,
+) -> f32 {
+    let BlockKindData::AttributeCrafter(def) = &inst.kind_data else {
+        return 1.0;
+    };
+    let attr_sum = world
+        .get::<AttributeCrafterState>(e)
+        .map(|state| state.attr_sum)
+        .unwrap_or(0.0);
+    let env = attribute_for_index(def.attribute)
+        .map(|attribute| crate::world::blocks::power::behavior::env_attr(world, attribute))
+        .unwrap_or(0.0);
+    def.base_efficiency + (def.boost_scale * attr_sum).min(def.max_boost) + env
+}
+
+/// `AttributeCrafterBuild.outputMultiplier()` (`AttributeCrafter.java:106`):
+/// `baseEfficiency + min(maxBoost, outputScale * attrsum) + attribute.env()`,
+/// disabled (times one) when `outputScale <= 0` (`scaleOutput` returns `amount`).
+fn attribute_crafter_output_multiplier(
+    world: &World,
+    e: Entity,
+    inst: &crate::world::block::BlockInstance,
+) -> f32 {
+    let BlockKindData::AttributeCrafter(def) = &inst.kind_data else {
+        return 1.0;
+    };
+    if def.output_scale <= 0.0 {
+        return 1.0;
+    }
+    let attr_sum = world
+        .get::<AttributeCrafterState>(e)
+        .map(|state| state.attr_sum)
+        .unwrap_or(0.0);
+    let env = attribute_for_index(def.attribute)
+        .map(|attribute| crate::world::blocks::power::behavior::env_attr(world, attribute))
+        .unwrap_or(0.0);
+    def.base_efficiency + (def.output_scale * attr_sum).min(def.max_boost) + env
+}
+
 /// Deterministic 64-bit LCG step, returns a bounded value in `0..bound`.
 fn next_bounded(state: &mut u64, bound: u32) -> u32 {
     *state = state
@@ -143,6 +220,12 @@ impl BuildingBehavior for CrafterBehavior {
         })
     }
     fn create_state(&self, world: &mut World, e: Entity) {
+        if world.get::<AttributeCrafterState>(e).is_none()
+            && instance(world, e)
+                .is_some_and(|inst| matches!(inst.kind_data, BlockKindData::AttributeCrafter(_)))
+        {
+            world.entity_mut(e).insert(AttributeCrafterState::default());
+        }
         if world.get::<CrafterState>(e).is_some() {
             return;
         }
@@ -170,15 +253,20 @@ impl BuildingBehavior for CrafterBehavior {
             .unwrap_or(0.0);
         let delta = delta(world, e);
         let item_capacity = inst.def.item_capacity;
+        // `AttributeCrafterBuild.getProgressIncrease` (`AttributeCrafter.java:93`)
+        // multiplies the base increase by `efficiencyMultiplier()`; every other
+        // crafter multiplies by one.
+        let efficiency_multiplier = attribute_crafter_efficiency_multiplier(world, e, &inst);
 
         if efficiency > 0.0 {
-            let inc = get_progress_increase(world, e, crafter.craft_time.max(0.0001));
+            let inc = get_progress_increase(world, e, crafter.craft_time.max(0.0001))
+                * efficiency_multiplier;
             if let Some(mut state) = world.get_mut::<CrafterState>(e) {
                 state.progress += inc;
                 state.warmup = approach(state.warmup, 1.0, CRAFTER_WARMUP_SPEED);
             }
             if !crafter.output_liquids.is_empty() {
-                let inc = get_progress_increase(world, e, 1.0);
+                let inc = get_progress_increase(world, e, 1.0) * efficiency_multiplier;
                 let capacity = liquid_capacity(world, e);
                 for (liquid, amount) in &crafter.output_liquids {
                     produce_liquid(world, e, LiquidId::new(*liquid), amount * inc, capacity);
@@ -211,8 +299,12 @@ impl BuildingBehavior for CrafterBehavior {
             if matches!(inst.kind_data, BlockKindData::Separator(_)) {
                 let _ = transfer::dump(world, e, None);
             } else {
+                // `dumpOutputs()` (`GenericCrafter.java:336-343`):
+                // `int amount = Math.max(1, Mathf.round(scaleOutput(output.amount)))`.
+                let output_multiplier = attribute_crafter_output_multiplier(world, e, &inst);
                 for (item, amount) in &crafter.output_items {
-                    for _ in 0..(*amount).max(1) {
+                    let count = (*amount as f32 * output_multiplier).round().max(1.0) as i32;
+                    for _ in 0..count {
                         if !transfer::dump(world, e, Some(ItemId::new(*item))) {
                             break;
                         }
@@ -239,12 +331,20 @@ impl BuildingBehavior for CrafterBehavior {
         }
     }
 
+    /// `AttributeCrafterBuild.efficiencyScale()` (`AttributeCrafter.java:114`):
+    /// `scaleLiquidConsumption ? efficiencyMultiplier() : super.efficiencyScale()`.
+    /// This snapshot's vanilla blocks all keep `scaleLiquidConsumption = false`,
+    /// so the consumption efficiency stays at the `BuildingComp` base of one;
+    /// the attribute term feeds `getProgressIncrease` instead (see
+    /// [`Self::update_tile`]).
     fn efficiency_scale(&self, world: &mut World, e: Entity) -> f32 {
         let Some(inst) = instance(world, e) else {
             return 1.0;
         };
         match &inst.kind_data {
-            BlockKindData::AttributeCrafter(def) => def.base_efficiency.max(0.0),
+            BlockKindData::AttributeCrafter(def) if def.scale_liquid_consumption => {
+                attribute_crafter_efficiency_multiplier(world, e, &inst)
+            }
             _ => 1.0,
         }
     }
@@ -447,6 +547,12 @@ fn craft(world: &mut World, e: Entity, crafter: &CrafterDef, item_capacity: i32)
         }
     } else {
         let outputs = crafter.output_items.clone();
+        // `scaleOutput(output.amount)` (`AttributeCrafter.java:119-121`): the
+        // attribute yield multiplier applies only with `outputScale > 0`
+        // (silicon-crucible 0.15); every other crafter scales by one.
+        let output_multiplier = instance(world, e)
+            .map(|inst| attribute_crafter_output_multiplier(world, e, &inst))
+            .unwrap_or(1.0);
         let mut accumulator = world
             .get::<CrafterState>(e)
             .map(|state| state.output_accumulator.clone())
@@ -455,7 +561,7 @@ fn craft(world: &mut World, e: Entity, crafter: &CrafterDef, item_capacity: i32)
             accumulator = smallvec::smallvec![0.0; outputs.len()];
         }
         for (index, (item, amount)) in outputs.iter().enumerate() {
-            accumulator[index] += *amount as f32;
+            accumulator[index] += *amount as f32 * output_multiplier;
             let floored = accumulator[index].floor();
             accumulator[index] -= floored;
             // `for(j < floored) offload(output.item)`.
@@ -785,6 +891,44 @@ pub fn refresh_drill_ore(
         BlockKindData::Pump(_) | BlockKindData::SolidPump(_) | BlockKindData::Fracker(_)
     ) {
         refresh_pump_floor(world, grid, content, e, tile, size);
+        return;
+    }
+    // `AttributeCrafterBuild.onProximityUpdate` (`AttributeCrafter.java:123`):
+    // `attrsum = sumAttribute(attribute, tile.x, tile.y)` (`Block.java:582`),
+    // which counts the footprint's `Floor.attributes` (deep floors excluded
+    // unless the block floats).
+    if let BlockKindData::AttributeCrafter(def) = &inst.kind_data {
+        let attribute = attribute_for_index(def.attribute);
+        let mut sum = 0.0f32;
+        if let Some(attribute) = attribute {
+            let corner = -((size - 1) / 2);
+            for dx in 0..size {
+                for dy in 0..size {
+                    let (tx, ty) = (
+                        i32::from(tile.x()) + corner + dx,
+                        i32::from(tile.y()) + corner + dy,
+                    );
+                    if !grid.tiles.in_bounds(tx, ty) {
+                        continue;
+                    }
+                    let Some(floor) = content.block(grid.tile(tx, ty).floor) else {
+                        continue;
+                    };
+                    if !inst.def.floating && !inst.def.placeable_liquid && floor.is_deep {
+                        continue;
+                    }
+                    sum += floor
+                        .attributes
+                        .iter()
+                        .find(|(name, _)| name == attribute.name())
+                        .map(|(_, value)| *value)
+                        .unwrap_or(0.0);
+                }
+            }
+        }
+        if let Some(mut state) = world.get_mut::<AttributeCrafterState>(e) {
+            state.attr_sum = sum;
+        }
         return;
     }
     // `BeamDrill.updateFacing` / `WallCrafter.getEfficiency` scan the tiles in
@@ -1569,6 +1713,9 @@ impl BuildingBehavior for SolidPumpBehavior {
         if world.get::<PumpState>(e).is_none() {
             world.entity_mut(e).insert(PumpState::default());
         }
+        if world.get::<SolidPumpState>(e).is_none() {
+            world.entity_mut(e).insert(SolidPumpState::default());
+        }
     }
 
     /// `SolidPump.shouldConsume` (`SolidPump.java:116-119`): a full result
@@ -1594,20 +1741,35 @@ impl BuildingBehavior for SolidPumpBehavior {
         let Some(inst) = instance(world, e) else {
             return;
         };
-        let (amount, result, attribute) = match &inst.kind_data {
-            BlockKindData::SolidPump(def) => (def.pump_amount, None, def.attribute.clone()),
-            BlockKindData::Fracker(def) => (def.pump_amount, def.result, def.attribute.clone()),
+        let (amount, result, attribute, item_use_time) = match &inst.kind_data {
+            BlockKindData::SolidPump(def) => (def.pump_amount, None, def.attribute.clone(), 0.0),
+            BlockKindData::Fracker(def) => (
+                def.pump_amount,
+                def.result,
+                def.attribute.clone(),
+                def.item_use_time,
+            ),
             _ => return,
         };
         let efficiency = world
             .get::<Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
-        {
-            let Some(mut state) = world.get_mut::<PumpState>(e) else {
-                return;
-            };
-            state.warmup = approach(state.warmup, if efficiency > 0.0 { 1.0 } else { 0.0 }, 0.02);
+        // `FrackerBuild.updateTile` (`Fracker.java:30-48`): a sand/water/power
+        // cycle every `itemUseTime` ticks while running; idle resets `lastPump`.
+        if efficiency > 0.0 && item_use_time > 0.0 {
+            let accumulator = world
+                .get::<SolidPumpState>(e)
+                .map(|state| state.accumulator)
+                .unwrap_or(0.0);
+            if accumulator >= item_use_time {
+                // `consume()` (`BuildingComp.java`): the `ConsumeItems.trigger`
+                // half; Power/Liquid consumers are continuous (`update`).
+                crate::world::update::trigger_consumers(world, e);
+                if let Some(mut state) = world.get_mut::<SolidPumpState>(e) {
+                    state.accumulator -= item_use_time;
+                }
+            }
         }
         let liquid = result.map(LiquidId::new).unwrap_or(LiquidId::WATER);
         // `SolidPump.updateTile` (`SolidPump.java:124`): `fraction =
@@ -1626,9 +1788,40 @@ impl BuildingBehavior for SolidPumpBehavior {
             .get::<LiquidModule>(e)
             .map(|module| module.get(liquid))
             .unwrap_or(0.0);
+        let time_scale = delta(world, e);
+        let mut pumping = false;
+        let mut max_pump = 0.0f32;
         if efficiency > 0.0 && stored < capacity - 0.001 {
-            let max_pump = (capacity - stored).min(amount * edelta(world, e) * fraction);
+            max_pump = (capacity - stored).min(amount * edelta(world, e) * fraction);
             produce_liquid(world, e, liquid, max_pump, capacity);
+            pumping = true;
+        }
+        // `SolidPumpBuild.updateTile`: `warmup = lerpDelta(warmup,
+        //  Mathf.num(efficiency > 0 && typeLiquid() < liquidCapacity - 0.001), 0.02)`.
+        let warmup = world
+            .get::<PumpState>(e)
+            .map(|state| approach(state.warmup, if pumping { 1.0 } else { 0.0 }, 0.02))
+            .unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<PumpState>(e) {
+            state.warmup = warmup;
+        }
+        let edelta = edelta(world, e);
+        let delta_now = delta(world, e);
+        if let Some(mut state) = world.get_mut::<SolidPumpState>(e) {
+            // `lastPump = maxPump / Time.delta` (fixed step: `delta` is the
+            // raw per-tick multiplier, so divide the scaled pump amount back).
+            state.last_pump = if pumping && time_scale > 0.0 {
+                max_pump / time_scale
+            } else {
+                0.0
+            };
+            // `pumpTime += warmup * edelta()` (rotator draw).
+            state.pump_time += warmup * edelta;
+            // `if(efficiency > 0){ ... super.updateTile(); accumulator +=
+            //  delta() * efficiency; }` (`Fracker.java:30-40`).
+            if efficiency > 0.0 {
+                state.accumulator += delta_now * efficiency;
+            }
         }
         // `SolidPumpBuild.updateTile`: `dumpLiquid(result)` every tick.
         crate::world::blocks::liquid::movement::dump_liquid_proximity(world, e, liquid, 2.0, -1);

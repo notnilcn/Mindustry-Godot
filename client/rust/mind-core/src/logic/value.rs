@@ -55,6 +55,8 @@ pub enum LogicObject {
     Building(Entity),
     /// A unit entity.
     Unit(Entity),
+    /// A `@bullet` live bullet entity (`SpawnBulletI` result).
+    Bullet(Entity),
     /// A content record (item/liquid/block/unit/weather/status/…).
     Content(ContentRef),
     /// A team index (`Team.all`).
@@ -75,6 +77,7 @@ impl LogicObject {
         match self {
             LogicObject::Building(_) => "[building]".into(),
             LogicObject::Unit(_) => "[unit]".into(),
+            LogicObject::Bullet(_) => "[bullet]".into(),
             LogicObject::Content(_) => "[content]".into(),
             LogicObject::Team(id) => id.to_string(),
             LogicObject::Str(s) => s.clone(),

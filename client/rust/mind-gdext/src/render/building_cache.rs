@@ -8,9 +8,11 @@
 //! bookkeeping lives in `mind_core::render::block_cache::BuildingCacheGrid`.
 //!
 //! The upstream global `SpriteCache` page pool (16382 sprites) becomes
-//! per-chunk mesh epochs (plan 16 §3.6 deviation S16-2). Team-overlay baking and
-//! the `drawBaseCached` descriptor bodies are owned by plan 07; this module bakes
-//! the base region and the (deferred) team overlay is recorded in the Changelog.
+//! per-chunk mesh epochs (plan 16 §3.6 deviation S16-2). The base region and
+//! the per-kind state sprites come from `cached_bake_sprites`; the enemy
+//! `block-border` team corner (`BuildingComp.drawTeam`, `BlockRenderer.java:
+//! 752-757`) bakes into trailing team meshes and participates in the chunk
+//! state fold, so a capture/team change re-bakes the chunk (GAPS #52).
 
 use std::collections::BTreeMap;
 
@@ -194,7 +196,15 @@ impl BuildingCacheRenderer {
                 if !BlockDrawMeta::from_def(def).draw_cached {
                     continue;
                 }
-                sum = sum.rotate_left(7) ^ host.cached_state_key(tx, ty);
+                // `BuildingComp.drawTeam` (`BlockRenderer.java:752-757`) bakes
+                // the enemy/derelict `block-border` corner into the cache, so a
+                // capture/team change must invalidate the chunk: fold the tile
+                // team and the local player team into the state sum.
+                let team = host.building_team(tx, ty).unwrap_or(0);
+                sum = sum.rotate_left(7)
+                    ^ host.cached_state_key(tx, ty)
+                    ^ (u64::from(team) << 59)
+                    ^ (u64::from(host.player_team()) << 55);
             }
         }
         sum
@@ -215,6 +225,10 @@ impl BuildingCacheRenderer {
         }
 
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
+        // `BuildingComp.drawTeam` marks are baked into their own page groups so
+        // their nodes can be appended after the block meshes (a team corner has
+        // to draw over the block even when it sits on a different atlas page).
+        let mut team_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
         let mut count = 0i64;
         {
             let host = self.host.clone();
@@ -306,6 +320,30 @@ impl BuildingCacheRenderer {
                         });
                         count += 1;
                     }
+                    // `BuildingComp.drawTeam` (`BlockRenderer.java:752-757`):
+                    // enemy/derelict blocks bake the team-coloured `block-border`
+                    // corner at the footprint's bottom-left plus 4 px. Java gates
+                    // it on `block.drawTeamOverlay` (default true, `Block.java:140`)
+                    // and `build.team != player.team()`.
+                    if meta.draw_team_overlay
+                        && let Some(team) = host.building_team(tx, ty)
+                        && team != host.player_team()
+                        && let Some(border) = self.resolver.find("block-border")
+                    {
+                        let (corner_x, corner_y) = team_corner(anchor_x, anchor_y, def.size);
+                        let page = border.page;
+                        let texture = border.texture.clone();
+                        let entry = team_groups.entry(page).or_insert((texture, Vec::new()));
+                        entry.1.push(Quad {
+                            cx: corner_x,
+                            cy: corner_y,
+                            w: 8.0,
+                            h: 8.0,
+                            uv: border.uv,
+                            color: mind_core::game::team::Team::get(team).color.to_rgba8888(),
+                        });
+                        count += 1;
+                    }
                 }
             }
         }
@@ -330,6 +368,23 @@ impl BuildingCacheRenderer {
             }
             // code-instantiated: one mesh per (chunk, BuildingCacheLayer, atlas
             // page); count/geometry are data-driven from the cache bake (§6.6).
+            holder.clone().add_child(&node);
+            nodes.push(node);
+        }
+        // Team corners after every block mesh: `drawTeam` runs at `Layer.block`
+        // after `drawBaseCached` (`BlockRenderer.java:214-221`).
+        for (_page, (texture, quads)) in team_groups {
+            if quads.is_empty() {
+                continue;
+            }
+            let Some(mesh) = build_mesh(&quads, 0.0, true) else {
+                continue;
+            };
+            let mut node = MeshInstance2D::new_alloc();
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            if let Some(texture) = texture {
+                node.set_texture(&texture);
+            }
             holder.clone().add_child(&node);
             nodes.push(node);
         }
@@ -358,6 +413,14 @@ fn chunk_index(cx: i32, cy: i32, chunks_x: i32) -> usize {
     (cx + cy * chunks_x) as usize
 }
 
+/// `BuildingComp.drawTeam` corner position (`BuildingComp.java:1334-1339`):
+/// `Draw.rect("block-border", x - size*tilesize/2 + 4, y - size*tilesize/2 + 4)`
+/// with `tilesize = 8`.
+fn team_corner(anchor_x: f32, anchor_y: f32, size: i32) -> (f32, f32) {
+    let half = size as f32 * 4.0;
+    (anchor_x - half + 4.0, anchor_y - half + 4.0)
+}
+
 /// Chunk AABB in world pixels (`30 * 8` units plus the half-tile pad).
 fn chunk_aabb(cx: i32, cy: i32) -> [f32; 4] {
     let unit = (CHUNK_SIZE * TILESIZE) as f32;
@@ -382,5 +445,20 @@ mod tests {
     #[test]
     fn chunk_aabb_is_30_tiles() {
         assert_eq!(chunk_aabb(0, 0), [-4.0, -4.0, 248.0, 248.0]);
+    }
+
+    /// GAPS #52 residual: `BuildingComp.drawTeam` bakes the enemy `block-border`
+    /// corner at `x - size*tilesize/2 + 4` (`BuildingComp.java:1334-1339`).
+    /// `building_center` for a size-3 block whose top-left is tile 5 is
+    /// `(5 + 1) * 8 = 48`, so the corner lands on the footprint's top-left tile
+    /// corner (`5 * 8 = 40`).
+    #[test]
+    fn team_corner_lands_on_the_footprint_corner() {
+        // Size 3 whose top-left is tile 5: anchor 48 -> corner 40 = 5 * 8.
+        assert_eq!(team_corner(48.0, 48.0, 3), (40.0, 40.0));
+        // Size 2 at tile 4 (`offset = 4`): anchor 36 -> corner 32 = 4 * 8.
+        assert_eq!(team_corner(36.0, 36.0, 2), (32.0, 32.0));
+        // Size 1 has no footprint corner (`offset = 0`), Java centres the mark.
+        assert_eq!(team_corner(24.0, 24.0, 1), (24.0, 24.0));
     }
 }

@@ -109,6 +109,47 @@ fn node_info_constructors_are_consistent() {
     assert_eq!(battery.capacity, 4000.0);
 }
 
+/// GAPS #22 (`ConsumePowerDynamic.requestedPower`,
+/// `ConsumePowerDynamic.java:26`): a behavior-written [`PowerDynamicUsage`]
+/// overrides the static `ConsumePower.usage` that `read_power_info` reports to
+/// the graph (the graph then applies the usual `shouldConsume` gate).
+#[test]
+fn dynamic_power_usage_overrides_static_consumer() {
+    use super::PowerDynamicUsage;
+    use super::read_power_info;
+
+    let mut fixture = Fixture::new();
+    let consumer = fixture.spawn(0, 1, PowerNodeInfo::consumer(0.5), 0.0, 0.0);
+    assert_eq!(
+        read_power_info(&fixture.world, consumer)
+            .map(|params| params.usage)
+            .unwrap_or(-1.0),
+        0.5
+    );
+    fixture
+        .world
+        .entity_mut(consumer)
+        .insert(PowerDynamicUsage(42.0));
+    assert_eq!(
+        read_power_info(&fixture.world, consumer)
+            .map(|params| params.usage)
+            .unwrap_or(-1.0),
+        42.0,
+        "dynamic request wins"
+    );
+    fixture
+        .world
+        .entity_mut(consumer)
+        .insert(PowerDynamicUsage(0.0));
+    assert_eq!(
+        read_power_info(&fixture.world, consumer)
+            .map(|params| params.usage)
+            .unwrap_or(-1.0),
+        0.0,
+        "zero request is honoured, not treated as absent"
+    );
+}
+
 /// `PowerTests.directConsumerSatisfactionIsAsExpected` (7 dynamic cases).
 #[test]
 fn direct_consumer_satisfaction_is_as_expected() {

@@ -13,6 +13,7 @@
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
 use crate::combat::bullet::{ABSORBED, Bullet};
@@ -314,6 +315,43 @@ impl Default for RegenProjectorState {
     }
 }
 
+/// `RegenProjector.mendMap`/`lastUpdateFrame` (`RegenProjector.java:22-25`):
+/// the **shared** heal buffer across every `RegenProjector` in the world.
+///
+/// Each projector offers its heal for a damaged target; the buffer keeps the
+/// `max` (`RegenProjector.java:157-158`), so overlapping projectors heal like a
+/// single one instead of stacking. The buffer is flushed once per update frame
+/// (`RegenProjector.java:166-177`), keyed on `state.updateId` — the port's
+/// [`crate::world::update::BuildClock`] tick.
+#[derive(Debug, Default, Resource)]
+pub struct RegenMendMap {
+    /// `lastUpdateFrame`: the `BuildClock` time the buffer was last flushed.
+    pub last_update_frame: Option<f32>,
+    /// `mendMap`: pending heal per target, in insertion order (deterministic).
+    pub entries: Vec<(Entity, f32)>,
+}
+
+impl RegenMendMap {
+    /// `mendMap.put(pos, Math.min(Math.max(value, healAmount * edelta() *
+    /// build.block.health / 100f), build.block.health - build.health))`
+    /// (`RegenProjector.java:157-158`). `want` is the projector's per-frame
+    /// heal; `missing` is the target's missing health.
+    pub fn offer(&mut self, target: Entity, want: f32, missing: f32) {
+        let missing = missing.max(0.0);
+        match self
+            .entries
+            .iter_mut()
+            .find(|(entity, _)| *entity == target)
+        {
+            // `Math.min(Math.max(value, heal), health - build.health)`: the max
+            // keeps the strongest single projector, the min caps the pending
+            // heal at the (possibly stale) missing health.
+            Some((_, value)) => *value = value.max(want).min(missing),
+            None => self.entries.push((target, want.min(missing))),
+        }
+    }
+}
+
 /// `RegenProjectorBuild.updateTile` (`delta == 1`, grid-free target scan).
 pub fn update_regen_projector(
     world: &mut World,
@@ -338,21 +376,29 @@ pub fn update_regen_projector(
 
     let range = state.range as f32;
     let targets = buildings_in_range(world, e, range);
-    let mut any = false;
-    for target in &targets {
-        if world
+    // `anyTargets = targets.contains(b -> b.damaged())` (`:139`).
+    state.any_targets = targets.iter().any(|target| {
+        world
             .get::<Health>(*target)
             .is_some_and(|health| health.damaged())
-        {
-            any = true;
-            break;
-        }
-    }
-    state.any_targets = any;
+    });
 
+    // `edelta()` (`BuildingComp.java:1934-1936`): this projector's efficiency
+    // scaled by `Time.delta * timeScale`. The per-frame heal and the optional
+    // item cycle both scale with it (GAPS #14: the heal used to ignore both
+    // `edelta` and the time scale).
+    let edelta = efficiency * crate::world::update::delta(world, e);
+
+    let mut mend_map = world.remove_resource::<RegenMendMap>().unwrap_or_default();
     if efficiency > 0.0 {
-        state.optional_timer += optional_efficiency;
+        // `if((optionalTimer += edelta() * optionalEfficiency) >= optionalUseTime)`
+        // (`:144-147`).
+        state.optional_timer += edelta * optional_efficiency;
         if state.optional_timer >= state.optional_use_time {
+            // `consume()` (`:146`): triggers the item consumer (the phase
+            // fabric booster). Power/liquids are drawn by the per-tick
+            // consumption pass; `trigger_consumers` is the port's item half.
+            crate::world::update::trigger_consumers(world, e);
             state.optional_timer = 0.0;
         }
 
@@ -364,19 +410,48 @@ pub fn update_regen_projector(
             if is_heal_suppressed(world, target) {
                 continue;
             }
-            let Some(health) = world.get::<Health>(target) else {
+            let Some(health) = world.get::<Health>(target).copied() else {
                 continue;
             };
             if !health.damaged() {
                 continue;
             }
             state.did_regen = true;
-            let heal = heal_amount / 100.0 * efficiency * health.max_health;
-            if let Some(mut health) = world.get_mut::<Health>(target) {
-                health.health = (health.health + heal).min(health.max_health);
-            }
+            // `healAmount * edelta() * build.block.health / 100f`, capped at
+            // the missing health (`block.health` is `Health.max_health`).
+            let want = heal_amount * edelta * health.max_health / 100.0;
+            mend_map.offer(target, want, health.max_health - health.health);
         }
     }
+
+    // `if(lastUpdateFrame != state.updateId)` (`:166-177`): flush the pending
+    // heals once per frame. This runs even at `efficiency == 0` (Java only
+    // skips it when suppressed, which returned above).
+    flush_regen_mend_map(world, &mut mend_map);
+    world.insert_resource(mend_map);
+}
+
+/// Applies and clears the shared `mendMap` once per update frame
+/// (`RegenProjector.java:166-177`): `build.heal(value); build.recentlyHealed()`.
+///
+/// `recentlyHealed` only feeds the heal-bar animation
+/// (`BuildingComp.java:497-499`), which the port renders from `Health`.
+pub fn flush_regen_mend_map(world: &mut World, mend_map: &mut RegenMendMap) {
+    let now = crate::world::update::build_time(world);
+    if mend_map.last_update_frame == Some(now) {
+        return;
+    }
+    mend_map.last_update_frame = Some(now);
+    for (target, amount) in mend_map.entries.drain(..) {
+        if amount <= 0.0 {
+            continue;
+        }
+        // `HealthComp.heal(amount)`: add and clamp to max.
+        if let Some(mut health) = world.get_mut::<Health>(target) {
+            health.health = (health.health + amount).min(health.max_health);
+        }
+    }
+    mend_map.entries.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,5 +1210,168 @@ mod base_shield_tests {
                 .hit_size,
             8.0
         );
+    }
+}
+
+#[cfg(test)]
+mod regen_projector_tests {
+    use bevy_ecs::entity::Entity;
+
+    use crate::entities::comp::Building;
+    use crate::entities::comp::Health;
+    use crate::world::BuildHarness;
+    use crate::world::blocks::defense::projectors::{
+        RegenMendMap, RegenProjectorState, update_regen_projector,
+    };
+    use crate::world::modules::{ItemModule, LiquidModule, PowerModule};
+
+    fn place(harness: &mut BuildHarness, name: &str, x: i32, y: i32) -> Entity {
+        let block = harness.content().block_id(name).expect(name);
+        assert!(
+            harness.place(x, y, block, 0, true),
+            "place {name} at ({x}, {y})"
+        );
+        harness.build_at(x, y).expect(name)
+    }
+
+    /// Tops the projector's power/liquid buffers so `updateConsumption` sees
+    /// `efficiency == 1` (`ConsumePower`/`ConsumeLiquid` both satisfied).
+    fn feed(harness: &mut BuildHarness, projectors: &[Entity]) {
+        let hydrogen = harness.content().liquid_id("hydrogen").expect("hydrogen");
+        for &projector in projectors {
+            if let Some(mut power) = harness.world.get_mut::<PowerModule>(projector) {
+                power.status = 1.0;
+            }
+            if let Some(mut liquids) = harness.world.get_mut::<LiquidModule>(projector) {
+                liquids.add(hydrogen, 1000.0, 1000.0);
+            }
+        }
+    }
+
+    fn health(harness: &BuildHarness, e: Entity) -> f32 {
+        harness
+            .world
+            .get::<Health>(e)
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    }
+
+    /// GAPS #14: the static `mendMap` (`RegenProjector.java:23`) is shared by
+    /// every projector and keeps the max heal, so two overlapping projectors
+    /// heal a target no faster than one (the port used to apply each heal
+    /// directly, stacking them).
+    #[test]
+    fn overlapping_projectors_do_not_stack_heals() {
+        let run = |projectors: &[(i32, i32)]| -> f32 {
+            let mut harness = BuildHarness::new(16, 16, 7);
+            let wall = place(&mut harness, "copper-wall", 6, 3);
+            if let Some(mut health) = harness.world.get_mut::<Health>(wall) {
+                health.health = 100.0;
+            }
+            let entities: Vec<Entity> = projectors
+                .iter()
+                .map(|&(x, y)| place(&mut harness, "regen-projector", x, y))
+                .collect();
+            for _ in 0..120 {
+                feed(&mut harness, &entities);
+                harness.tick();
+            }
+            health(&harness, wall) - 100.0
+        };
+        // Both projectors sit within the copper wall's 28-unit heal range
+        // (3 tiles = 24 world units; `range = 28` `RegenProjector.java:2014`).
+        let single = run(&[(3, 3)]);
+        let second_only = run(&[(6, 6)]);
+        let double = run(&[(3, 3), (6, 6)]);
+        assert!(single > 0.0, "baseline projector heals: {single}");
+        assert!(
+            second_only > 0.0,
+            "the second projector is live on its own: {second_only}"
+        );
+        assert!(
+            (double - single).abs() <= single * 0.05,
+            "overlapping projectors must not stack: single {single}, double {double}"
+        );
+    }
+
+    /// GAPS #14: the per-frame heal is `healAmount * edelta() * health / 100f`
+    /// (`RegenProjector.java:158`), and `edelta()` scales with `timeScale`
+    /// (`BuildingComp.java:1929-1936`). The port used only `efficiency`.
+    #[test]
+    fn heal_scales_with_edelta_and_time_scale() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let wall = place(&mut harness, "copper-wall", 6, 3);
+        let projector = place(&mut harness, "regen-projector", 3, 3);
+        let max_health = harness
+            .world
+            .get::<Health>(wall)
+            .map(|health| health.max_health)
+            .expect("wall health");
+        let mut state = harness
+            .world
+            .get::<RegenProjectorState>(projector)
+            .cloned()
+            .expect("projector state");
+        let mut run = |time_scale: f32, state: &mut RegenProjectorState| -> f32 {
+            if let Some(mut health) = harness.world.get_mut::<Health>(wall) {
+                health.health = 100.0;
+            }
+            if let Some(mut building) = harness.world.get_mut::<Building>(projector) {
+                // `applyBoost` raises `timeScale` (`BuildingComp.java:467-474`);
+                // a long duration keeps the decay pass out of this frame.
+                building.time_scale = time_scale;
+                building.time_scale_duration = 1000.0;
+            }
+            // A fresh frame so the shared mend buffer flushes.
+            harness.world.remove_resource::<RegenMendMap>();
+            update_regen_projector(&mut harness.world, projector, state, 1.0, 0.0);
+            health(&harness, wall) - 100.0
+        };
+        let base = run(1.0, &mut state);
+        let expected = state.heal_percent * max_health / 100.0;
+        assert!(
+            (base - expected).abs() < 0.01,
+            "healAmount * edelta * health / 100: {base} vs {expected}"
+        );
+        let boosted = run(2.0, &mut state);
+        assert!(
+            (boosted - 2.0 * base).abs() < 0.01,
+            "timeScale 2 doubles the heal: {boosted} vs {base}"
+        );
+    }
+
+    /// GAPS #14: `consume()` on the optional-item cycle
+    /// (`RegenProjector.java:144-147`) removes one phase fabric per
+    /// `optionalUseTime`; the port only reset the timer.
+    #[test]
+    fn optional_phase_item_is_consumed_on_its_cycle() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let wall = place(&mut harness, "copper-wall", 6, 3);
+        let projector = place(&mut harness, "regen-projector", 3, 3);
+        if let Some(mut health) = harness.world.get_mut::<Health>(wall) {
+            health.health = 100.0;
+        }
+        let phase = harness
+            .content()
+            .item_id("phase-fabric")
+            .expect("phase-fabric");
+        if let Some(mut items) = harness.world.get_mut::<ItemModule>(projector) {
+            items.add(phase, 5, 100);
+        }
+        // Tick 1: `shouldConsume` reads the previous frame's `anyTargets`
+        // (false), so efficiency stays 0 and the optional timer does not move.
+        feed(&mut harness, &[projector]);
+        harness.tick();
+        if let Some(mut state) = harness.world.get_mut::<RegenProjectorState>(projector) {
+            state.optional_timer = state.optional_use_time - 0.5;
+        }
+        feed(&mut harness, &[projector]);
+        harness.tick();
+        let left = harness
+            .world
+            .get::<ItemModule>(projector)
+            .map(|items| items.get(phase))
+            .unwrap_or(-1);
+        assert_eq!(left, 4, "one phase fabric consumed per optional cycle");
     }
 }

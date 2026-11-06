@@ -37,8 +37,14 @@ const LEG_Z: f32 = -0.02;
 /// Layer.bullet - 1)` (`UnitType.java:1508-1525,1632-1640`). The port keeps
 /// the payload in the carrier's band instead of Java's cross-band clamp.
 const PAYLOAD_Z: f32 = -0.03;
+/// A carried unit's own `drawSoftShadow` runs inside its `UnitType.draw`
+/// (`UnitType.java:1527,1666-1680`), one level below the payload body.
+const PAYLOAD_SHADOW_Z: f32 = PAYLOAD_Z - 0.01;
 /// `drawSoftShadow` at `min(z - 0.01, Layer.bullet - 1)`.
 const SOFT_SHADOW_Z: f32 = -0.01;
+/// `drawSoftShadow` radius factor (`UnitType.java:1676-1678`): the quad is
+/// `1.6` times the body region's larger side.
+const SOFT_SHADOW_RAD: f32 = 1.6;
 
 /// Unit sprite counters forwarded to the renderer stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -79,6 +85,23 @@ type UnitBucket = (Option<Gd<Texture2D>>, Vec<ZQuad>);
 /// `z`; equal z keeps emission order).
 fn sort_unit_quads(quads: &mut [ZQuad]) {
     quads.sort_by(|a, b| a.z.total_cmp(&b.z));
+}
+
+/// `drawPayload` re-aims the first carried payload to the carrier every frame:
+/// `pay.set(unit.x, unit.y, unit.rotation)` (`UnitType.java:1632-1640`) and
+/// `UnitPayload.set` writes the unit's position and rotation
+/// (`UnitPayload.java:78-81`). `CarriedPayload` only stores the pickup
+/// snapshot, so the render heading must come from the carrier's rotation.
+fn payload_heading(carrier_rotation: f32) -> f32 {
+    carrier_rotation - 90.0
+}
+
+/// `drawSoftShadow` quad size (`UnitType.java:1674-1680`):
+/// `max(region.w, region.h) * region.scl() * softShadowScl * 1.6`. The port's
+/// `sprite_scale` is `region.scl()` and every vanilla unit keeps
+/// `softShadowScl = 1` (`UnitType.java:149`).
+fn soft_shadow_size(body_w: f32, body_h: f32, sprite_scale: f32) -> f32 {
+    body_w.max(body_h) * sprite_scale * SOFT_SHADOW_RAD
 }
 
 /// Live unit draw pass, one bucket per unit layer.
@@ -492,22 +515,51 @@ impl UnitRenderer {
                 }
             }
             // `drawPayload` (`UnitType.java:1508-1526,1632-1640`): the first
-            // carried payload draws under the carrier. The port keeps only the
-            // pickup snapshot (`CarriedPayload`), so a unit payload draws its
-            // body/outline/cell and a build payload its composed `-full` icon
-            // instead of the live `UnitType.draw`/`Building.payloadDraw`.
+            // carried payload draws under the carrier, re-aimed to the carrier
+            // every frame (`pay.set(x, y, unit.rotation)`), and a carried unit
+            // runs its own `UnitType.draw` (shadow/outline/body/cell). A build
+            // payload draws its composed `-full` icon (`BuildPayload.draw`)
+            // instead of the live `Building.payloadDraw`.
             if let Some(payload) = &unit.payload {
                 match payload {
                     PayloadDraw::Unit {
                         name,
-                        rotation,
+                        // Pickup snapshot; the live heading is the carrier's
+                        // (`drawPayload` re-aims every frame).
+                        rotation: _pickup_rotation,
                         team,
                         healthf,
                         draw_body,
                         draw_cell,
                         segments,
                     } => {
-                        let rot = *rotation - 90.0;
+                        let rot = payload_heading(unit.rotation);
+                        let body = self.resolver.find(name);
+                        // `UnitPayload.draw` calls `unit.type.draw(unit)`, so
+                        // the carried unit's own `drawSoftShadow` lands at
+                        // `min(payload z - 0.01, Layer.bullet - 1)` with the
+                        // payload body's size (`UnitType.java:1527,1674-1680`).
+                        if let (Some(shadow), Some(body)) =
+                            (self.resolver.find("circle-shadow"), body.as_ref())
+                        {
+                            let size = soft_shadow_size(body.w, body.h, self.sprite_scale);
+                            let entry = groups
+                                .entry((bucket, shadow.page))
+                                .or_insert((shadow.texture.clone(), Vec::new()));
+                            entry.1.push(ZQuad {
+                                z: PAYLOAD_SHADOW_Z,
+                                quad: UnitQuad {
+                                    cx: unit.x,
+                                    cy: unit.y,
+                                    w: size,
+                                    h: size,
+                                    rot,
+                                    uv: shadow.uv,
+                                    color: 0x0000_0066,
+                                },
+                            });
+                            sprites += 1;
+                        }
                         if let Some(outline) = self.resolver.find(&format!("{name}-outline")) {
                             let entry = groups
                                 .entry((bucket, outline.page))
@@ -527,7 +579,7 @@ impl UnitRenderer {
                             sprites += 1;
                         }
                         if (*draw_body || *segments > 0)
-                            && let Some(body) = self.resolver.find(name)
+                            && let Some(body) = body
                         {
                             let entry = groups
                                 .entry((bucket, body.page))
@@ -632,7 +684,7 @@ impl UnitRenderer {
             // softShadowScl * 1.6`, colour `(0,0,0,0.4)`. Java draws it at
             // `z - 0.01`, *over* the legs (`z - 0.02`) and under the body.
             if let Some(shadow) = self.resolver.find("circle-shadow") {
-                let size = body.w.max(body.h) * self.sprite_scale;
+                let size = soft_shadow_size(body.w, body.h, self.sprite_scale);
                 let entry = groups
                     .entry((bucket, shadow.page))
                     .or_insert((shadow.texture.clone(), Vec::new()));
@@ -641,8 +693,8 @@ impl UnitRenderer {
                     quad: UnitQuad {
                         cx: unit.x,
                         cy: unit.y,
-                        w: size * 1.6,
-                        h: size * 1.6,
+                        w: size,
+                        h: size,
                         rot: 0.0,
                         uv: shadow.uv,
                         color: 0x0000_0066,
@@ -1189,7 +1241,9 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad, weapon_shadow_quad,
+        PAYLOAD_SHADOW_Z, PAYLOAD_Z, SOFT_SHADOW_Z, UnitQuad, ZQuad, payload_heading,
+        soft_shadow_size, sort_unit_quads, weapon_heat_quad, weapon_outline_quad,
+        weapon_shadow_quad,
     };
     use mind_core::content::Rgba;
 
@@ -1346,5 +1400,35 @@ mod tests {
         let flipped = weapon_outline_quad(10.0, 20.0, 30.0, 4.0, 8.0, uv, true, -0.002);
         assert_eq!(flipped.quad.uv, [0.3, 0.2, 0.1, 0.4]);
         assert_eq!(flipped.z, -0.002);
+    }
+
+    /// PAR-0369 residual: `drawPayload` re-aims the carried payload to the
+    /// carrier every frame — `pay.set(unit.x, unit.y, unit.rotation)`
+    /// (`UnitType.java:1632-1640`) then `UnitPayload.set` writes the unit
+    /// rotation (`UnitPayload.java:78-81`). The port drew the pickup snapshot.
+    #[test]
+    fn payload_heading_follows_the_carrier_rotation() {
+        assert_eq!(payload_heading(0.0), -90.0);
+        assert_eq!(payload_heading(90.0), 0.0);
+        assert_eq!(payload_heading(270.0), 180.0);
+    }
+
+    /// PAR-0369 residual: `UnitPayload.draw` runs the payload unit's own
+    /// `UnitType.draw`, so the payload gets the same `drawSoftShadow`
+    /// (`UnitType.java:1527,1674-1680`): `1.6 * max(body region side)` in world
+    /// pixels, one z below the payload body and under the carrier's shadow.
+    #[test]
+    fn payload_soft_shadow_matches_draw_soft_shadow() {
+        assert_eq!(soft_shadow_size(48.0, 32.0, 0.25), 48.0 * 0.25 * 1.6);
+        assert_eq!(soft_shadow_size(16.0, 40.0, 0.25), 40.0 * 0.25 * 1.6);
+        assert!(
+            PAYLOAD_SHADOW_Z < PAYLOAD_Z,
+            "payload shadow draws under the payload body"
+        );
+        assert!(
+            PAYLOAD_Z < SOFT_SHADOW_Z,
+            "payload draws under the carrier soft shadow"
+        );
+        assert_eq!(PAYLOAD_SHADOW_Z, PAYLOAD_Z - 0.01);
     }
 }

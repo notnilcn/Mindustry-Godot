@@ -186,6 +186,38 @@ impl BuildingBehavior for DoorBehavior {
             _ => return None,
         })
     }
+    /// `DoorBuild.control(enabled)` (`Door.java:89-105`): a logic
+    /// `control enabled` opens/closes the chain, skipping a door with units
+    /// standing in it while closing, a door already in the requested state,
+    /// and the 80-tick `timerToggle` throttle. `net.client()` has no port
+    /// equivalent: the sim is authoritative.
+    fn logic_control(
+        &self,
+        world: &mut World,
+        e: Entity,
+        a: crate::logic::LAccess,
+        p: &[crate::logic::LVar; 4],
+    ) -> bool {
+        use crate::logic::LAccess;
+        if a != LAccess::Enabled {
+            return false;
+        }
+        // `boolean shouldOpen = !Mathf.zero(p1);` (`Door.java:92`).
+        let should_open = p[0].numf().abs() > 0.000_001;
+        let open = world.get::<DoorState>(e).is_some_and(|state| state.open);
+        // `open == shouldOpen || (Units.anyEntities(tile) && !shouldOpen)`.
+        if open == should_open || (!should_open && unit_on_footprint(world, e)) {
+            return true;
+        }
+        if !control_allowed(world, e) {
+            return true;
+        }
+        // `configureAny(shouldOpen)` (`Door.java:104`): the config body plays
+        // the sound/effect and applies the chain.
+        self.configured(world, e, None, ConfigValue::Bool(should_open));
+        true
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<DoorState>(e).is_none() {
             world.entity_mut(e).insert(DoorState::default());
@@ -387,6 +419,24 @@ pub fn tap_allowed(world: &mut World, e: Entity) -> bool {
     true
 }
 
+/// `DoorBuild.control`'s timer gate (`Door.java:97`): `origin().timer(timerToggle, 80f)`.
+///
+/// It shares the `timerToggle` slot with [`tap_allowed`] (60 ticks), exactly
+/// like the Java field: a door toggled by a tap cannot be toggled by logic for
+/// another 80 ticks, and vice versa.
+fn control_allowed(world: &mut World, e: Entity) -> bool {
+    let origin = origin_of(world, e);
+    let now = crate::world::update::build_time(world);
+    let Some(mut state) = world.get_mut::<DoorState>(origin) else {
+        return false;
+    };
+    if state.last_toggle.is_some_and(|last| now - last < 80.0) {
+        return false;
+    }
+    state.last_toggle = Some(now);
+    true
+}
+
 /// `DoorBuild.effect()` (`Door.java:110-112`): `(open ? closefx : openfx)
 /// .at(this, size)` through the live unit runtime's FX sink. `door-large`
 /// swaps in the `*large` pair (`Blocks.java:1794-1796`; the vanilla `Door`s are
@@ -453,6 +503,26 @@ pub struct AutoDoorBehavior;
 pub const AUTO_DOOR_CHECK_INTERVAL: f32 = 20.0;
 
 impl BuildingBehavior for AutoDoorBehavior {
+    /// `AutoDoorBuild.sense(enabled)` (`AutoDoor.java:62-65`): `open ? 1 : 0`.
+    /// `AutoDoor extends Wall`, not `Door`, so it has no `control` override.
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        if a == LAccess::Enabled {
+            return Some(Sensed::Num(if world.get::<DoorState>(e)?.open {
+                1.0
+            } else {
+                0.0
+            }));
+        }
+        None
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<DoorState>(e).is_none() {
             world.entity_mut(e).insert(DoorState::default());
@@ -763,5 +833,89 @@ mod tests {
             .expect("clock")
             .time = 160.0;
         assert!(tap_allowed(&mut world, entity));
+    }
+
+    fn enabled_param(value: f64) -> [crate::logic::LVar; 4] {
+        let empty = crate::logic::LVar::new("");
+        std::array::from_fn(|index| {
+            if index == 0 {
+                crate::logic::LVar::num_const("p1", value)
+            } else {
+                empty.clone()
+            }
+        })
+    }
+
+    /// GAPS #15: `DoorBuild.control(enabled)` (`Door.java:89-105`) opens and
+    /// closes the chain through the config body and throttles for 80 ticks.
+    #[test]
+    fn door_logic_control_opens_and_throttles() {
+        let (mut world, table, content) = setup();
+        let entity = spawn_named(&mut world, &table, &content, "door", 0, 4, 4);
+        world.insert_resource(table);
+        world.insert_resource(crate::world::update::BuildClock { time: 0.0 });
+        assert!(DoorBehavior.logic_control(
+            &mut world,
+            entity,
+            crate::logic::LAccess::Enabled,
+            &enabled_param(1.0)
+        ));
+        assert_eq!(DoorBehavior.config(&world, entity), ConfigValue::Bool(true));
+        // Same slot as `tapped`: an immediate close is throttled (80 ticks).
+        assert!(DoorBehavior.logic_control(
+            &mut world,
+            entity,
+            crate::logic::LAccess::Enabled,
+            &enabled_param(0.0)
+        ));
+        assert_eq!(
+            DoorBehavior.config(&world, entity),
+            ConfigValue::Bool(true),
+            "80-tick timerToggle throttle"
+        );
+        world
+            .get_resource_mut::<crate::world::update::BuildClock>()
+            .expect("clock")
+            .time = 80.0;
+        assert!(DoorBehavior.logic_control(
+            &mut world,
+            entity,
+            crate::logic::LAccess::Enabled,
+            &enabled_param(0.0)
+        ));
+        assert_eq!(
+            DoorBehavior.config(&world, entity),
+            ConfigValue::Bool(false),
+            "closes once the throttle expires"
+        );
+        // A non-`enabled` accessor is not handled by the door.
+        assert!(!DoorBehavior.logic_control(
+            &mut world,
+            entity,
+            crate::logic::LAccess::Health,
+            &enabled_param(0.0)
+        ));
+    }
+
+    /// GAPS #15: `AutoDoorBuild.sense(enabled)` (`AutoDoor.java:62-65`).
+    ///
+    /// `AutoDoor.java` is `Blocks.blast-door` (`Blocks.java:1866`).
+    #[test]
+    fn auto_door_sense_reports_open_state() {
+        let (mut world, table, content) = setup();
+        // `AutoDoor.java` is `Blocks.blast-door` (`Blocks.java:1866`).
+        let entity = spawn_named(&mut world, &table, &content, "blast-door", 0, 4, 4);
+        world.insert_resource(table);
+        let sensor = |world: &EcsWorld| {
+            AutoDoorBehavior.logic_sense(world, entity, crate::logic::LAccess::Enabled)
+        };
+        assert_eq!(sensor(&world), Some(crate::logic::access::Sensed::Num(0.0)));
+        AutoDoorBehavior.configured(&mut world, entity, None, ConfigValue::Bool(true));
+        assert_eq!(sensor(&world), Some(crate::logic::access::Sensed::Num(1.0)));
+        // Other sensors fall through to the base table.
+        assert_eq!(
+            AutoDoorBehavior.logic_sense(&world, entity, crate::logic::LAccess::Health),
+            None
+        );
     }
 }

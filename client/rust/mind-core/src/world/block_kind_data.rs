@@ -64,7 +64,7 @@ pub struct CrafterDef {
 }
 
 /// `AttributeCrafter` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AttributeCrafterDef {
     /// Base `GenericCrafter` knobs (`AttributeCrafter extends GenericCrafter`).
     pub crafter: CrafterDef,
@@ -74,10 +74,41 @@ pub struct AttributeCrafterDef {
     pub base_efficiency: f32,
     /// `boostScale`.
     pub boost_scale: f32,
-    /// `minEfficiency`/`maxBoost`.
+    /// `minEfficiency`.
     pub min_efficiency: f32,
     /// `maxBoost`.
     pub max_boost: f32,
+    /// `outputScale` (`0` = disabled; silicon-crucible `0.15`).
+    pub output_scale: f32,
+    /// `scaleLiquidConsumption` (efficiency also scales liquid input).
+    pub scale_liquid_consumption: bool,
+    /// `displayEfficiency` (`AttributeCrafter.setBars`/`setStats` gate).
+    pub display_efficiency: bool,
+    /// `displayScaledOutput` (`setBars`/`setStats` yield gate).
+    pub display_scaled_output: bool,
+}
+
+impl Default for AttributeCrafterDef {
+    /// `AttributeCrafter.java:15-31` field defaults: `attribute = Attribute.heat`
+    /// (index 0), `baseEfficiency = 1`, `maxBoost = 1`, `minEfficiency = -1`,
+    /// `boostScale = 1`, `displayEfficiency = displayScaledOutput = true`,
+    /// `outputScale = 0`, `scaleLiquidConsumption = false`. The derived
+    /// `Default` (all zero) silently removed the boost for every block that does
+    /// not patch `boostScale` (cultivator).
+    fn default() -> Self {
+        Self {
+            crafter: CrafterDef::default(),
+            attribute: 0,
+            base_efficiency: 1.0,
+            boost_scale: 1.0,
+            min_efficiency: -1.0,
+            max_boost: 1.0,
+            output_scale: 0.0,
+            scale_liquid_consumption: false,
+            display_efficiency: true,
+            display_scaled_output: true,
+        }
+    }
 }
 
 /// `Drill` family knobs.
@@ -875,6 +906,8 @@ impl BlockKindData {
                     def.boost_scale = 0.15;
                     def.max_boost = 1.0;
                     def.min_efficiency = -1.0;
+                    // `Blocks.java:1090` `outputScale = 0.15f`.
+                    def.output_scale = 0.15;
                 }
             }
             // `Blocks.java:1120 plastanium-compressor` — plastanium x1, craftTime 60.
@@ -1113,6 +1146,8 @@ impl BlockKindData {
                     def.base_efficiency = 0.0;
                     def.min_efficiency = 9.0 - 0.0001;
                     def.boost_scale = 1.0 / 9.0;
+                    // `Blocks.java:3005` `displayEfficiency = false`.
+                    def.display_efficiency = false;
                 }
             }
             "cliff-crusher" => self.set_wall_crafter(110.0, Some(item("sand"))),

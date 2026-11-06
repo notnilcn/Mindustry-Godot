@@ -162,6 +162,14 @@ pub fn icon_button(
     text_label.set_horizontal_alignment(godot::global::HorizontalAlignment::CENTER);
     text_label.set_h_size_flags(SizeFlags::EXPAND_FILL);
     text_label.set_mouse_filter(MouseFilter::IGNORE);
+    // `TextButton` wraps its label (`TextButton.java:30-34`: `add(label)
+    // .grow().wrap()`; `Cell.java:260-272` -> `Label.setWrap(true)`), so a
+    // label wider than the button cell folds onto a second line instead of
+    // overflowing (PAR-0433: the logic editor's 160x64 "Built-in Variables"
+    // cell). The wrap only affects the label inside the cell; the cell size
+    // itself stays fixed, which the `ready` hook below protects by measuring
+    // the label's font metrics, not its wrapped minimum.
+    text_label.set_autowrap_mode(WRAP_WORD_SMART);
     // Apply the default font up front so the row reports a real minimum width
     // (the theme font is not available before the node enters the tree).
     if let Some(assets) = assets()
@@ -208,9 +216,16 @@ pub fn icon_button(
     // minimum size; size it from the padded icon+label row once metrics resolve.
     let result_for_ready = result.clone();
     let row_for_ready = row.clone();
+    let icon_for_ready = icon.clone();
+    let label_for_ready = text_label.clone();
     let ready_callable = Callable::from_fn("icon_button_ready", move |_args: &[&Variant]| {
         inset_button_content(&result_for_ready, &row_for_ready);
-        sync_button_minimum(&result_for_ready, &row_for_ready);
+        sync_text_button_minimum(
+            &result_for_ready,
+            &row_for_ready,
+            &icon_for_ready,
+            &label_for_ready,
+        );
     });
     result.connect("ready", &ready_callable);
     result
@@ -228,9 +243,65 @@ fn sync_button_minimum(button: &Gd<Button>, row: &Gd<HBoxContainer>) {
     if !button.is_instance_valid() || !row.is_instance_valid() {
         return;
     }
-    let mut button = button.clone();
-    let row = row.clone();
     let row_min = row.get_combined_minimum_size();
+    apply_button_minimum(button, row_min);
+}
+
+/// [`sync_button_minimum`] for the icon+label row: a wrapped `Label` reports
+/// the height it needs *at its current width*, which is still degenerate on
+/// `ready` (the layout has not run yet) and would grow the shared button past
+/// its declared cell (`PAR-0433`: the logic editor's 160x64 row grew to 151
+/// px). Measure the label's unwrapped single-line size from the font metrics
+/// instead — those never depend on the current layout.
+fn sync_text_button_minimum(
+    button: &Gd<Button>,
+    row: &Gd<HBoxContainer>,
+    icon: &Gd<Label>,
+    label: &Gd<Label>,
+) {
+    if !button.is_instance_valid() || !row.is_instance_valid() {
+        return;
+    }
+    let row_min = match label_single_line_size(label) {
+        Some(text) => text_button_row_minimum(icon.get_combined_minimum_size(), text),
+        None => row.get_combined_minimum_size(),
+    };
+    apply_button_minimum(button, row_min);
+}
+
+/// The icon+label row minimum: the icon cell plus the label's single-line font
+/// metrics (`PAR-0433`).
+fn text_button_row_minimum(icon_min: Vector2, label_single_line: Vector2) -> Vector2 {
+    Vector2::new(
+        icon_min.x + label_single_line.x,
+        icon_min.y.max(label_single_line.y),
+    )
+}
+
+/// The label's single-line size from its resolved font metrics, or `None`
+/// while the theme font is unresolved.
+fn label_single_line_size(label: &Gd<Label>) -> Option<Vector2> {
+    let font = label.get_theme_font("font")?;
+    let font_size = label.get_theme_font_size("font_size");
+    let width = font
+        .get_string_size_ex(&label.get_text())
+        .alignment(godot::global::HorizontalAlignment::LEFT)
+        .width(-1.0)
+        .font_size(font_size)
+        .done()
+        .x;
+    Some(Vector2::new(
+        width,
+        font.get_height_ex().font_size(font_size).done(),
+    ))
+}
+
+/// Applies a padded content minimum to a button's `custom_minimum_size`.
+fn apply_button_minimum(button: &Gd<Button>, row_min: Vector2) {
+    if !button.is_instance_valid() {
+        return;
+    }
+    let mut button = button.clone();
     let box_ = button.get_theme_stylebox("normal");
     let mut pad = Vector2::ZERO;
     if let Some(box_) = box_ {
@@ -415,5 +486,16 @@ mod tests {
             WRAP_WORD_SMART,
             godot::classes::text_server::AutowrapMode::WORD_SMART
         );
+    }
+
+    #[test]
+    fn text_button_minimum_uses_the_single_line_metrics() {
+        // The icon cell and the unwrapped label width add up; the row height is
+        // the taller cell (`PAR-0433`).
+        let min = text_button_row_minimum(Vector2::new(30.0, 36.0), Vector2::new(120.0, 18.0));
+        assert_eq!(min, Vector2::new(150.0, 36.0));
+        // A label wider than the icon dominates the width, not the height.
+        let min = text_button_row_minimum(Vector2::new(30.0, 36.0), Vector2::new(200.0, 18.0));
+        assert_eq!(min, Vector2::new(230.0, 36.0));
     }
 }

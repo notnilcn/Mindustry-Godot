@@ -22,6 +22,21 @@ const OPACITY_DEFAULT: i32 = 100;
 /// (`PowerNode`/`PowerSource`) keeps the default.
 const POWER_LASER_SCALE: f32 = 0.25;
 
+/// `Mathf.absin(scl, mag)`'s implicit clock is Arc `Time.time`
+/// (`Mathf.java:74-76`), which accumulates `Time.delta = deltaTime * 60` and is
+/// therefore measured in **ticks**, not seconds (`Time.java:17,26,75`;
+/// `Time.toSeconds = 60`). `get_ticks_msec() * 0.06` is exactly that clock.
+fn ticks_from_msec(msec: f32) -> f32 {
+    msec * 0.06
+}
+
+/// `PowerNode.setupColor` / `BeamNode.draw` blend factor:
+/// `(1 - satisfaction) * 0.86 + Mathf.absin(3f, 0.1f)` (the two-argument
+/// `absin` reads Arc `Time.time`, i.e. ticks).
+fn laser_mix(satisfaction: f32, ticks: f32) -> f32 {
+    (1.0 - satisfaction) * 0.86 + drawf::absin(ticks, 3.0, 0.1)
+}
+
 /// One resolved draw command.
 enum Cmd {
     Region {
@@ -99,7 +114,7 @@ impl INode2D for LinkOverlay {
         let Some(rect) = self.visible_rect() else {
             return;
         };
-        let ticks = Time::singleton().get_ticks_msec() as f32 * 0.06;
+        let ticks = ticks_from_msec(Time::singleton().get_ticks_msec() as f32);
         let laser_opacity = self.setting("lasersopacity").max(0) as f32 / 100.0;
         let bridge_opacity = self.setting("bridgeopacity").max(0) as f32 / 100.0;
         let lod_l1 = self.renderer_bool("stats_lod_l1");
@@ -128,7 +143,7 @@ impl INode2D for LinkOverlay {
                     let rot = (y2 - y1).atan2(x2 - x1).to_degrees();
                     // `setupColor`: white -> `Pal.powerLight` by
                     // `(1 - satisfaction) * 0.86 + absin(time, 3, 0.1)`.
-                    let mix = (1.0 - link.satisfaction) * 0.86 + drawf::absin(ticks, 3.0, 0.1);
+                    let mix = laser_mix(link.satisfaction, ticks);
                     let mut color = drawf::lerp([1.0, 1.0, 1.0, 1.0], pal::POWER_LIGHT, mix);
                     color[3] = laser_opacity * if lod_l2 { 1.0 } else { 0.0 };
                     let color = canvas::color_f4(color);
@@ -190,7 +205,7 @@ impl INode2D for LinkOverlay {
                         .or_else(|| self.region(&node, "power-beam-end"));
                     // `Draw.color(laserColor1, laserColor2, (1 - satisfaction)
                     // * 0.86 + absin(3, 0.1))` then `Draw.alpha(laserOpacity)`.
-                    let mix = (1.0 - link.satisfaction) * 0.86 + drawf::absin(ticks, 3.0, 0.1);
+                    let mix = laser_mix(link.satisfaction, ticks);
                     let mut color = drawf::lerp([1.0, 1.0, 1.0, 1.0], BEAM_LASER_2, mix);
                     color[3] = laser_opacity;
                     let color = canvas::color_f4(color);
@@ -420,5 +435,34 @@ impl LinkOverlay {
             .map(|p| p.y)
             .fold(f32::NEG_INFINITY, f32::max);
         Some((min_x, min_y, max_x - min_x, max_y - min_y))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{laser_mix, ticks_from_msec};
+
+    /// PAR-0346 re-check: Arc's `Time.time` is **tick**-based — `Time.delta =
+    /// deltaTime * 60` and `Time.toSeconds = 60` (`Time.java:17,26,75`) — so
+    /// Java's `Mathf.absin(3f, 0.1f)` clock is ticks, exactly `ms * 0.06`. The
+    /// item claimed Java used seconds; the code already matches upstream.
+    #[test]
+    fn time_clock_is_ticks_like_arc() {
+        assert_eq!(ticks_from_msec(1000.0), 60.0);
+        assert_eq!(ticks_from_msec(500.0), 30.0);
+        assert!((ticks_from_msec(16.0) - 0.96).abs() < 1e-6);
+    }
+
+    /// `(1 - satisfaction) * 0.86 + absin(ticks, 3, 0.1)` with
+    /// `absin(x, scl, mag) = (sin(x / (2 scl)) * mag + mag) / 2`
+    /// (`Mathf.java:78-80`): the same blend as `PowerNode.setupColor` and
+    /// `BeamNode.draw`.
+    #[test]
+    fn laser_mix_matches_java_setup_color() {
+        assert!((laser_mix(1.0, 0.0) - 0.05).abs() < 1e-6);
+        assert!((laser_mix(0.0, 0.0) - 0.91).abs() < 1e-5);
+        // absin is periodic in `2π * scl` ticks; one period is back at the peak.
+        let period = std::f32::consts::TAU * 3.0;
+        assert!((laser_mix(0.5, period) - 0.48).abs() < 1e-5);
     }
 }
