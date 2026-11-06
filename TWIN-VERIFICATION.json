@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T14:20:40Z",
+  "updated": "2026-11-06T14:39:18Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -16580,9 +16580,42 @@
     },
     "PAR-0394": {
       "title": "Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)",
-      "status": "fixing",
-      "claimed_by": "p1-orch",
-      "claimed_at": "2026-11-03T14:26:17Z"
+      "status": "verified",
+      "claimed_by": "hx-moddata",
+      "claimed_at": "2026-11-06T14:33:59Z",
+      "fix": "Re-verified at HEAD: the ModDataManager owner/decorator path already landed and the map half now actually writes/reads the patches region. mind-core::mods::assets::ModDataManager implements the DataManager lifecycle (load/unload/reloadPatches/reloadContent/reloadImages/reloadAudio/bundle merge/record ordering); mind-gdext::MindMods owns it (GameState.data) with data()/data_mut()/load_map_data()/publish_data_assets() driving the image/audio/bundle decorators; mind-core::maps::write_map_source_with_patches fills WriteContext.patches (hasExternalAssets meta tag, forceEmbed for export) and SaveReadState.patches decodes it back so ModDataManager::load applies the patch set to a live registry (unload restores).",
+      "evidence": [
+        "cargo test -p mind-core --lib maps::tests::map_patches: map_patches_roundtrip_save_load + map_patches_export_embeds_external_assets pass (runs/PAR-0538/focused.log)",
+        "cargo test -p mind-core --lib: 2929 passed, 0 failed, 4 ignored (runs/PAR-0537/mind-core-lib.log)",
+        "cargo check -p mind-gdext: ok (runs/PAR-0537/mind-gdext-check.log)"
+      ],
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps::tests::map_patches"
+            }
+          }
+        ]
+      },
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "notes": [
+        {
+          "at": "2026-11-06T14:39:05Z",
+          "by": "hx-moddata",
+          "text": "Re-verified headlessly at f11557ea + this pass. Residual (not part of this title, needs mind-gdext files outside hx-moddata ownership): MindSimHost/MindCampaign load paths still do not feed a loaded map patches region into MindMods::load_map_data (L08 summary gap 4, Java state.data is global). No new owner/decorator work was needed."
+        }
+      ]
     },
     "PAR-0395": {
       "title": "Script mods: unsupported reason was not shown in the Mods dialog row (9f33ceaa)",
@@ -17452,13 +17485,13 @@
     },
     "PAR-0465": {
       "title": "Splash damage never applies the bullet's status: burning/blasted ammo only tags the directly-hit unit, never units caught in the blast",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -17466,9 +17499,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0465"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::tests::splash"
             }
           }
         ]
@@ -17476,17 +17509,27 @@
       "area": "combat/status-damage",
       "java": "core/src/mindustry/entities/bullet/BulletType.java:606-614",
       "rust": "client/rust/mind-core/src/combat/bullet/mod.rs:938-972",
-      "evidence": "JAVA BulletType.createSplashDamage (BulletType.java:606-614) does the radius damage AND then a radius status pass: 'Damage.damage(b.team, x, y, splashDamageRadius, splashDamage * b.damageMultiplier(), splashDamagePierce, collidesAir, collidesGround, scaledSplashDamage, b, armorMultiplier); if(status != StatusEffects.none){ Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration, collidesAir, collidesGround, statusChance); }' — Damage.status (Damage.java:441-457) applies to every enemy unit within the radius, chance-gated by statusChance. RUST create_splash_damage (combat/bullet/mod.rs:938-972) ends at the damage call: 'let _ = super::damage::area::damage_area(ctx.world, ctx.content, Some(team), x, y, def.splash_damage_radius, def.splash_damage, opts);' with no status pass; damage::status::status_area (combat/damage/status.rs:350) exists and is ported but has ZERO call sites (grep 'status_area' finds only the re-export in combat/damage/mod.rs:22). The only unit status application is combat/bullet/mod.rs:1677 in hit_entity, i.e. the single directly-hit unit. Concrete vanilla case: salvo_pyratite / swarmer_pyratite (status=burning) and swarmer_blast / cyclone_blast (status=blasted) all have splash_damage_radius>0 and status_chance=1.0 in both trees; in Java an enemy unit standing 20 units from the impact gets burning, in the port it takes the splash damage and no status at all.",
+      "evidence": [
+        "cargo test -p mind-core --lib combat::bullet::tests::splash: 1 passed (splash_damage_applies_status_in_radius)",
+        "unit 8 units from a swarmer_pyratite detonation gets `burning`; unit at 48 units does not; buildings are never tagged",
+        "cargo test -p mind-core --lib (full): 2941 passed, 0 failed, 4 ignored"
+      ],
       "acceptance": "Headless oracle: place a defense unit at (100,100) on team 2, spawn one swarmer_blast bullet (def.status = blasted, status_chance 1.0, splash radius 20) flying so it detonates at (108,100) — 8 world units from the unit, outside direct collision — step it to detonation, then assert the unit's StatusComp.statuses contains 'blasted' with duration 480 (BulletType.statusDuration default 60*8) and that a second unit at distance 40 has NO entry. Java reference: same fixture in the Java harness shows the blasted entry. Fix passes when status_area is invoked from create_splash_damage with (team, x, y, splash_damage_radius, def.status, def.status_duration, def.status_chance).",
       "notes": [
         {
           "at": "2026-11-02T15:46:42Z",
           "by": "orch-a:orch-a",
           "text": "Extra detail for the fixer (verified against Java 2026-11-03): Java createSplashDamage calls Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration, collidesAir, collidesGround, statusChance) (BulletType.java:606-614). Damage.status (Damage.java:475-491) filters entities by 'entity.team == team || !entity.checkTarget(air, ground) || !entity.hittable() || !entity.within(x, y, radius)' before the chance roll, where UnitType.checkTarget(air, ground) = (isGrounded() && ground) || (isFlying() && air). The ported combat::damage::status::status_area (status.rs:350) has NO air/ground params and no hittable check, so the fix should extend status_area with air/ground (+ hittable) and call it from create_splash_damage after damage_area with def.collides_air/collides_ground/def.status_chance. Also note create_splash_damage currently omits Java's 'if(heals()) heal allied buildings in radius' branch (BulletType.java:616-621) - separate gap, do not bundle unless trivial."
+        },
+        {
+          "at": "2026-11-06T14:35:25Z",
+          "by": "hx-combat",
+          "text": "Splash radius status verified headlessly with swarmer_pyratite (burning). Finding: the original acceptance's `blasted` expectation is not observable in Java either — StatusComp.applyStatus skips effect.reactive (StatusComp.java:79-87) and blasted is reactive, so it never enters statuses; the pass still runs. Burning is the correct non-reactive fixture. Full mind-core lib 2941 pass."
         }
       ],
       "claimed_by": "hx-combat",
-      "claimed_at": "2026-11-06T13:46:01Z"
+      "claimed_at": "2026-11-06T13:46:01Z",
+      "fix": "PAR-0465 / BulletType.java:606-614: create_splash_damage now runs the radius status pass after the area damage. combat::damage::status::status_area was extended to Java's Damage.status filter set (Damage.java:475-491): units only (Unit marker, never buildings/bullets), enemy team, UnitComp.checkTarget(air, ground), UnitType.hittable, within(x,y,radius), then the per-entity statusChance roll in deterministic EntitySeq order; signature now takes air/ground/content."
     },
     "PAR-0466": {
       "title": "Editor resize does not shift relative build configs (Java BuildPlan.pointConfig p.sub(offsetX, offsetY), ignoreResizeConfig blocks excluded)",
@@ -23733,13 +23776,13 @@
     },
     "PAR-0489": {
       "title": "Launch cost is priced from the planet-default-core loadout list",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -23747,9 +23790,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0489"
+              "cmd": "cargo test -p mind-gdext --lib launch_"
             }
           }
         ]
@@ -23757,8 +23800,22 @@
       "severity": "P1",
       "gap": "gx/ui/dialogs/batch_c.rs:2693,2858 resolves launch_cost from campaign_views.loadouts built from planet.default_core (mc/ui/campaign.rs:1719-1746), while the picker offers every core <= launcher core (gx/campaign.rs:5304-5320); Java PlanetDialog.java:1405-1412 charges the chosen loadout's requirements.",
       "source": "CAMPAIGN_GAPS.md#cg-tech-02",
-      "claimed_by": "camp-loadout2",
-      "claimed_at": "2026-11-06T10:19:48Z"
+      "claimed_by": "hx-campaign",
+      "claimed_at": "2026-11-06T14:29:32Z",
+      "fix": "Launch charge is priced from the picker's selected schematic, not the planet-default-core loadout list. gx/campaign.rs `launch_dialog_json` now reports `launch_cost` = the selected schematic's requirements + staged resources (Java `from.removeItems(loadout.requirements()); from.removeItems(universe.getLaunchResources())`, PlanetDialog.java:1409-1410), plus the picker `core` and `selected_file`; batch_c.rs `planet_launch` charges `plan.launch_cost` (was `planet_find_loadout_row` over the default-core `loadouts` section, which has no row for a larger-core schematic) and stamps `plan.core` in the payload. New helpers `launch_core_name`/`launch_requirements`/`launch_total`/`schematic_placeable_on_planet`. launch_dialog_json also gates the grid on allowLaunchSchematics (PAR-0509) and seeds from the last-used loadout (PAR-0508).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib launch_cost_prices_the_selected_schematic_not_the_default_core_list -> ok (nucleus schematic absent from core-shard loadout_views; its requirements + staged resources are charged)",
+        "cargo test -p mind-gdext --lib launch_ -> 4 passed",
+        "cargo check -p mind-gdext -> exit 0",
+        "files: client/rust/mind-gdext/src/campaign.rs, client/rust/mind-gdext/src/ui/dialogs/batch_c.rs"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:29:59Z",
+          "by": "hx-campaign",
+          "text": "headless fix pass (no Java leg). Root cause confirmed at HEAD: batch_c.rs `planet_launch` looked the picker index up in `campaign_section(\"loadouts\")` (mc/ui/campaign.rs builds that from `planet.default_core`), so a nucleus/bastion schematic had no requirements row and only the staged resources were charged. Fix prices from `launch_dialog_json`'s selected-schematic `total` (`launch_cost` stacks) and charges it via `remove_sector_items(launcher, launch_cost)`. Unit test uses the real base content + vanilla loadouts: basicNucleus is absent from the core-shard `loadout_views` yet its block requirements are included in the charge. Java twin pass (core-nucleus launcher, nucleus schematic launch, compare source-sector items) pending."
+        }
+      ]
     },
     "PAR-0490": {
       "title": "Planet page Resume reloads the sector from disk instead of resuming the live world",
@@ -27041,13 +27098,13 @@
     },
     "PAR-0507": {
       "title": "CG-SAVE-03: resuming a base wipes the stored launch loadout/resources",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -27055,29 +27112,44 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0507"
+              "cmd": "cargo test -p mind-gdext --lib only_a_free_launch_clears_the_stored_loadout"
             }
           }
         ]
       },
-      "claimed_by": "camp-loadout2",
-      "claimed_at": "2026-11-06T10:19:48Z",
+      "claimed_by": "hx-campaign",
+      "claimed_at": "2026-11-06T14:29:32Z",
       "severity": "P2",
       "gap": "batch_c.rs:2930-2945 calls clear_loadout_info for every plain start_sector branch including a resume; Java only clears on free launch (PlanetDialog.java:1396-1403, resume :1449)",
       "source": "CAMPAIGN_GAPS.md#cg-save-03",
-      "affected": "gx/ui/dialogs/batch_c.rs,gx/campaign.rs,mc/game/universe.rs"
+      "affected": "gx/ui/dialogs/batch_c.rs,gx/campaign.rs,mc/game/universe.rs",
+      "fix": "`planet_launch` now calls `Universe.clearLoadoutInfo` only on the free-launch branch: new predicate `planet_launch_clears_loadout(resume, launcher, loadout)` = `!resume && launcher < 0 && loadout < 0` (PlanetDialog.java:1396-1403). A resume/go of a sector with a base (`control.playSector(sector)`, PlanetDialog.java:1449) and a launcher launch keep `launch-resources-seq` and `lastloadout-<core>`. The dead `play_sector` branch (MindCampaign has no such binding; `start_sector` picks resume from the sector record) was removed.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib only_a_free_launch_clears_the_stored_loadout -> ok (free launch clears; resume/go and launcher launch keep)",
+        "cargo test -p mind-gdext --lib campaign -> 14 passed, 4 pre-existing Godot-FFI failures unchanged",
+        "cargo test -p mind-core --lib universe -> 18 passed",
+        "cargo check -p mind-gdext -> exit 0",
+        "files: client/rust/mind-gdext/src/ui/dialogs/batch_c.rs"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:29:59Z",
+          "by": "hx-campaign",
+          "text": "headless fix pass (no Java leg). `campaign.has_method(\"play_sector\")` is always false (play_sector is a mind-core free function, not a MindCampaign #[func]), so resume went through the plain `start_sector` branch which unconditionally called `clear_loadout_info`. Now only the free-launch branch (no base + no launcher sector) clears, matching PlanetDialog.java:1396-1403; resume/go keeps `launch-resources-seq` + `lastloadout-<core>` (Java :1449). Unit test covers the branch predicate; a live check is `universe.get_launch_resources()` before/after resume. Java twin pass pending."
+        }
+      ]
     },
     "PAR-0508": {
       "title": "CG-TECH-04: last-used loadout is not restored",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -27085,29 +27157,43 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0508"
+              "cmd": "cargo test -p mind-core --lib universe"
             }
           }
         ]
       },
-      "claimed_by": "camp-loadout2",
-      "claimed_at": "2026-11-06T10:19:51Z",
+      "claimed_by": "hx-campaign",
+      "claimed_at": "2026-11-06T14:29:32Z",
       "severity": "P2",
       "gap": "gx/campaign.rs:5173 seeds launch loadout from core default; get_last_loadout (:5358) has no caller. Java seeds from universe.getLoadout(core)/LaunchLoadoutDialog.java:162, persisted as lastloadout-<core>",
       "source": "CAMPAIGN_GAPS.md#cg-tech-04",
-      "affected": "gx/campaign.rs,gx/ui/dialogs/batch_campaign2.rs"
+      "affected": "gx/campaign.rs,gx/ui/dialogs/batch_campaign2.rs",
+      "fix": "LaunchLoadoutDialog seeds the picker from `Universe.getLoadout(core)` instead of the core default: new `Universe::get_loadout_index` (mc/game/universe.rs) resolves `lastloadout-<core>` by `File.nameWithoutExtension()` among `Schematics.getLoadouts(core)`, falls back to the core's first loadout and to `core-shard`'s first (Universe.java:129-148), and tolerates a pre-existing full-path value. `launch_confirm` now persists the bare file stem (was the full path) via `update_loadout`, so the next launch restores it.",
+      "evidence": [
+        "cargo test -p mind-core --lib universe -> get_loadout_index_restores_the_last_used_schematic ok (stored stem, legacy full path, stale name fallback, unknown core None)",
+        "cargo test -p mind-gdext --lib launch_ -> 4 passed",
+        "cargo check -p mind-gdext -> exit 0",
+        "files: client/rust/mind-core/src/game/universe.rs, client/rust/mind-gdext/src/campaign.rs, client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:29:59Z",
+          "by": "hx-campaign",
+          "text": "headless fix pass (no Java leg). `get_last_loadout` had no caller because the stored file name was never resolved to a schematic. `Universe::get_loadout_index` is the Rust `Universe.getLoadout(CoreBlock)` and now seeds every `launch_dialog_json` call; `launch_confirm` stores `File.nameWithoutExtension()` (it previously stored the absolute path, so even a resolver would not have matched `lastloadout-<core>`). Unit test covers stem match, legacy full-path value, stale name fallback to the core's first loadout and unknown core -> None. Java twin pass pending."
+        }
+      ]
     },
     "PAR-0509": {
       "title": "CG-TECH-05: allowLaunchSchematics is ignored by the launch picker",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -27115,19 +27201,33 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0509"
+              "cmd": "cargo test -p mind-gdext --lib launch_"
             }
           }
         ]
       },
-      "claimed_by": "camp-loadout2",
-      "claimed_at": "2026-11-06T10:19:51Z",
+      "claimed_by": "hx-campaign",
+      "claimed_at": "2026-11-06T14:29:32Z",
       "severity": "P2",
       "gap": "Only definitions exist (mc/content/registries/planets.rs:287, sectors.rs:136, mc/game/sector.rs:698); the mind-gdext launch path always uses the launcher's best core and the full schematic grid. Java PlanetDialog.java:1405 + LaunchLoadoutDialog.java:167-196 gate on the destination",
       "source": "CAMPAIGN_GAPS.md#cg-tech-05",
-      "affected": "gx/campaign.rs,gx/ui/dialogs/batch_c.rs"
+      "affected": "gx/campaign.rs,gx/ui/dialogs/batch_c.rs",
+      "fix": "`launch_dialog_json` now ports PlanetDialog.java:1405 + LaunchLoadoutDialog.java:167-196: `launch_core_name` uses the launcher's `info.bestCoreType` only when the destination's `allowLaunchSchematics` (planet default, or preset when overrideLaunchDefaults) is true, else the planet's default core; the schematic grid is emitted only when schematics are allowed (empty otherwise, matching Java's no-grid branch) and skips loadouts containing a block that is not buildable on the launcher's planet (`supportsEnv` + `isOnPlanet`). batch_campaign2's `launch_rows` no longer falls back to the default-core loadout list for a live plan whose grid is empty, and `launch_selected_core` reads the plan's core.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib launch_core_follows_destination_allow_launch_schematics -> ok (Serpulo allows schematics -> bestCoreType; Erekir forbids -> core-bastion; 'air' falls back)",
+        "cargo test -p mind-gdext --lib launch_grid_skips_blocks_not_buildable_on_the_planet -> ok (copper-wall offered on Serpulo, not Erekir)",
+        "cargo check -p mind-gdext -> exit 0",
+        "files: client/rust/mind-gdext/src/campaign.rs, client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:29:59Z",
+          "by": "hx-campaign",
+          "text": "headless fix pass (no Java leg). Content data: serpulo.allowLaunchSchematics = true (Planets.java:138), erekir keeps the default false; preset `overrideLaunchDefaults` still wins via `Sector::allow_launch_schematics`. With the destination forbidding schematics the picker now forces the planet default core and emits no grid (Java renders only the preset description); the selection then seeds from that core's last-used loadout, so the launch still charges the configured loadout exactly like Java. Grid rows also honour the per-tile supportsEnv/isOnPlanet filter (`shownPlanets` needs the init/postInit sweeps, which the live boot runs). Java twin pass pending."
+        }
+      ]
     },
     "PAR-0510": {
       "title": "GAPS #28: trimDark used a zero darkness (sector-edge walls missing)",
@@ -27979,13 +28079,13 @@
     },
     "PAR-0529": {
       "title": "GAPS #1: Lightning chains to buildings (not units); missing insulated raycast, hitter filter, pierceCap, damage multiplier, random walk",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -27993,9 +28093,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0529"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::lightning"
             }
           }
         ]
@@ -28007,17 +28107,30 @@
       "area": "combat/lightning",
       "java": "core/src/mindustry/entities/Lightning.java:42-116",
       "rust": "client/rust/mind-core/src/combat/lightning.rs",
-      "gap": "Rust used farthest_enemy_building + no hitter params; Java uses Units.nearbyEnemies + Geometry.findFurthest on units, an insulated-building raycast with a tile-corner snap, the hitter air/ground filter, pierceCap, damageMultiplier, hitCreate (lightningType) and a random walk after maxChain."
+      "gap": "Rust used farthest_enemy_building + no hitter params; Java uses Units.nearbyEnemies + Geometry.findFurthest on units, an insulated-building raycast with a tile-corner snap, the hitter air/ground filter, pierceCap, damageMultiplier, hitCreate (lightningType) and a random walk after maxChain.",
+      "fix": "GAPS #1 / Lightning.java:42-116: combat::lightning now ports createLightningInternal in full — per-step hitCreate bullet + jittered polyline point; World.raycastEach over consecutive points with the enemy insulated-building snap to the tile corner and branch end; chain target is the farthest enemy unit in the hitRange box (Units.nearbyEnemies + Geometry.findFurthest, stable entity order) with the hitRange*2 within gate; hitter air/ground UnitComp.checkTarget gate, pierceCap and Bullet.damageMultiplier (status + rules.unitDamage/blockDamage); lightningType as hitCreate; random walk after maxChain (8). New Lightning.create_from_bullet implements the hitter overload and BulletType.java:585-589 lightning-on-hit now spawns branches; LightningBulletType.init passes its own bullet as hitter and the BulletType damage.",
+      "evidence": [
+        "cargo test -p mind-core --lib combat::lightning: 10 passed",
+        "cargo test -p mind-core --lib (full): 2941 passed, 0 failed, 4 ignored",
+        "cargo check -p mind-gdext: ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:17Z",
+          "by": "hx-combat",
+          "text": "Lightning 10/10: chains to units (never buildings), insulated plastanium wall snaps+ends the branch (tile corner in snap_point), hitter air/ground filter, pierceCap, status damageMultiplier scaling and random walk after maxChain. Full mind-core lib 2941 pass."
+        }
+      ]
     },
     "PAR-0530": {
       "title": "GAPS #2: Turret ammo has no limitRange (duo/scatter/hail/swarmer/salvo/cyclone/spectre + six Erekir turrets)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28025,9 +28138,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0530"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib world::blocks::defense::turrets"
             }
           }
         ]
@@ -28039,17 +28152,30 @@
       "area": "world/blocks/defense/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:246-253",
       "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs",
-      "gap": "Ammo lifetime stayed at the hand-written Blocks.java value (duo copper 60 vs Java 70, salvo copper 60 vs 83.6) because Turret.limitRange was not ported."
+      "gap": "Ammo lifetime stayed at the hand-written Blocks.java value (duo copper 60 vs Java 70, salvo copper 60 vs 83.6) because Turret.limitRange was not ported.",
+      "fix": "GAPS #2 / Turret.java:246-253: ported Turret.limitRange and applied the Blocks.java margins (duo 5, scatter 2, hail 0, swarmer 5, salvo/cyclone/spectre default 9; breach 12, diffuse 25, disperse 16 + extraRangeMargin 32, afflict -55, scathe/smite 9) to every turret ammo BulletDef after registration: lifetime = (rangeChange + range + margin + extraRangeMargin + 10) / speed.",
+      "evidence": [
+        "cargo test -p mind-core --lib world::blocks::defense::turrets: 56 passed",
+        "duo copper lifetime 70 (was 60), salvo copper 83.6 (was 60), breach beryllium (190+12+10)/7.5",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:17Z",
+          "by": "hx-combat",
+          "text": "limit_range_recomputes_ammo_lifetime covers duo/salvo/hail/breach/diffuse/disperse(extra 32)/afflict; turret suite 56 pass, full lib 2941."
+        }
+      ]
     },
     "PAR-0531": {
       "title": "GAPS #3: ErekirTechTree.rebalance part (b) is a no-op: Erekir turret ammo damage ~33% high",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28057,9 +28183,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0531"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib erekir_turret_ammo_rebalanced"
             }
           }
         ]
@@ -28071,17 +28197,30 @@
       "area": "content/tech/ekir+world/blocks/defense/turrets",
       "java": "core/src/mindustry/content/ErekirTechTree.java:26-48",
       "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs",
-      "gap": "rebalance() only scaled Erekir unit weapon bullets; turret ammo of blocks with non-Serpulo requirements (breach/diffuse/titan/disperse/sublimate/lustre/scathe/smite) kept the raw Blocks.java damage (breach beryllium 85 vs 63.75)."
+      "gap": "rebalance() only scaled Erekir unit weapon bullets; turret ammo of blocks with non-Serpulo requirements (breach/diffuse/titan/disperse/sublimate/lustre/scathe/smite) kept the raw Blocks.java damage (breach beryllium 85 vs 63.75).",
+      "fix": "GAPS #3 / ErekirTechTree.java:26-48 part (b): turret ammo of every turret whose requirements include a non-Serpulo item is scaled by 0.75 once per bullet id (ItemTurret | ContinuousLiquidTurret | ContinuousTurret only; PowerTurret afflict/malign excluded). Implemented as rebalance_erekir_turret_ammo at the turret-ammo installation point because the port installs ammo after content boot (GAPS #11); ekir::rebalance keeps part (a) for unit weapons.",
+      "evidence": [
+        "cargo test -p mind-core --lib world::blocks::defense::turrets: 56 passed",
+        "breach beryllium 85->63.75, diffuse graphite 41->30.75, titan thorium 350->262.5, disperse surge 65->48.75, sublimate ozone 60->45, lustre 210->157.5, smite 250->187.5; afflict 180/malign 70 untouched",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:17Z",
+          "by": "hx-combat",
+          "text": "erekir_turret_ammo_rebalanced asserts the 0.75 scaling on the Erekir turrets and that Serpulo turrets and PowerTurret ammo stay unchanged; full lib 2941 pass."
+        }
+      ]
     },
     "PAR-0532": {
       "title": "GAPS #5: cheating() ignored by turret ammo/heat (no infinite ammo, no heat bypass, no ItemTurret auto-fill)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28089,9 +28228,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0532"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib cheating_"
             }
           }
         ]
@@ -28103,17 +28242,30 @@
       "area": "world/blocks/defense/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:677-715; ItemTurret.java:103-110; LiquidTurret.java:128-133; LaserTurret.java:96",
       "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs",
-      "gap": "TeamComp.cheating() (team.rules().cheat) had no port: hasAmmo ignored the cheat floor, useAmmo always consumed, ItemTurret never auto-filled on placement, the heat efficiency multiplier was missing entirely (heatReq was never computed) and the laser coolant drain ignored the cheat branch."
+      "gap": "TeamComp.cheating() (team.rules().cheat) had no port: hasAmmo ignored the cheat floor, useAmmo always consumed, ItemTurret never auto-filled on placement, the heat efficiency multiplier was missing entirely (heatReq was never computed) and the laser coolant drain ignored the cheat branch.",
+      "fix": "GAPS #5 / TeamComp.java:17-19 + Turret.java:677-715, ItemTurret.java:103-110, LiquidTurret.java:128-133, LaserTurret.java:96: added turret::cheating (team.rules().cheat) and wired it into hasAmmo (ammoPerShot floor bypass), useAmmo (item/liquid never consumed), ItemTurret onProximityAdded auto-fill of the first ammo type and LaserTurret coolant use. Also ported TurretBuild.heatReq = calculateHeat(sideHeat) and updateEfficiencyMultiplier's min(max(heatReq/requirement, cheating?1:0), maxHeatEfficiency) term.",
+      "evidence": [
+        "cargo test -p mind-core --lib world::blocks::defense::turrets: 56 passed",
+        "cheating_gives_infinite_ammo / cheating_item_turret_auto_fills_on_placement / cheating_bypasses_heat_efficiency_floor pass",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:18Z",
+          "by": "hx-combat",
+          "text": "Three cheat tests: infinite ammo below ammoPerShot with no consumption, ItemTurret auto-fill (2 copper on a placed duo), and the heat efficiency floor 1 vs 0."
+        }
+      ]
     },
     "PAR-0533": {
       "title": "GAPS #6: ContinuousLaser fadeTime / ContinuousFlame lengthInterp ignored; PointLaser line-damages the muzzle instead of Damage.collidePoint at the aim point",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28121,9 +28273,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0533"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::kinds::continuous"
             }
           }
         ]
@@ -28135,17 +28287,30 @@
       "area": "combat/bullet",
       "java": "core/src/mindustry/entities/bullet/ContinuousLaserBulletType.java:94-98; ContinuousFlameBulletType.java:96-98; PointLaserBulletType.java:78-95; core/src/mindustry/entities/Damage.java:337-363",
       "rust": "client/rust/mind-core/src/combat/bullet/kinds/continuous.rs; client/rust/mind-core/src/combat/damage/line.rs",
-      "gap": "currentLength returned length.max(range) for every continuous kind (no 16-tick laser fade, no b.fin(Interp.slope) flame interpolation) and lustre used ContinuousLaser so it damaged the muzzle; Damage.collidePoint had no port."
+      "gap": "currentLength returned length.max(range) for every continuous kind (no 16-tick laser fade, no b.fin(Interp.slope) flame interpolation) and lustre used ContinuousLaser so it damaged the muzzle; Damage.collidePoint had no port.",
+      "fix": "GAPS #6 / ContinuousLaserBulletType.java:94-98, ContinuousFlameBulletType.java:96-98, PointLaserBulletType.java:78-95, Damage.java:337-363: ContinuousBehavior::current_length now applies the 16-tick laser fade (with Java's type-lifetime numerator) and the flame Interp.slope length interpolation. Added Damage.collidePoint (tile building + 1x1 aim-rect units, hit pipeline + hitEntity, pierce removal) and a PointLaserBulletType behavior that calls it every damageInterval; lustre_laser is now a PointLaser def instead of ContinuousLaser.",
+      "evidence": [
+        "cargo test -p mind-core --lib combat::bullet::kinds::continuous: 3 passed",
+        "point_laser_damages_at_the_aim_point (790 after one interval, 580 after two, muzzle unit untouched)",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:18Z",
+          "by": "hx-combat",
+          "text": "Laser fade (200->100->0), flame slope (0->130->0), and point-laser aim-point damage over 5-tick intervals verified headlessly."
+        }
+      ]
     },
     "PAR-0534": {
       "title": "GAPS #7: LiquidTurret never extinguishes fires (findTarget does not scan Fires)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28153,9 +28318,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0534"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib liquid_turret_"
             }
           }
         ]
@@ -28167,17 +28332,30 @@
       "area": "world/blocks/defense/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/LiquidTurret.java:91-119",
       "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs",
-      "gap": "LiquidTurretBuild.findTarget's extinguish branch (range-square fire scan, nearest fire, own-team building gate, current liquid canExtinguish) was absent; waves/tsunami never targeted fires."
+      "gap": "LiquidTurretBuild.findTarget's extinguish branch (range-square fire scan, nearest fire, own-team building gate, current liquid canExtinguish) was absent; waves/tsunami never targeted fires.",
+      "fix": "GAPS #7 / LiquidTurret.java:91-119: LiquidTurretBuild.findTarget's extinguish branch is ported — when the current ammo liquid canExtinguish, scan the range/tilesize square for the nearest fire, skip the turret's own tile and fires on other-team blocks, and target it without running standard targeting. validate_target now only rejects targets that actually have dead health, so a Fire target stays valid (Units.invalidateTarget's Healthc check).",
+      "evidence": [
+        "cargo test -p mind-core --lib world::blocks::defense::turrets: 56 passed",
+        "liquid_turret_targets_fires / liquid_turret_ignores_fire_with_flammable_ammo pass",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:18Z",
+          "by": "hx-combat",
+          "text": "Wave targets the nearest own-team fire within range; oil (flammable) never takes the fire path; a fire on an enemy wall is skipped."
+        }
+      ]
     },
     "PAR-0535": {
       "title": "GAPS #8: TractorBeamTurret subtracts health directly (no shields/death/blockDamage) and cannot distinguish air from ground",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28185,9 +28363,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0535"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib tractor_beam"
             }
           }
         ]
@@ -28199,7 +28377,20 @@
       "area": "world/blocks/defense/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/TractorBeamTurret.java:110-135",
       "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs",
-      "gap": "update_tractor did health.health -= beam_damage*eff (no shield absorb, no kill path, no rules.blockDamage/timeScale), status used strength>=chance instead of Mathf.chance, and parallax had targetGround=true (Java class default false)."
+      "gap": "update_tractor did health.health -= beam_damage*eff (no shield absorb, no kill path, no rules.blockDamage/timeScale), status used strength>=chance instead of Mathf.chance, and parallax had targetGround=true (Java class default false).",
+      "fix": "GAPS #8 / TractorBeamTurret.java:110-135: update_tractor now applies damageContinuousPierce (damage*eff*timeScale*rules.blockDamage(team) through the shield/healthMultiplier/unitHealth/death path via apply_health), uses Mathf.chance(statusChance) for the status, re-checks team + checkTarget(air, ground) each tick, uses the unit hitSize for the range check, and find_enemy_unit uses TargetQueries.closest_unit_filtered with the turret's targetAir/targetGround. parallax now has targetGround=false (Java class default).",
+      "evidence": [
+        "cargo test -p mind-core --lib world::blocks::defense::turrets: 56 passed",
+        "tractor_beam_damages_through_shields_and_ignores_ground (shield 2 -> 0, health 997, ground unit untouched)",
+        "cargo test -p mind-core --lib (full): 2941 passed"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:35:18Z",
+          "by": "hx-combat",
+          "text": "Shield absorbs the beam then health drops; grounded units are ignored by parallax (targetGround=false); existing tractor pull test updated to a flying target."
+        }
+      ]
     },
     "PAR-0536": {
       "title": "GAPS #40: Bans/Admins/Trace dialogs - unban/unadmin buttons + confirms; Trace IP/name lists and formatted strings",
@@ -28247,13 +28438,13 @@
     },
     "PAR-0537": {
       "title": "GAPS #59: ContentParser shallow field set — inline effect classes, bullet unit refs, research tech nodes and block/unit field surface",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28261,9 +28452,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0537"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -28272,17 +28463,33 @@
       "claimed_at": "2026-11-06T14:20:36Z",
       "severity": "P1",
       "gap": "mods/json ContentParser rejected/warned on inline ParticleEffect/RadialEffect/SeqEffect/SoundEffect/NoiseEffect (object form), ignored BulletType.spawnUnit/despawnUnit and named BulletType string refs, dropped the research tech-node reparenting, and read only ~30 block/unit fields (no Floor/Wall/UnitType subclass surface).",
-      "source": "GAPS.md#59"
+      "source": "GAPS.md#59",
+      "fix": "mods/json ContentParser (ContentParser.java:72-82,165-170,1337-1400): inline Effect objects now parse ParticleEffect (default class when type is omitted)/RadialEffect/SeqEffect/SoundEffect/NoiseEffect into content::EffectSpec (new kind variants + field records and constructors in content/registries/fx_meta.rs; SeqEffect lifetime is the child sum, SoundEffect inherits the child startDelay, NoiseEffect keeps its unclipped clip). BulletType string fields resolve named Bullets.<field> refs via new BulletRef::Named + bullets::bullet_by_java_name; spawnUnit/despawnUnit (plus despawnUnitCount/Chance/Radius, faceOutwards, hitUnder and the remaining BulletType scalar surface) parse and resolve to UnitTypeId with spawnUnitRange derived. research on any unlockable content is deferred and applied in finish_parsing as a tech node (parent by content name, explicit requirements, custom objectives, implicit Produce for items/liquids, root/planet/requiresUnlock branch, old-node detach without TechNodeRef index shifts). parse_block/parse_unit read the Block/Floor/Wall and UnitType field surface (fogRadius/canOverdrive/region/itemDrop/mapColor/group/cacheLayer plus targetFlags/commands/stances/defaultCommand/sounds/effects/colour/leg/segment fields).",
+      "evidence": [
+        "cargo test -p mind-core --lib mods: 160 passed, 0 failed (inline_effect_classes_parse, bullet_unit_refs_and_named_bullets, block_extended_field_surface, unit_extended_field_surface, research_inserts_tech_nodes)",
+        "cargo test -p mind-core --lib: 2929 passed, 0 failed, 4 ignored",
+        "cargo check -p mind-gdext: ok",
+        "cargo fmt --all --check: clean",
+        "runs/PAR-0537/mind-core-lib.log",
+        "runs/PAR-0537/mind-gdext-check.log"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:36:38Z",
+          "by": "hx-moddata",
+          "text": "Headless-only verification: 5 new parser tests plus the full mind-core lib suite. Inline effects keep no renderer half (metadata only, plan 17); spawnUnit resolves a named unit (inline unit objects still warn); research nodes attach to vanilla/mod parents and keep positional TechNodeRefs stable."
+        }
+      ]
     },
     "PAR-0538": {
       "title": "GAPS #56: per-family block knobs live only in the name-keyed apply_vanilla_knobs overlay; mod blocks of a vanilla class get zeroed defaults",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28290,9 +28497,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0538"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
             }
           }
         ]
@@ -28301,17 +28508,30 @@
       "claimed_at": "2026-11-06T14:20:40Z",
       "severity": "P1",
       "gap": "mc/world/block_kind_data.rs apply_vanilla_knobs matched ~64 vanilla block names, so a mod block of class GenericCrafter/Drill/Pump/SolidPump/Fracker/BeamDrill/BurstDrill/Radar/LogicDisplay/MessageBlock/MemoryBlock/CanvasBlock/LaunchPad inherited zeroed BlockKindData defaults (craftTime 0, drill time 0, pump 0, display size 0, ...).",
-      "source": "GAPS.md#56"
+      "source": "GAPS.md#56",
+      "fix": "world/block_kind_data.rs: the per-family class field initializers now live in the BlockKindData defaults so a mod block of a vanilla class is functional without a name-keyed apply_vanilla_knobs entry. CrafterDef (craftTime 80, liquidOutputDirections {-1}), AttributeCrafterDef (baseEfficiency 1, boostScale 1, minEfficiency -1, maxBoost 1), DrillDef (drillTime 300, hardnessDrillMultiplier 50), BurstDrillDef (hardness 0, invertedTime 200), BeamDrillDef (range 5, drillTime 200, tier 1), PumpDef (0.2), SolidPumpDef (0.2, baseEfficiency 1), FrackerDef (itemUseTime 100, water result), RadarDef (600), MemoryDef (32), MessageDef (400/24), DisplayDef (64/1), TileableDisplayDef (32/6/16), CanvasDef (8 + default palette), LaunchPadDef (launchTime 1). from_def uses the class default only when BlockDef.craft_time is 0 (content value wins) and Separator now copies def.craft_time; set_crafter keeps a craft() 0.0 as the class default instead of overwriting it. Redundant name cases (radar/message/tile-logic-display) removed from the overlay.",
+      "evidence": [
+        "cargo test -p mind-core --lib block_kind_data: class_defaults_apply_to_mod_blocks + factory_recipes_match_upstream pass",
+        "cargo test -p mind-core --lib: 2929 passed, 0 failed, 4 ignored",
+        "runs/PAR-0537/mind-core-lib.log"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:36:44Z",
+          "by": "hx-moddata",
+          "text": "Headless-only: new test builds a synthetic mod BlockDef per family and asserts the Java class defaults. Per-block recipe/knob values that Blocks.java sets on vanilla instances remain in the name overlay until BlockDef grows family content fields (needs content/registries/blocks/mod.rs, owned elsewhere); class-level defaults now apply to mod blocks."
+        }
+      ]
     },
     "PAR-0539": {
       "title": "GAPS #60: DataPatcher edits only ~8 BlockDef fields; the rest of the Block/Floor field surface warns unknown",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -28319,9 +28539,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0539"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -28330,7 +28550,20 @@
       "claimed_at": "2026-11-06T14:20:40Z",
       "severity": "P2",
       "gap": "mods/patch/mod.rs apply_block matched requirements/plans/upgrades/consumes/attributes/drillMultipliers/health/armor/itemCapacity/liquidCapacity/solid/floating/update/destructible; every other BlockDef field (fogRadius, canOverdrive, squareSprite, region, itemDrop, priority, insulated, depositCooldown, replaceable, ...) warned unknown.",
-      "source": "GAPS.md#60"
+      "source": "GAPS.md#60",
+      "fix": "mods/patch/mod.rs apply_block now dispatches the general BlockDef scalar surface through set_int/set_f32/set_bool table macros (fogRadius, unitCapModifier, itemCapacity, scaledHealth, buildTime/buildCostMultiplier, researchCostMultiplier, priority, liquidCapacity, ore fields, albedo, explosiveness/flammability, floor speed/drown/status/drag/damage/liquidMultiplier, crush/deposit/team flags, rotation/cache/shadow/light/team-overlay booleans, save/placement/insulation/power flags, craftTime/constructTime, playerControllable, commandable, ...) plus string/enum fields region, itemDrop, liquidDrop. set_block_field records the original value (including Option::None) so unapply restores it.",
+      "evidence": [
+        "cargo test -p mind-core --lib mods: 160 passed, 0 failed (mods::patch::tests::block_scalar_field_surface)",
+        "cargo test -p mind-core --lib: 2929 passed, 0 failed, 4 ignored",
+        "runs/PAR-0537/mind-core-lib.log"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T14:36:59Z",
+          "by": "hx-moddata",
+          "text": "Headless-only: new test patches 10 previously-unknown router fields (including itemDrop whose original is None), asserts the registry, then unapply-restores every value. Array/Seq/consumes/attributes paths unchanged."
+        }
+      ]
     }
   },
   "recipes": {

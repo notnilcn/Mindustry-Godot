@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T09:55:22Z",
+  "updated": "2026-11-06T14:28:56Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -789,6 +789,157 @@
       "repro": "cargo test -p mind-core --lib storage_block",
       "expected": "5 storage_block tests pass; incinerate_effect predicate/facing-edge/fullness gate pinned; cargo check -p mind-gdext passes",
       "risk": "View-only RngStream::Fx draw (not checksummed). Camera zoom echo-guard affects MCP pose pins during landing cutscenes.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-142856",
+      "created_at": "2026-11-06T14:28:56Z",
+      "agent": "hx-prod",
+      "branch": "main",
+      "head": "c150184e",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/world",
+      "summary": "GAPS #18/#19/#22: AttributeCrafter boost, Fracker item cycle, ConsumePowerDynamic",
+      "files": [
+        "client/rust/mind-core/src/world/behavior/production.rs",
+        "client/rust/mind-core/src/world/block_kind_data.rs",
+        "client/rust/mind-core/src/ui/content_stats/production.rs",
+        "client/rust/mind-core/src/world/blocks/power/mod.rs",
+        "client/rust/mind-core/src/world/blocks/power/module.rs",
+        "client/rust/mind-core/src/world/blocks/payloads/payload_loader.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib attribute_crafter; ... fracker; ... dynamic_power",
+      "expected": "attribute/fracker/dynamic-power tests pass; full lib 2967",
+      "risk": "AttributeCrafterDef defaults changed; silicon-crucible outputScale 0.15; dynamic power consumers",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-142856-2",
+      "created_at": "2026-11-06T14:28:56Z",
+      "agent": "hx-defense",
+      "branch": "main",
+      "head": "c150184e",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src/world",
+      "summary": "GAPS #14/#15 defense hooks + BuildTurret queue helpers",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/defense/projectors.rs",
+        "client/rust/mind-core/src/world/blocks/defense/behaviors.rs",
+        "client/rust/mind-core/src/world/blocks/defense/build_turret_plans.rs",
+        "client/rust/mind-core/src/world/behavior/defense.rs",
+        "client/rust/mind-core/src/world/behavior/mod.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib defense",
+      "expected": "defense 96, projector 33",
+      "risk": "RegenMendMap resource ordering; hooks inert until access.rs/unit_runtime dispatch lands",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-142856-3",
+      "created_at": "2026-11-06T14:28:56Z",
+      "agent": "hx-logic",
+      "branch": "main",
+      "head": "c150184e",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src/logic",
+      "summary": "GAPS #25/#26/#27/#63/#64/#65: logic bullet/senses/sinks + BlockIndexer/BuilderAI/BaseBuilderAI",
+      "files": [
+        "client/rust/mind-core/src/logic/world.rs",
+        "client/rust/mind-core/src/logic/value.rs",
+        "client/rust/mind-core/src/logic/access.rs",
+        "client/rust/mind-core/src/logic/globals.rs",
+        "client/rust/mind-core/src/sim/mod.rs",
+        "client/rust/mind-core/src/ai/block_indexer.rs",
+        "client/rust/mind-core/src/ai/types/builder.rs",
+        "client/rust/mind-core/src/ai/base_builder_ai.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib logic::",
+      "expected": "logic 143, ai 134, block_indexer 7; full lib 2967",
+      "risk": "SpawnBullet event shape; gdext must push LogicPlayerView; flag buckets now 256 teams",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-142856-4",
+      "created_at": "2026-11-06T14:28:56Z",
+      "agent": "hx-mapgen",
+      "branch": "main",
+      "head": "c150184e",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src/maps",
+      "summary": "GAPS #28/#29/#30: trimDark/addWeather darkness terms + CoreSpawn/SpawnPath filters",
+      "files": [
+        "client/rust/mind-core/src/maps/generators/basic.rs",
+        "client/rust/mind-core/src/maps/generators/planet.rs",
+        "client/rust/mind-core/src/maps/planet/mod.rs",
+        "client/rust/mind-core/src/maps/planet/serpulo.rs",
+        "client/rust/mind-core/src/maps/planet/erekir.rs",
+        "client/rust/mind-core/src/maps/planet/tantros.rs",
+        "client/rust/mind-core/src/maps/filters/builtin.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "parity-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps",
+      "expected": "maps 113; parity --check PASS",
+      "risk": "Rust-recorded world_gen_erekir/tantros checksums moved; golden files not regenerated",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-142856-5",
+      "created_at": "2026-11-06T14:28:56Z",
+      "agent": "hx-render",
+      "branch": "main",
+      "head": "c150184e",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src",
+      "summary": "Render PAR-0369/0519/0520 + unit/turret draw verified; UI PAR-0536 bans/admins/trace + icon wrap",
+      "files": [
+        "client/rust/mind-gdext/src/render/units.rs",
+        "client/rust/mind-gdext/src/render/debug.rs",
+        "client/rust/mind-gdext/src/render/building_cache.rs",
+        "client/rust/mind-gdext/src/render/links.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/misc.rs",
+        "client/rust/mind-gdext/src/ui/ui_host.rs",
+        "client/rust/mind-gdext/src/ui/kit/widgets/factory.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "ui-widgets-check",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render; ... ui::dialogs::misc",
+      "expected": "render 42, misc 8; headless boot + dialog sweep pass",
+      "risk": "payload z ordering; new MindUi admin_action signal; icon_button min-size",
       "status": "pending"
     }
   ]

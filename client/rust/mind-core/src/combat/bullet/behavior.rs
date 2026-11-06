@@ -115,9 +115,10 @@ pub fn behavior_for(kind: BulletKind) -> &'static dyn BulletBehavior {
         K::Interceptor => &super::kinds::interceptor::INTERCEPTOR,
         K::MassDriver => &super::kinds::mass_driver::MASS_DRIVER,
         K::Empty => &super::kinds::empty::EMPTY,
-        K::Continuous | K::ContinuousLaser | K::ContinuousFlame | K::PointLaser => {
+        K::Continuous | K::ContinuousLaser | K::ContinuousFlame => {
             &super::kinds::continuous::CONTINUOUS
         }
+        K::PointLaser => &super::kinds::continuous::POINT_LASER,
         K::Lightning => &super::kinds::lightning::LIGHTNING,
         K::Liquid | K::SpaceLiquid => &super::kinds::liquid::LIQUID,
         K::Fire => &super::kinds::fire::FIRE,

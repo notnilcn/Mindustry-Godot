@@ -12,11 +12,8 @@
 //! ## Intentional deviations
 //! - `PointDefenseTurret`/`TractorBeamTurret` models keep the upstream target
 //!   selection order but replace `Groups.bullet.intersect` / `Units.closestEnemy`
-//!   with stable `EntitySeq` scans until plan 05's spatial groups and plan 11's
-//!   `TargetQueries` land.
-//! - `TractorBeamTurret` cannot distinguish air/ground units yet (plan 11 owns
-//!   the unit type flags); a unit is treated as ground, so `parallax` sets both
-//!   target flags until then (recorded in the plan Changelog).
+//!   with stable `EntitySeq` scans over plan 11's `TargetQueries` (air/ground
+//!   gates from `unit_is_flying`/`unit_is_grounded`).
 
 use std::collections::BTreeMap;
 
@@ -29,7 +26,7 @@ use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, LiquidId, StatusId};
-use crate::entities::comp::{Health, Pos, TeamComp, Vel};
+use crate::entities::comp::{Pos, TeamComp, Vel};
 use crate::world::blocks::payloads::PayloadKind;
 use crate::world::modules::LiquidModule;
 
@@ -821,11 +818,10 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     });
 
     // `lustre` (`PointLaserBulletType`, Erekir continuous beam).
-    add("lustre_laser", BulletKind::ContinuousLaser, &|def| {
-        def.speed = 0.0;
-        def.lifetime = 1.0;
+    add("lustre_laser", BulletKind::PointLaser, &|def| {
+        // `PointLaserBulletType()` defaults come from `BulletDef::new(PointLaser)`
+        // (speed 0, lifetime 20, `optimalLifeFract = 0.5`, `damageInterval = 5`).
         def.damage = 210.0;
-        def.length = 250.0;
         def.building_damage_multiplier = 0.3;
         def.hit_size = 4.0;
     });
@@ -1517,9 +1513,10 @@ pub fn config_for(
             c.force = 16.0;
             c.scaled_force = 9.0;
             c.beam_damage = 0.5;
-            // Deviation: units have no air/ground flag until plan 11.
+            // `TractorBeamTurret` class defaults (`TractorBeamTurret.java:30`):
+            // `targetAir = true, targetGround = false`; parallax overrides neither.
             c.target_air = true;
-            c.target_ground = true;
+            c.target_ground = false;
             Some(c)
         }
         "segment" => {
@@ -1950,13 +1947,17 @@ pub fn update_tractor(
     };
     let hit_size = ctx
         .world
-        .get::<Health>(target)
-        .map(|_| 4.0f32)
-        .unwrap_or(4.0);
+        .get::<crate::entities::comp::unit::comp::HitboxComp>(target)
+        .map_or(4.0, |hitbox| hitbox.hit_size);
     let dst2 = (tx - x).powi(2) + (ty - y).powi(2);
     let max_dst = config.range + hit_size / 2.0;
     state.any = false;
-    if dst2 > max_dst * max_dst || eff <= 0.02 {
+    // `target.team() != team && target.checkTarget(targetAir, targetGround)`.
+    let flying = crate::combat::bullet::unit_is_flying(ctx.world, target);
+    let grounded = crate::combat::bullet::unit_is_grounded(ctx.world, target);
+    let target_ok = ctx.world.get::<TeamComp>(target).map(|t| t.team) != Some(team)
+        && ((grounded && config.target_ground) || (flying && config.target_air));
+    if dst2 > max_dst * max_dst || eff <= 0.02 || !target_ok {
         state.strength = lerp_delta(state.strength, 0.0, 0.1);
         return;
     }
@@ -1965,13 +1966,28 @@ pub fn update_tractor(
     state.target_pos = (tx, ty);
     state.strength = lerp_delta(state.strength, 1.0, 0.1);
     if angle_dist(state.rotation, dest) < config.shoot_cone {
-        if config.beam_damage > 0.0
-            && let Some(mut health) = ctx.world.get_mut::<Health>(target)
-        {
-            health.health -= config.beam_damage * eff;
+        // `target.damageContinuousPierce(damage * eff * timeScale *
+        // state.rules.blockDamage(team))` (`TractorBeamTurret.java:127-130`):
+        // pierce means no armor, but shields/healthMultiplier/unitHealth and
+        // the death path still apply (`ShieldComp.damagePierce` ->
+        // `rawDamage`).
+        if config.beam_damage > 0.0 {
+            let time_scale = ctx
+                .world
+                .get::<crate::entities::comp::Building>(e)
+                .map(|building| building.time_scale)
+                .unwrap_or(1.0);
+            let block_damage = crate::game::runtime::rules_of(ctx.world)
+                .map(|rules| rules.block_damage(team))
+                .unwrap_or(1.0);
+            let amount = config.beam_damage * eff * time_scale * block_damage;
+            crate::combat::damage::area::apply_health(ctx.world, target, amount);
         }
         if config.status != StatusId::NONE
-            && (config.status_chance <= 0.0 || state.strength >= config.status_chance)
+            && ctx.rng.chance(
+                crate::determinism::RngStream::Sim,
+                config.status_chance as f64,
+            )
         {
             crate::combat::damage::status::apply_status(
                 ctx.world,
@@ -2017,7 +2033,18 @@ fn find_enemy_unit(
     if !config.target_air && !config.target_ground {
         return None;
     }
-    targets.closest_unit(ctx.world, team, x, y, range)
+    // `Units.closestEnemy(team, x, y, range, u -> u.checkTarget(targetAir,
+    // targetGround))` (`TractorBeamTurret.java:110`): the air/ground gate is
+    // the unit's own `checkTarget`, not a blanket unit search.
+    targets.closest_unit_filtered(
+        ctx.world,
+        team,
+        x,
+        y,
+        range,
+        config.target_air,
+        config.target_ground,
+    )
 }
 
 /// `ContinuousTurretBuild.updateTile` (M6): keep-alive beam that follows the aim.
@@ -2210,6 +2237,9 @@ pub fn update_laser(
     }
 
     // Reload recharges from coolant (falling back to efficiency).
+    // `LaserTurret.java:96`: `(cheating() ? maxUsed : min(liquids.get(liquid),
+    // maxUsed)) * delta()`.
+    let cheating = super::cheating(ctx.world, e);
     if state.reload_counter > 0.0 {
         if config.uses_coolant()
             && let Some(mut liquids) = ctx.world.get_mut::<crate::world::modules::LiquidModule>(e)
@@ -2230,7 +2260,11 @@ pub fn update_laser(
             }
             if let Some(id) = current {
                 let max_used = config.coolant_amount;
-                let used = liquids.get(id).min(max_used);
+                let used = if cheating {
+                    max_used
+                } else {
+                    liquids.get(id).min(max_used)
+                };
                 liquids.remove(id, used);
                 state.reload_counter -= used * capacity * config.coolant_multiplier;
             }
@@ -2489,11 +2523,29 @@ mod tests {
             .expect("turret");
         let (ux, uy) = CombatHarness::tile_center(12, 8);
         let unit = harness.spawn_test_unit(ux, uy, 2, Vec::new());
-        let before = harness.build.world.get::<Health>(unit).unwrap().health;
+        // `TractorBeamTurret` defaults to `targetAir = true, targetGround = false`
+        // (`TractorBeamTurret.java:30`); parallax overrides neither.
+        harness.build.world.entity_mut(unit).insert(
+            crate::entities::comp::unit::comp::PhysicsComp {
+                flying: true,
+                ..Default::default()
+            },
+        );
+        let before = harness
+            .build
+            .world
+            .get::<crate::entities::comp::Health>(unit)
+            .unwrap()
+            .health;
         for _ in 0..120 {
             harness.tick();
         }
-        let after = harness.build.world.get::<Health>(unit).unwrap().health;
+        let after = harness
+            .build
+            .world
+            .get::<crate::entities::comp::Health>(unit)
+            .unwrap()
+            .health;
         assert!(
             after < before,
             "tractor beam damaged the unit: {after} < {before}"

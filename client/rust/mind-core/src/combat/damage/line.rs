@@ -9,10 +9,15 @@
 //! entity. Piercing lasers with a `pierceCap` stop after the cap.
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::query::{With, Without};
 use bevy_ecs::world::World;
 
+use crate::combat::bullet::{
+    CombatCtx, hit_building, hit_bullet, hit_entity, hit_tile, unit_is_flying, unit_is_grounded,
+};
 use crate::content::ContentRegistry;
-use crate::entities::comp::TeamComp;
+use crate::entities::comp::unit::comp::{BlockUnitComp, HitboxComp, UnitTypeComp};
+use crate::entities::comp::{Health, Pos, TeamComp, Unit};
 use crate::world::WorldGrid;
 
 use super::area::damage_entity;
@@ -54,6 +59,103 @@ pub fn linecast(
         false
     });
     found
+}
+
+/// `Damage.collidePoint` (`Damage.java:337-363`): point damage at `(x, y)`.
+///
+/// The point laser (lustre, `PointLaserBulletType.java:78-95`) damages the
+/// building on the aim tile and every enemy unit whose hitbox intersects the
+/// 1x1 aim rect, running the bullet's `hit` pipeline and `hitEntity` for each
+/// collision. The bullet is removed after the first collision only when it is
+/// not piercing.
+pub fn collide_point(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32) {
+    let Some(state) = ctx.bullet(bullet).cloned() else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    let team = ctx.team(bullet);
+    let (collides_air, collides_ground) = (def.collides_air, def.collides_ground);
+    let piercing = def.pierce;
+
+    if collides_ground && state.damage > 0.0 {
+        let (tx, ty) = (to_tile(x), to_tile(y));
+        if ctx.grid.tiles.in_bounds(tx, ty)
+            && let Some(build) = ctx.grid.tiles.get(tx, ty).build
+        {
+            let health = ctx
+                .world
+                .get::<Health>(build)
+                .map(|h| h.health)
+                .unwrap_or(0.0);
+            let enemy = ctx.world.get::<TeamComp>(build).map(|t| t.team) != Some(team);
+            // `build.collide(hitter)` (`LogicBuild` invulnerability).
+            let collide = !crate::world::build::logic_processor_invulnerable(ctx.world, build);
+            if enemy && collide {
+                let _ = hit_building(ctx, bullet, build);
+                hit_bullet(ctx, bullet, x, y, true);
+            }
+            // `testCollision` defaults to true; `hitTile` heals/catches fire.
+            hit_tile(ctx, bullet, build, x, y, health, false);
+        }
+    }
+
+    // `Units.nearbyEnemies(team, rect.setCentered(x, y, 1f), ...)`: the unit's
+    // hitbox must intersect the 1x1 aim rect. Stable entity order.
+    let units: Vec<Entity> = {
+        let mut query = ctx
+            .world
+            .query_filtered::<Entity, (With<Unit>, Without<BlockUnitComp>)>();
+        let mut units: Vec<Entity> = query.iter(ctx.world).collect();
+        units.sort_unstable_by_key(|entity| entity.index());
+        units.dedup();
+        units
+    };
+    for unit in units {
+        if ctx.world.get::<TeamComp>(unit).map(|t| t.team) == Some(team) {
+            continue;
+        }
+        let flying = unit_is_flying(ctx.world, unit);
+        let grounded = unit_is_grounded(ctx.world, unit);
+        // `u.checkTarget(collidesAir, collidesGround)` + `u.hittable()`.
+        if !((grounded && collides_ground) || (flying && collides_air)) {
+            continue;
+        }
+        if let Some(kind) = ctx.world.get::<UnitTypeComp>(unit)
+            && !ctx
+                .content
+                .unit(kind.type_id)
+                .is_some_and(|def| def.hittable)
+        {
+            continue;
+        }
+        let Some(pos) = ctx.world.get::<Pos>(unit) else {
+            continue;
+        };
+        let half = ctx
+            .world
+            .get::<HitboxComp>(unit)
+            .map_or(0.0, |h| h.hit_size / 2.0);
+        if (pos.x - x).abs() > 0.5 + half || (pos.y - y).abs() > 0.5 + half {
+            continue;
+        }
+        // `u.collision(hitter)` (controller hit, no sim effect) then
+        // `hitter.collision(u)` -> `BulletType.hit` + `hitEntity`.
+        hit_bullet(ctx, bullet, x, y, true);
+        let health = ctx
+            .world
+            .get::<Health>(unit)
+            .map(|h| h.health)
+            .unwrap_or(0.0);
+        hit_entity(ctx, bullet, unit, health);
+        if !piercing {
+            if let Some(mut state) = ctx.world.get_mut::<crate::combat::bullet::Bullet>(bullet) {
+                state.set(crate::combat::bullet::HIT);
+            }
+            break;
+        }
+    }
 }
 
 /// `Damage.collideLine`: damages enemy buildings along the ray.

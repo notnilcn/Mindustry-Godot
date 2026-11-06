@@ -4,8 +4,10 @@
 //! `LightningBulletType` behavior (`entities/bullet/LightningBulletType.java`).
 //!
 //! `init` creates an instant chain lightning and the bullet itself is a stub
-//! (never travels). Plan 10 M3 owns `combat::lightning`; until it lands this is
-//! inert.
+//! (never travels). The branch is created through
+//! [`crate::combat::lightning::create_from_bullet`], so the lightning bullet's
+//! own `collidesAir`/`collidesGround`/`pierceCap` gate the chain exactly like
+//! Java's `Lightning.create(b, ...)` (`LightningBulletType.java:40`).
 
 use bevy_ecs::entity::Entity;
 
@@ -26,19 +28,21 @@ impl BulletBehavior for LightningBehavior {
             let Some(def) = ctx.content.bullet(def_id) else {
                 return;
             };
+            // `Mathf.random(lightningLengthRand)` uses the unseeded view RNG;
+            // the port's deterministic substitution is the maximum length.
             let length = def.lightning_length + def.lightning_length_rand;
-            let damage = if def.lightning_damage >= 0.0 {
-                def.lightning_damage
-            } else {
-                ctx.bullet(b).map(|bullet| bullet.damage).unwrap_or(0.0)
-            };
-            (length, damage, def.lightning_color)
+            // `LightningBulletType.java:40` passes the BulletType `damage`
+            // field (the instance damage is re-derived by
+            // `Lightning.create(b, ...)`'s `hitter.damageMultiplier()`).
+            (length, def.damage, def.lightning_color)
         };
         let Some(((x, y), _vel, rotation)) = motion(ctx, b) else {
             return;
         };
-        let team = ctx.team(b);
-        crate::combat::lightning::create(ctx, team, color, damage, x, y, rotation, length.max(0));
+        // `Lightning.create(b, ...)`: the branch uses the lightning bullet as
+        // the `hitter` (air/ground gate, pierceCap, damage multiplier,
+        // `lightningType`).
+        crate::combat::lightning::create_from_bullet(ctx, b, color, damage, x, y, rotation, length);
     }
 
     fn range(&self, _def_range: f32) -> f32 {

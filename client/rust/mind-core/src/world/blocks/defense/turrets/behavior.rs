@@ -25,7 +25,7 @@ use crate::world::{BuildingReader, BuildingWriter};
 
 use super::{
     TurretAmmo, TurretConfig, TurretKind, TurretState, accept_item, accept_liquid, accept_payload,
-    handle_item, handle_liquid, handle_payload, save,
+    cheating, handle_item, handle_liquid, handle_payload, has_ammo, save,
 };
 
 /// `Building.enabled` (`BuildingComp.java:761-763`), defaulting to `true` for
@@ -101,6 +101,26 @@ impl BuildingBehavior for TurretBehavior {
             state.block_unit = Some(unit);
         }
         world.entity_mut(e).insert(state);
+    }
+
+    /// `ItemTurretBuild.onProximityAdded` (`ItemTurret.java:103-110`): a
+    /// cheating block with no ammo gets its first ammo type so it can shoot
+    /// (`if(!hasAmmo() && cheating() && ammoTypes.size > 0)
+    /// handleItem(this, ammoTypes.keys().next())`).
+    fn on_proximity_added(&self, world: &mut World, e: Entity) {
+        if !cheating(world, e) || has_ammo(world, e) {
+            return;
+        }
+        let Some(item) = world
+            .get::<TurretState>(e)
+            .and_then(|state| match &state.config.ammo {
+                TurretAmmo::Item(ammo) => ammo.first().map(|entry| entry.item),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        handle_item(world, e, item);
     }
 
     /// `TurretBuild` has no explicit `onRemoved`; the proxy is dropped with the

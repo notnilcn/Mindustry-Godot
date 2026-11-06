@@ -342,10 +342,14 @@ pub fn update_unit_status(world: &mut World, content: &ContentRegistry, entity: 
     }
 }
 
-/// `Damage.status`: applies `effect` to enemies of `team` within `radius`.
+/// `Damage.status(team, x, y, radius, effect, duration, air, ground, chance)`
+/// (`Damage.java:475-491`): applies `effect` to **unit** enemies of `team`
+/// within `radius`.
 ///
-/// `chance` is a `0..1` probability applied per entity in deterministic
-/// `EntitySeq` order.
+/// The unit gate is Java's exact filter: `entity.team != team`,
+/// `unit.checkTarget(air, ground)`, `unit.hittable()` and
+/// `unit.within(x, y, radius)`; `chance` is then applied per entity in
+/// deterministic `EntitySeq` order.
 #[allow(clippy::too_many_arguments)]
 pub fn status_area(
     world: &mut World,
@@ -356,6 +360,9 @@ pub fn status_area(
     effect: StatusId,
     duration: f32,
     chance: f32,
+    air: bool,
+    ground: bool,
+    content: &ContentRegistry,
     rng: &mut SimRng,
 ) -> usize {
     use crate::determinism::RngStream;
@@ -366,6 +373,11 @@ pub fn status_area(
     let radius2 = radius * radius;
     let mut targets: Vec<(u64, Entity)> = Vec::new();
     for entity_ref in world.iter_entities() {
+        // `Damage.status` iterates `Units.nearby*` — units only, never
+        // buildings or bullets.
+        if !entity_ref.contains::<crate::entities::comp::Unit>() {
+            continue;
+        }
         let Some(pos) = entity_ref.get::<Pos>() else {
             continue;
         };
@@ -376,6 +388,18 @@ pub fn status_area(
             && entity_ref
                 .get::<TeamComp>()
                 .is_some_and(|t| t.team == source)
+        {
+            continue;
+        }
+        // `UnitComp.checkTarget(air, ground)` (`UnitComp.java:76-78`).
+        let flying = crate::combat::bullet::unit_is_flying(world, entity_ref.id());
+        let grounded = crate::combat::bullet::unit_is_grounded(world, entity_ref.id());
+        if !((grounded && ground) || (flying && air)) {
+            continue;
+        }
+        // `UnitType.hittable(unit)` (`UnitType.java:645-647`).
+        if let Some(kind) = entity_ref.get::<UnitTypeComp>()
+            && !content.unit(kind.type_id).is_some_and(|def| def.hittable)
         {
             continue;
         }

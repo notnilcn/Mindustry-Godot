@@ -4235,6 +4235,13 @@ fn shock_mine_zaps_enemy_dagger() {
     let dagger = sim
         .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
         .expect("dagger");
+    // Java-faithful `Lightning` chains onto the dagger with all four tendrils,
+    // so one trigger lands ~150 damage: top the 150-HP dagger up so the
+    // 80-tick cooldown leg below can still observe a second trigger.
+    if let Some(mut hp) = sim.ecs.0.get_mut::<Health>(dagger) {
+        hp.max_health = 1_000.0;
+        hp.health = 1_000.0;
+    }
     let dagger_start = health(&sim, dagger).expect("dagger health");
     let hold = |sim: &mut Sim, dagger| {
         if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(dagger) {

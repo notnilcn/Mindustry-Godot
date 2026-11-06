@@ -805,6 +805,40 @@ pub(crate) fn hit_bullet(
         );
     }
     create_splash_damage(ctx, bullet, x, y);
+
+    // `BulletType.java:585-589`: `for(i = 0; i < lightning; i++) Lightning.create(
+    // b, lightningColor, lightningDamage < 0 ? damage : lightningDamage, b.x,
+    // b.y, b.rotation() + Mathf.range(lightningCone/2) + lightningAngle,
+    // lightningLength + Mathf.random(lightningLengthRand))`. Java draws the cone
+    // and length randoms from the unseeded view `Mathf`; the port uses the
+    // deterministic sim stream and the bullet itself as the `hitter`.
+    let (lightning, lightning_damage, lightning_color) =
+        (def.lightning, def.lightning_damage, def.lightning_color);
+    if lightning > 0 {
+        let damage = if lightning_damage < 0.0 {
+            def.damage
+        } else {
+            lightning_damage
+        };
+        let (cone, angle_off) = (def.lightning_cone, def.lightning_angle);
+        let (length, length_rand) = (def.lightning_length, def.lightning_length_rand);
+        let (bx, by) = ctx.pos(bullet).unwrap_or((x, y));
+        for _ in 0..lightning {
+            let angle =
+                state.rotation + ctx.rng.range(RngStream::Sim, -cone / 2.0, cone / 2.0) + angle_off;
+            let len = length + ctx.rng.random(RngStream::Sim, length_rand + 1);
+            let _ = crate::combat::lightning::create_from_bullet(
+                ctx,
+                bullet,
+                lightning_color,
+                damage,
+                bx,
+                by,
+                angle,
+                len,
+            );
+        }
+    }
 }
 
 /// Calls the kind-specific `BulletType.hit` override (or the base pipeline).
@@ -966,6 +1000,27 @@ fn create_splash_damage(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32)
         def.splash_damage,
         opts,
     );
+
+    // `BulletType.java:610-613`: `if(status != StatusEffects.none)
+    // Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration,
+    // collidesAir, collidesGround, statusChance)` — the radius status pass is
+    // separate from the damage pass (PAR-0465).
+    if def.status != crate::content::StatusId::NONE {
+        let _ = super::damage::status::status_area(
+            ctx.world,
+            Some(team),
+            x,
+            y,
+            def.splash_damage_radius,
+            def.status,
+            def.status_duration,
+            def.status_chance,
+            def.collides_air,
+            def.collides_ground,
+            ctx.content,
+            ctx.rng,
+        );
+    }
 }
 
 /// `BulletType.createPuddles` (`BulletType.java:597-604`): deposit `puddleAmount`
@@ -2366,6 +2421,91 @@ mod tests {
             harness.building_health_at(10, 8),
             before,
             "bullet passed through without damage"
+        );
+    }
+
+    /// PAR-0465 / `BulletType.java:606-614`: the splash radius pass applies the
+    /// ammo's status to every enemy unit in range, not just the direct hit.
+    #[test]
+    fn splash_damage_applies_status_in_radius() {
+        use crate::combat::damage::status::{install_status_applier, status_area};
+        use crate::entities::comp::unit::comp::StatusComp;
+
+        let mut harness = CombatHarness::new(64, 64, 7);
+        install_status_applier(&mut harness.build.world, &harness.build.content);
+        // Impact at (92, 100): `near` is 8 units away (inside the 30 radius),
+        // `far` is 48 units away (outside).
+        let near = harness.spawn_test_unit(100.0, 100.0, 2, Vec::new());
+        let far = harness.spawn_test_unit(140.0, 100.0, 2, Vec::new());
+        // Real units spawn with a `StatusComp`; the harness stand-in does not.
+        for unit in [near, far] {
+            harness
+                .build
+                .world
+                .entity_mut(unit)
+                .insert(StatusComp::default());
+        }
+        // `swarmer_pyratite` carries `burning`, a non-reactive status: Java's
+        // `StatusComp.applyStatus` skips `reactive` effects (`blasted`), so
+        // they never enter `statuses` (StatusComp.java:79-87).
+        let blast = harness
+            .content()
+            .bullet_by_name("swarmer_pyratite")
+            .expect("swarmer_pyratite");
+        let def = harness.content().bullet(blast).expect("def");
+        assert_eq!(
+            def.status,
+            harness.content().status_id("burning").expect("burning"),
+            "swarmer pyratite carries `burning` (Blocks.java:3703)"
+        );
+        let bullet = harness
+            .spawn_def(blast, 90.0, 100.0, 0.0, 1)
+            .expect("bullet");
+        {
+            let mut ctx = harness.combat_ctx();
+            hit_bullet(&mut ctx, bullet, 92.0, 100.0, false);
+        }
+        let burning = harness.content().status_id("burning").expect("burning");
+        let near_status = harness
+            .build
+            .world
+            .get::<StatusComp>(near)
+            .expect("near status comp");
+        assert!(
+            near_status
+                .statuses
+                .iter()
+                .any(|entry| entry.effect == burning),
+            "the unit 8 units from the impact is burning: {:?}",
+            near_status.statuses
+        );
+        let far_status = harness.build.world.get::<StatusComp>(far);
+        assert!(
+            far_status.is_none_or(|status| status.statuses.is_empty()),
+            "the unit outside the splash radius is not tagged"
+        );
+        // `Damage.status` never tags buildings.
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(6, 6, wall, 0, true));
+        let wall_entity = harness.build_at(6, 6).expect("wall");
+        let mut ctx = harness.combat_ctx();
+        status_area(
+            ctx.world,
+            Some(1),
+            6.0 * 8.0,
+            6.0 * 8.0,
+            30.0,
+            burning,
+            480.0,
+            1.0,
+            true,
+            true,
+            ctx.content,
+            ctx.rng,
+        );
+        assert!(
+            harness.build.world.get::<StatusComp>(wall_entity).is_none(),
+            "buildings are not units"
         );
     }
 }

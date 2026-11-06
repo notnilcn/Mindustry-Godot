@@ -377,14 +377,18 @@ pub fn rebalance_bullet(
     }
 }
 
-/// `ErekirTechTree.rebalance()` (`ErekirTechTree.java:26-48`).
+/// `ErekirTechTree.rebalance()` part (a) (`ErekirTechTree.java:26-36`).
 ///
-/// Scales `damage *= 0.75` once per bullet id for (a) every weapon bullet of
+/// Scales `damage *= 0.75` once per bullet id for every weapon bullet of
 /// `ErekirUnitType` units (which includes `TankUnitType` by inheritance, but
-/// not `MissileUnitType`/`NeoplasmUnitType`), and (b) turret ammo bullets of
-/// turrets with non-Serpulo requirements. Part (b) stays a documented no-op
-/// until turret ammo lands with plan 10 (`Blocks.java` inline ammo bullets are
-/// not registered yet; see the plan-02 M5 changelog).
+/// not `MissileUnitType`/`NeoplasmUnitType`).
+///
+/// Part (b) — turret ammo of blocks with non-Serpulo requirements — runs in
+/// `world/blocks/defense/turrets/mod.rs::rebalance_erekir_turret_ammo`, because
+/// the port installs turret ammo after content boot (`install_turret_ammo`,
+/// GAPS #11) while upstream registers it inline in `Blocks.load()`. Java's
+/// `instanceof` chain admits `ItemTurret`, `ContinuousLiquidTurret` and
+/// `ContinuousTurret` only (`PowerTurret` is excluded).
 pub fn rebalance(registry: &mut ContentRegistry) {
     let mut balanced = RebalanceSet::new();
     let mut bullets: Vec<BulletId> = Vec::new();
@@ -436,7 +440,8 @@ mod tests {
         assert_eq!(registry.bullet(other).unwrap().damage, 0.75);
         assert_eq!(balanced.len(), 2);
 
-        // `rebalance()` itself is a no-op until units/blocks land (M5/M3).
+        // `rebalance()` only walks unit weapons (part a): a bare registry with
+        // no units leaves the already-scaled bullet alone.
         let damage = registry.bullet(shared).unwrap().damage;
         rebalance(&mut registry);
         assert_eq!(registry.bullet(shared).unwrap().damage, damage);

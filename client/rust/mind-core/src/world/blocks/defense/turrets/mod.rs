@@ -604,6 +604,180 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     for (name, id) in names.iter() {
         content.name_bullet(name, *id);
     }
+
+    // `Blocks.java` calls `limitRange(...)` in the turret's double-brace init;
+    // upstream mutates the shared `BulletType` instances, so the port mutates
+    // the (per-turret) ammo `BulletDef`s after all of them exist.
+    limit_range(content, names);
+    rebalance_erekir_turret_ammo(content, names);
+}
+
+/// Every vanilla turret the port resolves a config for (`config_for`).
+const VANILLA_TURRETS: &[&str] = &[
+    "duo",
+    "scatter",
+    "scorch",
+    "hail",
+    "salvo",
+    "swarmer",
+    "fuse",
+    "ripple",
+    "lancer",
+    "arc",
+    "meltdown",
+    "cyclone",
+    "foreshadow",
+    "spectre",
+    "parallax",
+    "segment",
+    "wave",
+    "tsunami",
+    "breach",
+    "diffuse",
+    "sublimate",
+    "titan",
+    "disperse",
+    "afflict",
+    "lustre",
+    "scathe",
+    "smite",
+    "malign",
+    "build-tower",
+];
+
+/// `ErekirTechTree.rebalance()` part (b) (`ErekirTechTree.java:37-47`).
+///
+/// Every `Turret` whose requirements include an item outside
+/// `Items.serpuloItems` scales its **ammo** bullet damage by `* 0.75`, once per
+/// bullet id. Java's `instanceof` chain admits `ItemTurret`,
+/// `ContinuousLiquidTurret` and `ContinuousTurret` only — `PowerTurret`
+/// (`afflict`, `malign`) is deliberately excluded.
+///
+/// Ordering note: upstream runs this from `ErekirTechTree.load()` while the
+/// turret ammo is created inline in `Blocks.load()` (`ItemTurret.ammo`), so it
+/// precedes tech-tree construction. The port's turret ammo is installed after
+/// content boot (`install_turret_ammo`, GAPS #11), so the equivalent pass runs
+/// at that point; `content::tech::ekir::rebalance` keeps owning part (a).
+fn rebalance_erekir_turret_ammo(content: &mut ContentRegistry, names: &BTreeMap<String, BulletId>) {
+    let serpulo = content.serpulo_items().to_vec();
+    let mut balanced: std::collections::BTreeSet<BulletId> = std::collections::BTreeSet::new();
+    let mut updates: Vec<(BulletId, f32)> = Vec::new();
+    for &name in VANILLA_TURRETS {
+        let Some(block) = content.block_by_name(name) else {
+            continue;
+        };
+        // `Structs.contains(block.requirements, i -> !Items.serpuloItems.contains(i.item))`.
+        if !block
+            .requirements
+            .iter()
+            .any(|stack| !serpulo.contains(&stack.item))
+        {
+            continue;
+        }
+        let Some(config) = config_for(content, name, names) else {
+            continue;
+        };
+        // Java's family gate: ItemTurret | ContinuousLiquidTurret | ContinuousTurret.
+        let bullets: Vec<BulletId> = match config.kind {
+            TurretKind::Item => match &config.ammo {
+                TurretAmmo::Item(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+                _ => Vec::new(),
+            },
+            TurretKind::Continuous => match &config.ammo {
+                TurretAmmo::Liquid(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+                TurretAmmo::Power(ammo) => vec![ammo.bullet],
+                TurretAmmo::Item(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+                TurretAmmo::Payload(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+            },
+            // `PowerTurret`/`LaserTurret`/`LiquidTurret`/… are not in the Java chain.
+            _ => continue,
+        };
+        for id in bullets {
+            if !balanced.insert(id) {
+                continue;
+            }
+            if let Some(def) = content.bullet(id) {
+                updates.push((id, def.damage * 0.75));
+            }
+        }
+    }
+    for (id, damage) in updates {
+        if let Some(def) = content.bullet_mut(id) {
+            def.damage = damage;
+        }
+    }
+}
+
+/// `Blocks.java` `limitRange(margin)` calls (`Turret.limitRange`,
+/// `Turret.java:246-253`). Absent names do not limit their ammo.
+///
+/// Serpulo: `duo` 5, `scatter` 2, `hail` 0, `swarmer` 5, `salvo`/`cyclone`/
+/// `spectre` default 9. Erekir: `breach` 12, `diffuse` 25, `disperse` 16,
+/// `afflict` -55 (`PowerTurret.limitRange`), `scathe`/`smite` default 9.
+const LIMIT_RANGE_MARGINS: &[(&str, f32)] = &[
+    // `Blocks.java:3348`, `:3434`, `:3544`, `:3748`, `:3853`, `:4225`, `:4338`.
+    ("duo", 5.0),
+    ("scatter", 2.0),
+    ("hail", 0.0),
+    ("swarmer", 5.0),
+    ("salvo", 9.0),
+    ("cyclone", 9.0),
+    ("spectre", 9.0),
+    // `Blocks.java:4487`, `:4577`, `:5054`, `:5177`, `:5686`, `:5953`.
+    ("breach", 12.0),
+    ("diffuse", 25.0),
+    ("disperse", 16.0),
+    ("afflict", -55.0),
+    ("scathe", 9.0),
+    ("smite", 9.0),
+];
+
+/// `BulletType.extraRangeMargin` (`BulletType.java:166-167`): only `disperse`'s
+/// thorium/silicon ammo set it (`Blocks.java:4922`, `:4950` = 32).
+const EXTRA_RANGE_MARGINS: &[(&str, f32)] =
+    &[("disperse_thorium", 32.0), ("disperse_silicon", 32.0)];
+
+/// `Turret.limitRange(BulletType, margin)` (`Turret.java:246-253`):
+/// `bullet.lifetime = (rangeChange + range + margin + extraRangeMargin + 10) / speed`.
+fn limit_range(content: &mut ContentRegistry, names: &BTreeMap<String, BulletId>) {
+    let mut updates: Vec<(BulletId, f32)> = Vec::new();
+    for &(turret, margin) in LIMIT_RANGE_MARGINS {
+        let Some(config) = config_for(content, turret, names) else {
+            continue;
+        };
+        let bullets: Vec<BulletId> = match &config.ammo {
+            TurretAmmo::Item(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+            TurretAmmo::Liquid(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+            TurretAmmo::Power(ammo) => vec![ammo.bullet],
+            TurretAmmo::Payload(ammo) => ammo.iter().map(|entry| entry.bullet).collect(),
+        };
+        for id in bullets {
+            let Some(def) = content.bullet(id) else {
+                continue;
+            };
+            // `lifetime = (…) / speed`: a zero-speed bullet (LightningBulletType)
+            // has no travel time to limit; Java would divide by zero.
+            if def.speed <= 0.0 {
+                continue;
+            }
+            let extra = names
+                .iter()
+                .find_map(|(name, other)| (*other == id).then_some(name.as_str()))
+                .and_then(|name| {
+                    EXTRA_RANGE_MARGINS
+                        .iter()
+                        .find_map(|&(other, extra)| (other == name).then_some(extra))
+                })
+                .unwrap_or(0.0);
+            let real_range = def.range_change + config.range;
+            updates.push((id, (real_range + margin + extra + 10.0) / def.speed));
+        }
+    }
+    for (id, lifetime) in updates {
+        if let Some(def) = content.bullet_mut(id) {
+            def.lifetime = lifetime;
+        }
+    }
 }
 
 /// Registers the vanilla turret ammo bullets into a booted registry once
@@ -1169,6 +1343,15 @@ fn efficiency(world: &World, e: Entity) -> f32 {
         .unwrap_or(1.0)
 }
 
+/// `TeamComp.cheating()` (`TeamComp.java:17-19`): `team.rules().cheat`.
+///
+/// A cheating team never consumes turret ammo and ignores the heat efficiency
+/// floor (`Turret.java:679`, `:685`, `:715`, `ItemTurret.java:109`).
+pub fn cheating(world: &World, e: Entity) -> bool {
+    let team = world.get::<TeamComp>(e).map(|team| team.team).unwrap_or(0);
+    crate::game::runtime::rules_of(world).is_some_and(|rules| rules.team_rule(team).cheat)
+}
+
 fn position(world: &World, e: Entity) -> Option<(f32, f32)> {
     world.get::<Pos>(e).map(|p| (p.x, p.y))
 }
@@ -1358,10 +1541,12 @@ pub fn has_ammo(world: &World, e: Entity) -> bool {
 
 fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
     match &state.config.ammo {
+        // `Turret.java:715`: `ammo.size > 0 && (ammo.peek().amount >=
+        // ammoPerShot || cheating())`.
         TurretAmmo::Item(_) => state
             .ammo
             .last()
-            .is_some_and(|entry| entry.amount >= state.config.ammo_per_shot),
+            .is_some_and(|entry| entry.amount >= state.config.ammo_per_shot || cheating(world, e)),
         TurretAmmo::Liquid(ammo) => {
             let Some(liquids) = world.get::<LiquidModule>(e) else {
                 return false;
@@ -1605,6 +1790,15 @@ pub fn add_build_plan(world: &mut World, e: Entity, plan: BuildPlan) -> bool {
 /// (`TurretBuild.useAmmo`).
 fn use_ammo(state: &mut TurretState, world: &mut World, e: Entity) -> Option<BulletId> {
     let bullet = peek_ammo_state(state, world, e)?;
+    // `Turret.java:683-686` / `LiquidTurret.java:128-131`: a cheating team
+    // fires without consuming ammo (the item stack or the liquid charge).
+    if matches!(
+        &state.config.ammo,
+        TurretAmmo::Item(_) | TurretAmmo::Liquid(_)
+    ) && cheating(world, e)
+    {
+        return Some(bullet);
+    }
     let mut liquid_remove: Option<(LiquidId, f32)> = None;
     match &state.config.ammo {
         TurretAmmo::Item(_) => {
@@ -1704,7 +1898,24 @@ fn update_turret(
     let config = state.config.clone();
     let (x, y) = position(ctx.world, e).unwrap_or((0.0, 0.0));
     let team = ctx.team(e);
-    let eff = efficiency(ctx.world, e);
+    // `TurretBuild.updateTile` (`Turret.java:544-546`): `heatReq =
+    // calculateHeat(sideHeat)` — the heat network pulls from adjacent
+    // producers/conductors (plan 09 `heat::calculate_heat`).
+    if config.heat_requirement > 0.0 {
+        let update_id = crate::world::update::build_time(ctx.world) as u64;
+        let mut side_heat = [0.0f32; 4];
+        let mut came_from = crate::util::IdSet::new();
+        state.heat_req = crate::world::blocks::heat::calculate_heat(
+            ctx.world,
+            e,
+            &mut side_heat,
+            &mut came_from,
+            update_id,
+            0,
+        );
+    }
+    // `TurretBuild.updateEfficiencyMultiplier` (`Turret.java:677-681`).
+    let eff = update_efficiency_multiplier(ctx.world, e, efficiency(ctx.world, e), state, &config);
 
     // `Time.run(delay, …)` tasks run at the start of the frame before the
     // building update (Arc `Time.update`), so a delayed shot that comes due this
@@ -1918,6 +2129,25 @@ fn update_turret(
         state.was_shooting = true;
         update_shooting(ctx, e, state);
     }
+}
+
+/// `TurretBuild.updateEfficiencyMultiplier` (`Turret.java:677-681`):
+/// `efficiency *= min(max(heatReq / heatRequirement, cheating() ? 1 : 0),
+/// maxHeatEfficiency)`.
+fn update_efficiency_multiplier(
+    world: &World,
+    e: Entity,
+    eff: f32,
+    state: &TurretState,
+    config: &TurretConfig,
+) -> f32 {
+    if config.heat_requirement <= 0.0 {
+        return eff;
+    }
+    let floor = if cheating(world, e) { 1.0 } else { 0.0 };
+    eff * (state.heat_req / config.heat_requirement)
+        .max(floor)
+        .min(config.max_heat_efficiency)
 }
 
 /// `TurretBuild.handleReload` + `updateReload` + `updateCooling`.
@@ -2293,6 +2523,63 @@ fn bullet(
     state.heat = 1.0;
 }
 
+/// `LiquidTurretBuild.findTarget` fire scan (`LiquidTurret.java:93-115`).
+///
+/// Scans the `range / tilesize` square around the turret, keeps the nearest
+/// fire **not** on another team's building (`other.build == null ||
+/// other.team() == team`), and skips the turret's own tile (`other.build !=
+/// this`).
+fn nearest_fire(
+    ctx: &CombatCtx<'_>,
+    e: Entity,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+) -> Option<Entity> {
+    let ts = crate::config::TILESIZE as f32;
+    let tx = crate::world::WorldGrid::to_tile(x);
+    let ty = crate::world::WorldGrid::to_tile(y);
+    let tr = (range / ts) as i32;
+    let mut best: Option<(f32, Entity)> = None;
+    for dy in -tr..=tr {
+        for dx in -tr..=tr {
+            let (fx, fy) = (tx + dx, ty + dy);
+            if !ctx.grid.tiles.in_bounds(fx, fy) {
+                continue;
+            }
+            let tile = ctx.grid.tiles.get(fx, fy);
+            // `other.build != this`.
+            if tile.build == Some(e) {
+                continue;
+            }
+            // `other.build == null || other.team() == team`.
+            if let Some(build) = tile.build
+                && ctx
+                    .world
+                    .get::<TeamComp>(build)
+                    .is_some_and(|comp| comp.team != team)
+            {
+                continue;
+            }
+            let Some(fire) = crate::combat::fires::find_at(ctx.world, fx as i16, fy as i16) else {
+                continue;
+            };
+            let Some(pos) = ctx.world.get::<Pos>(fire) else {
+                continue;
+            };
+            let d2 = (pos.x - x) * (pos.x - x) + (pos.y - y) * (pos.y - y);
+            if d2 > range * range {
+                continue;
+            }
+            if best.is_none_or(|(bd, _)| d2 < bd) {
+                best = Some((d2, fire));
+            }
+        }
+    }
+    best.map(|(_, fire)| fire)
+}
+
 /// `TurretBuild.findTarget` / `findEnemy` (`Turret.java:631-677`) via plan 11's
 /// [`TargetQueries`] (plan 10 §3.8).
 ///
@@ -2312,6 +2599,21 @@ fn find_target(
     // The dispatched state is out of the world during this pass, so the ranges
     // come from the state handle (`turret_range_of`).
     let range = turret_range_of(state, ctx.world, e);
+
+    // `LiquidTurretBuild.findTarget` (`LiquidTurret.java:91-119`): a liquid
+    // turret whose current ammo liquid can extinguish targets the nearest fire
+    // in its range square instead of running the standard targeting pass.
+    if config.kind == TurretKind::Liquid
+        && let Some(liquids) = ctx.world.get::<LiquidModule>(e)
+        && ctx
+            .content
+            .liquid(liquids.current_liquid())
+            .is_some_and(|liquid| liquid.can_extinguish())
+        && let Some(fire) = nearest_fire(ctx, e, team, x, y, range)
+    {
+        state.target = Some(fire);
+        return;
+    }
     let track_range = tracking_range_of(state, ctx.world, e);
     let sort = ammo_unit_sort(state, ctx.world, e, ctx.content);
     let ammo = peek_ammo_state(state, ctx.world, e).and_then(|id| ctx.content.bullet(id));
@@ -2510,8 +2812,10 @@ fn validate_target(ctx: &CombatCtx<'_>, _e: Entity, state: &TurretState) -> bool
     if ctx.world.get_entity(target).is_err() {
         return false;
     }
-    // `Units.invalidateTarget`: dead targets drop (range is unbounded).
-    if !ctx.world.get::<Health>(target).is_some_and(|h| !h.dead) {
+    // `Units.invalidateTarget` (`Units.java:151-157`): the dead-target rule is
+    // `target instanceof Healthc h && !h.isValid()` — entities without health
+    // (a `Fire` the liquid turret is extinguishing) stay valid.
+    if ctx.world.get::<Health>(target).is_some_and(|h| h.dead) {
         return false;
     }
     true
@@ -3531,6 +3835,308 @@ mod find_target_tests {
         assert_eq!(
             harness.turret_state(turret).expect("state").target,
             Some(grounded)
+        );
+    }
+
+    // ---- GAPS #2: Turret.limitRange -------------------------------------
+
+    /// `Turret.limitRange` (`Turret.java:246-253`): every ammo bullet's
+    /// lifetime is recomputed from the turret range, its `rangeChange`, the
+    /// per-turret margin and `extraRangeMargin`.
+    #[test]
+    fn limit_range_recomputes_ammo_lifetime() {
+        let harness = CombatHarness::new(16, 16, 7);
+        let lifetime = |name: &str| {
+            let id = harness.content().bullet_by_name(name).expect(name);
+            harness.content().bullet(id).expect(name).lifetime
+        };
+        // `Blocks.java:3348` duo `limitRange(5f)`: (160 + 5 + 10) / 2.5.
+        assert_eq!(lifetime("duo_copper"), 70.0);
+        // `rangeChange = 16f` shifts the real range, not just base range.
+        assert!((lifetime("duo_graphite") - (160.0 + 16.0 + 5.0 + 10.0) / 3.5).abs() < 1e-4);
+        // `Blocks.java:3853` salvo default margin 9: (190 + 9 + 10) / 2.5.
+        assert!((lifetime("salvo_copper") - 83.6).abs() < 1e-4);
+        // `Blocks.java:3544` hail `limitRange(0f)` (range 235).
+        assert!((lifetime("hail_graphite") - (235.0 + 0.0 + 10.0) / 3.0).abs() < 1e-4);
+        // `Blocks.java:4487` breach `limitRange(12f)`: (190 + 12 + 10) / 7.5.
+        assert!((lifetime("breach_beryllium") - (190.0 + 12.0 + 10.0) / 7.5).abs() < 1e-4);
+        // `Blocks.java:4577` diffuse `limitRange(25f)` (range 125).
+        assert!(
+            (lifetime("diffuse_graphite") - (125.0 + 25.0 + 10.0) / 8.0).abs() < 1e-4,
+            "diffuse graphite lifetime {}",
+            lifetime("diffuse_graphite")
+        );
+        // `Blocks.java:5054` disperse `limitRange(16f)` + `extraRangeMargin 32`
+        // (`Blocks.java:4922`): rangeChange -120 → (310 - 120 + 16 + 32 + 10) / 9.5.
+        assert!(
+            (lifetime("disperse_thorium") - (310.0 - 120.0 + 16.0 + 32.0 + 10.0) / 9.5).abs()
+                < 1e-4,
+            "disperse thorium lifetime {}",
+            lifetime("disperse_thorium")
+        );
+        // `Blocks.java:5177` afflict `PowerTurret.limitRange(-55f)`: (368 - 55 + 10) / 5.
+        assert!((lifetime("afflict_orb") - (368.0 - 55.0 + 10.0) / 5.0).abs() < 1e-4);
+    }
+
+    // ---- GAPS #3: ErekirTechTree.rebalance part (b) ----------------------
+
+    /// `ErekirTechTree.rebalance()` (`ErekirTechTree.java:37-47`) scales ammo
+    /// damage of turrets with non-Serpulo requirements by `0.75`; `PowerTurret`
+    /// is excluded by the Java `instanceof` chain.
+    #[test]
+    fn erekir_turret_ammo_rebalanced() {
+        let harness = CombatHarness::new(16, 16, 7);
+        let damage = |name: &str| {
+            let id = harness.content().bullet_by_name(name).expect(name);
+            harness.content().bullet(id).expect(name).damage
+        };
+        assert_eq!(damage("breach_beryllium"), 85.0 * 0.75);
+        assert_eq!(damage("breach_tungsten"), 95.0 * 0.75);
+        assert_eq!(damage("diffuse_graphite"), 41.0 * 0.75);
+        assert_eq!(damage("titan_thorium"), 350.0 * 0.75);
+        assert_eq!(damage("disperse_surge"), 65.0 * 0.75);
+        assert_eq!(damage("sublimate_ozone"), 60.0 * 0.75);
+        assert_eq!(damage("lustre_laser"), 210.0 * 0.75);
+        assert_eq!(damage("smite_orb"), 250.0 * 0.75);
+        // Serpulo turrets are untouched.
+        assert_eq!(damage("duo_copper"), 9.0);
+        assert_eq!(damage("salvo_copper"), 15.0);
+        // `PowerTurret` (afflict/malign) is outside Java's `instanceof` chain.
+        assert_eq!(damage("afflict_orb"), 180.0);
+        assert_eq!(damage("malign_flak"), 70.0);
+    }
+
+    // ---- GAPS #5: cheating() --------------------------------------------
+
+    /// Installs a `CampaignRuntime` whose `team` rule has `cheat` set
+    /// (`TeamComp.cheating()` reads `team.rules().cheat`).
+    fn install_cheat_rules(h: &mut CombatHarness, team: u8) {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        // `BuildHarness::place` assigns `rules.default_team` to new buildings.
+        h.build.rules.default_team = team;
+        let campaign = Campaign::from_registry(h.content(), &EmptyNeighborhood);
+        let mut rules = Rules {
+            default_team: team,
+            ..Rules::default()
+        };
+        rules.team_rule_mut(team).cheat = true;
+        h.build
+            .world
+            .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+    }
+
+    /// `Turret.java:715`: a cheating team's turret reports ammo even below
+    /// `ammoPerShot`, and `useAmmo` (`:685`) does not consume it.
+    #[test]
+    fn cheating_gives_infinite_ammo() {
+        let mut h = CombatHarness::new(32, 32, 7);
+        let turret = h
+            .spawn_test_turret("breach", 60.0, 60.0, 1)
+            .expect("breach");
+        let tungsten = h.content().item_id("beryllium").expect("beryllium");
+        let bullet = h
+            .content()
+            .bullet_by_name("breach_beryllium")
+            .expect("ammo");
+        {
+            let mut state = h.build.world.get_mut::<TurretState>(turret).expect("state");
+            state.ammo.push(AmmoEntry {
+                item: tungsten,
+                bullet,
+                amount: 1, // < ammoPerShot (2)
+            });
+            state.total_ammo = 1;
+        }
+        assert!(!has_ammo(&h.build.world, turret), "1 < ammoPerShot");
+        install_cheat_rules(&mut h, 1);
+        assert!(has_ammo(&h.build.world, turret), "cheat ignores the stack");
+        // `useAmmo` leaves the stack untouched.
+        let mut state = h
+            .build
+            .world
+            .entity_mut(turret)
+            .take::<TurretState>()
+            .expect("state");
+        let used = use_ammo(&mut state, &mut h.build.world, turret);
+        assert_eq!(used, Some(bullet));
+        assert_eq!(state.total_ammo, 1, "cheat never consumes ammo");
+        assert_eq!(state.ammo[0].amount, 1);
+        h.build.world.entity_mut(turret).insert(state);
+    }
+
+    /// `ItemTurret.java:103-110`: a cheating block placed without ammo gets its
+    /// first ammo type in `onProximityAdded`.
+    #[test]
+    fn cheating_item_turret_auto_fills_on_placement() {
+        let mut h = CombatHarness::new(32, 32, 7);
+        install_cheat_rules(&mut h, 1);
+        let duo = h.content().block_id("duo").expect("duo");
+        assert!(h.place(4, 4, duo, 1, true), "place duo");
+        let turret = h.build_at(4, 4).expect("turret building");
+        let state = h.build.world.get::<TurretState>(turret).expect("state");
+        assert_eq!(state.total_ammo, 2, "first ammo type auto-filled");
+        assert_eq!(state.ammo.len(), 1);
+        assert_eq!(
+            state.ammo[0].item,
+            h.content().item_id("copper").expect("copper")
+        );
+    }
+
+    /// `Turret.java:677-681`: the heat efficiency multiplier is floored at 1
+    /// only for a cheating team, capped by `maxHeatEfficiency`.
+    #[test]
+    fn cheating_bypasses_heat_efficiency_floor() {
+        let mut h = CombatHarness::new(32, 32, 7);
+        let turret = h
+            .spawn_test_turret("afflict", 60.0, 60.0, 1)
+            .expect("afflict");
+        let mut state = h
+            .build
+            .world
+            .entity_mut(turret)
+            .take::<TurretState>()
+            .expect("state");
+        state.heat_req = 0.0;
+        let config = state.config.clone();
+        assert_eq!(
+            update_efficiency_multiplier(&h.build.world, turret, 1.0, &state, &config),
+            0.0,
+            "no heat and no cheat -> efficiency 0"
+        );
+        h.build.world.entity_mut(turret).insert(state);
+        install_cheat_rules(&mut h, 1);
+        let state = h.build.world.get::<TurretState>(turret).expect("state");
+        assert_eq!(
+            update_efficiency_multiplier(&h.build.world, turret, 1.0, state, &config),
+            1.0,
+            "cheat floors the heat ratio at 1 (capped by maxHeatEfficiency 1)"
+        );
+    }
+
+    // ---- GAPS #7: LiquidTurret fire extinguishing -------------------------
+
+    /// `LiquidTurretBuild.findTarget` (`LiquidTurret.java:91-119`): a liquid
+    /// turret whose current liquid can extinguish targets the nearest fire in
+    /// range instead of running the standard targeting pass.
+    #[test]
+    fn liquid_turret_targets_fires() {
+        let mut h = CombatHarness::new(32, 32, 7);
+        let water = h.content().liquid_id("water").expect("water");
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = h.spawn_test_turret("wave", tx, ty, 1).expect("wave");
+        {
+            let mut liquids = h
+                .build
+                .world
+                .get_mut::<LiquidModule>(turret)
+                .expect("liquids");
+            liquids.liquids[water.index()] = 100.0;
+            liquids.current_liquid = water;
+        }
+        // A fire on the turret's right, inside `range` (110).
+        let fire =
+            crate::combat::fires::create(&mut h.build.world, 10, 8, &mut h.rng).expect("fire");
+        // A fire on an enemy block must be ignored (`other.team() == team` gate).
+        let wall = h.content().block_id("copper-wall").expect("wall");
+        assert!(h.place(3, 8, wall, 0, true));
+        let blocked_fire =
+            crate::combat::fires::create(&mut h.build.world, 3, 8, &mut h.rng).expect("fire");
+        h.build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("state")
+            .target_timer = 0.0;
+        h.update_turrets_only();
+        assert_eq!(
+            h.turret_state(turret).expect("state").target,
+            Some(fire),
+            "nearest own-team fire is targeted"
+        );
+        let _ = blocked_fire;
+    }
+
+    /// A non-extinguishing liquid (oil) never takes the fire path
+    /// (`liquids.current().canExtinguish()`).
+    #[test]
+    fn liquid_turret_ignores_fire_with_flammable_ammo() {
+        let mut h = CombatHarness::new(32, 32, 7);
+        let oil = h.content().liquid_id("oil").expect("oil");
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = h.spawn_test_turret("wave", tx, ty, 1).expect("wave");
+        {
+            let mut liquids = h
+                .build
+                .world
+                .get_mut::<LiquidModule>(turret)
+                .expect("liquids");
+            liquids.liquids[oil.index()] = 100.0;
+            liquids.current_liquid = oil;
+        }
+        let _fire = crate::combat::fires::create(&mut h.build.world, 10, 8, &mut h.rng);
+        h.build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("state")
+            .target_timer = 0.0;
+        h.update_turrets_only();
+        assert_eq!(
+            h.turret_state(turret).expect("state").target,
+            None,
+            "oil cannot extinguish, so the fire is not a target"
+        );
+    }
+
+    // ---- GAPS #8: TractorBeamTurret --------------------------------------
+
+    /// `TractorBeamTurret.java:127-130`: the beam uses
+    /// `damageContinuousPierce` — shields absorb first, the death path runs —
+    /// and `targetGround = false` keeps grounded units safe.
+    #[test]
+    fn tractor_beam_damages_through_shields_and_ignores_ground() {
+        use crate::entities::comp::unit::comp::{PhysicsComp, ShieldComp};
+
+        let mut h = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(8, 8);
+        let turret = h
+            .spawn_test_turret("parallax", tx, ty, 1)
+            .expect("parallax");
+        // Default turret rotation is 90° (+y): place the air target straight up.
+        let air = h.spawn_test_unit(tx, ty + 100.0, 2, Vec::new());
+        h.build.world.entity_mut(air).insert(PhysicsComp {
+            flying: true,
+            ..PhysicsComp::default()
+        });
+        h.build.world.entity_mut(air).insert(ShieldComp {
+            shield: 2.0,
+            shield_alpha: 0.0,
+        });
+        // A grounded unit at the same distance must be ignored.
+        let ground = h.spawn_test_unit(tx, ty + 60.0, 2, Vec::new());
+        {
+            let mut state = h.build.world.get_mut::<TurretState>(turret).expect("state");
+            state.retarget_timer = 0.0;
+            state.target_timer = 0.0;
+            state.rotation = 90.0;
+        }
+        for _ in 0..10 {
+            h.update_turrets_only();
+        }
+        let shield = h.build.world.get::<ShieldComp>(air).expect("shield").shield;
+        let air_health = h.build.world.get::<Health>(air).expect("health").health;
+        assert!(shield < 2.0, "the shield absorbed beam damage: {shield}");
+        assert!(
+            air_health < 1_000.0,
+            "the beam also reaches health after the shield: {air_health}"
+        );
+        assert_eq!(
+            h.build.world.get::<Health>(ground).expect("health").health,
+            1_000.0,
+            "grounded units are outside `targetGround = false`"
         );
     }
 }
