@@ -22,6 +22,7 @@ use super::play::{
     PlayEvent, PlaySession, apply_sector_loss, check_game_state, is_waiting_wave, run_wave_campaign,
 };
 use super::rules::Rules;
+use super::service::ServiceTracker;
 use super::stats::GameStats;
 use super::teams::Teams;
 use super::universe::Campaign;
@@ -47,6 +48,9 @@ use crate::world::modules::ItemModule;
 const TICKS_PER_SECOND: f32 = 60.0;
 /// `Universe.update` global-position refresh period in ticks (one second).
 const GLOBAL_UPDATE_TICKS: u64 = 60;
+/// `GameService.registerEvents`'s `Timer.schedule(checkUpdate, 2f, 2f)` period
+/// in ticks (GAPS #68).
+const SERVICE_CHECK_TICKS: u64 = 120;
 
 /// Result of syncing the session against the live ECS world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -287,6 +291,11 @@ pub struct CampaignRuntime {
     /// PlanetDialog.java:1156-1161); drained by
     /// `Sim::apply_campaign_world_requests`.
     pub pending_abandon_kill: Option<u32>,
+    /// Local achievement/stat tracking (`Vars.service` + `GameService`; GAPS
+    /// #68). The host loads/saves the service through
+    /// [`ServiceTracker::load`]/[`ServiceTracker::save`] and may replace it
+    /// after boot; the campaign systems drive the gameplay hooks.
+    pub service: ServiceTracker,
 }
 
 /// `Time.runTask(7f, ...)` in `abandonSectorConfirm` (PlanetDialog.java:1156).
@@ -310,7 +319,14 @@ impl CampaignRuntime {
             pending_unlocks: Vec::new(),
             pending_info_saves: Vec::new(),
             pending_abandon_kill: None,
+            service: ServiceTracker::new(),
         }
+    }
+
+    /// Installs a pre-loaded service (host boot: settings -> [`ServiceTracker`]).
+    pub fn with_service(mut self, service: ServiceTracker) -> Self {
+        self.service = service;
+        self
     }
 
     /// `PlanetDialog.abandonSectorConfirm`, played-sector branch
@@ -510,6 +526,9 @@ pub fn run_wave_now(
     {
         stats.waves_lasted += 1;
     }
+    // `GameService`'s `WaveEvent` listener (`maxWavesSurvived` +
+    // `survive10WavesNoBlocks`; GAPS #68).
+    runtime.service.on_wave(&runtime.session, &runtime.campaign);
 }
 
 pub fn campaign_tick_system(world: &mut World) {
@@ -544,6 +563,23 @@ pub fn campaign_tick_system(world: &mut World) {
             let mut unit_runtime =
                 world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>();
             run_wave_now(&mut runtime, unit_runtime.as_deref_mut());
+        }
+
+        // `GameService` stat tracking (GAPS #68). The per-event listeners Java
+        // registers are replaced by counter diffs over the existing aggregation
+        // points: `poll` reads `GameStats`/`CampaignStats`, which
+        // `Sim::flush_events` and `notify_unit_created` filled on the previous
+        // tick. The `Timer.schedule(checkUpdate, 2f, 2f)` half runs every two
+        // seconds (120 ticks).
+        runtime.service.poll(&runtime.session, &runtime.campaign);
+        if runtime.ticks % SERVICE_CHECK_TICKS == 0 {
+            let active = crate::entities::comp::unit::queries::count(
+                world,
+                Some(runtime.session.default_team()),
+            ) as i32;
+            runtime
+                .service
+                .check_update(&runtime.session, &runtime.campaign, active);
         }
 
         // `Teams.unregisterCore` on destroyed cores: the port's break/combat
@@ -932,8 +968,31 @@ pub fn game_state_tick_system(world: &mut World) {
         world.insert_resource(runtime);
         return;
     }
+    // `SectorCaptureEvent` listener inputs: Java fires the event inside
+    // `Logic.sectorCapture` *before* `rules.attackMode = false`, so the
+    // listener sees the attacking flag and the pre-capture loss counter.
+    let was_attack_mode = runtime.session.rules.attack_mode;
+    let buildings_destroyed = runtime.session.stats.buildings_destroyed;
     let events = check_game_state(&mut runtime.session, &mut runtime.campaign);
     for event in events {
+        // `GameService` listeners (GAPS #68): sector capture, last-sector
+        // victory and the PvP win approximation.
+        match &event {
+            PlayEvent::SectorCapture { planet, .. } => runtime.service.on_sector_capture(
+                &runtime.session,
+                &runtime.campaign,
+                *planet,
+                was_attack_mode,
+                buildings_destroyed,
+            ),
+            PlayEvent::CampaignComplete { planet, .. } => runtime
+                .service
+                .on_campaign_complete(&runtime.campaign, *planet),
+            PlayEvent::GameOver { winner } => {
+                runtime.service.on_game_over(&runtime.session, *winner)
+            }
+            _ => {}
+        }
         if matches!(event, PlayEvent::GameOver { .. }) && runtime.session.is_campaign() {
             let winner = match event {
                 PlayEvent::GameOver { winner } => winner,
@@ -2040,6 +2099,7 @@ fn team_ai_enemy_stats(units: &[TeamAiUnitRow], team: u8) -> Vec<EnemyStat> {
 mod tests {
     use super::*;
     use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::game::achievements::{Achievement, SStat};
 
     fn content() -> ContentRegistry {
         create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).expect("content")
@@ -2768,6 +2828,97 @@ mod tests {
                 .sector(planet, sector_id)
                 .is_some_and(|sector| sector.info.info.was_captured)
         );
+        // GAPS #68: the wave fired through `run_wave_now` reached the service,
+        // and the capture's no-loss check ran in the game-state pass.
+        let service = runtime.service.service();
+        assert_eq!(service.get(SStat::MaxWavesSurvived), runtime.session.wave);
+        assert!(Achievement::CaptureNoBlocksBroken.unlocked(service));
+    }
+
+    /// GAPS #68: `campaign_tick_system` folds the `GameStats`/`CampaignStats`
+    /// aggregation points into the local service (`GameService.poll`).
+    #[test]
+    fn campaign_tick_polls_stats_into_the_service() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        session.phase = State::Playing;
+        session.stats.buildings_built = 2;
+        session.stats.placed_block_count.insert("router".into(), 1);
+        session.stats.units_created = 1;
+        session.stats.enemy_units_destroyed = 3;
+        session
+            .stats
+            .destroyed_block_count
+            .insert("conveyor".into(), 1);
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        campaign_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        let service = runtime.service.service();
+        assert_eq!(service.get(SStat::BlocksBuilt), 2);
+        assert_eq!(service.get(SStat::BlocksDestroyed), 1);
+        assert_eq!(service.get(SStat::UnitsBuilt), 1);
+        assert_eq!(service.get(SStat::UnitsDestroyed), 3);
+        assert!(runtime.service.blocks_built().contains("router"));
+    }
+
+    /// GAPS #68: a played attack-mode capture feeds `attacksWon`,
+    /// `defeatAttack5Waves`, `captureNoBlocksBroken` and `sectorsControlled`
+    /// through the `SectorCaptureEvent` listener path.
+    #[test]
+    fn game_state_capture_tracks_attack_stats_and_achievements() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+            sector.save = Some("sector-save".into());
+            sector.info.info.has_core = true;
+        }
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            attack_mode: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        session.phase = State::Playing;
+        session.wave = 3;
+        session.spawn_count = 1;
+        let core = Entity::from_raw_u32(1).expect("entity");
+        session
+            .teams
+            .register_core(core, TeamId(session.default_team()), &session.rules);
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        // Attack mode with no wave-team core left captures the sector.
+        game_state_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert!(
+            runtime
+                .events
+                .iter()
+                .any(|event| matches!(event, PlayEvent::SectorCapture { .. })),
+            "capture fired: {:?}",
+            runtime.events
+        );
+        let service = runtime.service.service();
+        assert_eq!(service.get(SStat::AttacksWon), 1);
+        assert_eq!(service.get(SStat::SectorsControlled), 1);
+        assert!(Achievement::DefeatAttack5Waves.unlocked(service));
+        assert!(Achievement::CaptureNoBlocksBroken.unlocked(service));
     }
 
     #[test]

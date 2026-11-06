@@ -26,28 +26,33 @@ use crate::binder::{self, BinderCore, BinderOptions, TableBinder};
 use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
-    ChatKind, CommandKind, DbConnection, Gamemode, MemberRole, PlayerStateReport, RemoteTables,
-    SnapshotKind, SubscriptionHandle, UiEventKind, Visibility, add_campaign_stat as _,
-    admin_add_chat_filter as _, admin_ban as _, admin_grant as _, admin_kick as _,
-    admin_remove_chat_filter as _, admin_run_wave as _, admin_set_config as _,
-    admin_set_whitelist as _, admin_skip_wave as _, admin_switch_team as _, admin_tile_op as _,
-    admin_unban as _, admin_whitelist as _, advance_turn as _, all_matchesQueryTableAccess,
-    all_playersQueryTableAccess, create_campaign as _, create_match as _, delete_schematic as _,
-    import_schematic as _, join_match as _, leave_match as _,
-    local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
-    local_playerQueryTableAccess, my_kickQueryTableAccess, my_match_chatQueryTableAccess,
+    ActionType, ChatKind, CommandKind, DbConnection, Gamemode, MemberRole, PlayerStateReport,
+    RemoteTables, SnapshotKind, SubscriptionHandle, UiEventKind, Visibility,
+    add_campaign_stat as _, admin_add_action_filter as _, admin_add_chat_filter as _,
+    admin_add_match_chat_filter as _, admin_ban as _, admin_ban_name as _, admin_grant as _,
+    admin_kick as _, admin_remove_action_filter as _, admin_remove_chat_filter as _,
+    admin_remove_match_chat_filter as _, admin_request_trace as _, admin_run_wave as _,
+    admin_set_config as _, admin_set_whitelist as _, admin_skip_wave as _, admin_switch_team as _,
+    admin_tile_op as _, admin_unban as _, admin_unban_name as _, admin_whitelist as _,
+    advance_turn as _, all_adminsQueryTableAccess, all_bansQueryTableAccess,
+    all_matchesQueryTableAccess, all_playersQueryTableAccess, all_whitelistQueryTableAccess,
+    create_campaign as _, create_match as _, delete_schematic as _, import_schematic as _,
+    join_match as _, leave_match as _, local_client_settingsQueryTableAccess,
+    local_player_profileQueryTableAccess, local_playerQueryTableAccess,
+    my_admin_actionsQueryTableAccess, my_kickQueryTableAccess, my_match_chatQueryTableAccess,
     my_match_checksumsQueryTableAccess, my_match_commandsQueryTableAccess,
-    my_match_membersQueryTableAccess, my_match_plan_chunksQueryTableAccess,
-    my_match_plansQueryTableAccess, my_match_player_statesQueryTableAccess,
-    my_match_snapshot_chunksQueryTableAccess, my_match_snapshot_requestsQueryTableAccess,
-    my_match_snapshotsQueryTableAccess, my_match_stateQueryTableAccess,
-    my_match_ui_eventsQueryTableAccess, my_matchQueryTableAccess, my_matchesQueryTableAccess,
-    my_sender_command_stateQueryTableAccess, protocol_infoQueryTableAccess, publish_checksum as _,
-    publish_match_state as _, publish_snapshot as _, publish_ui_event as _,
-    relay_configQueryTableAccess, report_plan_snapshot as _, report_player_state as _,
-    request_snapshot as _, save_schematic as _, save_sector_info as _, send_chat as _,
-    send_match_command as _, server_configQueryTableAccess, set_color as _, set_ready as _,
-    set_unlock as _, set_username as _, start_match as _,
+    my_match_eventsQueryTableAccess, my_match_membersQueryTableAccess,
+    my_match_plan_chunksQueryTableAccess, my_match_plansQueryTableAccess,
+    my_match_player_statesQueryTableAccess, my_match_snapshot_chunksQueryTableAccess,
+    my_match_snapshot_requestsQueryTableAccess, my_match_snapshotsQueryTableAccess,
+    my_match_stateQueryTableAccess, my_match_ui_eventsQueryTableAccess, my_matchQueryTableAccess,
+    my_matchesQueryTableAccess, my_sender_command_stateQueryTableAccess, my_tracesQueryTableAccess,
+    protocol_infoQueryTableAccess, publish_checksum as _, publish_match_state as _,
+    publish_snapshot as _, publish_ui_event as _, relay_configQueryTableAccess,
+    report_plan_snapshot as _, report_player_state as _, request_snapshot as _,
+    save_schematic as _, save_sector_info as _, send_chat as _, send_match_command as _,
+    server_configQueryTableAccess, set_color as _, set_ready as _, set_unlock as _,
+    set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -914,6 +919,80 @@ impl Connector {
             .map_err(send_error)
     }
 
+    /// Adds a match-scoped chat filter (admin only; PAR-0125).
+    pub fn admin_add_match_chat_filter(
+        &mut self,
+        match_id: u64,
+        pattern: &str,
+        mute: bool,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_add_match_chat_filter(match_id, pattern.to_string(), mute)
+            .map_err(send_error)
+    }
+
+    /// Removes a chat filter by id, global or match-scoped (admin only).
+    pub fn admin_remove_match_chat_filter(&mut self, filter_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_remove_match_chat_filter(filter_id)
+            .map_err(send_error)
+    }
+
+    /// Adds a persisted action filter (admin only; GAPS #34).
+    ///
+    /// `match_id` scopes the rule to one match (`None` = database-global) and
+    /// `action` limits it to one [`ActionType`] (`None` = every action);
+    /// `allow` explicitly allows instead of denying.
+    pub fn admin_add_action_filter(
+        &mut self,
+        match_id: Option<u64>,
+        action: Option<ActionType>,
+        allow: bool,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_add_action_filter(match_id, action, allow)
+            .map_err(send_error)
+    }
+
+    /// Removes a persisted action filter by id (admin only).
+    pub fn admin_remove_action_filter(&mut self, filter_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_remove_action_filter(filter_id)
+            .map_err(send_error)
+    }
+
+    /// Adds a case-insensitive name-ban regex (admin only; GAPS #34).
+    pub fn admin_ban_name(&mut self, pattern: &str) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_ban_name(pattern.to_string())
+            .map_err(send_error)
+    }
+
+    /// Removes a name-ban regex (admin only).
+    pub fn admin_unban_name(&mut self, pattern: &str) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_unban_name(pattern.to_string())
+            .map_err(send_error)
+    }
+
+    /// Requests a server-computed trace answer (`my_traces`; admin only).
+    pub fn admin_request_trace(
+        &mut self,
+        match_id: Option<u64>,
+        target: Identity,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_request_trace(match_id, target)
+            .map_err(send_error)
+    }
+
     /// Forces the next wave (admin or host).
     pub fn admin_skip_wave(&mut self, match_id: u64) -> Result<(), ConnectorError> {
         self.reducer_conn()?
@@ -1220,6 +1299,9 @@ impl Connector {
                     .add_query(|q| q.from.local_player())
                     .add_query(|q| q.from.local_player_profile())
                     .add_query(|q| q.from.all_players())
+                    .add_query(|q| q.from.all_admins())
+                    .add_query(|q| q.from.all_bans())
+                    .add_query(|q| q.from.all_whitelist())
                     .add_query(|q| q.from.my_matches())
                     .add_query(|q| q.from.all_matches())
                     .subscribe()
@@ -1242,12 +1324,15 @@ impl Connector {
                     .add_query(|q| q.from.my_match_members())
                     .add_query(|q| q.from.my_match_state())
                     .add_query(|q| q.from.my_kick())
+                    .add_query(|q| q.from.my_admin_actions())
                     .add_query(|q| q.from.my_sender_command_state())
                     .add_query(|q| q.from.my_match_player_states())
                     .add_query(|q| q.from.my_match_plans())
                     .add_query(|q| q.from.my_match_plan_chunks())
                     .add_query(|q| q.from.my_match_ui_events())
                     .add_query(|q| q.from.my_match_chat())
+                    .add_query(|q| q.from.my_match_events())
+                    .add_query(|q| q.from.my_traces())
                     .add_query(|q| q.from.my_match_checksums())
                     .add_query(|q| q.from.my_match_snapshots())
                     .add_query(|q| q.from.my_match_snapshot_requests())
@@ -1342,6 +1427,55 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    /// The query set `issue_wave` sends must equal the wave lists in
+    /// `waves.rs`: a table listed in a wave but never subscribed starves its
+    /// binder silently (regression: `all_admins`/`all_bans`/`all_whitelist`
+    /// and `my_admin_actions` were listed but not subscribed). Update this
+    /// constant together with `waves.rs` and `issue_wave`.
+    #[test]
+    fn subscribed_waves_match_table_lists() {
+        const SUBSCRIBED_BASE: &[&str] = &[
+            "protocol_info",
+            "relay_config",
+            "local_client_settings",
+            "server_config",
+        ];
+        const SUBSCRIBED_LOBBY: &[&str] = &[
+            "local_player",
+            "local_player_profile",
+            "all_players",
+            "all_admins",
+            "all_bans",
+            "all_whitelist",
+            "my_matches",
+            "all_matches",
+        ];
+        const SUBSCRIBED_GAME: &[&str] = &[
+            "my_match",
+            "my_match_commands",
+            "my_match_members",
+            "my_match_state",
+            "my_kick",
+            "my_admin_actions",
+            "my_sender_command_state",
+            "my_match_player_states",
+            "my_match_plans",
+            "my_match_plan_chunks",
+            "my_match_ui_events",
+            "my_match_chat",
+            "my_match_events",
+            "my_traces",
+            "my_match_checksums",
+            "my_match_snapshots",
+            "my_match_snapshot_requests",
+        ];
+        const SUBSCRIBED_SNAPSHOT: &[&str] = &["my_match_snapshot_chunks"];
+        assert_eq!(WaveName::Base.tables(), SUBSCRIBED_BASE);
+        assert_eq!(WaveName::Lobby.tables(), SUBSCRIBED_LOBBY);
+        assert_eq!(WaveName::Game.tables(), SUBSCRIBED_GAME);
+        assert_eq!(WaveName::Snapshot.tables(), SUBSCRIBED_SNAPSHOT);
+    }
 
     fn scratch_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("mind-stdb-conn-{name}-{}", std::process::id()))

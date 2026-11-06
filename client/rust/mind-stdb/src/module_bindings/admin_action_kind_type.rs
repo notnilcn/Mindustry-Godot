@@ -37,6 +37,20 @@ pub enum AdminActionKind {
     AddChatFilter,
 
     RemoveChatFilter,
+
+    AddMatchChatFilter,
+
+    RemoveMatchChatFilter,
+
+    BanName,
+
+    UnbanName,
+
+    RequestTrace,
+
+    AddActionFilter,
+
+    RemoveActionFilter,
 }
 
 impl __sdk::InModule for AdminActionKind {

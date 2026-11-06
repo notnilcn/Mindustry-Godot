@@ -617,7 +617,9 @@ impl DrillBehavior {
     /// `BurstDrill` sets `hardnessDrillMultiplier = 0` and overrides to
     /// `drillTime / multiplier` (`BurstDrill.java:35-44,53-55`), which the same
     /// formula reproduces.
-    fn drill_time(&self, def: &DrillDef, item: ItemId) -> f32 {
+    ///
+    /// Shared with the `BurstDrill` ambient-volume factor (`audio/ambient.rs`).
+    pub(crate) fn drill_time(&self, def: &DrillDef, item: ItemId) -> f32 {
         let hardness = self.hardness.get(item.index()).copied().unwrap_or(0) as f32;
         let multiplier = def
             .drill_multipliers
@@ -678,8 +680,77 @@ impl DrillBehavior {
                 state.invert_time = 1.0;
                 state.progress %= drill_time;
             }
+            // `BurstDrill.java:113-118` emits these only `if(wasVisible)`; the
+            // port's `Building.was_visible` is maintained by the fog pass
+            // (`sim/fog.rs`) and never set in fog-off play, so the cues stay
+            // sink-gated instead (see [`emit_burst_cues`]).
+            emit_burst_cues(world, e, item);
         }
     }
+}
+
+/// `BurstDrill.drillSoundVolume` / `drillSoundPitchRand`
+/// (`BurstDrill.java:32-33`).
+const BURST_DRILL_SOUND_VOLUME: f32 = 0.6;
+/// `drillSound.at(x, y, 1f + Mathf.range(drillSoundPitchRand))`.
+const BURST_DRILL_PITCH_RAND: f32 = 0.1;
+/// `BurstDrill.shake` class default (`BurstDrill.java:15`);
+/// `Effect.shake(shake, shake, this)`.
+const BURST_DRILL_SHAKE: f32 = 2.0;
+
+/// `BurstDrillBuild.updateTile` view cues (`BurstDrill.java:113-118`):
+/// `Effect.shake(shake, shake, this)`, `drillSound.at(...)`, then
+/// `drillEffect.at(x, y, dominantItem.color)` with the class defaults
+/// `drillEffect = Fx.shockwave` and `drillEffectRnd = 0`
+/// (`BurstDrill.java:26,42`).
+///
+/// Deviations:
+/// - Java wraps the three cues in `if(wasVisible)`; the port's
+///   `Building.was_visible` is only written by the fog pass (`sim/fog.rs`), so
+///   gating here would silence every burst in fog-off play. The host sinks are
+///   already headless-safe (no `AudioSinkRes`/`UnitRuntime`), so the cues are
+///   unconditional. See `StorageBlock.incinerateEffect` for the same
+///   divergence.
+/// - The two vanilla BurstDrills override `shake = 4` and
+///   `drillEffect = MultiEffect(...)` (`Blocks.java:3089-3104` impact-drill,
+///   `:3112-3124` eruption-drill); `BurstDrillDef` carries neither field yet, so
+///   every BurstDrill uses the class defaults (closing work filed separately).
+fn emit_burst_cues(world: &mut World, e: Entity, item: ItemId) {
+    let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) else {
+        return;
+    };
+    crate::audio::sim::emit_world_sound(
+        world,
+        crate::audio::SoundId::DRILL_IMPACT,
+        x,
+        y,
+        BURST_DRILL_SOUND_VOLUME,
+        1.0,
+        BURST_DRILL_PITCH_RAND,
+    );
+    // Resolve the view sink (`None` in headless/dedicated worlds, Java's
+    // `Effect.shouldCreate` headless guard) and the `dominantItem.color` tint.
+    let view = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .map(|runtime| {
+            let color = runtime
+                .content
+                .items()
+                .get(item.index())
+                .map_or(crate::content::Rgba::WHITE, |def| def.color);
+            (runtime.fx.clone(), color)
+        });
+    let Some((fx, color)) = view else {
+        return;
+    };
+    fx.shake(BURST_DRILL_SHAKE);
+    fx.effect(
+        &crate::content::registries::fx_meta::EffectRef::Named(crate::content::EffectId::SHOCKWAVE),
+        x,
+        y,
+        0.0,
+        color,
+    );
 }
 
 impl BuildingBehavior for DrillBehavior {
@@ -2031,6 +2102,140 @@ mod tests {
             .map(|items| items.get(copper))
             .unwrap_or(0);
         assert!(total >= 1, "expected drilled copper, got {total}");
+    }
+
+    /// Installs a recording FX bus on a throwaway `UnitRuntime` so block view
+    /// cues (`FxSink`) are observable from the raw test world.
+    fn install_fx_bus(world: &mut EcsWorld) -> std::sync::Arc<crate::fx::FxBus> {
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        let content = crate::world::harness::BuildHarness::load_content();
+        let grid = WorldGrid::new(32, 32);
+        let mut runtime = UnitRuntime::new(content, &grid, world, 1, false);
+        let bus = std::sync::Arc::new(crate::fx::FxBus::new());
+        runtime.fx = bus.clone();
+        world.insert_non_send(runtime);
+        bus
+    }
+
+    /// An `impact-drill` placed one tick short of a burst, with the audio/FX
+    /// recorders installed. Returns `(world, content, entity, instance,
+    /// drill_time, audio log, fx bus)`.
+    #[allow(clippy::type_complexity)]
+    fn burst_rig() -> (
+        EcsWorld,
+        ContentRegistry,
+        Entity,
+        std::sync::Arc<crate::world::block::BlockInstance>,
+        f32,
+        crate::audio::SharedAudioLog,
+        std::sync::Arc<crate::fx::FxBus>,
+    ) {
+        let (mut world, content, entity) = setup("impact-drill");
+        let inst = world
+            .get_resource::<BlockTable>()
+            .expect("table")
+            .get_named("impact-drill")
+            .expect("impact-drill")
+            .clone();
+        let copper = content.item_id("copper").expect("copper");
+        let burst = match &inst.kind_data {
+            BlockKindData::BurstDrill(def) => def.clone(),
+            _ => panic!("impact-drill is a BurstDrill"),
+        };
+        // `BurstDrill.getDrillTime` for an unmultiplied item (`BurstDrill.java:53-55`).
+        let drill_time = DrillBehavior::default().drill_time(&burst.drill, copper);
+        let log = crate::audio::SharedAudioLog::new();
+        world.insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+        let bus = install_fx_bus(&mut world);
+        {
+            let mut state = world.get_mut::<DrillState>(entity).expect("drill state");
+            state.dominant_item = Some(copper);
+            state.dominant_items = 1;
+            // One update crosses `drillTime` (`progress += delta * speed`).
+            state.progress = drill_time - 0.5;
+        }
+        if let Some(mut building) = world.get_mut::<Building>(entity) {
+            building.efficiency = 1.0;
+        }
+        (world, content, entity, inst, drill_time, log, bus)
+    }
+
+    /// `BurstDrill.java:113-118`: a burst plays `drillImpact` at the building
+    /// centre (volume 0.6, `pitch = 1 + range(0.1)`), shakes `2` and emits
+    /// `Fx.shockwave` tinted with the dominant item colour (the class defaults;
+    /// the vanilla `shake = 4` / `MultiEffect` overrides are a documented
+    /// deviation in [`emit_burst_cues`]).
+    #[test]
+    fn burst_drill_burst_fires_sound_and_view_cues() {
+        use crate::audio::{AudioEvent, SoundId};
+        use crate::content::EffectId;
+        use crate::fx::FxEvent;
+
+        let (mut world, content, entity, inst, drill_time, log, bus) = burst_rig();
+        let copper = content.item_id("copper").expect("copper");
+        let (cx, cy) = crate::audio::sim::building_centre_of(&world, entity).expect("centre");
+        inst.behavior.update_tile(&mut world, entity);
+
+        let state = world.get::<DrillState>(entity).expect("state");
+        assert_eq!(state.invert_time, 1.0, "the burst latch fired");
+        assert!(state.progress < drill_time);
+
+        let events = log.events();
+        let burst = events.iter().find_map(|ticked| match &ticked.event {
+            AudioEvent::At {
+                sound,
+                x,
+                y,
+                pitch,
+                volume,
+                ..
+            } if *sound == SoundId::DRILL_IMPACT => Some((*x, *y, *pitch, *volume)),
+            _ => None,
+        });
+        let (x, y, pitch, volume) = burst.expect("drillImpact emitted");
+        assert_eq!((x, y), (cx, cy), "drillImpact at the building centre");
+        assert!((volume - 0.6).abs() < 1.0e-6, "volume {volume}");
+        assert!((0.9..=1.1).contains(&pitch), "pitch {pitch}");
+
+        let color = content.items()[copper.index()].color;
+        let fx = bus.drain();
+        assert!(
+            fx.iter().any(|event| matches!(
+                event,
+                FxEvent::Shake { intensity, .. } if (*intensity - 2.0).abs() < 1.0e-6
+            )),
+            "Effect.shake(2, 2) missing: {fx:?}"
+        );
+        assert!(
+            fx.iter().any(|event| matches!(
+                event,
+                FxEvent::Effect {
+                    effect: crate::content::registries::fx_meta::EffectRef::Named(id),
+                    color: tint,
+                    ..
+                } if *id == EffectId::SHOCKWAVE && *tint == color
+            )),
+            "Fx.shockwave with the item tint missing: {fx:?}"
+        );
+    }
+
+    /// `BurstDrill.java:113`'s burst predicate: a cycle that does not reach
+    /// `drillTime` emits no sound and no FX.
+    #[test]
+    fn burst_drill_below_threshold_is_silent() {
+        let (mut world, _content, entity, inst, drill_time, log, bus) = burst_rig();
+        if let Some(mut state) = world.get_mut::<DrillState>(entity) {
+            state.progress = drill_time - 2.0;
+        }
+        inst.behavior.update_tile(&mut world, entity);
+        assert_eq!(
+            world.get::<DrillState>(entity).expect("state").invert_time,
+            0.0,
+            "no burst yet"
+        );
+        assert!(log.events().is_empty(), "no sound: {:?}", log.events());
+        assert!(bus.drain().is_empty(), "no fx");
     }
 
     #[test]

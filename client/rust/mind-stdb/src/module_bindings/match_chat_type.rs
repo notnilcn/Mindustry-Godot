@@ -16,6 +16,7 @@ pub struct MatchChat {
     pub team: Option<u8>,
     pub text: String,
     pub sent_at: __sdk::Timestamp,
+    pub target: Option<__sdk::Identity>,
 }
 
 impl __sdk::InModule for MatchChat {
@@ -33,6 +34,7 @@ pub struct MatchChatCols {
     pub team: __sdk::__query_builder::Col<MatchChat, Option<u8>>,
     pub text: __sdk::__query_builder::Col<MatchChat, String>,
     pub sent_at: __sdk::__query_builder::Col<MatchChat, __sdk::Timestamp>,
+    pub target: __sdk::__query_builder::Col<MatchChat, Option<__sdk::Identity>>,
 }
 
 impl __sdk::__query_builder::HasCols for MatchChat {
@@ -46,6 +48,7 @@ impl __sdk::__query_builder::HasCols for MatchChat {
             team: __sdk::__query_builder::Col::new(table_name, "team"),
             text: __sdk::__query_builder::Col::new(table_name, "text"),
             sent_at: __sdk::__query_builder::Col::new(table_name, "sent_at"),
+            target: __sdk::__query_builder::Col::new(table_name, "target"),
         }
     }
 }

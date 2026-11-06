@@ -32,7 +32,8 @@ use mind_stdb::module_bindings::{
     MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
     MyMatchSnapshotChunksTableAccessor, MyMatchSnapshotRequestsTableAccessor,
     MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor,
-    MyMatchesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind, Visibility,
+    MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind,
+    Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
@@ -217,6 +218,8 @@ pub struct MindNet {
     my_kick_binder: Option<TableBinder<MyKickTableAccessor>>,
     /// `my_admin_actions` rows (admin action history/trace).
     admin_actions_binder: Option<TableBinder<MyAdminActionsTableAccessor>>,
+    /// `my_traces` rows (server answers to `admin_request_trace`).
+    traces_binder: Option<TableBinder<MyTracesTableAccessor>>,
 }
 
 #[godot_api]
@@ -276,6 +279,7 @@ impl INode for MindNet {
             all_whitelist_binder: None,
             my_kick_binder: None,
             admin_actions_binder: None,
+            traces_binder: None,
         }
     }
 
@@ -424,6 +428,7 @@ impl MindNet {
         self.my_kick_binder = Some(connector.bind::<MyKickTableAccessor>("my_kick"));
         self.admin_actions_binder =
             Some(connector.bind::<MyAdminActionsTableAccessor>("my_admin_actions"));
+        self.traces_binder = Some(connector.bind::<MyTracesTableAccessor>("my_traces"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -841,9 +846,11 @@ impl MindNet {
         self.roster.connected().len() as i32
     }
 
-    /// Dispatches a player-list action (`kick`/`ban`/`unban`/`admin`/`team`)
-    /// for `target` (name or identity). Returns `true` when the reducer was
-    /// sent. The UI player-list menu calls this per button.
+    /// Dispatches a player-list action
+    /// (`kick`/`ban`/`unban`/`admin`/`unadmin`/`whitelist`/`unwhitelist`/`team`/
+    /// `trace`) for `target` (name or identity). Returns `true` when the reducer
+    /// was sent. The UI player-list menu calls this per button; `trace` asks the
+    /// module for a `my_traces` answer (`admin_request_trace`, GAPS #34).
     #[func]
     pub fn player_action(&mut self, action: GString, target: GString) -> bool {
         self.dispatch_player_action(action, target, 0)
@@ -1588,6 +1595,7 @@ impl MindNet {
             "whitelist" => PlayerAction::Whitelist(true),
             "unwhitelist" => PlayerAction::Whitelist(false),
             "team" => PlayerAction::SwitchTeam(value.clamp(0, u8::MAX as i64) as u8),
+            "trace" => PlayerAction::RequestTrace,
             other => {
                 log::warn!("player_action: unknown action `{other}`");
                 return false;
@@ -1649,6 +1657,11 @@ impl MindNet {
         {
             for change in changes {
                 self.roster.apply_admin_action(change);
+            }
+        }
+        if let Some(changes) = self.traces_binder.as_ref().map(|binder| binder.drain()) {
+            for change in changes {
+                self.roster.apply_trace(change);
             }
         }
     }

@@ -13,6 +13,8 @@ pub enum ChatKind {
     Team,
 
     System,
+
+    Admin,
 }
 
 impl __sdk::InModule for ChatKind {

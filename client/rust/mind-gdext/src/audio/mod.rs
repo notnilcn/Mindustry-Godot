@@ -991,10 +991,14 @@ impl MusicOutput for GodotMusicOutput<'_> {
         let _ = self.sound_paused;
     }
 
-    fn on_game_state_change(&mut self, playing: bool) {
-        if !playing {
-            self.player.stop();
-        }
+    fn on_game_state_change(&mut self, _playing: bool) {
+        // `SoundControl.update`'s game-state branch (`SoundControl.java:135-151`)
+        // resets the **Sound** bus only (`soundBus.stop()` / `play()` +
+        // `musicBus.play()`); it never stops the music player. Leaving a game
+        // must reach the `isMenu()` branch (`:156`) and let the menu track's
+        // `play()` fade the outgoing track out (`SoundControl.java:263-311`).
+        // The port's sound-bus reset (`pool.stop_all` + loop stops) lives in
+        // `MindAudio::process`; this hook stays music-neutral.
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T16:08:18Z",
+  "updated": "2026-11-06T16:10:31Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -29733,13 +29733,13 @@
     },
     "PAR-0566": {
       "title": "GAPS #68: Achievement/SStat tables + local GameService stat tracking",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
-        "java": [
+        "godot": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -29747,9 +29747,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0566"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib achievement && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib game::service && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib game::runtime::tests"
             }
           }
         ]
@@ -29758,7 +29758,23 @@
       "claimed_at": "2026-11-06T16:07:37Z",
       "severity": "P2",
       "source": "GAPS.md#68",
-      "gap": "Achievement (90 entries at upstream HEAD; GAPS said 69), SStat (21 stats) and the GameService listener logic were absent: NullService was a no-op and nothing tracked stats or unlocked achievements. Fixed non-platform half: game/achievements.rs (SStat+Achievement tables, keys, predicates), game/service.rs (LocalGameService implements crate::service::GameService with settings persistence + query API; ServiceTracker ports GameService.registerEvents reachable hooks), wired into CampaignRuntime (waves, sector capture, last-sector victory, GameStats/campaign-stat polls, turn peaks). Still absent: Steam/Steamworks (#69), UI badges/dialog, gdext plumbing of the service into the settings store."
+      "gap": "Achievement (90 entries at upstream HEAD; GAPS said 69), SStat (21 stats) and the GameService listener logic were absent: NullService was a no-op and nothing tracked stats or unlocked achievements. Fixed non-platform half: game/achievements.rs (SStat+Achievement tables, keys, predicates), game/service.rs (LocalGameService implements crate::service::GameService with settings persistence + query API; ServiceTracker ports GameService.registerEvents reachable hooks), wired into CampaignRuntime (waves, sector capture, last-sector victory, GameStats/campaign-stat polls, turn peaks). Still absent: Steam/Steamworks (#69), UI badges/dialog, gdext plumbing of the service into the settings store.",
+      "fix": "mc/game/achievements.rs: SStat (21) + Achievement (90) tables in Java declaration order with name/stat/goal predicates, achievement-<name> and achievement-stat-<name> persistence keys, unlock/unlocked/check_completion. mc/game/service.rs: LocalGameService implements crate::service::GameService (enabled, complete/clear/is_achieved, get/set_stat incl. unknown-name overflow, store_stats, store-count) with UnlockStore load/save and a UI query API (stat_rows/achievement_rows/completion/unlocked_json); ServiceTracker ports the reachable GameService.registerEvents listeners. Wiring: CampaignRuntime.service field driven from run_wave_now (WaveEvent), campaign_tick_system (GameStats/CampaignStats counter poll + 2 s checkUpdate: maxUnitActive/maxProduction/totalCampaignItems) and game_state_tick_system (SectorCapture: attacksWon/defeatAttack5Waves/captureNoBlocksBroken/sectorsControlled/captureAllSectors; CampaignComplete: completeSerpulo/Erekir; GameOver: pvpsWon). Java-parity deviations documented in the module docs (no UI-driven achievements, block/unit counting via GameStats aggregation).",
+      "evidence": [
+        "cargo test -p mind-core --lib achievement -> 6 passed",
+        "cargo test -p mind-core --lib game::service -> 8 passed",
+        "cargo test -p mind-core --lib game::runtime::tests -> 24 passed, incl. wave/capture/poll wiring",
+        "cargo test -p mind-core --lib -> 3009 passed, 0 failed",
+        "cargo check -p mind-gdext -> ok",
+        "cargo fmt --all -> clean"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T16:10:19Z",
+          "by": "hx-stats",
+          "text": "Verified headlessly at HEAD 01d18ac6 + this worktree: achievement predicate/unlock persistence and idempotent unlock (6 tests), stat accumulation from representative events/waves/captures/polls and max semantics (8 service tests), CampaignRuntime wiring (wave, attack-mode capture, GameStats poll; 24 runtime tests) and the full mind-core lib suite (3009 passed). Platform/Steam (#69) and gdext settings plumbing remain out of scope; the LocalGameService implements the existing crate::service::GameService seam so gx can inject it without ABI changes."
+        }
+      ]
     }
   },
   "recipes": {

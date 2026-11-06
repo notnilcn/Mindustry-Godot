@@ -6,18 +6,27 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod action_filter_type;
+pub mod action_rate_type;
+pub mod action_type_type;
 pub mod add_campaign_stat_reducer;
 pub mod admin_action_kind_type;
 pub mod admin_action_log_table;
 pub mod admin_action_log_type;
+pub mod admin_add_action_filter_reducer;
 pub mod admin_add_chat_filter_reducer;
+pub mod admin_add_match_chat_filter_reducer;
+pub mod admin_ban_name_reducer;
 pub mod admin_ban_reducer;
 pub mod admin_grant_reducer;
 pub mod admin_identity_table;
 pub mod admin_identity_type;
 pub mod admin_kick_reducer;
 pub mod admin_rate_type;
+pub mod admin_remove_action_filter_reducer;
 pub mod admin_remove_chat_filter_reducer;
+pub mod admin_remove_match_chat_filter_reducer;
+pub mod admin_request_trace_reducer;
 pub mod admin_run_wave_reducer;
 pub mod admin_set_config_reducer;
 pub mod admin_set_whitelist_reducer;
@@ -26,13 +35,16 @@ pub mod admin_switch_team_reducer;
 pub mod admin_switch_team_type;
 pub mod admin_tile_op_reducer;
 pub mod admin_tile_op_type;
+pub mod admin_unban_name_reducer;
 pub mod admin_unban_reducer;
 pub mod admin_whitelist_reducer;
 pub mod advance_turn_reducer;
+pub mod all_action_filters_table;
 pub mod all_admins_table;
 pub mod all_bans_table;
 pub mod all_chat_filters_table;
 pub mod all_matches_table;
+pub mod all_player_info_table;
 pub mod all_players_table;
 pub mod all_whitelist_table;
 pub mod am_i_admin_table;
@@ -66,6 +78,7 @@ pub mod create_profile_reducer;
 pub mod custom_type;
 pub mod delete_plans_type;
 pub mod delete_schematic_reducer;
+pub mod event_kind_type;
 pub mod gamemode_type;
 pub mod import_schematic_reducer;
 pub mod inventory_type;
@@ -77,11 +90,13 @@ pub mod local_player_table;
 pub mod logic_client_data_type;
 pub mod logic_sync_type;
 pub mod maintenance_schedule_type;
+pub mod match_chat_state_type;
 pub mod match_chat_table;
 pub mod match_chat_type;
 pub mod match_checksum_table;
 pub mod match_checksum_type;
 pub mod match_command_type;
+pub mod match_event_type;
 pub mod match_kick_type;
 pub mod match_mod_table;
 pub mod match_mod_type;
@@ -100,6 +115,7 @@ pub mod match_state_type;
 pub mod match_status_type;
 pub mod match_ui_event_table;
 pub mod match_ui_event_type;
+pub mod match_vote_type;
 pub mod member_role_type;
 pub mod menu_builder_choose_type;
 pub mod menu_choose_type;
@@ -112,6 +128,7 @@ pub mod my_kick_table;
 pub mod my_match_chat_table;
 pub mod my_match_checksums_table;
 pub mod my_match_commands_table;
+pub mod my_match_events_table;
 pub mod my_match_members_table;
 pub mod my_match_plan_chunks_table;
 pub mod my_match_plans_table;
@@ -125,10 +142,12 @@ pub mod my_match_ui_events_table;
 pub mod my_matches_table;
 pub mod my_schematics_table;
 pub mod my_sender_command_state_table;
+pub mod my_traces_table;
 pub mod payload_type;
 pub mod place_block_type;
 pub mod player_ban_table;
 pub mod player_ban_type;
+pub mod player_info_type;
 pub mod player_profile_table;
 pub mod player_profile_type;
 pub mod player_session_table;
@@ -137,6 +156,7 @@ pub mod player_spawn_type;
 pub mod player_state_rate_type;
 pub mod player_state_report_type;
 pub mod player_table;
+pub mod player_trace_type;
 pub mod player_type;
 pub mod protocol_info_table;
 pub mod protocol_info_type;
@@ -185,21 +205,32 @@ pub mod unlock_table;
 pub mod unlock_type;
 pub mod update_client_settings_reducer;
 pub mod visibility_type;
+pub mod vote_ballot_type;
+pub mod vote_cooldown_type;
 pub mod whitelist_entry_table;
 pub mod whitelist_entry_type;
 
+pub use action_filter_type::ActionFilter;
+pub use action_rate_type::ActionRate;
+pub use action_type_type::ActionType;
 pub use add_campaign_stat_reducer::add_campaign_stat;
 pub use admin_action_kind_type::AdminActionKind;
 pub use admin_action_log_table::*;
 pub use admin_action_log_type::AdminActionLog;
+pub use admin_add_action_filter_reducer::admin_add_action_filter;
 pub use admin_add_chat_filter_reducer::admin_add_chat_filter;
+pub use admin_add_match_chat_filter_reducer::admin_add_match_chat_filter;
+pub use admin_ban_name_reducer::admin_ban_name;
 pub use admin_ban_reducer::admin_ban;
 pub use admin_grant_reducer::admin_grant;
 pub use admin_identity_table::*;
 pub use admin_identity_type::AdminIdentity;
 pub use admin_kick_reducer::admin_kick;
 pub use admin_rate_type::AdminRate;
+pub use admin_remove_action_filter_reducer::admin_remove_action_filter;
 pub use admin_remove_chat_filter_reducer::admin_remove_chat_filter;
+pub use admin_remove_match_chat_filter_reducer::admin_remove_match_chat_filter;
+pub use admin_request_trace_reducer::admin_request_trace;
 pub use admin_run_wave_reducer::admin_run_wave;
 pub use admin_set_config_reducer::admin_set_config;
 pub use admin_set_whitelist_reducer::admin_set_whitelist;
@@ -208,13 +239,16 @@ pub use admin_switch_team_reducer::admin_switch_team;
 pub use admin_switch_team_type::AdminSwitchTeam;
 pub use admin_tile_op_reducer::admin_tile_op;
 pub use admin_tile_op_type::AdminTileOp;
+pub use admin_unban_name_reducer::admin_unban_name;
 pub use admin_unban_reducer::admin_unban;
 pub use admin_whitelist_reducer::admin_whitelist;
 pub use advance_turn_reducer::advance_turn;
+pub use all_action_filters_table::*;
 pub use all_admins_table::*;
 pub use all_bans_table::*;
 pub use all_chat_filters_table::*;
 pub use all_matches_table::*;
+pub use all_player_info_table::*;
 pub use all_players_table::*;
 pub use all_whitelist_table::*;
 pub use am_i_admin_table::*;
@@ -248,6 +282,7 @@ pub use create_profile_reducer::create_profile;
 pub use custom_type::Custom;
 pub use delete_plans_type::DeletePlans;
 pub use delete_schematic_reducer::delete_schematic;
+pub use event_kind_type::EventKind;
 pub use gamemode_type::Gamemode;
 pub use import_schematic_reducer::import_schematic;
 pub use inventory_type::Inventory;
@@ -259,11 +294,13 @@ pub use local_player_table::*;
 pub use logic_client_data_type::LogicClientData;
 pub use logic_sync_type::LogicSync;
 pub use maintenance_schedule_type::MaintenanceSchedule;
+pub use match_chat_state_type::MatchChatState;
 pub use match_chat_table::*;
 pub use match_chat_type::MatchChat;
 pub use match_checksum_table::*;
 pub use match_checksum_type::MatchChecksum;
 pub use match_command_type::MatchCommand;
+pub use match_event_type::MatchEvent;
 pub use match_kick_type::MatchKick;
 pub use match_mod_table::*;
 pub use match_mod_type::MatchMod;
@@ -282,6 +319,7 @@ pub use match_state_type::MatchState;
 pub use match_status_type::MatchStatus;
 pub use match_ui_event_table::*;
 pub use match_ui_event_type::MatchUiEvent;
+pub use match_vote_type::MatchVote;
 pub use member_role_type::MemberRole;
 pub use menu_builder_choose_type::MenuBuilderChoose;
 pub use menu_choose_type::MenuChoose;
@@ -294,6 +332,7 @@ pub use my_kick_table::*;
 pub use my_match_chat_table::*;
 pub use my_match_checksums_table::*;
 pub use my_match_commands_table::*;
+pub use my_match_events_table::*;
 pub use my_match_members_table::*;
 pub use my_match_plan_chunks_table::*;
 pub use my_match_plans_table::*;
@@ -307,10 +346,12 @@ pub use my_match_ui_events_table::*;
 pub use my_matches_table::*;
 pub use my_schematics_table::*;
 pub use my_sender_command_state_table::*;
+pub use my_traces_table::*;
 pub use payload_type::Payload;
 pub use place_block_type::PlaceBlock;
 pub use player_ban_table::*;
 pub use player_ban_type::PlayerBan;
+pub use player_info_type::PlayerInfo;
 pub use player_profile_table::*;
 pub use player_profile_type::PlayerProfile;
 pub use player_session_table::*;
@@ -319,6 +360,7 @@ pub use player_spawn_type::PlayerSpawn;
 pub use player_state_rate_type::PlayerStateRate;
 pub use player_state_report_type::PlayerStateReport;
 pub use player_table::*;
+pub use player_trace_type::PlayerTrace;
 pub use player_type::Player;
 pub use protocol_info_table::*;
 pub use protocol_info_type::ProtocolInfo;
@@ -367,6 +409,8 @@ pub use unlock_table::*;
 pub use unlock_type::Unlock;
 pub use update_client_settings_reducer::update_client_settings;
 pub use visibility_type::Visibility;
+pub use vote_ballot_type::VoteBallot;
+pub use vote_cooldown_type::VoteCooldown;
 pub use whitelist_entry_table::*;
 pub use whitelist_entry_type::WhitelistEntry;
 
@@ -384,7 +428,17 @@ pub enum Reducer {
         key: String,
         delta: i64,
     },
+    AdminAddActionFilter {
+        match_id: Option<u64>,
+        action: Option<ActionType>,
+        allow: bool,
+    },
     AdminAddChatFilter {
+        pattern: String,
+        mute: bool,
+    },
+    AdminAddMatchChatFilter {
+        match_id: u64,
         pattern: String,
         mute: bool,
     },
@@ -392,6 +446,9 @@ pub enum Reducer {
         target: __sdk::Identity,
         reason: String,
         duration_secs: Option<u64>,
+    },
+    AdminBanName {
+        pattern: String,
     },
     AdminGrant {
         target: __sdk::Identity,
@@ -402,8 +459,18 @@ pub enum Reducer {
         target: __sdk::Identity,
         reason: String,
     },
+    AdminRemoveActionFilter {
+        filter_id: u64,
+    },
     AdminRemoveChatFilter {
         filter_id: u64,
+    },
+    AdminRemoveMatchChatFilter {
+        filter_id: u64,
+    },
+    AdminRequestTrace {
+        match_id: Option<u64>,
+        target: __sdk::Identity,
     },
     AdminRunWave {
         match_id: u64,
@@ -436,6 +503,9 @@ pub enum Reducer {
     },
     AdminUnban {
         target: __sdk::Identity,
+    },
+    AdminUnbanName {
+        pattern: String,
     },
     AdminWhitelist {
         target: __sdk::Identity,
@@ -606,11 +676,17 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::AddCampaignStat { .. } => "add_campaign_stat",
+            Reducer::AdminAddActionFilter { .. } => "admin_add_action_filter",
             Reducer::AdminAddChatFilter { .. } => "admin_add_chat_filter",
+            Reducer::AdminAddMatchChatFilter { .. } => "admin_add_match_chat_filter",
             Reducer::AdminBan { .. } => "admin_ban",
+            Reducer::AdminBanName { .. } => "admin_ban_name",
             Reducer::AdminGrant { .. } => "admin_grant",
             Reducer::AdminKick { .. } => "admin_kick",
+            Reducer::AdminRemoveActionFilter { .. } => "admin_remove_action_filter",
             Reducer::AdminRemoveChatFilter { .. } => "admin_remove_chat_filter",
+            Reducer::AdminRemoveMatchChatFilter { .. } => "admin_remove_match_chat_filter",
+            Reducer::AdminRequestTrace { .. } => "admin_request_trace",
             Reducer::AdminRunWave { .. } => "admin_run_wave",
             Reducer::AdminSetConfig { .. } => "admin_set_config",
             Reducer::AdminSetWhitelist { .. } => "admin_set_whitelist",
@@ -618,6 +694,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminSwitchTeam { .. } => "admin_switch_team",
             Reducer::AdminTileOp { .. } => "admin_tile_op",
             Reducer::AdminUnban { .. } => "admin_unban",
+            Reducer::AdminUnbanName { .. } => "admin_unban_name",
             Reducer::AdminWhitelist { .. } => "admin_whitelist",
             Reducer::AdvanceTurn { .. } => "advance_turn",
             Reducer::CreateCampaign { .. } => "create_campaign",
@@ -661,12 +738,34 @@ impl __sdk::Reducer for Reducer {
                 key: key.clone(),
                 delta: delta.clone(),
             }),
+            Reducer::AdminAddActionFilter {
+                match_id,
+                action,
+                allow,
+            } => {
+                __sats::bsatn::to_vec(&admin_add_action_filter_reducer::AdminAddActionFilterArgs {
+                    match_id: match_id.clone(),
+                    action: action.clone(),
+                    allow: allow.clone(),
+                })
+            }
             Reducer::AdminAddChatFilter { pattern, mute } => {
                 __sats::bsatn::to_vec(&admin_add_chat_filter_reducer::AdminAddChatFilterArgs {
                     pattern: pattern.clone(),
                     mute: mute.clone(),
                 })
             }
+            Reducer::AdminAddMatchChatFilter {
+                match_id,
+                pattern,
+                mute,
+            } => __sats::bsatn::to_vec(
+                &admin_add_match_chat_filter_reducer::AdminAddMatchChatFilterArgs {
+                    match_id: match_id.clone(),
+                    pattern: pattern.clone(),
+                    mute: mute.clone(),
+                },
+            ),
             Reducer::AdminBan {
                 target,
                 reason,
@@ -676,6 +775,11 @@ impl __sdk::Reducer for Reducer {
                 reason: reason.clone(),
                 duration_secs: duration_secs.clone(),
             }),
+            Reducer::AdminBanName { pattern } => {
+                __sats::bsatn::to_vec(&admin_ban_name_reducer::AdminBanNameArgs {
+                    pattern: pattern.clone(),
+                })
+            }
             Reducer::AdminGrant { target, on } => {
                 __sats::bsatn::to_vec(&admin_grant_reducer::AdminGrantArgs {
                     target: target.clone(),
@@ -691,11 +795,27 @@ impl __sdk::Reducer for Reducer {
                 target: target.clone(),
                 reason: reason.clone(),
             }),
+            Reducer::AdminRemoveActionFilter { filter_id } => __sats::bsatn::to_vec(
+                &admin_remove_action_filter_reducer::AdminRemoveActionFilterArgs {
+                    filter_id: filter_id.clone(),
+                },
+            ),
             Reducer::AdminRemoveChatFilter { filter_id } => __sats::bsatn::to_vec(
                 &admin_remove_chat_filter_reducer::AdminRemoveChatFilterArgs {
                     filter_id: filter_id.clone(),
                 },
             ),
+            Reducer::AdminRemoveMatchChatFilter { filter_id } => __sats::bsatn::to_vec(
+                &admin_remove_match_chat_filter_reducer::AdminRemoveMatchChatFilterArgs {
+                    filter_id: filter_id.clone(),
+                },
+            ),
+            Reducer::AdminRequestTrace { match_id, target } => {
+                __sats::bsatn::to_vec(&admin_request_trace_reducer::AdminRequestTraceArgs {
+                    match_id: match_id.clone(),
+                    target: target.clone(),
+                })
+            }
             Reducer::AdminRunWave { match_id, count } => {
                 __sats::bsatn::to_vec(&admin_run_wave_reducer::AdminRunWaveArgs {
                     match_id: match_id.clone(),
@@ -749,6 +869,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminUnban { target } => {
                 __sats::bsatn::to_vec(&admin_unban_reducer::AdminUnbanArgs {
                     target: target.clone(),
+                })
+            }
+            Reducer::AdminUnbanName { pattern } => {
+                __sats::bsatn::to_vec(&admin_unban_name_reducer::AdminUnbanNameArgs {
+                    pattern: pattern.clone(),
                 })
             }
             Reducer::AdminWhitelist { target, on } => {
@@ -1049,10 +1174,12 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     admin_action_log: __sdk::TableUpdate<AdminActionLog>,
     admin_identity: __sdk::TableUpdate<AdminIdentity>,
+    all_action_filters: __sdk::TableUpdate<ActionFilter>,
     all_admins: __sdk::TableUpdate<AdminIdentity>,
     all_bans: __sdk::TableUpdate<PlayerBan>,
     all_chat_filters: __sdk::TableUpdate<ChatFilter>,
     all_matches: __sdk::TableUpdate<RelayMatch>,
+    all_player_info: __sdk::TableUpdate<PlayerInfo>,
     all_players: __sdk::TableUpdate<Player>,
     all_whitelist: __sdk::TableUpdate<WhitelistEntry>,
     am_i_admin: __sdk::TableUpdate<AdminIdentity>,
@@ -1083,6 +1210,7 @@ pub struct DbUpdate {
     my_match_chat: __sdk::TableUpdate<MatchChat>,
     my_match_checksums: __sdk::TableUpdate<MatchChecksum>,
     my_match_commands: __sdk::TableUpdate<MatchCommand>,
+    my_match_events: __sdk::TableUpdate<MatchEvent>,
     my_match_members: __sdk::TableUpdate<RelayMember>,
     my_match_plan_chunks: __sdk::TableUpdate<MatchPlanChunk>,
     my_match_plans: __sdk::TableUpdate<MatchPlanState>,
@@ -1095,6 +1223,7 @@ pub struct DbUpdate {
     my_matches: __sdk::TableUpdate<RelayMatch>,
     my_schematics: __sdk::TableUpdate<Schematic>,
     my_sender_command_state: __sdk::TableUpdate<SenderCommandState>,
+    my_traces: __sdk::TableUpdate<PlayerTrace>,
     player: __sdk::TableUpdate<Player>,
     player_ban: __sdk::TableUpdate<PlayerBan>,
     player_profile: __sdk::TableUpdate<PlayerProfile>,
@@ -1121,6 +1250,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "admin_identity" => db_update
                     .admin_identity
                     .append(admin_identity_table::parse_table_update(table_update)?),
+                "all_action_filters" => db_update
+                    .all_action_filters
+                    .append(all_action_filters_table::parse_table_update(table_update)?),
                 "all_admins" => db_update
                     .all_admins
                     .append(all_admins_table::parse_table_update(table_update)?),
@@ -1133,6 +1265,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "all_matches" => db_update
                     .all_matches
                     .append(all_matches_table::parse_table_update(table_update)?),
+                "all_player_info" => db_update
+                    .all_player_info
+                    .append(all_player_info_table::parse_table_update(table_update)?),
                 "all_players" => db_update
                     .all_players
                     .append(all_players_table::parse_table_update(table_update)?),
@@ -1223,6 +1358,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(my_match_commands_table::parse_table_update(table_update)?),
+                "my_match_events" => db_update
+                    .my_match_events
+                    .append(my_match_events_table::parse_table_update(table_update)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(my_match_members_table::parse_table_update(table_update)?),
@@ -1259,6 +1397,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "my_sender_command_state" => db_update.my_sender_command_state.append(
                     my_sender_command_state_table::parse_table_update(table_update)?,
                 ),
+                "my_traces" => db_update
+                    .my_traces
+                    .append(my_traces_table::parse_table_update(table_update)?),
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
@@ -1405,6 +1546,8 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.whitelist_entry = cache
             .apply_diff_to_table::<WhitelistEntry>("whitelist_entry", &self.whitelist_entry)
             .with_updates_by_pk(|row| &row.identity);
+        diff.all_action_filters = cache
+            .apply_diff_to_table::<ActionFilter>("all_action_filters", &self.all_action_filters);
         diff.all_admins =
             cache.apply_diff_to_table::<AdminIdentity>("all_admins", &self.all_admins);
         diff.all_bans = cache.apply_diff_to_table::<PlayerBan>("all_bans", &self.all_bans);
@@ -1412,6 +1555,8 @@ impl __sdk::DbUpdate for DbUpdate {
             cache.apply_diff_to_table::<ChatFilter>("all_chat_filters", &self.all_chat_filters);
         diff.all_matches =
             cache.apply_diff_to_table::<RelayMatch>("all_matches", &self.all_matches);
+        diff.all_player_info =
+            cache.apply_diff_to_table::<PlayerInfo>("all_player_info", &self.all_player_info);
         diff.all_players = cache
             .apply_diff_to_table::<Player>("all_players", &self.all_players)
             .with_updates_by_pk(|row| &row.identity);
@@ -1446,6 +1591,8 @@ impl __sdk::DbUpdate for DbUpdate {
             .apply_diff_to_table::<MatchChecksum>("my_match_checksums", &self.my_match_checksums);
         diff.my_match_commands =
             cache.apply_diff_to_table::<MatchCommand>("my_match_commands", &self.my_match_commands);
+        diff.my_match_events =
+            cache.apply_diff_to_table::<MatchEvent>("my_match_events", &self.my_match_events);
         diff.my_match_members =
             cache.apply_diff_to_table::<RelayMember>("my_match_members", &self.my_match_members);
         diff.my_match_plan_chunks = cache.apply_diff_to_table::<MatchPlanChunk>(
@@ -1479,6 +1626,7 @@ impl __sdk::DbUpdate for DbUpdate {
             "my_sender_command_state",
             &self.my_sender_command_state,
         );
+        diff.my_traces = cache.apply_diff_to_table::<PlayerTrace>("my_traces", &self.my_traces);
 
         diff
     }
@@ -1492,6 +1640,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "admin_identity" => db_update
                     .admin_identity
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_action_filters" => db_update
+                    .all_action_filters
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "all_admins" => db_update
                     .all_admins
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1503,6 +1654,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "all_matches" => db_update
                     .all_matches
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_player_info" => db_update
+                    .all_player_info
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "all_players" => db_update
                     .all_players
@@ -1594,6 +1748,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_events" => db_update
+                    .my_match_events
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1629,6 +1786,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_sender_command_state" => db_update
                     .my_sender_command_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_traces" => db_update
+                    .my_traces
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
@@ -1685,6 +1845,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "admin_identity" => db_update
                     .admin_identity
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_action_filters" => db_update
+                    .all_action_filters
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "all_admins" => db_update
                     .all_admins
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1696,6 +1859,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "all_matches" => db_update
                     .all_matches
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_player_info" => db_update
+                    .all_player_info
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "all_players" => db_update
                     .all_players
@@ -1787,6 +1953,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_events" => db_update
+                    .my_match_events
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1822,6 +1991,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_sender_command_state" => db_update
                     .my_sender_command_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_traces" => db_update
+                    .my_traces
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
@@ -1876,10 +2048,12 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     admin_action_log: __sdk::TableAppliedDiff<'r, AdminActionLog>,
     admin_identity: __sdk::TableAppliedDiff<'r, AdminIdentity>,
+    all_action_filters: __sdk::TableAppliedDiff<'r, ActionFilter>,
     all_admins: __sdk::TableAppliedDiff<'r, AdminIdentity>,
     all_bans: __sdk::TableAppliedDiff<'r, PlayerBan>,
     all_chat_filters: __sdk::TableAppliedDiff<'r, ChatFilter>,
     all_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    all_player_info: __sdk::TableAppliedDiff<'r, PlayerInfo>,
     all_players: __sdk::TableAppliedDiff<'r, Player>,
     all_whitelist: __sdk::TableAppliedDiff<'r, WhitelistEntry>,
     am_i_admin: __sdk::TableAppliedDiff<'r, AdminIdentity>,
@@ -1910,6 +2084,7 @@ pub struct AppliedDiff<'r> {
     my_match_chat: __sdk::TableAppliedDiff<'r, MatchChat>,
     my_match_checksums: __sdk::TableAppliedDiff<'r, MatchChecksum>,
     my_match_commands: __sdk::TableAppliedDiff<'r, MatchCommand>,
+    my_match_events: __sdk::TableAppliedDiff<'r, MatchEvent>,
     my_match_members: __sdk::TableAppliedDiff<'r, RelayMember>,
     my_match_plan_chunks: __sdk::TableAppliedDiff<'r, MatchPlanChunk>,
     my_match_plans: __sdk::TableAppliedDiff<'r, MatchPlanState>,
@@ -1922,6 +2097,7 @@ pub struct AppliedDiff<'r> {
     my_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
     my_schematics: __sdk::TableAppliedDiff<'r, Schematic>,
     my_sender_command_state: __sdk::TableAppliedDiff<'r, SenderCommandState>,
+    my_traces: __sdk::TableAppliedDiff<'r, PlayerTrace>,
     player: __sdk::TableAppliedDiff<'r, Player>,
     player_ban: __sdk::TableAppliedDiff<'r, PlayerBan>,
     player_profile: __sdk::TableAppliedDiff<'r, PlayerProfile>,
@@ -1957,6 +2133,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.admin_identity,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<ActionFilter>(
+            "all_action_filters",
+            &self.all_action_filters,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<AdminIdentity>(
             "all_admins",
             &self.all_admins,
@@ -1969,6 +2150,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("all_matches", &self.all_matches, event);
+        callbacks.invoke_table_row_callbacks::<PlayerInfo>(
+            "all_player_info",
+            &self.all_player_info,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Player>("all_players", &self.all_players, event);
         callbacks.invoke_table_row_callbacks::<WhitelistEntry>(
             "all_whitelist",
@@ -2079,6 +2265,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.my_match_commands,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<MatchEvent>(
+            "my_match_events",
+            &self.my_match_events,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<RelayMember>(
             "my_match_members",
             &self.my_match_members,
@@ -2135,6 +2326,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.my_sender_command_state,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<PlayerTrace>("my_traces", &self.my_traces, event);
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
         callbacks.invoke_table_row_callbacks::<PlayerBan>("player_ban", &self.player_ban, event);
         callbacks.invoke_table_row_callbacks::<PlayerProfile>(
@@ -2833,10 +3025,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         admin_action_log_table::register_table(client_cache);
         admin_identity_table::register_table(client_cache);
+        all_action_filters_table::register_table(client_cache);
         all_admins_table::register_table(client_cache);
         all_bans_table::register_table(client_cache);
         all_chat_filters_table::register_table(client_cache);
         all_matches_table::register_table(client_cache);
+        all_player_info_table::register_table(client_cache);
         all_players_table::register_table(client_cache);
         all_whitelist_table::register_table(client_cache);
         am_i_admin_table::register_table(client_cache);
@@ -2867,6 +3061,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         my_match_chat_table::register_table(client_cache);
         my_match_checksums_table::register_table(client_cache);
         my_match_commands_table::register_table(client_cache);
+        my_match_events_table::register_table(client_cache);
         my_match_members_table::register_table(client_cache);
         my_match_plan_chunks_table::register_table(client_cache);
         my_match_plans_table::register_table(client_cache);
@@ -2879,6 +3074,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         my_matches_table::register_table(client_cache);
         my_schematics_table::register_table(client_cache);
         my_sender_command_state_table::register_table(client_cache);
+        my_traces_table::register_table(client_cache);
         player_table::register_table(client_cache);
         player_ban_table::register_table(client_cache);
         player_profile_table::register_table(client_cache);
@@ -2895,10 +3091,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "admin_action_log",
         "admin_identity",
+        "all_action_filters",
         "all_admins",
         "all_bans",
         "all_chat_filters",
         "all_matches",
+        "all_player_info",
         "all_players",
         "all_whitelist",
         "am_i_admin",
@@ -2929,6 +3127,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "my_match_chat",
         "my_match_checksums",
         "my_match_commands",
+        "my_match_events",
         "my_match_members",
         "my_match_plan_chunks",
         "my_match_plans",
@@ -2941,6 +3140,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "my_matches",
         "my_schematics",
         "my_sender_command_state",
+        "my_traces",
         "player",
         "player_ban",
         "player_profile",

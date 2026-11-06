@@ -45,6 +45,23 @@ fn to_color(color: Rgba) -> Color {
     Color::from_rgba(color.r, color.g, color.b, color.a)
 }
 
+/// Resolves the duration of a queued [`FxEvent::Shake`].
+///
+/// `Effect.shake(intensity, duration, x, y)` always carries both, but the core
+/// `FxSink::shake(amount)` seam (`mind_core::combat::view`) only forwards the
+/// intensity, so those events arrive with `duration == 0`. Every core cue pairs
+/// the two (`Effect.shake(shake, shake, …)`; `BulletType.java:566`,
+/// `Weapon.java:527`, `BurstDrill.java:115`, `LaunchPad.java:157`), and a zero
+/// duration would leave `ShakeState` with `time == 0` (no visible shake), so
+/// fall back to the intensity.
+fn shake_duration(intensity: f32, duration: f32) -> f32 {
+    if duration > 0.0 {
+        duration
+    } else {
+        intensity.max(0.0)
+    }
+}
+
 /// `MindFx` — effect/decal/trail/shake pool host + MCP probes.
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -650,7 +667,16 @@ impl MindFx {
                     intensity,
                     duration,
                 } => {
-                    self.shake.add(intensity, duration.max(0.0));
+                    // `Effect.shake(intensity, duration, x, y)` always carries
+                    // both, but the core `FxSink::shake` seam only passes the
+                    // intensity, so those queues arrive with `duration == 0`.
+                    // Every core cue pairs `duration = intensity`
+                    // (`BulletType.java:566`, `Weapon.java:527`,
+                    // `BurstDrill.java:115`, `LaunchPad.java:157`); fall back
+                    // so `ShakeState.add` does not divide by zero and clear
+                    // the shake on the next frame.
+                    let duration = shake_duration(intensity, duration);
+                    self.shake.add(intensity, duration);
                     // `Renderer.shake`: the camera rig owns the offset; the
                     // `screenshake` setting is applied in `ShakeState.offset`
                     // (`RendererView.shakeIntensity * screenshake / 4 * 0.75`),
@@ -1004,5 +1030,31 @@ impl MindFx {
     #[func]
     pub fn live_turret_count(&self) -> i64 {
         self.turrets.len() as i64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shake_duration;
+
+    /// BurstDrill/LaunchPad cues go through `FxSink::shake(amount)`, which
+    /// queues `duration == 0`; the host must restore `Effect.shake(x, x, …)`
+    /// so the shake does not expire on its first frame. Reaction-explosion
+    /// shakes keep their explicit duration.
+    #[test]
+    fn shake_duration_falls_back_to_intensity() {
+        // `BurstDrill.java:115`: `Effect.shake(2f, 2f, this)`.
+        assert_eq!(shake_duration(2.0, 0.0), 2.0);
+        // `LaunchPad.java:157`: `Effect.shake(3f, 3f, this)`.
+        assert_eq!(shake_duration(3.0, 0.0), 3.0);
+        // `BulletType.java:566`: `Effect.shake(hitShake, hitShake, b)`.
+        assert_eq!(shake_duration(1.5, 0.0), 1.5);
+        // An explicit duration wins (`ExplosionSink`'s `shake_duration`, 16
+        // ticks for the reactor explosion).
+        assert_eq!(shake_duration(6.0, 16.0), 16.0);
+        assert_eq!(shake_duration(3.0, 3.0), 3.0);
+        // A zero cue stays zero (no NaN duration).
+        assert_eq!(shake_duration(0.0, 0.0), 0.0);
+        assert_eq!(shake_duration(-1.0, 0.0), 0.0);
     }
 }

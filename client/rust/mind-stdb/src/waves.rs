@@ -31,7 +31,8 @@ pub const LOBBY_TABLES: &[&str] = &[
 /// Game wave: the live match; raised explicitly on join and dropped on leave.
 ///
 /// Plan 21 M3/M4 add the player-state, plan, UI-event, chat, checksum and
-/// snapshot-metadata views.
+/// snapshot-metadata views. `my_match_events` is the server `EventType` bus
+/// source (GAPS #37) and `my_traces` carries `admin_request_trace` answers.
 pub const GAME_TABLES: &[&str] = &[
     "my_match",
     "my_match_commands",
@@ -45,6 +46,8 @@ pub const GAME_TABLES: &[&str] = &[
     "my_match_plan_chunks",
     "my_match_ui_events",
     "my_match_chat",
+    "my_match_events",
+    "my_traces",
     "my_match_checksums",
     "my_match_snapshots",
     "my_match_snapshot_requests",

@@ -20,7 +20,10 @@ use super::math::MIN_LOOP_VOLUME;
 use crate::content::ContentRegistry;
 use crate::content::registries::blocks::{BlockDef, BlockKind};
 use crate::ecs::EntitySeq;
-use crate::entities::comp::Building;
+use crate::entities::comp::{Building, DrillState};
+use crate::world::BlockKindData;
+use crate::world::behavior::production::DrillBehavior;
+use crate::world::block::BlockTable;
 use crate::world::blocks::defense::shields::ForceProjectorState;
 use crate::world::blocks::distribution::conveyor::ConveyorBuild;
 use crate::world::blocks::power::behavior::ImpactReactorState;
@@ -145,10 +148,13 @@ fn should_ambient_sound(
 /// `BuildingComp.ambientVolume` per class (`:2022` + overrides).
 fn ambient_volume_scale(world: &World, entity: Entity, def: &BlockDef, building: &Building) -> f32 {
     match def.kind {
-        // `Drill.ambientVolume = efficiency * size^2 / 4` (`Drill.java:257`);
-        // `BurstDrill`'s `progress^4` factor is deferred (Erekir only).
-        BlockKind::Drill | BlockKind::BurstDrill => {
+        // `Drill.ambientVolume = efficiency * size^2 / 4` (`Drill.java:257`).
+        BlockKind::Drill => building.efficiency * (def.size as f32).powi(2) / 4.0,
+        // `BurstDrill.ambientVolume()` multiplies the `Drill` formula by
+        // `pow(progress(), 4)` (`BurstDrill.java:123-124`).
+        BlockKind::BurstDrill => {
             building.efficiency * (def.size as f32).powi(2) / 4.0
+                * burst_drill_progress_factor(world, entity, building)
         }
         // `PowerGenerator.ambientVolume = clamp(productionEfficiency)`.
         BlockKind::ConsumeGenerator
@@ -167,6 +173,33 @@ fn ambient_volume_scale(world: &World, entity: Entity, def: &BlockDef, building:
             .map_or(building.efficiency, |state| state.warmup),
         _ => building.efficiency,
     }
+}
+
+/// `DrillBuild.progress()` (`Drill.java:328-330`): `0` with no dominant item,
+/// else `clamp(progress / getDrillTime(dominantItem))`. `BurstDrill`
+/// overrides `getDrillTime` to `drillTime / drillMultipliers.get(item, 1)`
+/// (`BurstDrill.java:53-55`), which [`DrillBehavior::drill_time`] reproduces
+/// (`hardnessDrillMultiplier = 0`, `BurstDrill.java:42-44`).
+fn burst_drill_progress_factor(world: &World, entity: Entity, building: &Building) -> f32 {
+    let Some(state) = world.get::<DrillState>(entity) else {
+        return 0.0;
+    };
+    let Some(item) = state.dominant_item else {
+        return 0.0;
+    };
+    let Some(drill_time) = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(building.block))
+        .and_then(|instance| match &instance.kind_data {
+            BlockKindData::BurstDrill(def) => {
+                Some(DrillBehavior::default().drill_time(&def.drill, item))
+            }
+            _ => None,
+        })
+    else {
+        return 0.0;
+    };
+    (state.progress / drill_time).clamp(0.0, 1.0).powi(4)
 }
 
 /// Fills `out` with one entry per live building whose ambient sound should
@@ -351,6 +384,72 @@ mod tests {
             .expect("module")
             .add(copper, cap, cap);
         assert!(collect(&sim).entries.is_empty(), "full drill is silent");
+    }
+
+    /// `BurstDrill.java:123-124`: `ambientVolume = efficiency * size^2 / 4 *
+    /// pow(progress(), 4)`, where `DrillBuild.progress()` is
+    /// `clamp(progress / getDrillTime(dominantItem))` and `0` without a
+    /// dominant item (`Drill.java:328-330`).
+    #[test]
+    fn burstdrill_ambient_uses_progress_pow4() {
+        let mut sim = ambient_sim();
+        // `impact-drill`: `drillTime = 720`, size 4 (`Blocks.java:3089-3100`);
+        // copper has no drill multiplier, so `getDrillTime = 720`.
+        let drill = place(&mut sim, "impact-drill", 5, 5);
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        sim.ecs
+            .0
+            .get_mut::<Building>(drill)
+            .expect("building")
+            .efficiency = 1.0;
+        {
+            let mut state = sim.ecs.0.get_mut::<DrillState>(drill).expect("state");
+            state.dominant_item = Some(copper);
+            state.progress = 360.0;
+        }
+        // `0.18 (BurstDrill class volume) * (4^2 / 4) * 0.5^4`.
+        let out = collect(&sim);
+        let entry = out
+            .entries
+            .iter()
+            .find(|entry| entry.sound == SoundId::DRILL_CHARGE)
+            .expect("burst drill ambient");
+        assert!(
+            (entry.volume - 0.18 * 4.0 * 0.0625).abs() < 1.0e-6,
+            "volume {}",
+            entry.volume
+        );
+
+        // No dominant item -> `progress() == 0` -> silent.
+        sim.ecs
+            .0
+            .get_mut::<DrillState>(drill)
+            .expect("state")
+            .dominant_item = None;
+        assert!(collect(&sim).entries.is_empty(), "no dominant item");
+
+        // `progress()` clamps to 1.
+        {
+            let mut state = sim.ecs.0.get_mut::<DrillState>(drill).expect("state");
+            state.dominant_item = Some(copper);
+            state.progress = 1440.0;
+        }
+        let out = collect(&sim);
+        let entry = out
+            .entries
+            .iter()
+            .find(|entry| entry.sound == SoundId::DRILL_CHARGE)
+            .expect("clamped burst drill ambient");
+        assert!(
+            (entry.volume - 0.18 * 4.0).abs() < 1.0e-6,
+            "volume {}",
+            entry.volume
+        );
     }
 
     #[test]

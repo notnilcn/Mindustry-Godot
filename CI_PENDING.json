@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T15:48:37Z",
+  "updated": "2026-11-06T16:09:28Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1181,6 +1181,60 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib server; ... -p mind-stdb --lib",
       "expected": "54 + 54 passed; live STDB smoke",
       "risk": "new subscription tables must exist in the published module; boot loop persists while hosting; gx/ui player-list wiring pending",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-160927",
+      "created_at": "2026-11-06T16:09:27Z",
+      "agent": "hx-wiring",
+      "branch": "main",
+      "head": "4a7b6d5f",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src",
+      "summary": "Defense logic dispatch + BuildTurret queue (PAR-0527/0528)",
+      "files": [
+        "client/rust/mind-core/src/logic/access.rs",
+        "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib access; ... build_turret",
+      "expected": "dispatch + team-queue tests pass",
+      "risk": "control() pre-dispatch precedes generic branches; TurretState gained fields",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-160928",
+      "created_at": "2026-11-06T16:09:28Z",
+      "agent": "hx-wiring",
+      "branch": "main",
+      "head": "4a7b6d5f",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src",
+      "summary": "Legacy removal wiring + missile shooter + shootStatus + movement damage + targetable (PAR-0517/0525/0542/0543/0544)",
+      "files": [
+        "client/rust/mind-core/src/world/mod.rs",
+        "client/rust/mind-core/src/world/behavior/legacy.rs",
+        "client/rust/mind-core/src/sim/runtime.rs",
+        "client/rust/mind-core/src/sim/unit_runtime.rs",
+        "client/rust/mind-core/src/combat/bullet/spawn.rs",
+        "client/rust/mind-core/src/weapons/mod.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib legacy; ... missile_shooter; ... crawler_crushes",
+      "expected": "full lib 3004 pass",
+      "risk": "legacy sweep before darkness could shift map darkness; StatusApplier needed for shootStatus; legs clone per tick",
       "status": "pending"
     }
   ]

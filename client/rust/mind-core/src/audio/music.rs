@@ -664,6 +664,46 @@ mod tests {
         );
     }
 
+    /// `SoundControl.java:135-156`: leaving a game resets the Sound bus only,
+    /// so the in-game track stays current and the menu `play()` crossfades it
+    /// out (`:263-311`). The gdext `MusicOutput::on_game_state_change` must
+    /// stay music-neutral (it used to stop the player, cutting the fade).
+    #[test]
+    fn leaving_game_crossfades_into_menu_music() {
+        let mut player = MusicPlayer::new();
+        let mut out = RecordingMusicOutput::default();
+        let mut context = ctx();
+        context.delta_frames = 10.0;
+        // First in-game update: the game-state hook fires (entering game) and
+        // the ambient branch's `silence()` has no track to fade.
+        player.update(&context, &mut SeededAudioRng::new(1), &mut out);
+        assert!(out.resets.contains(&true), "entering-game hook fired");
+
+        // An in-game track fully faded in (`play` is the fade-in path; an
+        // ambient `playOnce` starts at `fade = 1`).
+        player.play(Some(MusicRef::new("game1")), &context, &mut out);
+        for _ in 0..20 {
+            player.play(Some(MusicRef::new("game1")), &context, &mut out);
+        }
+        assert!((player.fade - 1.0).abs() < 1.0e-4);
+        assert_eq!(out.playing, Some(MusicRef::new("game1")));
+
+        // Leave the game (menu); the state machine runs the game-state hook,
+        // then the menu branch fades `game1` out over `foutTime`.
+        context.is_menu = true;
+        context.is_game = false;
+        for _ in 0..130 {
+            player.update(&context, &mut SeededAudioRng::new(1), &mut out);
+        }
+        assert!(
+            out.resets.contains(&false),
+            "leaving-game hook fired once: {:?}",
+            out.resets
+        );
+        assert_eq!(out.playing, Some(MusicRef::new("menu")));
+        assert_eq!(out.stopped, 1, "the outgoing track was faded out, not cut");
+    }
+
     #[test]
     fn editor_selection() {
         let mut player = MusicPlayer::new();

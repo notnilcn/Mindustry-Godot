@@ -12,6 +12,7 @@ pub struct ChatFilter {
     pub mute: bool,
     pub added_by: __sdk::Identity,
     pub added_at: __sdk::Timestamp,
+    pub match_id: Option<u64>,
 }
 
 impl __sdk::InModule for ChatFilter {
@@ -27,6 +28,7 @@ pub struct ChatFilterCols {
     pub mute: __sdk::__query_builder::Col<ChatFilter, bool>,
     pub added_by: __sdk::__query_builder::Col<ChatFilter, __sdk::Identity>,
     pub added_at: __sdk::__query_builder::Col<ChatFilter, __sdk::Timestamp>,
+    pub match_id: __sdk::__query_builder::Col<ChatFilter, Option<u64>>,
 }
 
 impl __sdk::__query_builder::HasCols for ChatFilter {
@@ -38,6 +40,7 @@ impl __sdk::__query_builder::HasCols for ChatFilter {
             mute: __sdk::__query_builder::Col::new(table_name, "mute"),
             added_by: __sdk::__query_builder::Col::new(table_name, "added_by"),
             added_at: __sdk::__query_builder::Col::new(table_name, "added_at"),
+            match_id: __sdk::__query_builder::Col::new(table_name, "match_id"),
         }
     }
 }

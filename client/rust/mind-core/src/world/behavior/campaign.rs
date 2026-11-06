@@ -592,6 +592,22 @@ impl BuildingBehavior for LaunchPadBehavior {
                 block,
             },
         ));
+        // `LaunchPad.java:149`: `launchSound.at(x, y, 1f +
+        // Mathf.range(launchSoundPitchRand))` (`padLaunch`, pitch rand 0.1,
+        // `:33-34`). Java plays it just before the payload spawn; the port
+        // emits it after so the payload position is already resolved.
+        crate::audio::sim::emit_world_sound(
+            world,
+            crate::audio::SoundId::PAD_LAUNCH,
+            x,
+            y,
+            1.0,
+            1.0,
+            0.1,
+        );
+        // `LaunchPad.java:156-158`: `Fx.launchPod.at(this)` then
+        // `Effect.shake(3f, 3f, this)`.
+        emit_launch_view(world, x, y);
         if let Some(mut state) = world.get_mut::<CampaignState>(e) {
             state.launch_time = 0.0;
         }
@@ -643,6 +659,35 @@ fn instance_accept_multiple(world: &World, e: Entity) -> bool {
 
 fn launch_item_capacity(world: &World, e: Entity) -> i32 {
     crate::world::blocks::distribution::transfer::item_capacity(world, e)
+}
+
+/// `LaunchPad.java:157` shake intensity/duration (both `3f`).
+const LAUNCH_SHAKE: f32 = 3.0;
+
+/// `LaunchPad.updateTile` view cues (`LaunchPad.java:156-158`):
+/// `Fx.launchPod.at(this)` then `Effect.shake(3f, 3f, this)`.
+fn emit_launch_cues(fx: &dyn crate::combat::view::FxSink, x: f32, y: f32) {
+    fx.effect(
+        &crate::content::registries::fx_meta::EffectRef::Named(
+            crate::content::EffectId::LAUNCH_POD,
+        ),
+        x,
+        y,
+        0.0,
+        crate::content::Rgba::WHITE,
+    );
+    // The plan-10 `FxSink::shake` seam carries the intensity only; the host
+    // falls back to `duration = intensity` (`Effect.shake(3f, 3f, this)`).
+    fx.shake(LAUNCH_SHAKE);
+}
+
+/// Resolves the live FX sink and emits the launch cues. Headless/dedicated
+/// worlds have no `UnitRuntime` (Java's `Effect.shouldCreate` headless guard).
+fn emit_launch_view(world: &World, x: f32, y: f32) {
+    let Some(runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+        return;
+    };
+    emit_launch_cues(runtime.fx.as_ref(), x, y);
 }
 
 /// Launch-pad draw rows (`LaunchPadBuild.draw`, `LaunchPad.java:114-133`;
@@ -875,6 +920,86 @@ mod tests {
         assert_eq!(payloads.len(), 1, "one LaunchPayload entity");
         assert_eq!(payloads[0].stacks, vec![(copper, 100)]);
         assert_eq!(payloads[0].lifetime, 120.0);
+    }
+
+    /// Installs a recording FX bus on a throwaway `UnitRuntime` so block view
+    /// cues (`FxSink`) are observable from the raw test world.
+    fn install_fx_bus(world: &mut EcsWorld) -> std::sync::Arc<crate::fx::FxBus> {
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        let content = crate::world::harness::BuildHarness::load_content();
+        let grid = WorldGrid::new(32, 32);
+        let mut runtime = UnitRuntime::new(content, &grid, world, 1, false);
+        let bus = std::sync::Arc::new(crate::fx::FxBus::new());
+        runtime.fx = bus.clone();
+        world.insert_non_send(runtime);
+        bus
+    }
+
+    /// `LaunchPad.java:149`: firing plays `padLaunch` at the pad with volume 1
+    /// and `pitch = 1 + range(0.1)`; `:156-158`: `Fx.launchPod.at(this)` then
+    /// `Effect.shake(3f, 3f, this)`.
+    #[test]
+    fn launch_pad_fires_sound_and_view_cues() {
+        use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+        use crate::content::EffectId;
+        use crate::fx::FxEvent;
+
+        let (mut world, inst, e, content) = pad("advanced-launch-pad");
+        let log = SharedAudioLog::new();
+        world.insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+        let bus = install_fx_bus(&mut world);
+        let copper = content.item_id("copper").expect("copper");
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(e) {
+            items.add(copper, 100, 100);
+        }
+        if let Some(mut building) = world.get_mut::<Building>(e) {
+            building.efficiency = 1.0;
+        }
+        if let Some(mut state) = world.get_mut::<CampaignState>(e) {
+            state.launch_time = 1799.0;
+        }
+        let (pad_x, pad_y) = world
+            .get::<crate::entities::comp::Pos>(e)
+            .map(|pos| (pos.x, pos.y))
+            .expect("pad pos");
+        inst.behavior.update_tile(&mut world, e);
+
+        let events = log.events();
+        let launch = events.iter().find_map(|ticked| match &ticked.event {
+            AudioEvent::At {
+                sound,
+                x,
+                y,
+                pitch,
+                volume,
+                ..
+            } if *sound == SoundId::PAD_LAUNCH => Some((*x, *y, *pitch, *volume)),
+            _ => None,
+        });
+        let (x, y, pitch, volume) = launch.expect("padLaunch emitted");
+        assert_eq!((x, y), (pad_x, pad_y), "padLaunch at the pad centre");
+        assert!((volume - 1.0).abs() < 1.0e-6, "volume {volume}");
+        assert!((0.9..=1.1).contains(&pitch), "pitch {pitch}");
+
+        let fx = bus.drain();
+        assert!(
+            fx.iter().any(|event| matches!(
+                event,
+                FxEvent::Effect {
+                    effect: crate::content::registries::fx_meta::EffectRef::Named(id),
+                    ..
+                } if *id == EffectId::LAUNCH_POD
+            )),
+            "Fx.launchPod missing: {fx:?}"
+        );
+        assert!(
+            fx.iter().any(|event| matches!(
+                event,
+                FxEvent::Shake { intensity, .. } if (*intensity - 3.0).abs() < 1.0e-6
+            )),
+            "Effect.shake(3, 3) missing: {fx:?}"
+        );
     }
 
     #[test]

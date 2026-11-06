@@ -24,6 +24,15 @@ pub struct ServerConfig {
     pub chat_retention_rows: u32,
     pub match_ttl_hours: u32,
     pub banned_name_patterns: Vec<String>,
+    pub enable_votekick: bool,
+    pub anti_spam: bool,
+    pub interact_rate_window_secs: u32,
+    pub interact_rate_limit: u32,
+    pub interact_rate_kick: u32,
+    pub message_rate_limit_secs: u32,
+    pub message_spam_kick: u32,
+    pub uuid_change_limit: u32,
+    pub uuid_change_time_period_hours: u32,
 }
 
 impl __sdk::InModule for ServerConfig {
@@ -51,6 +60,15 @@ pub struct ServerConfigCols {
     pub chat_retention_rows: __sdk::__query_builder::Col<ServerConfig, u32>,
     pub match_ttl_hours: __sdk::__query_builder::Col<ServerConfig, u32>,
     pub banned_name_patterns: __sdk::__query_builder::Col<ServerConfig, Vec<String>>,
+    pub enable_votekick: __sdk::__query_builder::Col<ServerConfig, bool>,
+    pub anti_spam: __sdk::__query_builder::Col<ServerConfig, bool>,
+    pub interact_rate_window_secs: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub interact_rate_limit: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub interact_rate_kick: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub message_rate_limit_secs: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub message_spam_kick: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub uuid_change_limit: __sdk::__query_builder::Col<ServerConfig, u32>,
+    pub uuid_change_time_period_hours: __sdk::__query_builder::Col<ServerConfig, u32>,
 }
 
 impl __sdk::__query_builder::HasCols for ServerConfig {
@@ -100,6 +118,27 @@ impl __sdk::__query_builder::HasCols for ServerConfig {
             banned_name_patterns: __sdk::__query_builder::Col::new(
                 table_name,
                 "banned_name_patterns",
+            ),
+            enable_votekick: __sdk::__query_builder::Col::new(table_name, "enable_votekick"),
+            anti_spam: __sdk::__query_builder::Col::new(table_name, "anti_spam"),
+            interact_rate_window_secs: __sdk::__query_builder::Col::new(
+                table_name,
+                "interact_rate_window_secs",
+            ),
+            interact_rate_limit: __sdk::__query_builder::Col::new(
+                table_name,
+                "interact_rate_limit",
+            ),
+            interact_rate_kick: __sdk::__query_builder::Col::new(table_name, "interact_rate_kick"),
+            message_rate_limit_secs: __sdk::__query_builder::Col::new(
+                table_name,
+                "message_rate_limit_secs",
+            ),
+            message_spam_kick: __sdk::__query_builder::Col::new(table_name, "message_spam_kick"),
+            uuid_change_limit: __sdk::__query_builder::Col::new(table_name, "uuid_change_limit"),
+            uuid_change_time_period_hours: __sdk::__query_builder::Col::new(
+                table_name,
+                "uuid_change_time_period_hours",
             ),
         }
     }
