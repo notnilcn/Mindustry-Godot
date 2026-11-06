@@ -1472,6 +1472,49 @@ impl Sim {
         }
     }
 
+    /// Drains [`crate::world::consumers::PendingConsumerDamage`], the combat
+    /// half of `ConsumeItemExplode.update` (`ConsumeItemExplode.java:30-42`).
+    ///
+    /// The generic consumer runtime (`world::consumers::runtime_update`, GAPS
+    /// #58) queues `(entity, damage)` because the building pass only owns
+    /// `&mut World`; here the queued damage becomes a real
+    /// `Building.damage(damage)` (`BuildingComp.java:2066-2088` — block-health
+    /// scale, shields and the death marker live in
+    /// [`crate::combat::damage::area::apply_health`]), plus Java's
+    /// `explodeEffect.at(build.x, build.y)` (`Fx.generatespark`) and
+    /// `Events.fire(Trigger.blastGenerator)`.
+    ///
+    /// Runs after the scheduled building pass and before `resolve_deaths`, so a
+    /// killing explosion still resolves in the same tick. The generator-family
+    /// legacy pass ([`Self::update_item_explode_consumers`]) stays separate
+    /// until the content lowering emits `ConsumeItemExplode` consumers.
+    pub(crate) fn drain_consumer_damage(&mut self) {
+        let pending = self
+            .ecs
+            .0
+            .remove_resource::<crate::world::consumers::PendingConsumerDamage>()
+            .map(|pending| pending.0)
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return;
+        }
+        for (entity, damage) in pending {
+            if self.ecs.0.get_entity(entity).is_err() {
+                continue;
+            }
+            crate::combat::damage::area::apply_health(&mut self.ecs.0, entity, damage);
+            let (x, y) = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Pos>(entity)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or((0.0, 0.0));
+            crate::world::blocks::power::explosion::generatespark(&mut self.ecs.0, x, y);
+            self.triggers
+                .fire(super::Trigger::BlastGenerator, &mut self.ecs.0);
+        }
+    }
+
     /// `PowerGenerator.onExplosion`'s **sim half** (J04 T4,
     /// `PowerGenerator.java:149-201`): radius damage, ignition fires (delayed
     /// by `dst / explosionSpeed` through the `SimClock`), boulder/prop
@@ -1781,6 +1824,14 @@ impl Sim {
         self.ecs
             .0
             .insert_resource(LiquidTraits::from_content(&content));
+        // GAPS #58: item trait vectors (`Item.flammability`/`radioactivity`/
+        // `explosiveness`/`charge`) for the trait-filtered consumers
+        // (`ConsumeItemFlammable`/`Radioactive`/`Explosive`/`Charged`,
+        // `ConsumeItemEfficiency`). A missing table rejects every item, so the
+        // live runtime must install it exactly like `LiquidTraits`.
+        self.ecs
+            .0
+            .insert_resource(crate::world::consumers::ItemTraits::from_content(&content));
         self.ecs.0.insert_resource(PowerGrids::new());
         // I04 T3: the reconstructor's `Trigger.cannotUpgrade` marker (`&World`
         // hook, interior mutability); drained by `Sim::tick`.
@@ -2349,6 +2400,91 @@ impl Sim {
     }
 }
 
+/// Per-building data source for the Java `Func<Building, …>` dynamic consumers
+/// (`ConsumeItemDynamic`/`ConsumePayloadDynamic`/`ConsumeLiquidsDynamic`).
+///
+/// Java expresses these consumers as per-building closures; the port's content
+/// model has none, so the live sim resolves them from ECS state plus content
+/// metadata:
+///
+/// * `ConsumeItemDynamic` — the `UnitFactory` selected plan's requirements
+///   (`UnitFactory.java:84`) and the `BlockProducer` recipe requirements
+///   (`BlockProducer.java:40-56`);
+/// * `ConsumePayloadDynamic` — the `UnitAssembler` plan's payload requirements
+///   (`UnitAssembler.java:162`).
+///
+/// `AssemblerUnitPlan.itemReq`/`liquidReq` (`UnitAssembler.java:163-164`) have
+/// no port fields yet (`BlockDef.assembler_plans` carries payloads only), and
+/// `ConsumePowerDynamic`/`ConsumePowerCondition` have no vanilla users; those
+/// keep the trait defaults.
+///
+/// `world::consumers::runtime_efficiency`/`runtime_update`/`runtime_trigger`
+/// accept `Option<&dyn DynamicConsume>`: the call site that passes this bridge
+/// lives in `world/update.rs::update_consumption` (GAPS #58 cross-file half).
+pub struct SimDynamicConsume<'a> {
+    /// Live content registry (block defs carry the plans/requirements).
+    pub content: &'a ContentRegistry,
+}
+
+impl crate::world::consumers::DynamicConsume for SimDynamicConsume<'_> {
+    fn items(&self, world: &World, entity: Entity) -> Vec<crate::content::ItemStack> {
+        let Some(block) = world
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|building| building.block)
+        else {
+            return Vec::new();
+        };
+        // `UnitFactory.consume(new ConsumeItemDynamic(e -> e.currentPlan != -1
+        // ? plans.get(...).requirements : ItemStack.empty))`.
+        if let Some(state) = world.get::<crate::world::blocks::units::UnitFactoryBuild>(entity) {
+            let plan = usize::try_from(state.current_plan)
+                .ok()
+                .and_then(|index| self.content.block(block)?.unit_plans.get(index));
+            return plan
+                .map(|plan| plan.requirements.clone())
+                .unwrap_or_default();
+        }
+        // `BlockProducer.consume(new ConsumeItemDynamic(e -> recipe().requirements
+        // * buildCostMultiplier))` — the multiplier is the consumer's, applied by
+        // `runtime_efficiency`.
+        if let Some(state) =
+            world.get::<crate::world::blocks::payloads::block_producer::BlockProducerBuild>(entity)
+        {
+            return state
+                .recipe
+                .and_then(|recipe| self.content.block(recipe))
+                .map(|def| def.requirements.clone())
+                .unwrap_or_default();
+        }
+        Vec::new()
+    }
+
+    fn payloads(
+        &self,
+        world: &World,
+        entity: Entity,
+    ) -> Vec<crate::world::consumers::PayloadStack> {
+        // `UnitAssembler.consume(consPayload = new ConsumePayloadDynamic(build
+        // -> build.plan().requirements))`.
+        let Some(state) = world.get::<crate::world::blocks::units::UnitAssembler>(entity) else {
+            return Vec::new();
+        };
+        state
+            .plan()
+            .map(|plan| {
+                plan.payloads
+                    .iter()
+                    .map(|payload| crate::world::consumers::PayloadStack {
+                        content: payload.content,
+                        is_block: payload.is_block,
+                        count: payload.amount,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2361,6 +2497,15 @@ mod tests {
     fn registry() -> ContentRegistry {
         create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
             .expect("content boot")
+    }
+
+    /// `Trigger.blastGenerator` counter (`TriggerRegistry` listeners are plain
+    /// fn pointers, so the GAPS #58 drain test counts through a module static).
+    static BLAST_GENERATOR_FIRES: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    fn count_blast_generator(_world: &mut World) {
+        BLAST_GENERATOR_FIRES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// T4: the reconstructor's command panel submits `("content", "<command>")`;
@@ -2666,6 +2811,153 @@ mod tests {
         assert_eq!(
             sim.materialize_map_buildings(&[(0, DecodedBase::default())]),
             0
+        );
+    }
+
+    /// GAPS #58: `install_block_runtime_from` installs the [`ItemTraits`] table
+    /// the trait filters (`ConsumeItemFlammable`/`Radioactive`/`Explosive`/
+    /// `Charged`) read; without it every trait-filtered item is rejected.
+    #[test]
+    fn live_runtime_installs_item_traits() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        assert!(
+            sim.ecs
+                .0
+                .get_resource::<crate::world::consumers::ItemTraits>()
+                .is_none()
+        );
+        sim.install_block_runtime().expect("runtime");
+        let traits = sim
+            .ecs
+            .0
+            .get_resource::<crate::world::consumers::ItemTraits>()
+            .expect("item traits installed");
+        let content = sim.block_runtime().expect("runtime").content();
+        for item in content.items() {
+            assert_eq!(traits.flammability_of(item.id), item.flammability);
+            assert_eq!(traits.radioactivity_of(item.id), item.radioactivity);
+            assert_eq!(traits.explosiveness_of(item.id), item.explosiveness);
+            assert_eq!(traits.charge_of(item.id), item.charge);
+        }
+        // Vanilla sanity: `blast-compound` is explosive, `coal` flammable.
+        let blast = content.item_id("blast-compound").expect("blast-compound");
+        let coal = content.item_id("coal").expect("coal");
+        assert!(traits.explosiveness_of(blast) > 0.0);
+        assert!(traits.flammability_of(coal) > 0.0);
+    }
+
+    /// GAPS #58: the building pass queues `ConsumeItemExplode` damage in
+    /// [`PendingConsumerDamage`]; `Sim::tick` drains it through
+    /// `Building.damage` (health + `Trigger.blastGenerator`).
+    #[test]
+    fn consumer_damage_queue_is_drained_by_tick() {
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+        assert!(sim.place_for_team(6, 6, wall, 0, 1), "wall placed");
+        let entity = sim.grid.entity_at(TilePos::new(6, 6)).expect("wall entity");
+        let before = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::Health>(entity)
+            .expect("health")
+            .health;
+        // `TriggerRegistry` listeners are plain `fn(&mut World)` pointers, so a
+        // module static counts the `Trigger.blastGenerator` fire.
+        BLAST_GENERATOR_FIRES.store(0, std::sync::atomic::Ordering::SeqCst);
+        sim.triggers
+            .on(super::super::Trigger::BlastGenerator, count_blast_generator);
+        sim.ecs
+            .0
+            .insert_resource(crate::world::consumers::PendingConsumerDamage(vec![(
+                entity, 25.0,
+            )]));
+        sim.tick().expect("tick");
+        let after = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::Health>(entity)
+            .expect("health")
+            .health;
+        assert!(
+            (before - after - 25.0).abs() < 1e-3,
+            "queued ConsumeItemExplode damage applied ({before} -> {after})"
+        );
+        assert!(
+            !sim.ecs
+                .0
+                .contains_resource::<crate::world::consumers::PendingConsumerDamage>(),
+            "queue drained"
+        );
+        assert!(
+            BLAST_GENERATOR_FIRES.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "Trigger.blastGenerator fired"
+        );
+    }
+
+    /// GAPS #58: the [`SimDynamicConsume`] bridge resolves the Java closures —
+    /// a `UnitFactory`'s selected plan requirements (`ConsumeItemDynamic`).
+    #[test]
+    fn dynamic_consume_bridge_reads_factory_plan_items() {
+        use crate::world::consumers::{
+            ConsumeInstance, ConsumeInstanceKind, DynamicConsume, runtime_efficiency,
+        };
+
+        let mut sim = Sim::new(1, 24, 24, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let content = sim.block_runtime().expect("runtime").content().clone();
+        let factory_block = content
+            .blocks()
+            .iter()
+            .find(|def| !def.unit_plans.is_empty())
+            .map(|def| def.id)
+            .expect("a UnitFactory block");
+        assert!(
+            sim.place_for_team(10, 10, factory_block, 0, 1),
+            "factory placed"
+        );
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(10, 10))
+            .expect("factory entity");
+        let plan_index = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::units::UnitFactoryBuild>(entity)
+            .map(|state| state.current_plan)
+            .unwrap_or(-1);
+        assert!(plan_index >= 0, "created() selects the first plan");
+        let plan = &content.block(factory_block).expect("def").unit_plans[plan_index as usize];
+        {
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+            for stack in &plan.requirements {
+                let held = items.get(stack.item);
+                items.remove(stack.item, held);
+                items.add(stack.item, stack.amount, 1_000_000);
+            }
+        }
+        let consumer = ConsumeInstance::new(ConsumeInstanceKind::ItemDynamic);
+        let bridge = SimDynamicConsume { content: &content };
+        assert_eq!(
+            runtime_efficiency(&sim.ecs.0, entity, &consumer, 1.0, Some(&bridge)),
+            1.0,
+            "plan requirements held -> efficiency 1"
+        );
+        {
+            let stack = plan.requirements.first().expect("plan requirements");
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+            items.remove(stack.item, 1);
+        }
+        assert_eq!(
+            runtime_efficiency(&sim.ecs.0, entity, &consumer, 1.0, Some(&bridge)),
+            0.0,
+            "missing requirement -> efficiency 0"
+        );
+        // Without the bridge the dynamic consumer is inert (`ConsumeItemDynamic`
+        // has no static stacks), which is why the live pass must supply it.
+        assert_eq!(
+            runtime_efficiency(&sim.ecs.0, entity, &consumer, 1.0, None),
+            0.0
         );
     }
 }

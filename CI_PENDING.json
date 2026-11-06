@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T21:28:48Z",
+  "updated": "2026-11-06T21:46:22Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1337,6 +1337,40 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render; ... player; ... planet; ... -p mind-core --lib input",
       "expected": "render 64, planet 7, player 18, input 158, schematic 8; dialog sweep failed=0",
       "risk": "lightmap cost with beams; new HUD classes; player list ABI seam; .msch writes re-encode",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-214622",
+      "created_at": "2026-11-06T21:46:22Z",
+      "agent": "hx-wave-i",
+      "branch": "main",
+      "head": "5e99e8da",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src",
+      "summary": "Team core pool + unit payloads + block family fields (GAPS #21/#23/#56)",
+      "files": [
+        "client/rust/mind-core/src/world/blocks/storage/team_items.rs",
+        "client/rust/mind-core/src/world/blocks/storage/core_block.rs",
+        "client/rust/mind-core/src/game/sector.rs",
+        "client/rust/mind-core/src/world/blocks/payloads/payload_block.rs",
+        "client/rust/mind-core/src/world/blocks/units/behavior.rs",
+        "client/rust/mind-core/src/io/sim_io.rs",
+        "client/rust/mind-core/src/content/registries/blocks/mod.rs",
+        "client/rust/mind-core/src/world/block_kind_data.rs",
+        "parity/mod_classmap.json",
+        "parity/golden_manifest.json"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "parity"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_items; ... unit_payload_tests; ... block_kind_data",
+      "expected": "full lib passes; 8 team_items + 6 block_kind_data + payload tests",
+      "risk": "only canonical core holds items (multi-core goldens may shift); native payload save format changed; BlockKind 137-139 append-only; classmap sha pin",
       "status": "pending"
     }
   ]

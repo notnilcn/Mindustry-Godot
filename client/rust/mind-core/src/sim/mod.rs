@@ -25,7 +25,7 @@ pub mod unit_runtime;
 pub mod world_apply;
 
 use bevy_ecs::entity::Entity;
-use bevy_ecs::schedule::Schedule;
+use bevy_ecs::schedule::{IntoScheduleConfigs, Schedule};
 use serde_json::Error as JsonError;
 
 use crate::command::Command;
@@ -285,7 +285,7 @@ impl Sim {
     pub fn new(seed: u64, width: i32, height: i32, floor: BlockId, wall: BlockId) -> Self {
         let mut grid = WorldGrid::new(width, height);
         grid.fill(floor, wall);
-        Self {
+        let mut sim = Self {
             ecs: MindWorld::new(),
             schedule: self::schedule::build_sim_schedule(),
             grid,
@@ -329,7 +329,18 @@ impl Sim {
             pending_events: Vec::new(),
             event_log: Vec::new(),
             last_config_tap: None,
-        }
+        };
+        // GAPS #61: consume the ability queues in the same entity pass that
+        // fills them. `build_sim_schedule` is shared with the P0 trace golden and
+        // only names the sets, so the extra system is registered per instance
+        // (it no-ops without a live `UnitRuntime`/queues and never reorders a
+        // named set).
+        sim.schedule.add_systems(
+            drain_ability_queues_system
+                .in_set(self::schedule::EntitySet::UpdateUnits)
+                .after(unit_runtime::unit_update_system),
+        );
+        sim
     }
 
     /// Builds a sim from a parsed scenario (`flat` generator only at P0).
@@ -1294,6 +1305,11 @@ impl Sim {
         // `ConsumeItemExplode.update` (T2): explosive generator fuel damages
         // the building and fires `Trigger.blastGenerator`.
         self.update_item_explode_consumers();
+        // GAPS #58: the generic `ConsumeItemExplode` half of the same Java body —
+        // the scheduled consumer pass queued `Building.damage` requests; apply
+        // them (and the spark effect / `Trigger.blastGenerator`) before the
+        // death pass below.
+        self.drain_consumer_damage();
         // `PowerGenerator.onExplosion`'s sim half (T4): damage, fires, props,
         // fireballs and puddles (the fireballs drain in the fires/puddles pass
         // below, matching `onExplosion`'s immediate `createNet`).
@@ -3069,6 +3085,100 @@ pub(crate) fn spawn_logic_bullet(
     result
 }
 
+/// `EntitySet::UpdateUnits` system (GAPS #61): drains the queues filled by
+/// [`crate::combat::abilities::update_unit_abilities`] in the same tick.
+///
+/// * [`crate::combat::abilities::PendingMoveLightning`] — a real
+///   [`crate::combat::lightning::create`] branch (`MoveLightningAbility.java:82-84`);
+/// * [`crate::combat::abilities::PendingAbilityUnitSpawns`] — `Units.canCreate`
+///   gating, then a tracked spawn through [`unit_runtime::UnitRuntime`]
+///   (`UnitSpawnAbility.java:48-60`).
+///
+/// Registered after [`unit_runtime::unit_update_system`] inside
+/// `EntitySet::UpdateUnits`, so the lightning `hitCreate` bullets still run in
+/// this tick's `UpdateBullets` pass (Java creates them inside the unit pass) and
+/// the spawned unit joins the tracked runtime immediately. Without a live unit
+/// runtime the queues stay queued (the bare harness owns no sequencer).
+pub(crate) fn drain_ability_queues_system(world: &mut bevy_ecs::world::World) {
+    let strikes = world
+        .remove_resource::<crate::combat::abilities::PendingMoveLightning>()
+        .unwrap_or_default();
+    let spawns = world
+        .remove_resource::<crate::combat::abilities::PendingAbilityUnitSpawns>()
+        .unwrap_or_default();
+    if strikes.0.is_empty() && spawns.0.is_empty() {
+        return;
+    }
+    let Some(mut runtime) = world.remove_non_send::<unit_runtime::UnitRuntime>() else {
+        world.insert_resource(strikes);
+        world.insert_resource(spawns);
+        return;
+    };
+    // `Lightning.create` needs the combat context (content/grid/rng/fx/seq).
+    if !strikes.0.is_empty() {
+        let audio = world
+            .remove_resource::<crate::audio::AudioSinkRes>()
+            .unwrap_or_else(crate::audio::AudioSinkRes::noop);
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let unit_runtime::UnitRuntime {
+                content,
+                grid,
+                rng,
+                fx,
+                seq,
+                ..
+            } = &mut runtime;
+            let mut ctx = crate::combat::bullet::CombatCtx {
+                world,
+                content,
+                grid,
+                rng,
+                fx: fx.as_ref(),
+                audio: &audio,
+                seq,
+                spawned: &mut spawned,
+            };
+            crate::combat::abilities::drain_pending_move_lightning(&mut ctx, &strikes);
+        }
+        world.insert_resource(audio);
+        runtime.bullets_created += spawned.len() as u64;
+        runtime.bullets.extend(spawned);
+    }
+    // `UnitSpawnAbility.update`: `if(timer >= spawnTime && Units.canCreate(...))
+    // { this.unit.create(team) ... }`. `UnitRuntime::spawn` owns the tracked
+    // entity sequence and the `unitsCreated` counter (`UnitType.spawn`).
+    for spawn in spawns.0 {
+        let Some(def) = runtime.content.unit_by_name(spawn.unit) else {
+            continue;
+        };
+        if !crate::entities::comp::unit::queries::can_create_unit(world, spawn.team, def) {
+            continue;
+        }
+        let Some(entity) = runtime.spawn(
+            world,
+            spawn.unit,
+            spawn.team,
+            spawn.x,
+            spawn.y,
+            spawn.rotation,
+        ) else {
+            continue;
+        };
+        crate::game::stats::notify_unit_created(world, entity, Some(spawn.unit));
+        // `spawnEffect.at(x, y, 0f)` (`UnitSpawnAbility.java:52`).
+        use crate::content::registries::fx_meta::EffectRef;
+        runtime.fx.effect(
+            &EffectRef::Named(crate::content::EffectId::SPAWN),
+            spawn.x,
+            spawn.y,
+            0.0,
+            crate::content::Rgba::WHITE,
+        );
+    }
+    world.insert_non_send(runtime);
+}
+
 #[cfg(test)]
 mod combat_tests;
 #[cfg(test)]
@@ -3371,5 +3481,175 @@ mod team_ai_host_tests {
             })
             .count();
         assert_eq!(spawned, 1, "the host spawned the core unit");
+    }
+}
+
+/// GAPS #61: the ability pending-queue drains registered by [`Sim::new`], plus
+/// the live-sim `StatusApplier` install the `shootStatus` weapon path needs.
+#[cfg(test)]
+mod ability_queue_tests {
+    use super::*;
+    use crate::content::Rgba;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    fn live_sim() -> Sim {
+        let mut sim = Sim::new(7, 24, 24, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim
+    }
+
+    /// Item 4 (`shootStatus`): a bare harness world has no `StatusApplier`, while
+    /// the live sim installs the content-backed one
+    /// (`install_unit_runtime_from`) before any weapon/ability can apply a
+    /// status through `apply_status`.
+    #[test]
+    fn live_sim_installs_the_status_applier() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        assert!(
+            sim.ecs
+                .0
+                .get_resource::<crate::combat::damage::status::StatusApplier>()
+                .is_none(),
+            "bare sim has no applier"
+        );
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(
+            sim.ecs
+                .0
+                .get_resource::<crate::combat::damage::status::StatusApplier>()
+                .is_some(),
+            "live sim installs StatusApplier (shootStatus path)"
+        );
+    }
+
+    /// `MoveLightningAbility` queues a bolt; the `UpdateUnits` drain turns it
+    /// into a real `Lightning.create` branch (hit bullets) and empties the queue.
+    #[test]
+    fn pending_move_lightning_becomes_a_real_branch() {
+        use crate::combat::abilities::{PendingLightningStrike, PendingMoveLightning};
+        let mut sim = live_sim();
+        sim.ecs
+            .0
+            .insert_resource(PendingMoveLightning(vec![PendingLightningStrike {
+                team: 1,
+                color: Rgba::new(0.66, 0.85, 1.0, 1.0),
+                damage: 12.0,
+                x: 96.0,
+                y: 96.0,
+                rotation: 0.0,
+                length: 6,
+                vx: 0.5,
+                vy: 0.0,
+            }]));
+        let before = sim.unit_runtime().expect("runtime").bullets_created;
+        sim.tick().expect("tick");
+        assert!(
+            !sim.ecs.0.contains_resource::<PendingMoveLightning>(),
+            "bolt queue drained"
+        );
+        assert!(
+            sim.unit_runtime().expect("runtime").bullets_created > before,
+            "Lightning.create spawned its hit bullets"
+        );
+    }
+
+    /// `UnitSpawnAbility` queue: `Units.canCreate` gate + the tracked runtime
+    /// sequencer (`UnitType.spawn`).
+    #[test]
+    fn pending_ability_spawn_uses_the_runtime_sequencer() {
+        use crate::combat::abilities::{PendingAbilityUnitSpawn, PendingAbilityUnitSpawns};
+        let mut sim = live_sim();
+        let dagger = sim
+            .block_runtime()
+            .expect("block runtime")
+            .content()
+            .unit_id("dagger")
+            .expect("dagger");
+        sim.ecs
+            .0
+            .insert_resource(PendingAbilityUnitSpawns(vec![PendingAbilityUnitSpawn {
+                unit: "dagger",
+                team: 1,
+                x: 60.0,
+                y: 60.0,
+                rotation: 90.0,
+            }]));
+        sim.tick().expect("tick");
+        assert!(
+            !sim.ecs.0.contains_resource::<PendingAbilityUnitSpawns>(),
+            "spawn queue drained"
+        );
+        let runtime = sim.unit_runtime().expect("runtime");
+        let spawned = runtime
+            .units
+            .iter()
+            .copied()
+            .find(|entity| {
+                sim.ecs
+                    .0
+                    .get::<UnitTypeComp>(*entity)
+                    .is_some_and(|comp| comp.type_id == dagger)
+            })
+            .expect("spawned unit tracked by the runtime");
+        let pos = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::Pos>(spawned)
+            .expect("pos");
+        assert!(
+            (pos.x - 60.0).abs() < 1e-3 && (pos.y - 60.0).abs() < 1e-3,
+            "spawned at the queued point ({}, {})",
+            pos.x,
+            pos.y
+        );
+    }
+
+    /// `UnitSpawnAbility.java:48`: `Units.canCreate(team, unit)` gates the spawn.
+    #[test]
+    fn pending_ability_spawn_respects_the_unit_cap() {
+        use crate::combat::abilities::{PendingAbilityUnitSpawn, PendingAbilityUnitSpawns};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut sim = live_sim();
+        let content = sim
+            .block_runtime()
+            .expect("block runtime")
+            .content()
+            .clone();
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            unit_cap: 0,
+            unit_cap_variable: false,
+            ..Rules::default()
+        });
+        session.phase = crate::game::State::Playing;
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        sim.ecs
+            .0
+            .insert_resource(PendingAbilityUnitSpawns(vec![PendingAbilityUnitSpawn {
+                unit: "dagger",
+                team: 1,
+                x: 60.0,
+                y: 60.0,
+                rotation: 0.0,
+            }]));
+        super::drain_ability_queues_system(&mut sim.ecs.0);
+        assert!(
+            !sim.ecs.0.contains_resource::<PendingAbilityUnitSpawns>(),
+            "capped spawn consumed"
+        );
+        assert!(
+            sim.unit_runtime().expect("runtime").units.is_empty(),
+            "Units.canCreate rejected the spawn at cap"
+        );
     }
 }

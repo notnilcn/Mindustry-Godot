@@ -834,7 +834,8 @@ fn update_builder(
                     rotation,
                     team,
                 );
-                if let Some(placed) = grid.entity_at(anchor) {
+                let placed = grid.entity_at(anchor);
+                if let Some(placed) = placed {
                     let grid_ref: &WorldGrid = grid;
                     runtime.placed_hooks(world, grid_ref, placed);
                     // `ConstructBlock.constructFinish` (`ConstructBlock.java:72-118`):
@@ -864,6 +865,20 @@ fn update_builder(
                     (anchor.x() as i32, anchor.y() as i32),
                     false,
                 );
+                // `ConstructBlock.constructFinish` calls
+                // `block.placeEnded(tile, builder, rotation, config)` after the
+                // place effect and before `BlockBuildEndEvent`
+                // (`ConstructBlock.java:118`). GAPS #62's call site:
+                // `Turret.placeEnded` resets the turret rotation and mod blocks
+                // use the hook for post-place state.
+                if let Some(placed) = placed {
+                    let instance = world
+                        .get_resource::<BlockTable>()
+                        .and_then(|table| table.instance(state.current));
+                    if let Some(inst) = instance {
+                        inst.place_ended(world, placed, Some(unit), rotation, &current.config);
+                    }
+                }
                 out.events
                     .push(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                         x: anchor.x(),
@@ -2693,5 +2708,99 @@ mod tests {
         );
         sim.block_runtime = Some(runtime);
         assert_eq!(bridge_link(&sim, e), TilePos::new(8, 9).pack());
+    }
+
+    /// GAPS #62: `ConstructBlock.constructFinish` calls
+    /// `Block.placeEnded(tile, builder, rotation, config)` after `configure` and
+    /// the place effect (`ConstructBlock.java:72-118`).
+    #[test]
+    fn construct_finish_calls_place_ended() {
+        use std::sync::Arc;
+
+        #[derive(Debug, Clone, Default, PartialEq)]
+        struct PlaceEndedStamp {
+            entity: Option<Entity>,
+            builder: Option<Entity>,
+            rotation: u8,
+            config: crate::world::config::ConfigValue,
+        }
+
+        #[derive(bevy_ecs::prelude::Resource, Default)]
+        struct PlaceEndedLog(Vec<PlaceEndedStamp>);
+
+        struct ProbeBehavior;
+
+        impl crate::world::behavior::BuildingBehavior for ProbeBehavior {
+            fn place_ended(
+                &self,
+                world: &mut World,
+                e: Entity,
+                builder: Option<Entity>,
+                rotation: u8,
+                config: &crate::world::config::ConfigValue,
+            ) {
+                let stamp = PlaceEndedStamp {
+                    entity: Some(e),
+                    builder,
+                    rotation,
+                    config: config.clone(),
+                };
+                if world.get_resource::<PlaceEndedLog>().is_none() {
+                    world.insert_resource(PlaceEndedLog::default());
+                }
+                if let Some(mut log) = world.get_resource_mut::<PlaceEndedLog>() {
+                    log.0.push(stamp);
+                }
+            }
+        }
+
+        let (mut sim, unit, _core, wall) = sim_with_player();
+        // Rebuild the block table with a probe behavior on the wall so the
+        // default wall behavior cannot swallow the hook.
+        let content = sim.block_runtime().expect("runtime").content().clone();
+        let mut registry = crate::world::blocks::default_registry(&content);
+        registry.register_named("copper-wall", Arc::new(ProbeBehavior));
+        let table = BlockTable::build(&content, &registry).expect("block table");
+        sim.ecs.0.insert_resource(table);
+        sim.ecs.0.insert_resource(PlaceEndedLog::default());
+
+        set_core_copper(&mut sim, 100);
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        assert!(
+            sim.queue_player_place_config(
+                20,
+                20,
+                wall,
+                2,
+                crate::world::config::ConfigValue::Item(copper),
+            ),
+            "wall queued"
+        );
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        let placed = sim
+            .grid
+            .entity_at(TilePos::new(20, 20))
+            .expect("wall placed");
+        let log = sim
+            .ecs
+            .0
+            .get_resource::<PlaceEndedLog>()
+            .expect("place_ended log");
+        let stamp = log.0.last().expect("place_ended called");
+        assert_eq!(stamp.entity, Some(placed));
+        assert_eq!(stamp.builder, Some(unit), "builder unit passed through");
+        assert_eq!(stamp.rotation, 2, "plan rotation passed through");
+        assert_eq!(
+            stamp.config,
+            crate::world::config::ConfigValue::Item(copper),
+            "plan config passed through"
+        );
     }
 }

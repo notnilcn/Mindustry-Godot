@@ -149,12 +149,47 @@ pub struct PendingLightningStrike {
     pub rotation: f32,
     /// Bolt length (`<= 0` = no bolt).
     pub length: i32,
+    /// Caster velocity x (`unit.vel.x`; `Lightning.create` is called at
+    /// `x + unit.vel.x`, so the drain adds this at creation time).
+    pub vx: f32,
+    /// Caster velocity y (`unit.vel.y`).
+    pub vy: f32,
 }
 
 /// Deferred `MoveLightningAbility` bolts, drained by the combat pass
 /// ([`crate::world::behavior::PendingShockMineTriggers`] pattern).
 #[derive(Debug, Default, bevy_ecs::prelude::Resource)]
 pub struct PendingMoveLightning(pub Vec<PendingLightningStrike>);
+
+/// Drains [`PendingMoveLightning`] into real `Lightning.create` branches
+/// (`MoveLightningAbility.java:82-84`), returning the number created.
+///
+/// `shootEffect`/`shootSound` stay view-side; the branch itself is simulation
+/// state (chain bullets + damage) and therefore belongs to the combat pass.
+pub fn drain_pending_move_lightning(
+    ctx: &mut crate::combat::bullet::CombatCtx<'_>,
+    pending: &PendingMoveLightning,
+) -> usize {
+    let mut created = 0;
+    for strike in &pending.0 {
+        // `if(length > 0){ Lightning.create(...) }`.
+        if strike.length <= 0 {
+            continue;
+        }
+        crate::combat::lightning::create(
+            ctx,
+            strike.team,
+            strike.color,
+            strike.damage,
+            strike.x + strike.vx,
+            strike.y + strike.vy,
+            strike.rotation,
+            strike.length,
+        );
+        created += 1;
+    }
+    created
+}
 
 /// One deferred `UnitSpawnAbility` spawn (`Units.canCreate` and the entity
 /// sequencer live in the unit runtime, which the ability pass does not own).
@@ -503,6 +538,10 @@ fn update_ability(
                 let (ox, oy) =
                     rotate_offset(x, y, spec.spawn_offset, 0.0, unit_rotation(world, entity));
                 let rotation = unit_rotation(world, entity);
+                let (vx, vy) = world
+                    .get::<Vel>(entity)
+                    .map(|vel| (vel.x, vel.y))
+                    .unwrap_or((0.0, 0.0));
                 if !world.contains_resource::<PendingMoveLightning>() {
                     world.insert_resource(PendingMoveLightning::default());
                 }
@@ -515,6 +554,8 @@ fn update_ability(
                         y: oy,
                         rotation,
                         length: spec.length,
+                        vx,
+                        vy,
                     });
                 }
                 // `if(alternate) side *= -1f;` — the next strike alternates its

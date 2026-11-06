@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T21:36:52Z",
+  "updated": "2026-11-06T22:20:38Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -28920,6 +28920,11 @@
           "at": "2026-11-06T15:53:33Z",
           "by": "hx-wiring",
           "text": "Implemented in client/rust/mind-core/src/weapons/mod.rs (outside the packet s file list; the weapon engine has no combat/ equivalent — flag for merge routing). Verified headlessly; Java twin pending."
+        },
+        {
+          "at": "2026-11-06T22:10:05Z",
+          "by": "hx-simint",
+          "text": "Verified the live-sim StatusApplier half (packet item 4): sim/unit_runtime.rs::install_unit_runtime_from calls combat::damage::status::install_status_applier before anything can apply a status, so MindSimHost's live tick reaches shootStatus. Bare harness worlds (BuildHarness/CombatHarness/UnitHarness) deliberately do NOT install it and each test installs UnitStatusApply manually. New regression test sim::ability_queue_tests::live_sim_installs_the_status_applier asserts bare Sim has none and install_unit_runtime() installs it (cargo test -p mind-core --lib ability_queue: 4 passed)."
         }
       ]
     },
@@ -29048,13 +29053,13 @@
     },
     "PAR-0546": {
       "title": "GAPS #35: server→client @Remote calls have no channel and there is no KickReason enum",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
             }
           }
         ]
@@ -29062,32 +29067,41 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0546"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib call_packet"
             }
           }
         ]
       },
-      "claimed_by": "hx-net",
-      "claimed_at": "2026-11-06T15:06:43Z",
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:03:38Z",
       "severity": "P1",
       "gap": "HEAD f11557ea: the relay UI-event schema (client/rust/mind-stdb/src/module_bindings/ui_event_kind_type.rs) has 14 kinds (MenuBuilderShow/Update/Hide, HudText, HideHudText, Announce, InfoPopup, Label, InfoToast, WarningToast, OpenUri, CopyToClipboard, PingMarker) — no infoMessage (chat covers part), followUpMenu/hideFollowUpMenu reliable variants, setCameraPosition, sound/soundAt/effect, playMusic, traceInfo, removeWorldLabel. Kick reasons are free-form strings (MatchKick.reason, admin_kick(reason)): no KickReason enum anywhere in client/rust (grep -rn KickReason -> only a static string comment). Closing this needs module schema/event-kind additions in server/spacetimedb (owned by another agent) plus a gx/net + ui dispatch (gx/ui owned by the UI agent).",
       "source": "GAPS.md#35",
       "evidence": [
-        "sed ui_event_kind_type.rs -> 14 variants, no camera/sound/music/trace/removeWorldLabel/follow-up-menu reliable",
-        "grep -rn KickReason client/rust -> no enum"
+        "cargo test -p mind-stdb --lib call_packet (6 passed)",
+        "cargo test -p mind-stdb --lib typeio (12 passed)",
+        "cargo check -p mind-gdext --all-targets (clean)"
+      ],
+      "fix": "Client call channel landed: mind-stdb/src/call_packet.rs has CallKind/CallPacket for 23 server->client @Remote calls (infoMessage, menu/followUpMenu/hideFollowUpMenu, menuBuilder/update/hide, setCameraPosition, sound/soundAt, effect/effectReliable, playMusic, traceInfo, 6 label/labelReliable overloads, removeWorldLabel, kick string + KickReason enum) with [kind][body] encode/decode matching the generated *CallPacket.write layouts, a bounded CallChannel + CallHandler dispatch with unknown/malformed/overflow rejection tails, and typeio.rs KickReason (16 reasons, quiet/bundle_key). mind-gdext/src/net/call.rs CallBridge classifies kick/camera/infoMessage/playMusic; MindNet.push_call_frame/server_calls_json/call_channel_json expose it. Server-side publication/transport is a residual PAR.",
+      "notes": [
+        {
+          "at": "2026-11-06T22:03:48Z",
+          "by": "hx-protocol",
+          "text": "Verified headlessly: codec + round-trip/malformed tests pass in mind-stdb; gdext cargo check clean. No Java leg run (brief forbids running Java) — twin verification pending."
+        }
       ]
     },
     "PAR-0547": {
       "title": "GAPS #36: TypeIO network-only codecs missing (Unit, Building, Tile, PosEntity, Entity, Controller, Kick, TraceInfo, Sound, MenuResult, MarkerControl, UiBuilder, StringArray, Action)",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
             }
           }
         ]
@@ -29095,31 +29109,40 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0547"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib typeio"
             }
           }
         ]
       },
-      "claimed_by": "hx-net",
-      "claimed_at": "2026-11-06T15:06:52Z",
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:03:38Z",
       "severity": "P1",
       "gap": "HEAD f11557ea: client/rust/mind-core/src/io/typeio/codecs.rs (1158 lines) has write_string/bytes/ints/shorts/item/liquid/block/weather/content/item_stacks/liquid_stacks/team/color/command/stance/effect/unit_type/bullet_type/vec2/vec_nullable/status/rules/objectives/objective_marker but none of the network-only writers: grep for write_unit, write_building, write_tile, write_pos_entity, write_entity, write_controller, write_kick, write_trace_info, write_sound, write_menu_result, write_marker_control, write_ui_builder, write_string_array, write_action -> no hits. The codecs belong in mind-core/src/io/typeio (outside hx-net file ownership: mind-stdb / net / headless-server), so this pass files it rather than editing it. Mapping: TypeIO.writeUnit/writeBuilding/writeTile/writePosEntity/writeEntity/writeController/writeKick/writeTraceInfo/writeSound/writeMenuResult/writeMarkerControl/writeUiBuilder/writeStringArray/writeAction (core/src/mindustry/io/TypeIO.java).",
       "source": "GAPS.md#36",
       "evidence": [
-        "grep -n pub fn write_ mind-core/src/io/typeio/codecs.rs -> no unit/building/tile/entity/controller/kick/trace/sound/menu/marker/ui-builder/string-array/action writers"
+        "cargo test -p mind-stdb --lib typeio (12 passed)",
+        "cargo test -p mind-stdb --lib (89 passed)"
+      ],
+      "fix": "Network-only TypeIO codecs landed in mind-stdb/src/typeio.rs: unit (standard/block/null), building, tile (Point2.pack -1,-1 null), posEntity, entity, controller (types 0/1/2/3/4/5/6-9 incl. CommandAI attack/targetPos/command/queue/stances), kick (KickReason 16), traceInfo (12-entry caps), sound, menuResult (token/result/values, max* caps), markerControl (26), UiBuilder NodeBuilder tree (64 UiKey, 13 node types, depth/entry caps), stringArray (cell cap), adminAction (5), plus writeString/writeStrings/writeInts/writeShorts/writeBytes/writeEffect/writeColor/writeBlock/writeTeam and the TypeIoWriter/TypeIoReader primitives. Round-trip + malformed-input rejection tests per codec.",
+      "notes": [
+        {
+          "at": "2026-11-06T22:03:48Z",
+          "by": "hx-protocol",
+          "text": "Verified headlessly: codec + round-trip/malformed tests pass in mind-stdb; gdext cargo check clean. No Java leg run (brief forbids running Java) — twin verification pending."
+        }
       ]
     },
     "PAR-0548": {
       "title": "GAPS #37: EventType — 13 of 89 upstream event classes exist; Unit/Player/Config/Deposit/CoreChange/Research/Unlock/BuildSelect/BulletDestroy etc. missing",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
             }
           }
         ]
@@ -29127,30 +29150,36 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0548"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib event"
             }
           }
         ]
       },
-      "claimed_by": "hx-net",
-      "claimed_at": "2026-11-06T15:06:56Z",
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:03:38Z",
       "severity": "P1",
       "gap": "HEAD f11557ea: mind-core/src/event.rs defines 13 event types (ClientCreate, ClientLoad, ContentInit, StateChange, BlockPlaced, BlockBroken, Reset, Play, Wave, MusicRegister, SaveWrite, SaveLoad, RulesLoad) while core/src/mindustry/game/EventType.java declares 89 classes. Missing include UnitCreate/UnitDestroy/UnitDamage/UnitDrown/UnitSpawn/UnitChange/UnitControl, PlayerJoin/PlayerLeave/PlayerChat/PlayerConnect/PlayerBan/PlayerUnban, Config, Deposit, Withdraw, Pickup, PayloadDrop, CoreChange, LaunchItem, Research, Unlock, BuildSelect, BulletDestroy (both), GeneratorPressureExplode, MenuOptionChoose, TextInput, ServerLoad, SchematicCreate, MapMake, Win/Lose/Resize/MapPublish/Dispose/Host/Turn/SectorLaunch/WorldLoad*. The bus itself exists (define_events! registration-ordered listeners, event.rs tests listener order/routing), so only the classes + their fire sites are missing. Fix lives in mind-core (outside hx-net file ownership: mind-stdb / net / headless-server) -> filed, not edited.",
       "source": "GAPS.md#37",
       "evidence": [
-        "grep -c public static class core/src/mindustry/game/EventType.java -> 89",
-        "define_events! in mind-core/src/event.rs -> 13 entries",
-        "cargo test -p mind-core --lib event -> listener order/routing pass"
+        "cargo test -p mind-stdb --lib event (11 passed)",
+        "samples_cover_every_declared_class_exactly_once: 89 classes round-trip",
+        "cargo check -p mind-gdext --all-targets (clean)"
       ],
       "notes": [
         {
           "at": "2026-11-06T15:16:15Z",
           "by": "hx-stdb",
           "text": "Module side of GAPS #37 landed (server/spacetimedb, client crates untouched): relay/events.rs publishes match_event rows (EventKind: MatchCreate/MatchStart/MatchEnd/PlayerJoin/PlayerLeave/PlayerKick/PlayerBan/PlayerUnban/PlayerChat/VoteStarted/VotePassed/VoteFailed/ConfigChange/AdminAction/NameBan/NameUnban/SyncRequest/ClientCommand) and my_match_events exposes the caller's active match, 5 min retention via tick_maintenance. Evidence: runs/PAR-0121/stdb-integration.sh T12 (MatchCreate/PlayerJoin/MatchStart/PlayerChat/PlayerKick observed). Client side still needs the binding + EventType mapping; simulation events remain sim-side by design."
+        },
+        {
+          "at": "2026-11-06T22:03:48Z",
+          "by": "hx-protocol",
+          "text": "Verified headlessly: codec + round-trip/malformed tests pass in mind-stdb; gdext cargo check clean. No Java leg run (brief forbids running Java) — twin verification pending."
         }
-      ]
+      ],
+      "fix": "EventType taxonomy + relay payload codec landed: mind-stdb/src/event_type.rs declares all 89 upstream classes (Unit*/Player*/Config/Deposit/CoreChange/Research/Unlock/BuildSelect/BulletDestroy/...), each as a serde struct variant named exactly like the Java class with the wire projection of its fields; EventType::encode/decode is the {\"type\":\"<Class>\",...} JSON envelope used as MatchEvent.detail. events.rs maps every EventKind to the taxonomy (module-only kinds excepted, MODULE_ONLY_EVENT_KINDS), and ServerEvent::typed/class_name/has_payload + EventBus::typed_after/typed_event decode typed rows while plain-text details keep the kind mapping. MindNet now binds my_match_events into the EventBus and exposes match_events_json/match_event_types_json. Fire sites in the client sim and the module-side typed publication are filed as a residual PAR."
     },
     "PAR-0549": {
       "title": "GAPS #45: JoinDialog shows no server version or @server.outdated when the host build differs",
@@ -29731,13 +29760,22 @@
       "evidence": [
         "cargo test -p mind-core --lib consumers (7 passed)",
         "cargo test -p mind-core --lib behavior (116 passed)",
-        "cargo test -p mind-core --lib (3014 passed)"
+        "cargo test -p mind-core --lib (3014 passed)",
+        "cargo test -p mind-core --lib consume (42 passed)",
+        "cargo test -p mind-core --lib dynamic_consume_bridge (1 passed)",
+        "cargo test -p mind-core --lib item_traits (1 passed)",
+        "cargo test -p mind-core --lib (3066 passed, 4 ignored)"
       ],
       "notes": [
         {
           "at": "2026-11-06T16:35:34Z",
           "by": "hx-mod2",
           "text": "Runtime wired through world/update.rs (consumer_efficiency/consumer_update delegate to world::consumers). Remaining cross-file half: content/registries/blocks/mod.rs must append the matching Consume variant set + call Consumers::build_with_extras; sim/runtime.rs must insert ItemTraits::from_content; combat pass must drain PendingConsumerDamage and provide DynamicConsume for factory/deconstructor families."
+        },
+        {
+          "at": "2026-11-06T21:55:29Z",
+          "by": "hx-simint",
+          "text": "Sim half landed: install_block_runtime_from installs world::consumers::ItemTraits::from_content; Sim::tick drains PendingConsumerDamage through combat::damage::area::apply_health + Fx.generatespark + Trigger.blastGenerator; sim::runtime::SimDynamicConsume supplies ConsumeItemDynamic (UnitFactory selected plan, BlockProducer recipe) and ConsumePayloadDynamic (UnitAssembler plan payloads). Verified: live_runtime_installs_item_traits, consumer_damage_queue_is_drained_by_tick, dynamic_consume_bridge_reads_factory_plan_items. Remaining (NOT mine): (a) content/registries/blocks/mod.rs Consume enum still has only Items/Liquid/Liquids/Power/Coolant and world/block.rs::from_def still calls Consumers::build (needs Consume variants + build_with_extras); (b) world/update.rs::update_consumption still hardcodes dynamic=None, so SimDynamicConsume has no live call site yet; (c) AssemblerUnitPlan.itemReq/liquidReq have no content fields (BlockDef.assembler_plans payloads only); (d) generator-family ConsumeItemExplode still runs through the legacy GeneratorConfig path (no double-drain today because ItemExplode lowering is absent)."
         }
       ]
     },
@@ -29815,13 +29853,20 @@
       "evidence": [
         "cargo test -p mind-core --lib abilities (18 passed)",
         "cargo test -p mind-core --lib blocks:: (308 passed)",
-        "cargo test -p mind-core --lib (3014 passed)"
+        "cargo test -p mind-core --lib (3014 passed)",
+        "cargo test -p mind-core --lib ability_queue (4 passed)",
+        "cargo test -p mind-core --lib (3066 passed, 4 ignored)"
       ],
       "notes": [
         {
           "at": "2026-11-06T16:35:44Z",
           "by": "hx-mod2",
           "text": "Cross-file half: mods/json resolve_ability_kind + ability field parsing for the 4 new classes; combat/sim pass must drain PendingMoveLightning (Lightning.create) and PendingAbilityUnitSpawns (Units.canCreate + spawn seq); render/effect pass draws LaunchCoreComp; TiledFloor/TiledWall/WobbleProp BlockKind additions still needed in content/registries/blocks/mod.rs (owner: other agent)."
+        },
+        {
+          "at": "2026-11-06T21:55:29Z",
+          "by": "hx-simint",
+          "text": "Drains landed: sim::drain_ability_queues_system registered per-Sim in EntitySet::UpdateUnits after unit_runtime::unit_update_system. PendingMoveLightning -> combat::abilities::drain_pending_move_lightning -> combat::lightning::create (PendingLightningStrike gained vx/vy; Java adds unit.vel to the origin). PendingAbilityUnitSpawns -> queries::can_create_unit (Units.canCreate) then tracked UnitRuntime::spawn + notify_unit_created + Fx.spawn; queues consumed same tick. Verified: 4 tests in sim::ability_queue_tests (real branch bullets, tracked sequencer spawn, unit-cap rejection, live StatusApplier install). No blockers."
         }
       ]
     },
@@ -29856,13 +29901,20 @@
       "fix": "Helper traits aligned to the Java interfaces and implemented: ControlBlock for RouterBehavior (unit/isControlled/canControl/shouldAutoTarget), ExplosionShield for ForceProjectorBehavior (polygon absorb + buildup), UnitTetherBlock for TargetDummyDefenseBehavior (records UnitTetherTarget), RotBlock for MassDriverBehavior; BlockInstance::plan_rotation/invert_flip/flip_rotation/plan_configs/place_ended + BuildingBehavior::place_ended hook.",
       "evidence": [
         "cargo test -p mind-core --lib blocks:: (308 passed)",
-        "cargo test -p mind-core --lib (3014 passed)"
+        "cargo test -p mind-core --lib (3014 passed)",
+        "cargo test -p mind-core --lib place_ended (1 passed)",
+        "cargo test -p mind-core --lib (3066 passed, 4 ignored)"
       ],
       "notes": [
         {
           "at": "2026-11-06T16:35:48Z",
           "by": "hx-mod2",
           "text": "Call-site wiring still needed: sim/builder.rs constructFinish should call BlockInstance::place_ended(tile, builder, rotation, config); input/line.rs could delegate its inline flipRotation copy; UI plan-config list should use BlockInstance::plan_configs."
+        },
+        {
+          "at": "2026-11-06T21:55:29Z",
+          "by": "hx-simint",
+          "text": "Call site landed: sim/builder.rs constructFinish now invokes BlockInstance::place_ended(tile, builder, rotation, config) after configure/chain and before the BlockBuildEndEvent push (ConstructBlock.java:118 order). Verified by construct_finish_calls_place_ended (probe behavior records entity/builder/rotation/config). Still open elsewhere: UI plan-config list should consume BlockInstance::plan_configs (gx/ui, other agent) and input/line.rs inline flipRotation copy."
         }
       ]
     },
@@ -30373,6 +30425,340 @@
           "text": "Headless: pool verified through real Sim placements (two Command::Place cores) and BuildHarness transfer/destroy paths; focused core=97/storage=22/sector=67, full mind-core lib=3034 passed; cargo check -p mind-gdext ok; gdext core_items tests pass; clippy adds no lint in the touched files; fmt clean. No Java leg (brief forbids running Java)."
         }
       ]
+    },
+    "PAR-0576": {
+      "title": "GAPS #35 residual: server relay cannot publish call frames (nothing feeds MindNet.push_call_frame)",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0576"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:03:58Z",
+      "severity": "P1",
+      "gap": "PAR-0546 landed the client half (mind-stdb typeio.rs KickReason + call_packet.rs 23 CallKind variants with CallChannel dispatch; mind-gdext net/call.rs CallBridge + MindNet.push_call_frame/server_calls_json/call_channel_json). Still missing, outside hx-protocol file ownership: (1) server/spacetimedb has no call-frame table/reducer/kind, so a host cannot publish infoMessage/menu/camera/sound/music/trace/label/kick calls; (2) nothing calls MindNet.push_call_frame — the relay binder/dispatch must be added where the module table lands (server relay owner + gx/net consumer). Client codec+channel are tested and ready; the server-owned schema change is the blocker.",
+      "source": "PAR-0546 residual"
+    },
+    "PAR-0577": {
+      "title": "GAPS #37 residual: EventType taxonomy exists but client-sim fire sites and module typed publication are missing",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0577"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:03:58Z",
+      "severity": "P1",
+      "gap": "PAR-0548 landed all 89 EventType classes + the {\"type\":...} JSON payload codec in mind-stdb/src/event_type.rs, the EventKind->class mapping, and ServerEvent::typed/EventBus::typed_after; MindNet binds my_match_events into the EventBus. Still missing, outside hx-protocol file ownership: (1) the client sim never fires UnitCreate/UnitDestroy/UnitDamage/UnitDrown/BulletCreate/BuildDamage/BuildSelect/Config/Deposit/Withdraw/CoreChange/Research/Unlock/... (mind-core has only 13 EventTypes in event.rs; fire sites live in mind-core sim/game); (2) server/spacetimedb/src/relay/events.rs EventKind (18 variants) has no variants for the new classes and never writes the typed detail envelope, so typed rows cannot arrive over STDB yet. The client decodes typed details as soon as the relay publishes them.",
+      "source": "PAR-0548 residual"
+    },
+    "PAR-0578": {
+      "title": "GAPS #36 residual: TypeIO writeObject-tagged overloads (Call.effect data) and entity/plan sync codecs not ported",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0578"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-protocol",
+      "claimed_at": "2026-11-06T22:04:02Z",
+      "severity": "P2",
+      "gap": "PAR-0547 landed the listed network-only TypeIO codecs in mind-stdb/src/typeio.rs. Two gaps remain, both low priority: (1) the two-argument Call.effect overload (EffectCallPacket2) serializes an arbitrary Object via TypeIO.writeObject/readObject, whose tagged-object codec lives in mind-core::io::typeio; mind-stdb cannot depend on mind-core, so CallPacket only ports the colour overload — if logic needs effect data, add a tagged-object projection to typeio.rs. (2) writePlans/writeClientPlans/writePayload/writeMounts/writeAbilities are invoked by entity/snapshot packets owned by the sync lane, not by server->client calls; they belong with mind-core's save/entity IO. No test currently exercises them over the call channel.",
+      "source": "PAR-0547 residual"
+    },
+    "PAR-0579": {
+      "title": "GAPS #68 follow-up: shared GameService tracker injected into the live campaign runtime (boot/autosave/exit persistence + UI row queries)",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib campaign"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-gxint",
+      "claimed_at": "2026-11-06T22:13:50Z",
+      "severity": "P1",
+      "source": "GAPS.md#68",
+      "gap": "The core half of GAPS #68 (PAR-0566) landed LocalGameService/ServiceTracker and CampaignRuntime::with_service, but the gdext host never injected it: every sector/custom-map load built a CampaignRuntime with the default empty tracker, nothing loaded the persisted unlock keys at boot, nothing saved on autosave/exit, and no MindCampaign query methods exposed stat/achievement rows for the UI.",
+      "fix": "MindCampaign owns THE shared ServiceTracker (Vars.service): bootstrap loads it from Core.settings through SettingsUnlockStore (load_service), both CampaignRuntime::new sites inject it with with_service(self.service.clone()), every pump/persist mirrors runtime.service back into the facade, and persist + the autosave boundary write it through save_service. New #[func] probes service_achievement_rows_json / service_stat_rows_json / service_completion_json / service_unlocked_json (serde JSON, live-runtime mirrored) feed the UI tables; MindSimHost::campaign_service exposes the installed tracker.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib campaign -> 25 passed / 4 pre-existing ui::dialogs::batch_campaign2 Godot-FFI failures; new service_injection_roundtrips_through_the_unlock_store + service_rows_json_cover_every_stat_and_achievement green",
+        "cargo check -p mind-gdext (tests) clean",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0, log shows MindCampaign ready (14 save slot(s), 0 achievement(s))"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:13:54Z",
+          "by": "hx-gxint",
+          "text": "Verified headlessly: the shared tracker boots from the persisted achievement-*/achievement-stat-* settings keys, is injected into the live CampaignRuntime (with_service), mirrors back every pump, and round-trips through save/load (injection + persistence test); the four #[func] row queries match LocalGameService::stat_rows/achievement_rows; cargo check --tests clean; headless boot exit 0."
+        }
+      ]
+    },
+    "PAR-0580": {
+      "title": "GAPS #50 follow-up: MindCampaign.planet_bodies solar-system rows for the planet view",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib planet_bodies"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-gxint",
+      "claimed_at": "2026-11-06T22:13:58Z",
+      "severity": "P2",
+      "source": "GAPS.md#50",
+      "gap": "PAR-0570 ported the planet-view cubemap skybox and SunMesh but had no body list: gx/ui/planet.rs build_universe() reads MindCampaign.planet_bodies(planet) behind has_method, which did not exist, so no sun, planet or moon was ever placed.",
+      "fix": "MindCampaign.planet_bodies(planet) -> Array[VarDictionary] rows {name, kind(\"sun\"|\"planet\"), position: Vector3, radius, rotation} derived by planet_body_rows() from the existing orbit helpers (orbit_radii/solar_system/world_position/rotation, mind_core::render::g3d::orbit): every visible body of the viewed planet solar system except the viewed globe (drawn by planet_mesh), positioned in the viewed planet rotated mesh frame ((body.position - viewed.position).rotate(Y, viewed.getRotation())), sun = the system root; ancestor visibility mirrors PlanetRenderer.renderPlanet early-returns.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib planet_bodies -> 1 passed (planet_bodies_derive_the_solar_system_in_the_viewed_frame: sun/erekir rows, viewed planet excluded, world-space separation preserved under the frame rotation)",
+        "cargo test -p mind-gdext --lib campaign -> 25 passed / 4 pre-existing ui Godot-FFI failures",
+        "headless boot exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:14:01Z",
+          "by": "hx-gxint",
+          "text": "Verified headlessly: planet_bodies row derivation is tested against the base content registry (sun kind/radius, erekir rotation, viewed-planet exclusion, rotation-preserved distances, viewpoint-from-sun case); headless boot exit 0."
+        }
+      ]
+    },
+    "PAR-0581": {
+      "title": "GAPS #49 follow-up: beam bullets skip the default circle light; ContinuousLaser carries Java's orange light",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending. render/light.rs doc comments still describe the old ContinuousLaser default gap (stale comment only; behaviour unchanged)."
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib sim_host::tests"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-gxint",
+      "claimed_at": "2026-11-06T22:14:06Z",
+      "severity": "P2",
+      "source": "GAPS.md#49",
+      "gap": "PAR-0569 added LightRenderer.line and bullet_line_light(), but MindSimHost::light_sources still pushed the default BulletType.drawLight circle for every bullet, so the Laser/ContinuousLaser/ContinuousFlame/Sap beams were lit twice (line + circle). The circle also hardcoded Pal.powerLight/0.3 instead of the def light fields, and BulletDef::new(ContinuousLaser) carried the BulletType defaults instead of Java lightColor=Color.orange/lightOpacity=0.7 (ContinuousLaserBulletType.java:40-41).",
+      "fix": "bullet_circle_light() mirrors BulletType.drawLight (gates lightOpacity/lightRadius <= 0, BulletType.java:708-711) and returns None for the four kinds whose empty drawLight is replaced by a Drawf.light line in draw (LaserBulletType.java:121-128, ContinuousLaserBulletType.java:70-76, ContinuousFlameBulletType.java:91-104, SapBulletType.java:58-59), so light_sources skips them; all other bullets now use the def lightRadius/lightColor/lightOpacity. bullets.rs sets ContinuousLaser light_color=0xffa500ff (Color.orange) and light_opacity=0.7.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib sim_host::tests -> 19 passed (beam_bullet_kinds_skip_the_default_circle_light: gates, 4 skipped kinds, every registered beam def skipped, shrapnel keeps its circle)",
+        "cargo test -p mind-core --lib continuous_laser_def -> 1 passed (continuous_laser_def_carries_the_orange_light)",
+        "cargo check -p mind-gdext clean; headless boot exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T22:14:09Z",
+          "by": "hx-gxint",
+          "text": "Verified headlessly: 4 beam kinds skipped, default-circle gates pinned, every registered beam-kind def skipped in base content, shrapnel (line light + default drawLight in Java) still emits its circle; ContinuousLaser def light fields pinned against Sap/Plain defaults."
+        }
+      ]
+    },
+    "PAR-0582": {
+      "title": "GAPS #49 follow-up: Fx.pointBeam line-light rows from MindFx (light-pass consumer pending)",
+      "status": "fixing",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending. Stays fixing until render.rs forwards view_light_lines() to LightBuffer::add_line (outside the packet files)."
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib fx::tests"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-gxint",
+      "claimed_at": "2026-11-06T22:14:15Z",
+      "severity": "P2",
+      "source": "GAPS.md#49",
+      "gap": "MindFx.view_lights only collected PrimKind::Light circles, so the one vanilla effect body that uses the line-form Drawf.light -- Fx.pointBeam (Fx.java:152-160: Drawf.light(e.x, e.y, pos.x, pos.y, 20f, e.color, 0.6f*e.fout())) -- was rendered as a circle light at the beam origin (the core body emits emit.light as a stand-in). Fx.lightning (Fx.java:189-206) and Fx.chainLightning/chainEmp (Fx.java:2877-2949) add NO light in Java, so the packet premise that they need line lights is wrong for the Java oracle.",
+      "fix": "MindFx now derives line-light rows (x1,y1,x2,y2,width,rgba) for Fx.pointBeam live states (origin -> Position payload, stroke 20, alpha tint.a*0.6*fout) via fx_line_light(), drops the body circle-Light prims for that effect in build_fx_program(), and exposes view_light_lines() (cleared/refilled per draw). Remaining consumer work: MindWorldRenderer must forward view_light_lines() into render/light.rs LightBuffer::add_line (render.rs forwards only view_lights() today; render.rs/render/light.rs are outside this packet file ownership).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib fx::tests -> 4 passed (point_beam_emits_a_line_light_row, point_beam_drops_the_circle_light_approximation, lightning_effects_do_not_emit_line_lights, shake_duration_falls_back_to_intensity)",
+        "cargo check -p mind-gdext clean; headless boot exit 0"
+      ]
+    },
+    "PAR-0583": {
+      "title": "GAPS #32 residual: dedicated host never loads mod content into its registry (reloadassets/mods only re-scan the mod dir)",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0583"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-server2",
+      "claimed_at": "2026-11-06T22:20:33Z",
+      "severity": "P1",
+      "gap": "mind-headless/src/server/commands.rs cmd_mods/cmd_reloadassets built a throwaway Mods and only reported scan results; the host registry was base content only (boot_content()). mods only printed the scan, not the loaded set; reloadassets could never make mod JSON content or patches visible to the host.",
+      "source": "GAPS.md#32"
+    },
+    "PAR-0584": {
+      "title": "GAPS #32 residual: dedicated host autosave never runs on the host clock (autosave/autosaveSpacing/autosaveAmount unused)",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0584"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-server2",
+      "claimed_at": "2026-11-06T22:20:33Z",
+      "severity": "P1",
+      "gap": "autosave.rs had naming/rotation helpers only; no ServerState timer advanced by the host tick loop, so Java ServerControl.java:283-319 autosave never fired and long dedicated sessions produced no auto_*.msav backups.",
+      "source": "GAPS.md#32"
+    },
+    "PAR-0585": {
+      "title": "GAPS #33: NetServer command half — chat command parser/dispatch, fixName/checkColor, kickAll use, enableVotekick/interactRate gates",
+      "status": "fixing",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0585"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-server2",
+      "claimed_at": "2026-11-06T22:20:38Z",
+      "severity": "P1",
+      "gap": "No server-side chat command dispatch existed in mind-headless (only the module reducer path); fixName/checkColor were unported, NetHost::kick_all was never called, and the dedicated server config gates (enableVotekick, interactRate*) were never pushed to the module server_config row.",
+      "source": "GAPS.md#33"
     }
   },
   "recipes": {
