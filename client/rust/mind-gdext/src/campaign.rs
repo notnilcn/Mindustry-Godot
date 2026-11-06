@@ -2869,24 +2869,11 @@ impl MindCampaign {
     }
 
     /// `Objectives.Research.display()` half: `content.techNode == null ||
-    /// parent == null || parent.content.unlockedHost()`.
+    /// parent == null || parent.content.unlockedHost()`. The parent comes from
+    /// `UnlockFields.tech_node` (the last-created node), matching Java's
+    /// `UnlockableContent.techNode` (PAR-0500).
     fn research_parent_unlocked(&self, registry: &ContentRegistry, content: ContentRef) -> bool {
-        let Some(node) = registry
-            .tech()
-            .nodes
-            .iter()
-            .find(|node| node.content == Some(content))
-        else {
-            return true;
-        };
-        let Some(parent_ref) = node.parent else {
-            return true;
-        };
-        registry
-            .tech()
-            .node(parent_ref)
-            .and_then(|parent| parent.content)
-            .is_none_or(|parent_content| tech_tree::content_unlocked(registry, parent_content))
+        tech_tree::research_parent_unlocked(registry, content)
     }
 
     /// `Content.emoji() + " " + Content.localizedName` (no leading space when
@@ -5363,6 +5350,42 @@ impl MindCampaign {
             }
         }
         GString::from(serde_json::Value::Object(out).to_string().as_str())
+    }
+
+    /// `Universe.updateLaunchResources` from the loadout editor's
+    /// `{item: amount}` map: the `LoadoutDialog` hider callback
+    /// (`LaunchLoadoutDialog.java:138-141`) writes the edited `ItemSeq` back
+    /// before the parent rows refresh. Items are placed in the dense
+    /// item-id-indexed sequence the launch flow charges and stocks.
+    #[func]
+    pub fn set_launch_resources(&mut self, amounts: VarDictionary) -> bool {
+        let stacks = {
+            let Some(registry) = self.registry.as_ref() else {
+                return false;
+            };
+            let mut amounts_by_name: Vec<(String, i64)> = Vec::new();
+            for key in amounts.keys_array().iter_shared() {
+                let Ok(name) = key.try_to::<GString>() else {
+                    continue;
+                };
+                let amount = amounts
+                    .get(&key)
+                    .and_then(|value| value.try_to::<f64>().ok())
+                    .unwrap_or(0.0) as i64;
+                amounts_by_name.push((name.to_string(), amount));
+            }
+            mind_core::ui::campaign::launch_resource_sequence(registry, &amounts_by_name)
+        };
+        let Some(result) = self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.update_launch_resources(settings, stacks)
+        }) else {
+            return false;
+        };
+        if result.is_err() {
+            return false;
+        }
+        self.persist();
+        true
     }
 
     /// `Universe.updateLaunchResources` from a JSON `[n, ...]` sequence.

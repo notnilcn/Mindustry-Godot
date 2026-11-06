@@ -151,6 +151,10 @@ pub struct MindPlanetView {
     light_dir: Vector3,
     ambient: Color,
     sector_label_text: GString,
+    /// `sector_label_text` already is final Godot BBCode
+    /// (`set_sector_label_markup`, the `PlanetDialog.draw` hover text) instead
+    /// of a plain sector name to wrap in the `[accent][[ name ]` frame.
+    sector_label_markup: bool,
     /// Preset whose icon is drawn inside the selected hex
     /// (`renderProjections`).
     sector_icon_preset: GString,
@@ -207,6 +211,7 @@ impl IControl for MindPlanetView {
             light_dir: DEFAULT_LIGHT,
             ambient: Color::from_rgba(1.0, 1.0, 1.0, 1.0),
             sector_label_text: GString::new(),
+            sector_label_markup: false,
             sector_icon_preset: GString::new(),
             sector_icon: None,
             markers: None,
@@ -476,6 +481,17 @@ impl MindPlanetView {
     #[func]
     pub fn set_sector_label(&mut self, text_value: GString) {
         self.sector_label_text = text_value;
+        self.sector_label_markup = false;
+        self.update_label();
+    }
+
+    /// Final `PlanetDialog.draw` hover text as Godot BBCode
+    /// (`PlanetDialog.java:956-977`): the dialog composes the selectable name
+    /// frame or the locked reason (icons included), the view only positions it.
+    #[func]
+    pub fn set_sector_label_markup(&mut self, text_value: GString) {
+        self.sector_label_text = text_value;
+        self.sector_label_markup = true;
         self.update_label();
     }
 
@@ -1660,11 +1676,16 @@ impl MindPlanetView {
         };
         // `PlanetDialog.draw`: `[accent][lb] [white]<name>[accent] ]` — gold
         // brackets with the name in white (`Styles.outlineLabel` carries the
-        // black outline via the scene's theme overrides).
-        let text = format!(
-            "[color=#ffd37f][lb] [color=white]{}[color=#ffd37f] ]",
-            self.sector_label_text
-        );
+        // black outline via the scene's theme overrides). The dialog's
+        // `set_sector_label_markup` hands over the finished hover text instead.
+        let text = if self.sector_label_markup {
+            self.sector_label_text.to_string()
+        } else {
+            format!(
+                "[color=#ffd37f][lb] [color=white]{}[color=#ffd37f] ]",
+                self.sector_label_text
+            )
+        };
         label.set_text(&GString::from(text.as_str()));
         label.set_visible(true);
         label.reset_size();

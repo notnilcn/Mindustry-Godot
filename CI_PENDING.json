@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T04:46:07Z",
+  "updated": "2026-11-06T06:43:24Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -449,6 +449,87 @@
       "repro": "cargo test -p mind-core --lib content::tech; cargo test -p mind-core --lib ai::types::player; cargo test -p mind-gdext --lib root_selector_needs_two_selectable_trees; python3 tools/twin_verification.py check",
       "expected": "mind-core 2903 tests pass (incl. implicit_dependency_research_objectives + player_can_mine_checks_range_stack_and_unmineable_floors); batch_campaign2 + hints unit tests pass; twin check ok 500 items",
       "risk": "Tech-tree node objectives now include implicit Research rows everywhere (can_spend/selectable/auto-unlock); parity/golden_content.json tech objectives regenerated (only objectives arrays moved) with the manifest sha256 recorded; golden_manifest reasons grew. mind-gdext lib tests have 17 pre-existing Godot-engine-required failures in this headless env (Json/GString builtins) - unrelated.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-063752",
+      "created_at": "2026-11-06T06:37:52Z",
+      "agent": "camp-ui",
+      "branch": "main",
+      "head": "ac460437",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 14,
+      "area": "client/rust/mind-core/src/ui",
+      "summary": "Campaign planet hover lock reasons (SectorView.hover_lock/hover_allowed + annotate_globe gates)",
+      "files": [
+        "client/rust/mind-core/src/ui/campaign.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs",
+        "client/rust/mind-gdext/src/ui/planet.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "ui-widgets-check"
+      ],
+      "repro": "cargo test -p mind-core ui::campaign; cargo check -p mind-gdext",
+      "expected": "hover_lock_reason_matches_generator passes; the planet hover label shows the Java reason string",
+      "risk": "annotate_globe gates run for every sector row; check the Erekir numbered-sector suppression and the planetLaunch cancel icon",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-063753",
+      "created_at": "2026-11-06T06:37:53Z",
+      "agent": "camp-ui",
+      "branch": "main",
+      "head": "ac460437",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 15,
+      "area": "client/rust/mind-core/src/game",
+      "summary": "Campaign research parent resolves the last-created tech node (tech_node)",
+      "files": [
+        "client/rust/mind-core/src/game/tech_tree.rs",
+        "client/rust/mind-gdext/src/campaign.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core game::tech_tree",
+      "expected": "research_parent_uses_last_created_tech_node passes; research popup prints Research Silicon instead of Research ???",
+      "risk": "campaign facade delegation only; multi-node content parent selection",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-064324",
+      "created_at": "2026-11-06T06:43:24Z",
+      "agent": "camp-world",
+      "branch": "main",
+      "head": "ac460437",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 18,
+      "area": "client/rust/mind-core/src/maps",
+      "summary": "Preset campaign maps run authored genfilters (Arc-JSON tag + SaveVersion fallback block names)",
+      "files": [
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-core/src/maps/map.rs",
+        "client/rust/mind-core/src/maps/filters/builtin.rs",
+        "client/rust/mind-core/src/maps/filters/mod.rs",
+        "client/rust/mind-core/src/io/sim_io.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "cargo test -p mind-core --lib 'maps::filters::' && cargo test -p mind-core --lib preset_map_load_applies_genfilter_scatter && cargo test -p mind-core --lib filters_accept_arc_style_genfilters_tag",
+      "expected": "all three filter/map tests pass; a fresh campaign preset load (serpulo:170) reports world_gen_debug seed >= 0, boulders ~100 (snow/basalt mix) and ore 618; Load Game/sector resume still report seed -1 and no filter pass",
+      "risk": "Map::filters now quote_bare_keys every genfilters tag and block_id applies SaveVersion.fallback; malformed tags still fall back to the default stack, but a wrongly 'fixed' name could retarget a filter (check groundZero's flooronto:sand -> sand-floor and the editor's strict-JSON round-trip via filter_options_json/write_filters). map_gen_seed now recorded for preset loads, so any golden that asserts -1 for a preset sector changes.",
+      "notes": "PAR-0483 / CG-GEN-01. Fresh GZ after fix: boulders 107 (Java 118, per-load RNG), ore 618, authored core tile intact. Evidence runs/PAR-0483/20261106-164210-run.md. PAR-0482 (weather) refuted separately, no code change.",
       "status": "pending"
     }
   ]

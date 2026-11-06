@@ -3478,11 +3478,29 @@ impl MindSimHost {
         let loaded = if resume_file {
             log::info!("load_sector: resuming `{planet_name}:{sector}` from `{save_path}`");
             load_grid_file(&save_path, &mut registry)
+        } else if let Some(preset_path) =
+            resolve_preset_map_path(planet_name, sector as u16, &registry)
+        {
+            // `World.loadSector` -> `sector.preset.generator.generate` ->
+            // `SaveIO.load(map.file, world.new FilterContext(map))`
+            // (`FileMapGenerator.java:71-82`): a preset map loads through the
+            // map-load context, so its `genfilters` stack (boulder/prop
+            // scatters) runs before `endMapLoad` — exactly like a custom-game
+            // map load. Java's `filter.randomize()` draws from the global rand;
+            // the port draws a recorded seed per load (`map_gen_seed`).
+            let seed = self.next_map_gen_seed();
+            let loaded = load_map_grid_file(&preset_path, &mut registry, seed);
+            if let Some(loaded) = loaded.as_ref() {
+                log::info!(
+                    "load_sector: loaded preset map `{preset_path}` ({}x{}, gen seed {seed})",
+                    loaded.grid.tiles.width,
+                    loaded.grid.tiles.height
+                );
+            }
+            loaded
         } else {
-            // `World.loadSector`: a preset sector uses its stored designed map
-            // (`SectorPreset.generator` / `FileMapGenerator`); planet sectors
-            // fall back to the planet generator.
-            load_preset_map_grid(planet_name, sector as u16, &mut registry)
+            // No preset map: planet sectors fall back to the planet generator.
+            None
         };
         let generated_sector = if loaded.is_none() {
             // H05 T2: the campaign primes the live threat/enemy-base flags;
@@ -7865,14 +7883,32 @@ impl MindSimHost {
             .map(|seed| seed as i64)
             .unwrap_or(-1);
         d.set("seed", &seed.to_variant());
-        let (ore, boulders, ore_sample, boulder_sample) = match self.content_snapshot.as_ref() {
-            Some(content) => count_world_gen(&self.sim.grid, content),
-            None => (0, 0, Vec::new(), Vec::new()),
-        };
+        // Exact decimal form: the seed is a u64 and Godot `int` is signed, so a
+        // draw above `i64::MAX` (common: `Time.get_ticks_usec()`-derived) wraps
+        // in `seed`. `seed_u64` is the reproducible value for
+        // `MindSimHost::set_next_map_gen_seed`.
+        let seed_u64 = self
+            .sim
+            .map_gen_seed()
+            .map(|seed| seed.to_string())
+            .unwrap_or_default();
+        d.set("seed_u64", &GString::from(seed_u64.as_str()).to_variant());
+        let (ore, boulders, ore_sample, boulder_sample, boulder_blocks) =
+            match self.content_snapshot.as_ref() {
+                Some(content) => count_world_gen(&self.sim.grid, content),
+                None => (0, 0, Vec::new(), Vec::new(), Vec::new()),
+            };
         d.set("ore", &ore.to_variant());
         d.set("boulders", &boulders.to_variant());
         d.set("ore_tiles", &pack_coords(ore_sample).to_variant());
         d.set("boulder_tiles", &pack_coords(boulder_sample).to_variant());
+        // Per-prop breakdown (the genfilter's own output mix, e.g.
+        // `snow-boulder`/`basalt-boulder` for `groundZero`'s scatter stack).
+        let mut blocks: Dictionary<GString, Variant> = Dictionary::new();
+        for (name, count) in boulder_blocks {
+            blocks.set(&GString::from(name.as_str()), &count.to_variant());
+        }
+        d.set("boulder_blocks", &blocks.to_variant());
         d
     }
 
@@ -10668,15 +10704,19 @@ fn load_base_catalog(registry: &ContentRegistry) -> Option<mind_core::ai::BaseRe
     Some(bases)
 }
 
-/// `World.loadSector` preset branch: loads the preset's `maps/<planet>/<map>.msav`
-/// through the save reader into a fresh [`WorldGrid`]. Returns `None` when the
-/// sector cell has no preset, the file is absent, or the load fails (the caller
-/// then uses the planet generator).
-fn load_preset_map_grid(
+/// `World.loadSector` preset branch: resolves the preset's
+/// `maps/<planet>/<map>.msav` path. Returns `None` when the sector cell has no
+/// preset or the file is absent (the caller then uses the planet generator).
+///
+/// The caller loads the resolved path through [`load_map_grid_file`] — a preset
+/// map is a *map* load (`FileMapGenerator.generate` -> `SaveIO.load(map.file,
+/// world.new FilterContext(map))`), so its `genfilters` scatter/ore stack runs;
+/// [`load_grid_file`] stays the plain save/resume reader.
+fn resolve_preset_map_path(
     planet_name: &str,
     sector: u16,
-    registry: &mut ContentRegistry,
-) -> Option<LoadedGrid> {
+    registry: &ContentRegistry,
+) -> Option<String> {
     // Resolve `sector.preset` and its map name (`SectorPreset.initialize`).
     let (owner_name, map_name) = {
         let planet = registry.planet_by_name(planet_name)?;
@@ -10700,13 +10740,7 @@ fn load_preset_map_grid(
         log::warn!("load_sector: preset map missing `{path}`");
         return None;
     }
-    let loaded = load_grid_file(&path, registry)?;
-    log::info!(
-        "load_sector: loaded preset map `{owner_name}/{map_name}` ({}x{})",
-        loaded.grid.tiles.width,
-        loaded.grid.tiles.height
-    );
-    Some(loaded)
+    Some(path)
 }
 
 /// Reads an `.msav`/`MGRS` file into a fresh [`WorldGrid`] through the save
@@ -10728,7 +10762,9 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
 
 /// [`load_grid_file`] for map loads: runs the `World.FilterContext` step with
 /// `seed` (`World.loadMap`, `World.java:341-357,661-695`), so the map's
-/// `genfilters`/default stack lands ore and boulders before `endMapLoad`.
+/// `genfilters`/default stack lands ore and boulders before `endMapLoad`. Both
+/// the editor map load and a campaign preset launch (`FileMapGenerator`) go
+/// through this path.
 fn load_map_grid_file(path: &str, registry: &mut ContentRegistry, seed: u64) -> Option<LoadedGrid> {
     let bytes = FileAccess::get_file_as_bytes(path);
     let save = match mind_core::io::sim_io::decode_map_bytes(bytes.as_slice(), registry, seed) {
@@ -10783,11 +10819,13 @@ type GenCoords = Vec<(i32, i32)>;
 fn count_world_gen(
     grid: &WorldGrid,
     content: &ContentRegistry,
-) -> (i64, i64, GenCoords, GenCoords) {
+) -> (i64, i64, GenCoords, GenCoords, Vec<(String, i64)>) {
     let mut ore = 0i64;
     let mut boulders = 0i64;
     let mut ore_sample: GenCoords = Vec::new();
     let mut boulder_sample: GenCoords = Vec::new();
+    let mut boulder_blocks: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
     for (pos, index) in grid.iter_row_major() {
         let tile = grid.tile_ref(index);
         if content
@@ -10804,12 +10842,21 @@ fn count_world_gen(
             .is_some_and(|def| def.kind == BlockKind::StaticProp && def.name.contains("boulder"))
         {
             boulders += 1;
+            if let Some(def) = content.block(tile.block) {
+                *boulder_blocks.entry(def.name.clone()).or_insert(0) += 1;
+            }
             if boulder_sample.len() < 8 {
                 boulder_sample.push((i32::from(pos.x()), i32::from(pos.y())));
             }
         }
     }
-    (ore, boulders, ore_sample, boulder_sample)
+    (
+        ore,
+        boulders,
+        ore_sample,
+        boulder_sample,
+        boulder_blocks.into_iter().collect(),
+    )
 }
 
 /// Packs `(x, y)` pairs into a flat `PackedInt32Array` (debug probes).

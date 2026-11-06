@@ -1180,6 +1180,41 @@ mod tests {
         assert_eq!(decorated.len(), 30, "only the Java floors: {decorated:?}");
     }
 
+    /// `JsonIO` resolves `genfilters` block names through
+    /// `ContentLoader.getByName`, which applies the legacy block-name map: the
+    /// shipped `groundZero` tag carries `flooronto:sand`, and that must target
+    /// `sand-floor` rather than fall back to `air` — `ScatterFilter` reads `air`
+    /// as "any floor" (`ScatterFilter.java:31`).
+    #[test]
+    fn scatter_flooronto_resolves_legacy_block_name() {
+        let content = test_registry();
+        let stone = content.block_id("stone").expect("stone");
+        let sand = content.block_id("sand-floor").expect("sand-floor");
+        let boulder = content.block_id("boulder").expect("boulder");
+        let mut tiles = crate::world::tiles::Tiles::new(4, 4);
+        for index in 0..tiles.len() {
+            let tile = tiles.geti_mut(index);
+            tile.floor = if index % 2 == 0 { sand } else { stone };
+            tile.block = BlockId::AIR;
+            tile.overlay = BlockId::AIR;
+        }
+        let mut stack = read_filters(
+            &content,
+            r#"[{"class":"scatter","chance":1.0,"flooronto":"sand","block":"boulder"}]"#,
+        );
+        assert_eq!(stack.len(), 1, "the entry parses");
+        let mut rng = SimRng::new(3);
+        apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+        for index in 0..tiles.len() {
+            let tile = tiles.geti(index);
+            if tile.floor == sand {
+                assert_eq!(tile.block, boulder, "sand-floor tile scattered");
+            } else {
+                assert_eq!(tile.block, BlockId::AIR, "stone tile untouched");
+            }
+        }
+    }
+
     /// L02 T1: the default stack (`Maps.readFilters("")`, `Maps.java:333-336`)
     /// scatters `boulder` on stone and `sand-boulder` on sand at
     /// `ScatterFilter.chance = 0.013` (`ScatterFilter.java:10`). The old

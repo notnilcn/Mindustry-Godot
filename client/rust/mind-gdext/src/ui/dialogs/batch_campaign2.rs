@@ -2555,12 +2555,10 @@ impl DialogController for LoadoutDialog {
 /// requirement item so all items can be stepped at least once.
 fn loadout_seed(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
     let mut seed_amounts = VarDictionary::new();
-    // `Universe.getLaunchResources()`: the name-keyed stacks endpoint is the
-    // live facade reader (`get_launch_resources` returns the dense sequence).
-    let mut live = dialog.campaign_json("get_launch_resources", &[]);
-    if live.is_empty() {
-        live = dialog.campaign_json("get_launch_resource_stacks", &[]);
-    }
+    // `Universe.getLaunchResources()`: read the name-keyed stacks endpoint.
+    // `get_launch_resources` returns the dense `PackedInt32Array`, which
+    // `campaign_json`'s GString cast cannot parse (PAR-0488).
+    let live = dialog.campaign_json("get_launch_resource_stacks", &[]);
     let index = {
         let st = state.borrow();
         st.index
@@ -2950,6 +2948,26 @@ impl DialogController for LaunchLoadoutDialog {
 
     fn shown(&mut self, dialog: &mut MindDialog) {
         launch_rebuild(dialog, &self.state);
+        // `LaunchLoadoutDialog.@resources` gives the editor a hider callback
+        // (`LaunchLoadoutDialog.java:138-141`): committing an amount writes the
+        // live launch resources back and rebuilds the parent's total/rows. The
+        // editor signals `loadout_changed` on every committed edit (PAR-0488).
+        let Some(loadout) = dialog_node("loadout") else {
+            return;
+        };
+        let target = dialog.to_gd();
+        let callable = Callable::from_fn("launch_loadout_changed", move |_args: &[&Variant]| {
+            let mut node = target.clone();
+            let mut bound = node.bind_mut();
+            bound.refresh_controller();
+        });
+        connect_once(
+            dialog,
+            "loadout_changed",
+            &loadout,
+            "loadout_changed",
+            &callable,
+        );
     }
 }
 

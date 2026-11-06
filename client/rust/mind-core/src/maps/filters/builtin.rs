@@ -32,10 +32,27 @@ fn block_name(registry: &ContentRegistry, id: BlockId) -> String {
         .unwrap_or_else(|| "air".to_owned())
 }
 
+/// Resolves a `genfilters` block name the way `JsonIO`'s `Block` serializer
+/// does (`JsonIO.java:201-204`): `ContentLoader.getByName(block, name)` first,
+/// then the `SaveVersion.fallback` rename (`SaveFileReader.fallback`,
+/// `chunk::map_fallback`), else `Blocks.air`.
+///
+/// The shipped preset tags rely on the fallback (`groundZero` carries
+/// `flooronto:sand`, which must mean `sand-floor`); without it the entry would
+/// resolve to `air`, which `ScatterFilter` reads as "any floor"
+/// (`ScatterFilter.java:31`) and the map would gain boulders on every floor.
 fn block_id(registry: &ContentRegistry, name: &str) -> BlockId {
-    registry
-        .block_by_name(name)
-        .map(|def| def.id)
+    let resolve = |name: &str| {
+        registry
+            .get_by_name(crate::content::ContentType::Block, name)
+            .and_then(|content| registry.block(BlockId::new(content.id)))
+            .map(|def| def.id)
+    };
+    resolve(name)
+        .or_else(|| {
+            let fallback = crate::io::save::chunk::map_fallback(name);
+            (fallback != name).then(|| resolve(fallback)).flatten()
+        })
         .unwrap_or(BlockId::AIR)
 }
 

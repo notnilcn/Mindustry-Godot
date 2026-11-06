@@ -192,6 +192,14 @@ pub struct SectorView {
     pub vulnerable: bool,
     /// `displayThreat` colour, 8 hex digits (`ff998dff`).
     pub threat_color: String,
+    /// `PlanetDialog.draw` hover reason for a cell that is not selectable
+    /// (`SerpuloPlanetGenerator.getLockedText`): `"shielded"`, `"foundation"`
+    /// (`sector.foundationrequired`) or `"locked"`; `None` when the planet has
+    /// no generator and Java shows no text.
+    pub hover_lock: Option<&'static str>,
+    /// `PlanetDialog.java:965` outer hover gate:
+    /// `!(sector.preset == null && !planet.allowLaunchToNumbered)`.
+    pub hover_allowed: bool,
 }
 
 /// One `@sectors.import` source row (`SectorInfo.eachImport`): the sector that
@@ -948,6 +956,8 @@ fn sector_view(planet: &Planet, sector: &Sector, registry: &ContentRegistry) -> 
         objectives: Vec::new(),
         vulnerable: false,
         threat_color: threat_color(sector.threat),
+        hover_lock: None,
+        hover_allowed: true,
     }
 }
 
@@ -1384,6 +1394,27 @@ pub fn annotate_globe(
         view.show_action = sector.has_base()
             || view.selectable
             || preset.is_some_and(|preset| preset.unlock.always_unlocked);
+        // `PlanetDialog.draw` hover label (PlanetDialog.java:956-977):
+        // `!(hovered.preset == null && !planet.allowLaunchToNumbered)` gates
+        // the text, then a non-selectable cell asks the generator for a reason.
+        view.hover_allowed = !(sector.preset.is_none() && !def.allow_launch_to_numbered);
+        view.hover_lock = if def.generator == GeneratorKind::None {
+            None
+        } else if (sector.preset.is_none() || !require_unlock)
+            && near(sector.id).iter().any(|&other| is_based(other))
+        {
+            // `SerpuloPlanetGenerator.getLockedText` (:114-123): a numbered /
+            // submission cell next to a base needs a foundation core, or is
+            // shielded by a megabase's `shieldSectors`.
+            Some(if sector.is_shielded(planet) {
+                "shielded"
+            } else {
+                "foundation"
+            })
+        } else {
+            // `PlanetGenerator.getLockedText` (:46-48).
+            Some("locked")
+        };
     }
     views
 }
@@ -1417,6 +1448,26 @@ pub fn sector_views(
             view
         })
         .collect()
+}
+
+/// Dense item-id-indexed launch resource sequence from a name-keyed map.
+///
+/// `Universe.updateLaunchResources(ItemSeq)` (`Universe.java:113-116`) persists
+/// the `ItemSeq` in item-id order; the loadout editor produces `{item: amount}`
+/// rows, so this is the name→id projection the launch flow charges and stocks.
+/// Unknown names are ignored and negative amounts clamp to zero.
+pub fn launch_resource_sequence(registry: &ContentRegistry, amounts: &[(String, i64)]) -> Vec<i32> {
+    let mut out = vec![0i32; registry.items().len()];
+    for (name, amount) in amounts {
+        let Some(item) = registry.item_id(name) else {
+            continue;
+        };
+        let clamped = (*amount).clamp(0, i32::MAX as i64) as i32;
+        if let Some(slot) = out.get_mut(item.raw() as usize) {
+            *slot = clamped;
+        }
+    }
+    out
 }
 
 /// Builds the tech-tree nodes for a planet (or all nodes when `planet` is None).
@@ -2832,5 +2883,163 @@ mod tests {
         for id in PROVIDERS {
             assert!(!view(id).shielded);
         }
+    }
+
+    /// PAR-0488: the loadout editor's `{item: amount}` rows project onto the
+    /// dense item-id-indexed `ItemSeq` that `Universe.updateLaunchResources`
+    /// persists and the launch flow charges/stocks.
+    #[test]
+    fn launch_resource_sequence_maps_names_to_item_ids() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let copper = registry.item_id("copper").expect("copper");
+        let lead = registry.item_id("lead").expect("lead");
+        let sequence = launch_resource_sequence(
+            &registry,
+            &[
+                (String::from("copper"), 2510),
+                (String::from("lead"), -3),
+                (String::from("not-an-item"), 5),
+            ],
+        );
+        assert_eq!(sequence.len(), registry.items().len());
+        assert_eq!(sequence[copper.raw() as usize], 2510);
+        assert_eq!(sequence[lead.raw() as usize], 0, "negative clamps");
+        assert_eq!(
+            sequence.iter().filter(|amount| **amount != 0).count(),
+            1,
+            "unknown names are dropped"
+        );
+    }
+
+    /// PAR-0494: the reason a non-selectable cell shows under the cursor
+    /// (`PlanetDialog.java:956-977` + `SerpuloPlanetGenerator.java:114-123`):
+    /// a numbered/submission cell next to a base needs a foundation core or is
+    /// shielded, a tech-gated preset says "Locked", a numbered cell on a planet
+    /// without `allowLaunchToNumbered` shows nothing.
+    #[test]
+    fn hover_lock_reason_matches_generator() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+        const GZ: u16 = 170;
+        const STORMRIDER: u16 = 27;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let serpulo = registry.planet_by_name("serpulo").expect("serpulo").id;
+        let mut campaign =
+            Campaign::from_registry(&registry, &crate::game::planet::EmptyNeighborhood);
+        // The runtime builds `planet.neighbors` from the icosphere grid
+        // (`Campaign::from_registry`), so these are the vanilla adjacencies.
+        let numbered = campaign
+            .planet(serpulo)
+            .expect("serpulo")
+            .neighbors
+            .get(GZ as usize)
+            .expect("gz neighbours")
+            .iter()
+            .copied()
+            .find(|id| {
+                campaign.planet(serpulo).expect("serpulo").sectors[*id as usize]
+                    .preset
+                    .is_none()
+            })
+            .expect("numbered neighbour of ground zero");
+        let shield_neighbour = campaign
+            .planet(serpulo)
+            .expect("serpulo")
+            .neighbors
+            .get(STORMRIDER as usize)
+            .and_then(|neighbours| neighbours.first().copied())
+            .expect("stormrider neighbour");
+        let far = (0..campaign.planet(serpulo).expect("serpulo").sectors.len() as u16)
+            .find(|id| {
+                campaign.planet(serpulo).expect("serpulo").sectors[*id as usize]
+                    .preset
+                    .is_none()
+                    && *id != GZ
+                    && *id != numbered
+                    && !campaign
+                        .planet(serpulo)
+                        .expect("serpulo")
+                        .neighbors
+                        .get(GZ as usize)
+                        .is_some_and(|neighbours| neighbours.contains(id))
+            })
+            .expect("numbered sector away from ground zero");
+        let frozen = registry
+            .sector_by_name("frozenForest")
+            .expect("frozenForest");
+        for id in [GZ, shield_neighbour] {
+            let sector = &mut campaign.planet_mut(serpulo).expect("serpulo").sectors[id as usize];
+            sector.save = Some(format!("sector-serpulo-{id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+        }
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors(), &registry),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(view(numbered).has_base || !view(numbered).has_base);
+        assert_eq!(
+            view(numbered).hover_lock,
+            Some("foundation"),
+            "a numbered cell next to a base needs the foundation core"
+        );
+        assert!(view(numbered).hover_allowed);
+        assert_eq!(
+            view(STORMRIDER).hover_lock,
+            Some("shielded"),
+            "a shielded submission cell next to a base shows the shield reason"
+        );
+        assert_eq!(
+            view(frozen.sector).hover_lock,
+            Some("locked"),
+            "a tech-gated preset falls back to `Locked`"
+        );
+        assert_eq!(
+            view(far).hover_lock,
+            Some("locked"),
+            "a numbered cell with no based neighbour says `Locked`"
+        );
+
+        // Erekir (`allowLaunchToNumbered = false`): numbered cells show no text
+        // (`PlanetDialog.java:965`).
+        let erekir = campaign.planet_id_by_name("erekir").expect("erekir");
+        let numbered_erekir = campaign
+            .planet(erekir)
+            .expect("erekir")
+            .sectors
+            .iter()
+            .find(|sector| sector.preset.is_none())
+            .map(|sector| sector.id)
+            .expect("erekir numbered sector");
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(erekir).expect("erekir");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors(), &registry),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(
+            !view(numbered_erekir).hover_allowed,
+            "Erekir suppresses numbered hover text"
+        );
     }
 }

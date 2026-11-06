@@ -190,6 +190,13 @@ impl Map {
     /// Maps with a `build` tag in `1..83` and no `genfilters` use an empty
     /// stack (upstream legacy rule); otherwise the `genfilters` JSON (or the
     /// default stack when absent) is parsed.
+    ///
+    /// Preset `.msav` tags are Arc JSON with bare object keys
+    /// (`[{class:scatter,chance:0.015,flooronto:shale,block:shale-boulder}]`),
+    /// while the editor writes strict JSON; upstream `Map.filters()` parses
+    /// through `JsonIO`, which accepts both. The tag is normalized with
+    /// [`crate::io::json::quote_bare_keys`] before the strict parse so a legacy
+    /// preset stack is honoured instead of falling back to the default stack.
     pub fn filters(
         &self,
         content: &ContentRegistry,
@@ -197,7 +204,8 @@ impl Map {
         if self.build_lt_83() && self.genfilters_json().is_none() {
             Vec::new()
         } else {
-            super::filters::read_filters(content, self.genfilters_json().unwrap_or(""))
+            let json = crate::io::json::quote_bare_keys(self.genfilters_json().unwrap_or(""));
+            super::filters::read_filters(content, &json)
         }
     }
 
@@ -384,6 +392,61 @@ mod tests {
             100,
         );
         assert!(!modern.filters(&content).is_empty());
+    }
+
+    /// `Map.filters()` accepts the Arc-style bare-key `genfilters` that every
+    /// shipped preset `.msav` carries (`Map.java:120-125` parses through
+    /// `JsonIO`, which tolerates bare keys). A strict-JSON reader would fail and
+    /// silently substitute the default scatter+ore stack.
+    #[test]
+    fn filters_accept_arc_style_genfilters_tag() {
+        let content = crate::content::test_support::test_registry();
+        let map = Map::new(
+            PathBuf::from("/maps/serpulo/groundZero.msav"),
+            256,
+            256,
+            tags(&[
+                ("name", "Ground Zero"),
+                (
+                    "genfilters",
+                    "[{class:scatter,chance:0.015,flooronto:shale,block:shale-boulder},\
+                     {class:ore,ore:ore-copper,scl:8.0,threshold:0.35}]",
+                ),
+            ]),
+            false,
+            1,
+            -1,
+        );
+        let filters = map.filters(&content);
+        let classes: Vec<&str> = filters.iter().map(|filter| filter.class_tag()).collect();
+        assert_eq!(
+            classes,
+            vec!["scatter", "ore"],
+            "the authored stack is parsed, not the default stack"
+        );
+
+        // Strict JSON (what the editor writes) parses to the same stack.
+        let strict = Map::new(
+            PathBuf::from("/maps/custom.msav"),
+            16,
+            16,
+            tags(&[
+                ("name", "Custom"),
+                (
+                    "genfilters",
+                    r#"[{"class":"scatter","chance":0.015,"flooronto":"shale","block":"shale-boulder"}]"#,
+                ),
+            ]),
+            true,
+            1,
+            100,
+        );
+        let classes: Vec<&str> = strict
+            .filters(&content)
+            .iter()
+            .map(|filter| filter.class_tag())
+            .collect();
+        assert_eq!(classes, vec!["scatter"]);
     }
 
     #[test]

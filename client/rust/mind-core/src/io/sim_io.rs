@@ -3295,6 +3295,13 @@ mod map_filter_tests {
     /// field guarantees overlay tiles on a small fixture grid.
     const ORE_TAG: &str = r#"[{"class":"ore","ore":"ore-copper","scl":8.0,"threshold":0.35}]"#;
 
+    /// `groundZero`-style scatter stack: `class:scatter` on the stone floor with
+    /// an explicit prop (`{"class":scatter,"chance":0.015,"flooronto":shale,
+    /// "block":shale-boulder}` in the shipped `.msav`; an entry without `block`
+    /// defaults to air and places nothing, as in `ScatterFilter.java:11`).
+    const SCATTER_TAG: &str =
+        r#"[{"class":"scatter","chance":0.5,"flooronto":"stone","block":"boulder"}]"#;
+
     /// Writes a 64x64 flat-stone map fixture carrying `extra` meta tags and
     /// returns the encoded native container bytes.
     fn map_bytes(
@@ -3302,12 +3309,26 @@ mod map_filter_tests {
         name: &str,
         extra: &[(&str, &str)],
     ) -> Vec<u8> {
+        map_bytes_with_authored_block(registry, name, extra, None)
+    }
+
+    /// [`map_bytes`] with one authored block at `(4, 4)` so the filter pass can
+    /// be checked against authored tile data (`preset .msav` tiles survive).
+    fn map_bytes_with_authored_block(
+        registry: &crate::content::ContentRegistry,
+        name: &str,
+        extra: &[(&str, &str)],
+        authored: Option<crate::content::BlockId>,
+    ) -> Vec<u8> {
         let fs = MockFs::new();
         let file = std::path::PathBuf::from(format!("/maps/{name}.msav"));
         let mut world = FixtureWorld::new(registry, 64, 64);
         let stone = registry.block_id("stone").expect("stone floor");
         for floor in world.floors.iter_mut() {
             *floor = stone;
+        }
+        if let Some(block) = authored {
+            world.blocks[4 * 64 + 4] = block;
         }
         let mut tags = base_meta_tags(64, 64, 0, name);
         tags.insert("name".to_owned(), name.to_owned());
@@ -3320,6 +3341,22 @@ mod map_filter_tests {
         ctx.entities = Some(&world);
         SaveIo::save(&fs, &file, &ctx, &SaveOptions::new()).expect("write fixture");
         fs.read(&file).expect("fixture bytes")
+    }
+
+    fn boulder_tiles(
+        grid: &WorldGrid,
+        registry: &crate::content::ContentRegistry,
+    ) -> Vec<(i16, i16)> {
+        let mut out = Vec::new();
+        for (pos, index) in grid.iter_row_major() {
+            let block = grid.tile_ref(index).block;
+            if registry.block(block).is_some_and(|def| {
+                def.kind == BlockKind::StaticProp && def.name.contains("boulder")
+            }) {
+                out.push((pos.x(), pos.y()));
+            }
+        }
+        out
     }
 
     fn ore_tiles(grid: &WorldGrid, registry: &crate::content::ContentRegistry) -> Vec<(i16, i16)> {
@@ -3405,6 +3442,58 @@ mod map_filter_tests {
         let filtered = decode_map_bytes(&bytes, &mut registry, 5).expect("filtered decode");
         assert!(ore_tiles(&filtered.grid, &registry).is_empty());
         assert!(tiles_equal(&plain.grid, &filtered.grid));
+    }
+
+    /// (d) A preset sector map (`SectorPreset.generator` ->
+    /// `FileMapGenerator.generate` -> `SaveIO.load(map.file, FilterContext)`,
+    /// `FileMapGenerator.java:71-82`) lands its `genfilters` scatter stack on a
+    /// map load, exactly like a custom-game map (`groundZero` carries five
+    /// `class:scatter` entries). Authored tile data survives the pass, and the
+    /// recorded seed reproduces the placement.
+    #[test]
+    fn preset_map_load_applies_genfilter_scatter() {
+        let mut registry = test_registry();
+        let boulder = registry.block_id("boulder").expect("boulder prop");
+        let bytes = map_bytes_with_authored_block(
+            &registry,
+            "Preset",
+            &[("genfilters", SCATTER_TAG)],
+            Some(boulder),
+        );
+        // The plain (save/resume) reader keeps only the authored prop: the
+        // sector-preset path must not use it.
+        let plain = decode_save_bytes(&bytes, &mut registry).expect("plain decode");
+        assert_eq!(
+            boulder_tiles(&plain.grid, &registry),
+            vec![(4, 4)],
+            "a save decode keeps authored tiles and runs no scatter pass"
+        );
+
+        let filtered = decode_map_bytes(&bytes, &mut registry, 11).expect("filtered decode");
+        let placed = boulder_tiles(&filtered.grid, &registry);
+        assert!(
+            placed.len() > 100,
+            "the scatter stack lands boulders on the stone floor ({} placed)",
+            placed.len()
+        );
+        assert!(
+            placed.contains(&(4, 4)),
+            "the authored prop survives the filter pass"
+        );
+        assert_eq!(filtered.map_gen_seed, Some(11));
+
+        let again = decode_map_bytes(&bytes, &mut registry, 11).expect("filtered decode");
+        assert_eq!(
+            boulder_tiles(&again.grid, &registry),
+            placed,
+            "the recorded seed reproduces the scatter placement"
+        );
+        let rerolled = decode_map_bytes(&bytes, &mut registry, 12).expect("filtered decode");
+        assert_ne!(
+            boulder_tiles(&rerolled.grid, &registry),
+            placed,
+            "a fresh seed re-rolls the scatter placement"
+        );
     }
 
     /// The decoded seed survives into the state dump (`map_gen_seed`) and is

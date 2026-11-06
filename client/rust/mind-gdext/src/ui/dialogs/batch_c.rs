@@ -3433,18 +3433,75 @@ fn planet_update_hover(
         let planet = st.selected_planet.clone();
         for sector in planet_sectors(dialog, st, &planet) {
             let sector_tile = planet_view_tile(view, &sector);
-            if sector_tile == tile && !row_bool(&sector, "locked") {
-                name_text = planet_localized_sector(&sector);
-                break;
+            if sector_tile != tile {
+                continue;
             }
+            // `PlanetDialog.draw` hover label (`PlanetDialog.java:956-977`):
+            // selectable cells show `[accent][[ [white]name[accent] ]`; a
+            // locked numbered/submission cell next to a base explains the
+            // reason from the generator (`SerpuloPlanetGenerator
+            // .getLockedText`); `planetLaunch` shows the cancel glyph.
+            let selectable = if st.launch_mode == "planetLaunch" {
+                row_bool(&sector, "accelerator_selectable")
+            } else {
+                row_bool(&sector, "selectable")
+            };
+            if selectable {
+                name_text = format!(
+                    "[color=#ffd37fff][lb] [color=white]{}[color=#ffd37fff] ]",
+                    planet_localized_sector(&sector)
+                );
+            } else if !row_bool_or(&sector, "hover_allowed", true) {
+                name_text = String::new();
+            } else if st.launch_mode == "planetLaunch" {
+                name_text = format!("[color=#7f7f7fff]{}[/color]", kit::icons::glyph("cancel"));
+            } else if st.launch_mode != "select" {
+                name_text = planet_hover_lock_text(&sector);
+            }
+            break;
         }
     }
     planet_view_call(
         view,
-        "set_sector_label",
+        "set_sector_label_markup",
         &[GString::from(name_text.as_str()).to_variant()],
     );
     planet_view_call(view, "set_hover", &[tile.to_variant()]);
+}
+
+/// `PlanetGenerator.getLockedText` (`SerpuloPlanetGenerator.java:114-123`):
+/// the reason a non-selectable cell shows under the cursor. The reason kind
+/// comes from the sector row (`hover_lock`, computed host-side).
+fn planet_hover_lock_text(sector: &VarDictionary) -> String {
+    match row_str(sector, "hover_lock").as_str() {
+        "shielded" => format!(
+            "[color=#ff0000ff]{}[/color]{}",
+            kit::icons::glyph("defense"),
+            kit::tm("@sector.shielded")
+        ),
+        "foundation" => {
+            let emoji = kit::assets()
+                .map(|assets| {
+                    assets
+                        .bind()
+                        .unicode_str(GString::from("core-foundation"))
+                        .to_string()
+                })
+                .unwrap_or_default();
+            format!(
+                "[color=#ff0000ff]{}[/color]{}{}",
+                kit::icons::glyph("cancel"),
+                emoji,
+                kit::tm("@sector.foundationrequired")
+            )
+        }
+        "locked" => format!(
+            "[color=#7f7f7fff]{} {}[/color]",
+            kit::icons::glyph("lock"),
+            kit::t("@locked")
+        ),
+        _ => String::new(),
+    }
 }
 
 /// `_over_ui`: the rail, the sector list and the button row are not the globe.

@@ -37,8 +37,8 @@ or an ordering-dependent inference).
 | 3 | `Build:` objective text is composed with the wrong arguments (raw id, no icon/name) | **P1** | **FIXED** — twin-verified, PAR-0479 |
 | 4 | Campaign autosave fires once per hour instead of once per minute | **P1** | **FIXED** — twin-verified, PAR-0480 |
 | 5 | Launching to another sector never saves the sector you leave | **P1** | **FIXED** — verified in-engine, PAR-0481 (Java leg blocked) |
-| 6 | Authored sector maps skip `genfilters` (groundZero loses its scatter boulders) | **P1** | code-confirmed |
-| 7 | Authored sector weather is overwritten on every fresh landing | **P1** | code-confirmed |
+| 6 | Authored sector maps skip `genfilters` (groundZero loses its scatter boulders) | **P1** | **FIXED** — twin-verified, PAR-0483 |
+| 7 | Authored sector weather is overwritten on every fresh landing | **P1** | **REFUTED** — Java overwrites it too, PAR-0482 |
 | 8 | Core + adjacent container/vault is not one item pool; unloader layouts dead-end | **P1** | code-confirmed |
 | 9 | `SectorInfo.resources` is never computed (sector panel/core info rows empty) | **P2** | code-confirmed |
 | 10 | Configure Loadout manual resource editor is inert; launch cost priced from the wrong loadout list | **P1** | code-confirmed |
@@ -465,7 +465,7 @@ dependency-objective behaviour.
   `up/ui/dialogs/LoadoutDialog.java:76-83`.
 - **Verification.** Edit copper +10 in the resource editor, close; read
   `MindCampaign.get_launch_resources()` — unchanged in Godot.
-- **Status.** Code-confirmed.
+- **Status.** **Partially fixed at HEAD (2026-11-06) — editor wiring landed, not yet twin-verified (`PAR-0488` remains `seeded`).** `loadout_seed` now reads `get_launch_resource_stacks` instead of the `PackedInt32Array` that `campaign_json`'s `GString` cast cannot parse; a `set_launch_resources` facade + `launch_resource_sequence` helper/test landed; and `LaunchLoadoutDialog::shown` connects `loadout_changed` to rebuild the parent's rows/total. The in-engine edit→close→launch round trip still needs a paired verification.
 
 ### CG-TECH-02 — Launch cost is priced from the planet's default-core loadout list — **P1**
 - **Symptom.** Once the launcher's best core is foundation/nucleus, the picker
@@ -582,7 +582,7 @@ dependency-objective behaviour.
   `up/maps/planet/SerpuloPlanetGenerator.java:114-123` (the two strings).
 - **Verification.** Hover a numbered sector adjacent to your base; screenshot
   the cursor label.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0494` (similarity 55.9).** `SectorView` gained `hover_lock`/`hover_allowed` and `annotate_globe` applies Java's gates (`PlanetDialog.java:956-977`, `SerpuloPlanetGenerator.java:114-123`, `PlanetGenerator.java:46-48`); `planet_update_hover` emits the Java label (accent name / planetLaunch cancel icon / shield / foundation / locked) via the new `set_sector_label_markup`. Hovering sector 63 next to a based GZ gives `⊗ <core-foundation> Core: Foundation Required Nearby` in both clients. See `runs/PAR-0494/`.
 
 ### CG-UI-04 — Campaign-complete overlay never appears at capture time — **P1**
 - **Symptom.** Capturing Serpulo's last sector does nothing in-game in the port;
@@ -656,7 +656,7 @@ finding.
 - **Verification.** Launch groundZero; count solid `*-boulder` tiles in the
   loaded grid at the stone basin east of spawn. Authored boulders remain;
   filter-placed ones are 0.
-- **Status.** Code-confirmed.
+- **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0483` (similarity 74.4).** Three defects had to land together: the preset path now resolves the map and calls `load_map_grid_file` (→`decode_map_bytes`) with a recorded `next_map_gen_seed()`; `Map::filters` quotes the bare-key Arc JSON before the strict parse (previously every shipped preset tag failed and silently fell back to the default stack); and `filters::builtin::block_id` uses Java's `SaveVersion.fallback` chain so `flooronto:sand` resolves to `sand-floor` instead of `air`. Probe: fresh GZ boulders **0 → 107** (Java 118), seed `-1 → 13842768`, authored ore 618 intact. See `runs/PAR-0483/`.
 
 ### CG-GEN-02 — Preset sectors bypass candidate resolution and the core invariant — **P2**
 - `gx/sim_host.rs:10695-10705` builds exactly one path
@@ -690,20 +690,20 @@ finding.
   wall ring, Godot open floor to the last tile.
 - **Status.** Code-confirmed.
 
-### CG-GEN-05 — Authored sector weather is thrown away on every fresh landing — **P1**
-- **Symptom.** `saltFlats`/`tarFields`/`atolls` sandstorm, `taintedWoods`
+### CG-GEN-05 — Authored sector weather is thrown away on every fresh landing — **P1 — REFUTED**
+- **Symptom (claimed).** `saltFlats`/`tarFields`/`atolls` sandstorm, `taintedWoods`
   sporestorm + always-fog, `sunkenPier` fog, etc. never play as authored; the
   sector gets terrain-derived weather instead.
-- **Godot evidence.** `gx/campaign.rs:1160-1176` overwrites `rules.weather`
-  with `add_weather` after loading the map, so the authored `weather:[…]`
-  (with `minFrequency`/`always`/cooldown) is lost on a fresh launch.
-- **Java evidence.** `up/core/World.java:266,303` runs `setSectorRules`
+- **Godot evidence (claimed).** `gx/campaign.rs:1160-1176` overwrites
+  `rules.weather` with `add_weather` after loading the map, so the authored
+  `weather:[…]` (with `minFrequency`/`always`/cooldown) is lost on a fresh launch.
+- **Java evidence (claimed).** `up/core/World.java:266,303` runs `setSectorRules`
   (`addWeather`) **before** `SaveIO.load`; `SaveVersion.readRules`
   (`up/io/SaveVersion.java:196`) then replaces `state.rules` with the map's
   rules, authored weather included.
 - **Verification.** Fresh-launch one of the authored weather sectors; compare
   `get_rules_json().weather` with the map metadata / Java.
-- **Status.** Code-confirmed.
+- **Status.** **Refuted at HEAD (2026-11-06) — in-engine verified with a Java probe, `PAR-0482`.** The claim above misread Java's call order: `World.loadSector` calls `setSectorRules` **twice**, and the second call (`World.java:292`) runs `planet.generator.addWeather` (`:303` → `clear()` + terrain re-derive) *after* `SaveVersion.readRules` installed the map rules. Empirically Java `playNewSector("saltFlats")` yields `rules.weather=[]` although the `.msav` authors a sandstorm (minFrequency 97200); GZ yields terrain-derived `snowing`, identical to the port's entry and window fields. The port's order (`adopt_map_rules` then `add_weather`) already matches, so there is no divergence to fix and no code change was made. The twin pair is the matched GZ fresh-landing state (`runs/PAR-0482/`), with the Java Salt Flats dump/frame as supporting evidence.
 
 ### CG-GEN-06 — `assets/planets/serpulo.json` is never loaded — **P2**
 - The file ships but no loader reads it; `preset_remap`/`attack_sectors` are
@@ -920,8 +920,10 @@ tolerance). They are recorded so future gap hunts do not re-audit them.
   `clearLoadoutInfo`, `checkAutoUnlocks` (PAR-0080 fix), `clearResearch` and
   node visibility propagation were checked and match; CG-TECH-05 is the one
   gate that is not consulted.
-- Authored weather is loaded from the map but overwritten afterwards
-  (CG-GEN-05); `addWeather` predicates themselves match Java.
+- Authored weather is **also** overwritten by Java on a fresh preset landing
+  (CG-GEN-05 refuted, PAR-0482): `World.loadSector`'s second `setSectorRules`
+  runs `generator.addWeather` after the map rules load; the port's order already
+  matches. `addWeather` predicates themselves match Java.
 - 223/223 Serpulo tech nodes resolve and render; the old PAR-0145 "root null"
   grouping no longer reproduces.
 - The tech-tree root-selector "dead Serpulo button" (CG-TECH-06) is **refuted**:
@@ -1003,10 +1005,10 @@ chains; `seeded` items carry the code evidence and a `source` anchor back here.
 | CG-TUT-03 | PAR-0479 | twin-verified | CG-TECH-01 | PAR-0488 | seeded |
 | CG-SECTOR-01 | PAR-0480 | twin-verified | CG-TECH-02 | PAR-0489 | seeded |
 | CG-SECTOR-02 | PAR-0481 | verified | CG-UI-01 | PAR-0490 | twin-verified |
-| CG-GEN-05 | PAR-0482 | seeded | CG-UI-04 | PAR-0491 | seeded |
-| CG-GEN-01 | PAR-0483 | seeded | CG-TUT-04 | PAR-0492 | verified |
+| CG-GEN-05 | PAR-0482 | verified (refuted) | CG-UI-04 | PAR-0491 | seeded |
+| CG-GEN-01 | PAR-0483 | twin-verified | CG-TUT-04 | PAR-0492 | verified |
 | CG-ECON-01 | PAR-0484 | seeded | CG-UI-02 | PAR-0493 | seeded |
-| CG-ECON-02 | PAR-0485 | seeded | CG-UI-03 | PAR-0494 | seeded |
+| CG-ECON-02 | PAR-0485 | seeded | CG-UI-03 | PAR-0494 | twin-verified |
 
 The other findings in §3–§9 remain doc-only (they need a Java leg or a deeper
 save state to verify) and are the natural next batch for the twin queue.
@@ -1037,17 +1039,21 @@ full recipes in `runs/<PAR>/`.
 | CG-TECH-06 (P2) | PAR-0496 | **refuted** (both clients show the 2-root picker; aligned Java's predicate anyway) | `root_select_visible(rows, selected_root_locked) = rows − selected_locked > 1` + test; no vanilla user-visible change | `runs/PAR-0496/`, `parity/twin/PAR-0496/` |
 | CG-ECON-05 (P2) | PAR-0498 | verified (Godot-only; captures exclude the OS cursor / no drill cursor is drawn) | `can_mine_tile` gates on `valid_mine` + `acceptsItem` + `playerUnmineable`; click path rejects a far tile | `runs/PAR-0498/` |
 | CG-HINT-01 (P2) | PAR-0499 | verified (Godot-only; the Java `desktopPause` state was unreachable at wave 1) | `desktopPause` completes on the `pause` hotkey press edge (`_on_hotkey` → `pause_key_tap`), not `is_paused()` | `runs/PAR-0499/` |
+| CG-UI-03 (P1) | PAR-0494 | twin-verified (55.9) | `SectorView.hover_lock`/`hover_allowed` + Java's `annotate_globe` gates; `planet_update_hover` emits the accent name / cancel icon / shield / foundation / locked label via `set_sector_label_markup` | `runs/PAR-0494/`, `parity/twin/PAR-0494/` |
+| New: research parent masking (P2) | PAR-0500 | twin-verified (92.1) | `tech_tree::research_parent_unlocked` resolves `UnlockFields.tech_node` (last-created node), so the popup prints `Research Silicon` instead of `Research ???` | `runs/PAR-0500/`, `parity/twin/PAR-0500/` |
+| CG-GEN-01 (P1) | PAR-0483 | twin-verified (74.4) | preset launches load through `decode_map_bytes` with a recorded seed; `Map::filters` quotes bare-key Arc JSON; `filters::builtin::block_id` applies Java's `SaveVersion.fallback` chain; GZ boulders 0 → 107 (Java 118) | `runs/PAR-0483/`, `parity/twin/PAR-0483/` |
+| CG-GEN-05 (P1) | PAR-0482 | **refuted** (Java also replaces authored weather on a fresh preset landing; port order already matches) | no code change; Java probe `playNewSector("saltFlats")` → `rules.weather=[]` | `runs/PAR-0482/`, `parity/twin/PAR-0482/` |
 
-New bugs recorded while fixing (all in `TWIN-VERIFICATION.json`):
+Partial progress this pass: **CG-TECH-01 / PAR-0488** — the launch-loadout editor
+wiring landed (stacks endpoint read, `set_launch_resources` facade,
+`loadout_changed` listener) but the edit→close→launch round trip is not yet
+paired, so the ledger item stays `seeded`.
+
+New bugs recorded while fixing (still open in `TWIN-VERIFICATION.json`):
 
 - **PAR-0495** (P2, mismatch) — a mid-session sector reload leaves the world
   renderer blank until the process restarts (observed while staging PAR-0492;
   not investigated).
-- **PAR-0500** (P2, mismatch) — `campaign.rs::research_parent_unlocked` masks
-  multi-node content by the *first* tech node's parent; Java uses
-  `content.techNode` (the last created), so Java prints `Research Silicon` where
-  the port prints `Research ???` (visible in the PAR-0497 pair). Fix: use
-  `UnlockFields.tech_node`.
 - Not filed, pre-existing, noted in PAR-0498: `get_mine_result` never falls back
   to `tile.floor().itemDrop`, so the `playerUnmineable` floor gate is currently
   unobservable in vanilla.

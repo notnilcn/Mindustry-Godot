@@ -223,6 +223,33 @@ pub fn dependencies_unlocked(registry: &ContentRegistry, node_ref: TechNodeRef) 
     true
 }
 
+/// `Objectives.Research.display()` gate (`Objectives.java:26-31`):
+/// `content.techNode == null || content.techNode.parent == null ||
+/// content.techNode.parent.content.unlockedHost()`.
+///
+/// `UnlockableContent.techNode` is overwritten by every `TechNode`
+/// constructor, so it points at the **last created** node — not the first node
+/// in `tech.nodes`. Content in more than one tree (e.g. `silicon` in the
+/// Serpulo and Erekir trees) therefore resolves through the later tree, exactly
+/// like Java (the upstream TODO calls this broken for multi-node content).
+pub fn research_parent_unlocked(registry: &ContentRegistry, content: ContentRef) -> bool {
+    let Some(node_ref) = unlock_fields(registry, content).and_then(|fields| fields.tech_node)
+    else {
+        return true;
+    };
+    let Some(node) = registry.tech().node(node_ref) else {
+        return true;
+    };
+    let Some(parent_ref) = node.parent else {
+        return true;
+    };
+    registry
+        .tech()
+        .node(parent_ref)
+        .and_then(|parent| parent.content)
+        .is_none_or(|parent_content| content_unlocked(registry, parent_content))
+}
+
 /// Whether every objective in `objectives` is met under `ctx`.
 pub fn objectives_complete(
     registry: &ContentRegistry,
@@ -624,6 +651,52 @@ mod tests {
     fn vanilla_trees_have_nodes() {
         let (registry, _store) = registry();
         assert!(!registry.tech().nodes.is_empty());
+    }
+
+    /// PAR-0500: `Objectives.Research.display()` resolves the parent through
+    /// `content.techNode` — the **last created** node — not the first node in
+    /// the store. `silicon` has a Serpulo node (parent `graphite`, locked on a
+    /// fresh profile) and a later Erekir node (parent `sand`, always unlocked),
+    /// so Java prints the name while the first-node lookup masked it as `???`.
+    #[test]
+    fn research_parent_uses_last_created_tech_node() {
+        let (registry, _store) = registry();
+        let silicon = registry.by_name("silicon").expect("silicon");
+        let fields = unlock_fields(&registry, silicon).expect("silicon unlock fields");
+        assert!(
+            fields.tech_nodes.len() > 1,
+            "silicon is in both vanilla tech trees"
+        );
+        assert_eq!(
+            fields.tech_node,
+            fields.tech_nodes.last().copied(),
+            "`techNode` is the node created last"
+        );
+        let first = registry
+            .tech()
+            .node(fields.tech_nodes[0])
+            .expect("first silicon node");
+        let last = registry
+            .tech()
+            .node(*fields.tech_nodes.last().unwrap())
+            .expect("last silicon node");
+        assert_ne!(
+            first.parent, last.parent,
+            "the two trees give silicon different parents"
+        );
+        let first_parent = first
+            .parent
+            .and_then(|parent| registry.tech().node(parent))
+            .and_then(|parent| parent.content)
+            .expect("first parent content");
+        assert!(
+            !content_unlocked(&registry, first_parent),
+            "the first tree's parent is still locked on a fresh profile"
+        );
+        assert!(
+            research_parent_unlocked(&registry, silicon),
+            "the last node's parent (`sand`, always unlocked) gates the display"
+        );
     }
 
     #[test]
