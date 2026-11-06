@@ -65,6 +65,39 @@ tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent 
   [`docs/CI-FIXER-PROMPT.md`](docs/CI-FIXER-PROMPT.md). The opencode agent is
   [`.opencode/agents/ci-fixer.md`](.opencode/agents/ci-fixer.md).
 
+## Close what you open
+
+Every agent **must close whatever it opened before it reports done** — the dev
+laptop is shared by the user, the main agent and every subagent. A Godot editor
+or game instance, a dev server, an SSH tunnel, a background job, a subagent or a
+detached shell left running keeps burning CPU/RAM and starves later work.
+Cleanup is part of the task: a turn is **incomplete** while a process it started
+is still running, even if the edit landed. This applies to *anything* an agent
+opens, not just the examples below.
+
+- **Godot editors and games**: stop the game you launched (`godot_game stop`, or
+  the equivalent stop action in the MCP client you use), close the editor
+  (`godot_instance terminate`, the `tools/godot.sh -e` window, or
+  `tools/parity-session.sh --stop` for a parity-session editor), then sweep
+  orphans as the addon guide describes: `pgrep -f "godot --path"` and kill any
+  process whose `--editor-pid` is gone.
+- **Servers and sessions**: `tools/mp-local.sh down` for the local SpacetimeDB
+  harness, `tools/parity-session.sh --stop` for the Xvfb + editor bridge, and the
+  matching shutdown for any other server, watcher, tunnel or display your session
+  opened.
+- **Background jobs and subagents**: wait for or cancel every job and subagent
+  you started before returning; never leave one running "for later", and never
+  leave a `&`/`nohup` process behind.
+- **Failures and interruptions count**: a failed, timed-out or interrupted
+  command does not transfer cleanup to the user or the next agent. Stop what you
+  started, then report.
+- **Only what you started**: never kill the user's editor/session, another
+  agent's processes, or the shared `dsh web`/MCP host. Verify with the tool's
+  status call (`godot_game status`, `godot_instance list`) plus `pgrep -af <name>`.
+
+"The next agent can close it" is not an excuse — the next agent should start it
+fresh.
+
 ## CI handoff: `CI_PENDING.json`
 
 Every landed change that a later full gate must validate gets one entry, written
