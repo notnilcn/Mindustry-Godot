@@ -1076,3 +1076,31 @@ planet-default-core loadout list), which needs a foundation/nucleus launcher.
 
 The remaining doc-only findings in §3–§9 are still open and are the next twin
 queue batch.
+
+---
+
+## 14. Headless gap-closing pass — 2026-11-07
+
+A headless-only fix pass (8 parallel Rust agents; no Java, no interactive Godot)
+closed the remaining campaign items and the wider `GAPS.md` / twin backlog. All
+work is merged into `main` and recorded as `verified` in
+`TWIN-VERIFICATION.json`; every item carries a note that the **Java twin leg is
+still pending** (the user runs that pass separately).
+
+| CG | Twin item | Status | Fix |
+|---|---|---|---|
+| CG-TECH-02 (P1) | PAR-0489 | verified (headless; twin pending) | launch cost prices the *selected* schematic (`launch_requirements` + staged `getLaunchResources`), destination `allowLaunchSchematics` gate, `plan.core` stamping |
+| CG-SAVE-03 (P2) | PAR-0507 | verified (headless) | only a free launch clears the stored loadout; resume keeps it |
+| CG-TECH-04 (P2) | PAR-0508 | verified (headless) | `Universe::get_loadout_index` restores by stem; confirm persists the stem |
+| CG-TECH-05 (P2) | PAR-0509 | verified (headless) | launcher `bestCoreType` only when the destination allows schematics; grid env filtering; preset description |
+| New: accelerator cutscene | PAR-0602 | verified (headless) | shared `LaunchSequence`, 20-bolt Fx lightning, 13 coreLandDust rings, white cover |
+| New: GameOver/Load dialogs | PAR-0604/0605 | verified (headless) | multiplayer waiting/disconnect + `difficulty.guide`; corrupt/missing save states + missing-asset rows |
+| New: SectorSubmissions / mods view-content | PAR-0606/0607 | verified (headless) | submission link tables; per-mod content grid |
+
+Merged main additionally has: the world_gen/ui/logic golden reconciliation
+(old→new checksums documented in PAR-0597 and the logic font note), the full
+`mind-core` / `mind-headless` / `mind-stdb` lib suites green, `tools/parity.sh
+--check` PASS, and the workspace `cargo clippy -- -D warnings` green. Remaining
+open items are the Java-visual legs (PAR-0151/0426/0435/0436/0449), the blocked
+ABI items (PAR-0513, PAR-0559), the Steam half (PAR-0591), and the net/UI
+residuals filed as PAR-0600/0601/0608.
