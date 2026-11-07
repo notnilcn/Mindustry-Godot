@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-07T02:33:56Z",
+  "updated": "2026-11-07T03:04:06Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1722,6 +1722,38 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib; ... -p mind-gdext --lib player",
       "expected": "109 + 25 pass; DIALOGCHECK failed=0",
       "risk": "roster JSON keys; all_bans admin-gated; Tab/Escape ordering vs MindUiRoot",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-030406",
+      "created_at": "2026-11-07T03:04:06Z",
+      "agent": "hx-26",
+      "branch": "main",
+      "head": "955f0c99",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/render,client/rust/mind-gdext/src",
+      "summary": "Logic player-view push + GAPS #53 fluid/tint/drawf/display (PAR-0612..0616)",
+      "files": [
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-gdext/src/camera.rs",
+        "client/rust/mind-core/src/render/liquid_frames.rs",
+        "client/rust/mind-core/src/render/draw_desc.rs",
+        "client/rust/mind-core/src/render/floor_main.rs",
+        "client/rust/mind-core/src/render/drawf.rs",
+        "client/rust/mind-gdext/src/render/floor.rs",
+        "client/rust/mind-gdext/src/display_context.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib logic_view; ... -p mind-core --lib render::",
+      "expected": "3 + 259 + 84 pass; headless boot exit 0",
+      "risk": "per-frame HUD lookups; DrawDesc liquid field surface; tint overlay; dash consumer pending",
       "status": "pending"
     }
   ]
