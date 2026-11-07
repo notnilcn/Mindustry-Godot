@@ -3239,6 +3239,8 @@ fn join_close(dialog: &Gd<MindDialog>) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]

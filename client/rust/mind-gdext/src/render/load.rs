@@ -503,17 +503,19 @@ mod tests {
     #[test]
     fn bars_match_the_java_formulas() {
         let renderer = LoadRenderer::new();
-        let mut values = LoadMetrics::default();
-        values.cores = 2;
-        values.asset_progress = 0.25;
-        values.gl_es = true;
-        values.java_heap_mb = 220.0;
-        values.version_build = 146;
-        values.version_modifier = String::from("beta");
-        values.os = LoadOs::Mac;
-        values.save_slots = 45;
-        values.settings_keys = 30;
-        values.mods = 8;
+        let values = LoadMetrics {
+            cores: 2,
+            asset_progress: 0.25,
+            gl_es: true,
+            java_heap_mb: 220.0,
+            version_build: 146,
+            version_modifier: String::from("beta"),
+            os: LoadOs::Mac,
+            save_slots: 45,
+            settings_keys: 30,
+            mods: 8,
+            ..Default::default()
+        };
         let bars = renderer.bars(&values);
         assert_eq!(bars.len(), BAR_TEXTS.len());
         assert_eq!(bars[0].text, "s_proc#");
@@ -539,11 +541,13 @@ mod tests {
     #[test]
     fn invalid_bars_are_skipped() {
         let renderer = LoadRenderer::new();
-        let mut values = LoadMetrics::default();
-        values.assets_ready = false;
-        values.save_slots = -1;
-        values.settings_keys = 0;
-        values.mods = -1;
+        let values = LoadMetrics {
+            assets_ready: false,
+            save_slots: -1,
+            settings_keys: 0,
+            mods: -1,
+            ..Default::default()
+        };
         let bars = renderer.bars(&values);
         assert!(!bars[1].valid, "assets bar hidden before assets load");
         assert!(!bars[6].valid, "saves bar hidden before saves load");

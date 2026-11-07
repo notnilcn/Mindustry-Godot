@@ -888,6 +888,8 @@ fn tile_block_def<'a>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     /// `DesktopInput.drawTop` F selection (`InputHandler.java:1757-1771`):

@@ -3989,6 +3989,8 @@ fn planet_over_ui(dialog: &mut MindDialog, st: &PlanetState, point: Vector2) -> 
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     /// PAR-0507: `PlanetDialog.playSelected` clears the stored loadout and

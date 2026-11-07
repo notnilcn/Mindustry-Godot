@@ -54,6 +54,8 @@ pub fn check_json(json: &str, headless: bool) -> Result<UpdateStatus, ReleaseErr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

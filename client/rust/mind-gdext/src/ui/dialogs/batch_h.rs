@@ -2664,6 +2664,8 @@ fn campaign_rules_apply(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     /// A fresh half-unique temp path for the save-check tests.

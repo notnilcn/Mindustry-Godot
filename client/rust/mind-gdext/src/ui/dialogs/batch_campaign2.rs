@@ -7222,6 +7222,8 @@ fn map_play_close_stack(dialog: &mut MindDialog) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]

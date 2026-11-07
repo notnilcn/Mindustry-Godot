@@ -257,6 +257,7 @@ impl LightBuffer {
 
     /// `LightRenderer.line(x, y, x2, y2, stroke, tint, alpha)`. Zero/negative
     /// strokes are ignored (they have no area, matching the Java quad).
+    #[allow(clippy::too_many_arguments)] // one parameter per Java `line` arg
     pub fn add_line(
         &mut self,
         x: f32,
@@ -966,6 +967,8 @@ fn rect_contains(rect: (f32, f32, f32, f32), x: f32, y: f32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     fn view(w: f32, h: f32) -> CameraView {
@@ -1050,7 +1053,7 @@ mod tests {
     fn region_light_stamps_tinted_pixels() {
         let view = view(16.0, 16.0);
         // 2x2 fully red, fully opaque region.
-        let pixels = Arc::new(RegionPixels::new(2, 2, vec![255, 0, 0, 255].repeat(4)));
+        let pixels = Arc::new(RegionPixels::new(2, 2, [255, 0, 0, 255].repeat(4)));
         let mut bytes = vec![0u8; 16 * 16 * 4];
         let light = RegionLight::new(8.0, 8.0, 8.0, 8.0, 0.0, [1.0, 1.0, 1.0, 0.5], pixels);
         stamp_region(&mut bytes, 16, 16, &view, &light);
@@ -1070,7 +1073,7 @@ mod tests {
     #[test]
     fn region_light_rotates() {
         let view = view(32.0, 32.0);
-        let pixels = Arc::new(RegionPixels::new(4, 1, vec![255, 255, 255, 255].repeat(4)));
+        let pixels = Arc::new(RegionPixels::new(4, 1, [255, 255, 255, 255].repeat(4)));
         let mut bytes = vec![0u8; 32 * 32 * 4];
         let light = RegionLight::new(16.0, 16.0, 16.0, 4.0, 90.0, [1.0, 1.0, 1.0, 1.0], pixels);
         stamp_region(&mut bytes, 32, 32, &view, &light);
@@ -1268,7 +1271,7 @@ mod tests {
     #[test]
     fn beam_grow_covers_the_longest_vanilla_beam() {
         // `LaserBulletType.length` 160 at 1.1x, foreshadow is the longest.
-        assert!(BEAM_LIGHT_GROW >= 160.0 * 1.1);
+        const { assert!(BEAM_LIGHT_GROW >= 160.0 * 1.1) };
         let rect = (0.0, 0.0, 100.0, 100.0);
         assert!(rect_contains(rect, 50.0, 50.0));
         assert!(!rect_contains(rect, 150.0, 50.0));

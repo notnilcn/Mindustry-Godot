@@ -1725,14 +1725,16 @@ mod tests {
     fn payload_soft_shadow_matches_draw_soft_shadow() {
         assert_eq!(soft_shadow_size(48.0, 32.0, 0.25), 48.0 * 0.25 * 1.6);
         assert_eq!(soft_shadow_size(16.0, 40.0, 0.25), 40.0 * 0.25 * 1.6);
-        assert!(
-            PAYLOAD_SHADOW_Z < PAYLOAD_Z,
-            "payload shadow draws under the payload body"
-        );
-        assert!(
-            PAYLOAD_Z < SOFT_SHADOW_Z,
-            "payload draws under the carrier soft shadow"
-        );
+        const {
+            assert!(
+                PAYLOAD_SHADOW_Z < PAYLOAD_Z,
+                "payload shadow draws under the payload body"
+            );
+            assert!(
+                PAYLOAD_Z < SOFT_SHADOW_Z,
+                "payload draws under the carrier soft shadow"
+            );
+        };
         assert_eq!(PAYLOAD_SHADOW_Z, PAYLOAD_Z - 0.01);
     }
 

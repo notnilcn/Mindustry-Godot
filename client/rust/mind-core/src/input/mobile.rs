@@ -2057,7 +2057,7 @@ mod tests {
         // `MobileInput.touchUp` (`MobileInput.java:562-570`): a placing line is
         // flushed into the build queue on release; the committed plans are
         // returned so the host can enqueue sim place commands.
-        let mut world = ContentWorld::new(test_content(), 16, 16);
+        let world = ContentWorld::new(test_content(), 16, 16);
         let conveyor = world.block_id("conveyor");
         let meta = world.line_block(conveyor);
         let rules = world.rules(conveyor);

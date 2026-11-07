@@ -708,7 +708,7 @@ impl MindInput {
         // The core tree (`handle_gesture_with`) decides taps/line starts; the
         // selected block's `LineBlock` + `LineRules` come from content.
         for event in &events {
-            self.fold_mobile_gesture(event.clone());
+            self.fold_mobile_gesture(*event);
         }
         match raw {
             // `MobileInput.update` lineMode branch runs every frame while the
@@ -837,10 +837,12 @@ impl MindInput {
 
     /// Capabilities pushed into the mobile decision tree (`settings`/focus).
     fn mobile_caps(&self) -> mobile::MobileCaps {
-        let mut focus = FocusState::default();
-        focus.has_dialog = self.bridge.ui_dialog;
-        focus.has_field = self.bridge.text_focus;
-        focus.is_menu = !self.bridge.in_game;
+        let focus = FocusState {
+            has_dialog: self.bridge.ui_dialog,
+            has_field: self.bridge.text_focus,
+            is_menu: !self.bridge.in_game,
+            ..Default::default()
+        };
         mobile::MobileCaps {
             focus,
             menu: !self.bridge.in_game,

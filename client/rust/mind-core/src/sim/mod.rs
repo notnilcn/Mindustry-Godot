@@ -1565,10 +1565,12 @@ impl Sim {
                 // synchronously in `run_spawn_bullet` (via
                 // [`spawn_logic_bullet`]) so the instruction result is set;
                 // here the drained record is kept for the host/debug probe.
-                LogicWorldEvent::SpawnBullet { def, entity, .. } => {
-                    if let Some(entity) = entity {
-                        self.logic_bullet_spawns.push((def, entity));
-                    }
+                LogicWorldEvent::SpawnBullet {
+                    def,
+                    entity: Some(entity),
+                    ..
+                } => {
+                    self.logic_bullet_spawns.push((def, entity));
                 }
                 // `SyncI`: `Call.syncVariable(build, id, value)` is a
                 // server-target remote that writes the authoritative executor
@@ -1598,10 +1600,10 @@ impl Sim {
                 // `ucontrol payEnter` → `Call.unitBuildingControlSelect`
                 // (`LExecutor.java:441-446`): the port's `onControlSelect`
                 // implementor is `CoreBlock` (respawn the player at the core).
-                LogicWorldEvent::ControlSelect { unit, build } => {
-                    if self.player_unit == Some(unit) {
-                        let _ = self.control_select_core(build);
-                    }
+                LogicWorldEvent::ControlSelect { unit, build }
+                    if self.player_unit == Some(unit) =>
+                {
+                    let _ = self.control_select_core(build);
                 }
                 // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
                 _ => {}
@@ -2760,21 +2762,10 @@ impl Sim {
         &mut self,
         f: impl FnOnce(&mut crate::logic::globals::LogicPlayerView) -> R,
     ) -> R {
-        if self
-            .ecs
-            .0
-            .get_resource::<crate::logic::globals::LogicPlayerView>()
-            .is_none()
-        {
-            self.ecs
-                .0
-                .insert_resource(crate::logic::globals::LogicPlayerView::default());
-        }
         let mut view = self
             .ecs
             .0
-            .get_resource_mut::<crate::logic::globals::LogicPlayerView>()
-            .expect("inserted above");
+            .get_resource_or_insert_with(crate::logic::globals::LogicPlayerView::default);
         f(&mut view)
     }
 

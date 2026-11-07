@@ -877,11 +877,7 @@ pub(crate) fn tile_quads_with(
             .is_some_and(|block| block_cache_layer(block) == CacheLayerId::Walls);
         if accessible || !wall_layer {
             out.extend(floor_draw_base_quads_with(
-                world,
-                content,
-                tile,
-                layer,
-                tiled.as_deref_mut(),
+                world, content, tile, layer, tiled,
             ));
         }
     } else if floor_def.is_some_and(|floor| floor_cache_layer(floor) != layer)
@@ -958,14 +954,7 @@ pub(crate) fn floor_draw_base_quads_with(
     {
         // The overlay's own `drawMain` (`Floor.drawOverlay` → `overlay.drawBase`,
         // `Floor.java:304-309`): its autotile same-check reads `tile.overlay`.
-        out.push(main_quad(
-            world,
-            content,
-            tile,
-            overlay,
-            true,
-            tiled.as_deref_mut(),
-        ));
+        out.push(main_quad(world, content, tile, overlay, true, tiled));
         // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
         // variant only; a plain floor used as an overlay runs the full
         // `Floor.drawBase` (its own edges; the overlay-of-overlay step

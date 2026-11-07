@@ -175,6 +175,8 @@ pub fn bad_gpu_message(causes: &str, final_message: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

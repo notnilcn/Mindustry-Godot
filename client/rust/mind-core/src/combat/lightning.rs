@@ -130,7 +130,7 @@ pub fn create(
 /// advanced `HIT_RANGE / 2` along a rotation jittered by `range_symmetric(20)`
 /// — so the drawn bolt looks identical to a real branch with no targets.
 pub fn view_polyline(seed: i64, x0: f32, y0: f32, rotation0: f32, length: i32) -> Vec<(f32, f32)> {
-    let mut rand = Rand::new(seed as i64 as u64);
+    let mut rand = Rand::new(seed as u64);
     let mut x = x0;
     let mut y = y0;
     let mut rotation = rotation0;

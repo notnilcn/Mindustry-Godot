@@ -4512,6 +4512,8 @@ fn camera_world_corner(camera: &Gd<MindCamera2D>, x: f32, y: f32) -> (f32, f32) 
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     /// `Binding.java:10-11` binds `move_x` to A/D and `move_y` to S/W;
