@@ -26,6 +26,7 @@ use super::teams::Teams;
 use super::universe::Campaign;
 use crate::content::{ContentRegistry, PlanetId};
 use crate::ecs::TeamId;
+use crate::event::{self as events, SimEvent};
 use crate::game::State;
 use crate::io::json::content_serde::SectorKey;
 use crate::io::json::rules::GameStats;
@@ -144,6 +145,13 @@ pub struct PlaySession {
     /// `PlayEvent` weather cooldown re-shuffle pending (`Logic.java:90-99`):
     /// set by every `logic_play` and consumed once by `weather_system`.
     pub weather_reset_pending: bool,
+    /// Typed event rows queued by the play flows for the host to dispatch onto
+    /// the [`Events`](crate::event::Events) bus (the port's `Events.fire`
+    /// seam, GAPS #37). Bounded by
+    /// [`EVENT_QUEUE_CAPACITY`](crate::event::EVENT_QUEUE_CAPACITY); a host
+    /// drains it with [`Self::take_event_rows`] and feeds
+    /// [`Events::dispatch_row`](crate::event::Events::dispatch_row).
+    pub event_rows: Vec<events::EventRow>,
 }
 
 impl Default for PlaySession {
@@ -177,7 +185,30 @@ impl PlaySession {
             allow_launch_loadout: false,
             add_starting_items: false,
             weather_reset_pending: false,
+            event_rows: Vec::new(),
         }
+    }
+
+    /// Queues one typed event row for the host's `Events` bus.
+    ///
+    /// The outbox drops the oldest row when a host never drains it
+    /// ([`EVENT_QUEUE_CAPACITY`](crate::event::EVENT_QUEUE_CAPACITY)): the
+    /// rows are a replay window, not owned state.
+    pub fn push_event_row(&mut self, event: events::EventRow) {
+        if self.event_rows.len() >= crate::event::EVENT_QUEUE_CAPACITY {
+            self.event_rows.remove(0);
+        }
+        self.event_rows.push(event);
+    }
+
+    /// Drains the queued typed rows (host `Events.dispatch` input).
+    pub fn take_event_rows(&mut self) -> Vec<events::EventRow> {
+        std::mem::take(&mut self.event_rows)
+    }
+
+    /// Queued typed rows, oldest first.
+    pub fn event_rows(&self) -> &[events::EventRow] {
+        &self.event_rows
     }
 
     /// `state.isCampaign()`.
@@ -259,6 +290,11 @@ pub fn play_map(
         from_save: false,
         rules_epoch: load.rules_epoch,
     }];
+    // `World.loadMap` -> `World.endMapLoad` fires `WorldLoadEvent` before
+    // `Logic.play` fires `PlayEvent` (`World.java:220-230`, `Logic.java:105-125`).
+    session.push_event_row(events::EventRow::Game(events::GameEvent::WorldLoadEvent(
+        events::WorldLoadEvent,
+    )));
     events.extend(logic_play(session));
     events.push(PlayEvent::NewGame);
     events
@@ -415,6 +451,15 @@ pub fn play_new_sector(
     }];
     events.extend(logic_play(session));
     apply_launch_loadout(session, registry);
+    // `Control.playNewSector` fires `SectorLaunchEvent` after `Logic.play`
+    // (`Control.java` `playNewSector`; the port queues the typed row for the
+    // host `Events` bus, GAPS #37).
+    session.push_event_row(events::EventRow::Game(
+        events::GameEvent::SectorLaunchEvent(events::SectorLaunchEvent {
+            planet,
+            sector: sector_id,
+        }),
+    ));
     events.push(PlayEvent::SectorLaunch {
         planet,
         sector: sector_id,
@@ -489,6 +534,11 @@ pub fn play_sector(
     let incoming = session.rules.clone();
     let load = apply_rules_load(&mut session.rules, incoming, true, epoch);
     session.phase = State::Playing;
+    // `World.loadState` (save load) ends in the same `WorldLoadEvent` as a map
+    // load (`World.java:220-230`); `Logic.play` is skipped on this path.
+    session.push_event_row(events::EventRow::Game(events::GameEvent::WorldLoadEvent(
+        events::WorldLoadEvent,
+    )));
     vec![PlayEvent::RulesLoad {
         from_save: true,
         rules_epoch: load.rules_epoch,
@@ -519,6 +569,11 @@ pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
     // `PlayEvent` weather reset (`Logic.java:90-99`): re-shuffled once per play,
     // including save loads, rather than only when every cooldown reads zero.
     session.weather_reset_pending = true;
+    // `Logic.play` fires `PlayEvent` (`Logic.java:58-101`); queue the typed row
+    // for the host `Events` bus (GAPS #37).
+    session.push_event_row(events::EventRow::Sim(SimEvent::PlayEvent(
+        events::PlayEvent,
+    )));
     vec![PlayEvent::Play]
 }
 
@@ -596,6 +651,11 @@ pub fn check_game_state(session: &mut PlaySession, campaign: &mut Campaign) -> V
 fn raise_game_over(session: &mut PlaySession, winner: u8) -> PlayEvent {
     session.game_over = true;
     session.stats.waves_lasted = session.wave;
+    // `Logic.gameOver` fires `GameOverEvent` (`Logic.java:327-374`); queue the
+    // typed row for the host `Events` bus (GAPS #37).
+    session.push_event_row(events::EventRow::Game(events::GameEvent::GameOverEvent(
+        events::GameOverEvent { winner },
+    )));
     PlayEvent::GameOver { winner }
 }
 
@@ -722,6 +782,17 @@ pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec
     session.markers.clear();
     session.objectives.clear();
 
+    // `Logic.sectorCapture` fires `SectorCaptureEvent` (`Logic.java:394-425`,
+    // after the attacking flag is cleared); queue the typed row for the host
+    // `Events` bus (GAPS #37).
+    session.push_event_row(events::EventRow::Game(
+        events::GameEvent::SectorCaptureEvent(events::SectorCaptureEvent {
+            planet,
+            sector: sector_id,
+            initial,
+        }),
+    ));
+
     let mut events = vec![PlayEvent::SectorCapture {
         planet,
         sector: sector_id,
@@ -741,6 +812,9 @@ pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec
 pub fn update_game_over(session: &mut PlaySession, winner: u8) -> PlayEvent {
     session.game_over = true;
     session.won = winner == session.default_team();
+    session.push_event_row(events::EventRow::Game(events::GameEvent::GameOverEvent(
+        events::GameOverEvent { winner },
+    )));
     PlayEvent::GameOver { winner }
 }
 
@@ -748,6 +822,9 @@ pub fn update_game_over(session: &mut PlaySession, winner: u8) -> PlayEvent {
 pub fn game_over(session: &mut PlaySession, winner: u8) -> PlayEvent {
     session.stats.waves_lasted = session.wave;
     session.won = winner == session.default_team();
+    session.push_event_row(events::EventRow::Game(events::GameEvent::GameOverEvent(
+        events::GameOverEvent { winner },
+    )));
     PlayEvent::GameOver { winner }
 }
 
@@ -1031,6 +1108,177 @@ mod tests {
         );
         assert_eq!(session.phase, State::Playing);
         assert!(!session.is_campaign());
+    }
+
+    /// GAPS #37: `playMap` queues the `WorldLoadEvent`/`PlayEvent` rows for the
+    /// host `Events` bus (`World.java:220-230`, `Logic.java:58-101`), and both
+    /// round-trip through it.
+    #[test]
+    fn play_map_queues_world_load_and_play_event_rows() {
+        let mut session = PlaySession::new(Rules::default());
+        let mut epoch = RulesEpoch::new();
+        let _ = play_map(&mut session, Rules::default(), None, |_| false, &mut epoch);
+        let rows = session.take_event_rows();
+        assert_eq!(
+            rows.iter()
+                .map(events::EventRow::class_name)
+                .collect::<Vec<_>>(),
+            vec!["WorldLoadEvent", "PlayEvent"]
+        );
+        assert!(session.event_rows().is_empty(), "drained");
+
+        let mut bus = events::Events::new();
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let world_seen = seen.clone();
+        bus.on_world_load(move |_| world_seen.borrow_mut().push("WorldLoadEvent"));
+        let play_seen = seen.clone();
+        bus.on_play(move |_| play_seen.borrow_mut().push("PlayEvent"));
+        for row in rows {
+            bus.dispatch_row(row);
+        }
+        assert_eq!(*seen.borrow(), vec!["WorldLoadEvent", "PlayEvent"]);
+    }
+
+    /// `World.loadState` (the `playSector` save branch) ends in the same
+    /// `WorldLoadEvent` as a map load (`World.java:220-230`).
+    #[test]
+    fn play_sector_save_load_queues_world_load_event_row() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        {
+            let sector = campaign.sector_mut(planet, sector_id).unwrap();
+            sector.save = Some("save".to_owned());
+            sector.info.info.has_core = true;
+        }
+        let mut session = PlaySession::new(Rules::default());
+        let mut epoch = RulesEpoch::new();
+        let mut reloader = NoReloader;
+        let play_events = play_sector(
+            &mut session,
+            &mut campaign,
+            &registry,
+            planet,
+            sector_id,
+            None,
+            &mut epoch,
+            &mut reloader,
+        );
+        assert!(play_events.iter().any(|event| matches!(
+            event,
+            PlayEvent::RulesLoad {
+                from_save: true,
+                ..
+            }
+        )));
+        let rows = session.take_event_rows();
+        assert_eq!(
+            rows.iter()
+                .map(events::EventRow::class_name)
+                .collect::<Vec<_>>(),
+            vec!["WorldLoadEvent"]
+        );
+    }
+
+    /// GAPS #37: `Control.playNewSector` fires `SectorLaunchEvent` after the
+    /// play flow's `PlayEvent`.
+    #[test]
+    fn play_new_sector_queues_sector_launch_event_row() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules::default());
+        let mut epoch = RulesEpoch::new();
+        let mut reloader = NoReloader;
+        play_new_sector(
+            &mut session,
+            &mut campaign,
+            &registry,
+            planet,
+            sector_id,
+            None,
+            &mut epoch,
+            &mut reloader,
+        );
+        let rows = session.take_event_rows();
+        assert_eq!(
+            rows.iter()
+                .map(events::EventRow::class_name)
+                .collect::<Vec<_>>(),
+            vec!["PlayEvent", "SectorLaunchEvent"]
+        );
+        assert!(matches!(
+            &rows[1],
+            events::EventRow::Game(events::GameEvent::SectorLaunchEvent(event))
+                if event.planet == planet && event.sector == sector_id
+        ));
+    }
+
+    /// GAPS #37: `Logic.sectorCapture` queues `SectorCaptureEvent` with the
+    /// upstream `initialCapture` flag.
+    #[test]
+    fn sector_capture_queues_sector_capture_event_row() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules::default());
+        session.sector = Some((planet, sector_id));
+
+        let _ = sector_capture(&mut session, &mut campaign);
+        let rows = session.take_event_rows();
+        assert_eq!(rows.len(), 1, "one capture row: {rows:?}");
+        assert_eq!(rows[0].class_name(), "SectorCaptureEvent");
+        assert!(matches!(
+            &rows[0],
+            events::EventRow::Game(events::GameEvent::SectorCaptureEvent(event))
+                if event.initial && event.planet == planet && event.sector == sector_id
+        ));
+
+        // A recapture is not the initial capture.
+        let _ = sector_capture(&mut session, &mut campaign);
+        let rows = session.take_event_rows();
+        assert!(matches!(
+            &rows[0],
+            events::EventRow::Game(events::GameEvent::SectorCaptureEvent(event)) if !event.initial
+        ));
+    }
+
+    /// GAPS #37: `Logic.gameOver`/`Logic.checkGameState` queue the
+    /// `GameOverEvent` row with the winning team.
+    #[test]
+    fn game_over_queues_game_over_event_row() {
+        let mut session = PlaySession::new(Rules::default());
+        session.wave = 6;
+        let event = game_over(&mut session, 2);
+        assert_eq!(event, PlayEvent::GameOver { winner: 2 });
+        let rows = session.take_event_rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].class_name(), "GameOverEvent");
+        assert!(matches!(
+            rows[0],
+            events::EventRow::Game(events::GameEvent::GameOverEvent(event)) if event.winner == 2
+        ));
+    }
+
+    /// `Logic.checkGameState`'s core-loss game over is the other `GameOverEvent`
+    /// fire site.
+    #[test]
+    fn check_game_state_queues_game_over_event_row() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules::default());
+        session.wave = 3;
+        let play_events = check_game_state(&mut session, &mut campaign);
+        assert!(
+            matches!(play_events.as_slice(), [PlayEvent::GameOver { .. }]),
+            "core loss raises one game over: {play_events:?}"
+        );
+        let rows = session.take_event_rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].class_name(), "GameOverEvent");
     }
 
     #[test]

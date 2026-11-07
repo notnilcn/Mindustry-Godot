@@ -67,7 +67,7 @@ pub use protocol::{CLIENT_BUILD, PROTOCOL_VERSION, ProtocolError, check_protocol
 pub use relay::{CommandStream, OrderError};
 pub use roster::{AssignTeamView, PlayerAction, PlayerEntry, Roster, TraceInfo};
 pub use session::{HostParams, MatchSession, SessionError, SessionState};
-pub use spacetimedb_sdk::Identity;
+pub use spacetimedb_sdk::{Identity, Timestamp};
 pub use token::{FileTokenStore, TokenStore, token_key};
 pub use transport::{RelayTransport, StdbTransport};
 pub use waves::{SubscriptionWaves, WaveEvent, WaveName};

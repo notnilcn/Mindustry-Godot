@@ -34,6 +34,7 @@ use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId, LiquidId, Plan
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::event::{EventContent, EventRow, GameEvent};
 use crate::game::State;
 use crate::math::ArcRand;
 use crate::render::g3d::grid::PlanetGrid;
@@ -204,6 +205,17 @@ fn unlock_sort_key(unlock: &UnlockRef) -> (u8, u16) {
         UnlockRef::Item(id) => (0, id.raw()),
         UnlockRef::Liquid(id) => (1, id.raw()),
         UnlockRef::Unit(id) => (2, id.raw()),
+    }
+}
+
+/// [`UnlockRef`] -> the typed event row's content identity (`EventType` wire
+/// payloads carry the content name; the host resolves it through
+/// `ContentRegistry` when it encodes the row).
+fn event_content(unlock: UnlockRef) -> EventContent {
+    match unlock {
+        UnlockRef::Item(id) => EventContent::Item(id.raw()),
+        UnlockRef::Liquid(id) => EventContent::Liquid(id.raw()),
+        UnlockRef::Unit(id) => EventContent::Unit(id.raw()),
     }
 }
 
@@ -632,6 +644,16 @@ pub fn campaign_tick_system(world: &mut World) {
             for unlock in unlocks {
                 if seen.insert(unlock_sort_key(&unlock)) {
                     runtime.pending_unlocks.push(unlock);
+                    // `UnlockableContent.unlock()` fires `UnlockEvent`
+                    // (`Control.java:160-174`); queue the typed row for the
+                    // host `Events` bus (GAPS #37).
+                    runtime
+                        .session
+                        .push_event_row(EventRow::Game(GameEvent::UnlockEvent(
+                            crate::event::UnlockEvent {
+                                content: event_content(unlock),
+                            },
+                        )));
                 }
             }
             if let Some((planet, sector_id)) = runtime.session.sector
@@ -3116,6 +3138,69 @@ mod tests {
         let sector = runtime.campaign.sector(planet, sector_id).expect("sector");
         assert_eq!(sector.info.windows.core_deltas[copper.index()], 3);
         assert_eq!(sector.info.windows.production_deltas[copper.index()], 5);
+    }
+
+    /// GAPS #37: a produced/dumped unlock queues its `UnlockEvent` row for the
+    /// host `Events` bus (`UnlockableContent.unlock` -> `Control.java:160-174`),
+    /// deduped against the still-pending unlocks.
+    #[test]
+    fn produced_unlocks_queue_an_unlock_event_row() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        session.phase = State::Playing;
+        let mut world = World::new();
+        install_campaign_core_hooks(&mut world);
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        let copper = registry.item_id("copper").unwrap();
+        if let Some(queues) = world.get_resource::<CampaignCoreQueues>()
+            && let Ok(mut state) = queues.0.lock()
+        {
+            state.unlocks.push(UnlockRef::Item(copper));
+        }
+        campaign_tick_system(&mut world);
+        {
+            let mut runtime = world
+                .remove_resource::<CampaignRuntime>()
+                .expect("runtime installed");
+            assert!(runtime.pending_unlocks.contains(&UnlockRef::Item(copper)));
+            let rows = runtime.session.event_rows();
+            assert_eq!(rows.len(), 1, "one unlock row: {rows:?}");
+            assert_eq!(rows[0].class_name(), "UnlockEvent");
+            assert!(matches!(
+                rows[0],
+                EventRow::Game(GameEvent::UnlockEvent(event))
+                    if event.content == EventContent::Item(copper.raw())
+            ));
+            // The host drained the row on its pump.
+            let _ = runtime.session.take_event_rows();
+            world.insert_resource(runtime);
+        }
+
+        // The content is still pending (host has not persisted it): a second
+        // queue must not re-fire the row.
+        if let Some(queues) = world.get_resource::<CampaignCoreQueues>()
+            && let Ok(mut state) = queues.0.lock()
+        {
+            state.unlocks.push(UnlockRef::Item(copper));
+        }
+        campaign_tick_system(&mut world);
+        let runtime = world
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime installed");
+        assert!(
+            runtime.session.event_rows().is_empty(),
+            "deduped unlock fires once: {:?}",
+            runtime.session.event_rows()
+        );
     }
 
     #[test]

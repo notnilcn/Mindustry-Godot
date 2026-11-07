@@ -178,7 +178,9 @@ mod tests {
             pan: 0.0,
         };
         assert!(bridge.push_frame(&sound.encode().unwrap()));
-        assert!(bridge.push_frame(&[250]));
+        // `push_frame` reports false for a rejected frame (documented), while
+        // `CallChannel` still records the rejection in the tail.
+        assert!(!bridge.push_frame(&[250]));
         assert_eq!(bridge.stats_json()["pending"], 1);
         let stats = bridge.stats_json();
         assert_eq!(stats["accepted"], 1);

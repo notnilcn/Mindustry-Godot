@@ -321,7 +321,9 @@ impl ServerState {
                     match next {
                         Some(next_map) => {
                             self.info(&format!("Selected next map to be {next_map}."));
-                            self.broadcast(&format!(
+                            // `ServerControl.java:116`: the next-map notice is
+                            // `Call.infoMessage(String)`, not a chat message.
+                            self.net.info_message(&format!(
                                 "[scarlet]Game over![]\n\nNext selected map: [accent]{next_map}[white].\nNew game begins in {extra_seconds} seconds."
                             ));
                         }

@@ -25,10 +25,15 @@
 //!
 //! Not ported (owned elsewhere or awaiting another subsystem): the animation
 //! snapshot family (`entitySnapshot`, `stateSnapshot`, `blockSnapshot`, ...),
-//! the world-mutation calls (`setTile`, `setFloor`, ...), `effect` with an
-//! `Object data` payload (`TypeIO.writeObject`), and the remaining logic/UI
-//! calls (`setHudText`, `announce`, `infoPopup`, `openURI`, ...) that
+//! the world-mutation calls (`setTile`, `setFloor`, ...), and the remaining
+//! logic/UI calls (`setHudText`, `announce`, `infoPopup`, `openURI`, ...) that
 //! `UiEventKind` already carries over the relay.
+//!
+//! The `effect` overload with an `Object data` payload (`EffectCallPacket2`,
+//! `TypeIO.writeObject`) is ported as a body codec
+//! ([`encode_effect_data_body`]/[`decode_effect_data_body`], PAR-0578); it has
+//! no `CallKind` yet because the 23-kind module ABI would need an appended
+//! `CallPacketKind` variant (server-lane change).
 //!
 //! Malformed/unknown calls never panic: [`decode`] rejects them with
 //! [`CallError`] and [`CallChannel`] records the rejection while continuing to
@@ -1228,6 +1233,76 @@ impl CallChannel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `Call.effect(..., Object data)` body (PAR-0578).
+// ---------------------------------------------------------------------------
+
+/// Body of the `Call.effect(Effect, float, float, float, Color, Object data)`
+/// overload — the generated `EffectCallPacket2`
+/// (`core/build/generated/.../mindustry/gen/EffectCallPacket2.java`):
+/// `writeEffect`, `f(x)`, `f(y)`, `f(rotation)`, `writeColor`,
+/// `writeObject(data)` (the read side uses `readObjectSafe`).
+///
+/// The 23-kind module ABI has no `CallPacketKind` for this overload (the
+/// module's enum is append-only and belongs to the server lane), so this is a
+/// body codec only: assigning it a wire kind needs one appended module variant
+/// plus the `crate::calls::call_kind` mapping entry. The tagged-object
+/// projection lives in [`typeio::TaggedValue`].
+pub fn encode_effect_data_body(
+    effect: Option<EffectId>,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    color: Rgba,
+    data: &typeio::TaggedValue,
+) -> Result<Vec<u8>, CallError> {
+    let mut writer = TypeIoWriter::new();
+    typeio::write_effect(&mut writer, effect);
+    writer.f(x);
+    writer.f(y);
+    writer.f(rotation);
+    typeio::write_color(&mut writer, color);
+    typeio::write_object(&mut writer, data)?;
+    Ok(writer.into_bytes())
+}
+
+/// Decoded [`encode_effect_data_body`] payload (`EffectCallPacket2`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectDataBody {
+    /// Effect content id (`None` = null effect).
+    pub effect: Option<EffectId>,
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// Rotation in degrees.
+    pub rotation: f32,
+    /// Tint colour.
+    pub color: Rgba,
+    /// Tagged `data` object (`writeObject`/`readObjectSafe`).
+    pub data: typeio::TaggedValue,
+}
+
+/// Decodes [`encode_effect_data_body`] (`readObjectSafe`).
+pub fn decode_effect_data_body(body: &[u8]) -> Result<EffectDataBody, CallError> {
+    let mut reader = TypeIoReader::new(body);
+    let effect = typeio::read_effect(&mut reader)?;
+    let x = reader.f()?;
+    let y = reader.f()?;
+    let rotation = reader.f()?;
+    let color = typeio::read_color(&mut reader)?;
+    let data = typeio::read_object(&mut reader)?;
+    reader.expect_end()?;
+    Ok(EffectDataBody {
+        effect,
+        x,
+        y,
+        rotation,
+        color,
+        data,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -1617,5 +1692,66 @@ mod tests {
             crate::typeio::read_menu_result(&mut reader).unwrap(),
             result
         );
+    }
+}
+
+/// PAR-0578: the `Call.effect(..., Object data)` body codec.
+#[cfg(test)]
+mod effect_data_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::{decode_effect_data_body, encode_effect_data_body};
+    use crate::call_packet::CallError;
+    use crate::typeio::{EffectId, Rgba, TaggedValue, TypeIoError};
+
+    fn color() -> Rgba {
+        Rgba {
+            r: 255,
+            g: 128,
+            b: 0,
+            a: 255,
+        }
+    }
+
+    /// The `EffectCallPacket2` body round-trips effect/x/y/rotation/color and a
+    /// tagged `data` object (`writeObject`/`readObjectSafe`).
+    #[test]
+    fn effect_data_body_round_trips_with_a_tagged_payload() {
+        for data in [
+            TaggedValue::Null,
+            TaggedValue::Content {
+                content_type: 2,
+                id: 7,
+            },
+            TaggedValue::ObjectArray(vec![
+                TaggedValue::Int(3),
+                TaggedValue::String(Some("hit".to_string())),
+            ]),
+        ] {
+            let body =
+                encode_effect_data_body(Some(EffectId(5)), 1.5, 2.5, 90.0, color(), &data).unwrap();
+            let decoded = decode_effect_data_body(&body).unwrap();
+            assert_eq!(decoded.effect, Some(EffectId(5)));
+            assert_eq!((decoded.x, decoded.y, decoded.rotation), (1.5, 2.5, 90.0));
+            assert_eq!(decoded.color, color());
+            assert_eq!(decoded.data, data);
+        }
+
+        // A null effect id is the `-1` null effect sentinel.
+        let body =
+            encode_effect_data_body(None, 0.0, 0.0, 0.0, color(), &TaggedValue::Null).unwrap();
+        assert_eq!(decode_effect_data_body(&body).unwrap().effect, None);
+    }
+
+    /// Trailing bytes are corruption, not a silently truncated payload.
+    #[test]
+    fn effect_data_body_rejects_trailing_bytes() {
+        let mut body =
+            encode_effect_data_body(None, 0.0, 0.0, 0.0, color(), &TaggedValue::Null).unwrap();
+        body.push(0xff);
+        assert!(matches!(
+            decode_effect_data_body(&body),
+            Err(CallError::Codec(TypeIoError::TrailingBytes { .. }))
+        ));
     }
 }

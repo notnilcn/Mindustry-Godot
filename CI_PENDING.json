@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-07T00:00:40Z",
+  "updated": "2026-11-07T00:32:03Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1593,6 +1593,37 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service; ... platform; cargo test --manifest-path server/spacetimedb/Cargo.toml --lib",
       "expected": "service 17, platform 46, module 109, mind-stdb 95",
       "risk": "STDB schema additions; bindings pin 2.10.1 vs ambient 2.13 shim; movement clamps",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-003203",
+      "created_at": "2026-11-07T00:32:03Z",
+      "agent": "hx-wave-m",
+      "branch": "main",
+      "head": "6a32370b",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src,client/rust/mind-gdext/src/render",
+      "summary": "Mod ability parsing + accelerator draw/timeline (PAR-0587/0586/0296)",
+      "files": [
+        "client/rust/mind-core/src/mods/json/mod.rs",
+        "client/rust/mind-core/src/content/boot.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs",
+        "client/rust/mind-core/src/render/accelerator.rs",
+        "client/rust/mind-core/src/world/blocks/campaign/accelerator.rs",
+        "client/rust/mind-gdext/src/render/accelerator.rs",
+        "client/rust/mind-gdext/src/sim_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib accelerator; ... mods; ... -p mind-gdext --lib accelerator; ... batch_f",
+      "expected": "accelerator 15+4, mods 167, batch_f 9; full lib 3114",
+      "risk": "AbilitySpec mapping; classes fixture; accelerator sim_host seam; cutscene FX pending",
       "status": "pending"
     }
   ]

@@ -961,6 +961,16 @@ impl KickReason {
     pub fn bundle_key(self) -> String {
         format!("server.kicked.{}", self.name())
     }
+
+    /// Inverse of [`Self::name`] (`KickReason.valueOf`): the console tokens
+    /// `kick_all`/`kick_reason` producers accept (`"gameover"`,
+    /// `"serverClose"`, …). Case-insensitive; unknown names return `None`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|reason| reason.name().eq_ignore_ascii_case(name.trim()))
+    }
 }
 
 /// `TypeIO.writeKick`: ordinal byte.
@@ -1282,6 +1292,397 @@ pub fn read_color(r: &mut TypeIoReader<'_>) -> Result<Rgba, TypeIoError> {
 }
 
 // ---------------------------------------------------------------------------
+// TypeIO.writeObject / readObject (tagged objects, PAR-0578).
+// ---------------------------------------------------------------------------
+//
+// Ported from `core/src/mindustry/io/TypeIO.java:38-320`: `writeObject`
+// prepends one tag byte per value kind, `readObject` decodes it. The port has
+// no live world/content registry here, so ids stay raw and the caller resolves
+// them (`content`/`techNode` keep the content-type ordinal + id,
+// `building`/`unit` keep the id); array/byte/string caps mirror the Java
+// constants (a malformed body is an error, never a panic).
+
+/// `TypeIO.maxArraySize` (`TypeIO.java:49`): tagged array entries.
+pub const MAX_TAGGED_ARRAY: usize = 1000;
+/// `TypeIO.maxByteArraySize` (`TypeIO.java:49`): tagged `byte[]` bytes.
+pub const MAX_TAGGED_BYTES: usize = 40_000;
+/// `readObjectSafe`'s string cap (`TypeIO.java:230`, `read.str(1200)`).
+pub const MAX_TAGGED_STRING: usize = 1200;
+/// Recursion cap for tagged object arrays (upstream rejects nested arrays
+/// outright; the cap also bounds a hostile body).
+pub const MAX_TAGGED_DEPTH: usize = 8;
+
+/// `TypeIO.writeObject(Writes, Object)`: one arbitrary tagged value
+/// (`TypeIO.java:72-190`).
+///
+/// Every upstream tag has a variant; the tags that name a live object keep the
+/// raw id instead (`Building`/`Unit`), and `legacyType` reads back as
+/// [`Self::Null`] like upstream. `Bullet`/`Seq` were written as `null`
+/// upstream and have no variant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaggedValue {
+    /// Tag 0 (`nullType`).
+    Null,
+    /// Tag 1 (`integerType`).
+    Int(i32),
+    /// Tag 2 (`longType`).
+    Long(i64),
+    /// Tag 3 (`floatType`).
+    Float(f32),
+    /// Tag 4 (`stringType`).
+    String(Option<String>),
+    /// Tag 5 (`contentType`): `ContentType` ordinal + content id.
+    Content {
+        /// `ContentType` ordinal (`ContentType.all[...]`).
+        content_type: u8,
+        /// Content id.
+        id: i16,
+    },
+    /// Tag 6 (`intSeqType`).
+    IntSeq(Vec<i32>),
+    /// Tag 7 (`point2Type`).
+    Point2 {
+        /// Point x.
+        x: i32,
+        /// Point y.
+        y: i32,
+    },
+    /// Tag 8 (`point2ArrayType`), capped at 255 entries upstream.
+    Point2Array(Vec<(i32, i32)>),
+    /// Tag 9 (`techNodeType`): the unlocked content's type ordinal + id.
+    TechNode {
+        /// `ContentType` ordinal (`ContentType.all[...]`).
+        content_type: u8,
+        /// Content id.
+        id: i16,
+    },
+    /// Tag 10 (`booleanType`).
+    Boolean(bool),
+    /// Tag 11 (`doubleType`).
+    Double(f64),
+    /// Tag 12 (`buildingType`): packed building position.
+    Building(i32),
+    /// Tag 13 (`lAccessType`): `LAccess` ordinal.
+    LAccess(i16),
+    /// Tag 14 (`byteArrayType`).
+    Bytes(Vec<u8>),
+    /// Tag 16 (`booleanArrayType`).
+    Bools(Vec<bool>),
+    /// Tag 17 (`unitType`): unit id.
+    Unit(i32),
+    /// Tag 18 (`vec2ArrayType`).
+    Vec2Array(Vec<(f32, f32)>),
+    /// Tag 19 (`vec2Type`).
+    Vec2 {
+        /// Vector x.
+        x: f32,
+        /// Vector y.
+        y: f32,
+    },
+    /// Tag 20 (`teamType`): `Team.id`.
+    Team(u8),
+    /// Tag 21 (`intArrayType`).
+    IntArray(Vec<i32>),
+    /// Tag 22 (`objectArrayType`); nested arrays are rejected upstream.
+    ObjectArray(Vec<TaggedValue>),
+    /// Tag 23 (`unitCommandType`): unit-command content id.
+    UnitCommand(u16),
+}
+
+fn tagged_array_len(len: usize, what: &'static str) -> Result<(), TypeIoError> {
+    if len > MAX_TAGGED_ARRAY {
+        return Err(TypeIoError::TooLarge {
+            what,
+            actual: len,
+            limit: MAX_TAGGED_ARRAY,
+        });
+    }
+    Ok(())
+}
+
+/// `TypeIO.writeObject(Writes, Object)`.
+pub fn write_object(w: &mut TypeIoWriter, value: &TaggedValue) -> Result<(), TypeIoError> {
+    match value {
+        TaggedValue::Null => w.b(0),
+        TaggedValue::Int(value) => {
+            w.b(1);
+            w.i(*value);
+        }
+        TaggedValue::Long(value) => {
+            w.b(2);
+            w.l(*value);
+        }
+        TaggedValue::Float(value) => {
+            w.b(3);
+            w.f(*value);
+        }
+        TaggedValue::String(value) => {
+            w.b(4);
+            write_string(w, value.as_deref())?;
+        }
+        TaggedValue::Content { content_type, id } => {
+            w.b(5);
+            w.b(*content_type as i8);
+            w.s(*id);
+        }
+        TaggedValue::IntSeq(values) => {
+            tagged_array_len(values.len(), "tagged int seq")?;
+            w.b(6);
+            w.s(values.len() as i16);
+            for value in values {
+                w.i(*value);
+            }
+        }
+        TaggedValue::Point2 { x, y } => {
+            w.b(7);
+            w.i(*x);
+            w.i(*y);
+        }
+        TaggedValue::Point2Array(points) => {
+            if points.len() > u8::MAX as usize {
+                return Err(TypeIoError::TooLarge {
+                    what: "tagged point2 array",
+                    actual: points.len(),
+                    limit: u8::MAX as usize,
+                });
+            }
+            w.b(8);
+            w.b(points.len() as i8);
+            for (x, y) in points {
+                w.i(pack_point2(*x, *y));
+            }
+        }
+        TaggedValue::TechNode { content_type, id } => {
+            w.b(9);
+            w.b(*content_type as i8);
+            w.s(*id);
+        }
+        TaggedValue::Boolean(value) => {
+            w.b(10);
+            w.bool(*value);
+        }
+        TaggedValue::Double(value) => {
+            w.b(11);
+            w.d(*value);
+        }
+        TaggedValue::Building(pos) => {
+            w.b(12);
+            w.i(*pos);
+        }
+        TaggedValue::LAccess(ordinal) => {
+            w.b(13);
+            w.s(*ordinal);
+        }
+        TaggedValue::Bytes(bytes) => {
+            if bytes.len() > MAX_TAGGED_BYTES {
+                return Err(TypeIoError::TooLarge {
+                    what: "tagged byte array",
+                    actual: bytes.len(),
+                    limit: MAX_TAGGED_BYTES,
+                });
+            }
+            w.b(14);
+            w.i(bytes.len() as i32);
+            w.bytes(bytes);
+        }
+        TaggedValue::Bools(bools) => {
+            tagged_array_len(bools.len(), "tagged boolean array")?;
+            w.b(16);
+            w.i(bools.len() as i32);
+            for value in bools {
+                w.bool(*value);
+            }
+        }
+        TaggedValue::Unit(id) => {
+            w.b(17);
+            w.i(*id);
+        }
+        TaggedValue::Vec2Array(vectors) => {
+            tagged_array_len(vectors.len(), "tagged vec2 array")?;
+            w.b(18);
+            w.s(vectors.len() as i16);
+            for (x, y) in vectors {
+                w.f(*x);
+                w.f(*y);
+            }
+        }
+        TaggedValue::Vec2 { x, y } => {
+            w.b(19);
+            w.f(*x);
+            w.f(*y);
+        }
+        TaggedValue::Team(id) => {
+            w.b(20);
+            w.b(*id as i8);
+        }
+        TaggedValue::IntArray(values) => {
+            tagged_array_len(values.len(), "tagged int array")?;
+            w.b(21);
+            write_ints(w, values)?;
+        }
+        TaggedValue::ObjectArray(values) => {
+            tagged_array_len(values.len(), "tagged object array")?;
+            w.b(22);
+            w.i(values.len() as i32);
+            for value in values {
+                write_object(w, value)?;
+            }
+        }
+        TaggedValue::UnitCommand(id) => {
+            w.b(23);
+            w.us(*id);
+        }
+    }
+    Ok(())
+}
+
+/// `TypeIO.readObjectSafe` (`TypeIO.java:205-206, 218-320`): tag byte, safe
+/// string cap, top-level arrays allowed; nested arrays are rejected.
+pub fn read_object(r: &mut TypeIoReader<'_>) -> Result<TaggedValue, TypeIoError> {
+    read_object_inner(r, true, 0)
+}
+
+fn read_object_inner(
+    r: &mut TypeIoReader<'_>,
+    allow_arrays: bool,
+    depth: usize,
+) -> Result<TaggedValue, TypeIoError> {
+    if depth > MAX_TAGGED_DEPTH {
+        return Err(TypeIoError::DepthExceeded {
+            limit: MAX_TAGGED_DEPTH,
+        });
+    }
+    let tag = r.ub()?;
+    let array_allowed = |tag: u8| -> Result<(), TypeIoError> {
+        if allow_arrays {
+            Ok(())
+        } else {
+            Err(TypeIoError::InvalidValue {
+                what: "nested tagged array",
+                value: i64::from(tag),
+            })
+        }
+    };
+    match tag {
+        0 => Ok(TaggedValue::Null),
+        1 => Ok(TaggedValue::Int(r.i()?)),
+        2 => Ok(TaggedValue::Long(r.l()?)),
+        3 => Ok(TaggedValue::Float(r.f()?)),
+        4 => {
+            if r.b()? == 0 {
+                Ok(TaggedValue::String(None))
+            } else {
+                Ok(TaggedValue::String(Some(r.str_max(MAX_TAGGED_STRING)?)))
+            }
+        }
+        5 => Ok(TaggedValue::Content {
+            content_type: r.ub()?,
+            id: r.s()?,
+        }),
+        6 => {
+            array_allowed(tag)?;
+            let len = tagged_read_len(i32::from(r.s()?), "tagged int seq")?;
+            let mut values = Vec::with_capacity(len);
+            for _ in 0..len {
+                values.push(r.i()?);
+            }
+            Ok(TaggedValue::IntSeq(values))
+        }
+        7 => Ok(TaggedValue::Point2 {
+            x: r.i()?,
+            y: r.i()?,
+        }),
+        8 => {
+            array_allowed(tag)?;
+            let len = usize::from(r.ub()?);
+            let mut points = Vec::with_capacity(len);
+            for _ in 0..len {
+                let packed = r.i()?;
+                points.push((unpack_point2_x(packed), unpack_point2_y(packed)));
+            }
+            Ok(TaggedValue::Point2Array(points))
+        }
+        9 => Ok(TaggedValue::TechNode {
+            content_type: r.ub()?,
+            id: r.s()?,
+        }),
+        10 => Ok(TaggedValue::Boolean(r.bool()?)),
+        11 => Ok(TaggedValue::Double(r.d()?)),
+        12 => Ok(TaggedValue::Building(r.i()?)),
+        13 => Ok(TaggedValue::LAccess(r.s()?)),
+        14 => {
+            array_allowed(tag)?;
+            let len = tagged_read_len(r.i()?, "tagged byte array")?;
+            if len > MAX_TAGGED_BYTES {
+                return Err(TypeIoError::TooLarge {
+                    what: "tagged byte array",
+                    actual: len,
+                    limit: MAX_TAGGED_BYTES,
+                });
+            }
+            Ok(TaggedValue::Bytes(r.bytes(len)?.to_vec()))
+        }
+        // `legacyType`: a discarded byte, read back as null upstream.
+        15 => {
+            let _ = r.b()?;
+            Ok(TaggedValue::Null)
+        }
+        16 => {
+            array_allowed(tag)?;
+            let len = tagged_read_len(r.i()?, "tagged boolean array")?;
+            let mut values = Vec::with_capacity(len.min(MAX_TAGGED_ARRAY));
+            for _ in 0..len {
+                values.push(r.bool()?);
+            }
+            Ok(TaggedValue::Bools(values))
+        }
+        17 => Ok(TaggedValue::Unit(r.i()?)),
+        18 => {
+            array_allowed(tag)?;
+            let len = tagged_read_len(i32::from(r.s()?), "tagged vec2 array")?;
+            let mut vectors = Vec::with_capacity(len);
+            for _ in 0..len {
+                vectors.push((r.f()?, r.f()?));
+            }
+            Ok(TaggedValue::Vec2Array(vectors))
+        }
+        19 => Ok(TaggedValue::Vec2 {
+            x: r.f()?,
+            y: r.f()?,
+        }),
+        20 => Ok(TaggedValue::Team(r.ub()?)),
+        21 => {
+            array_allowed(tag)?;
+            Ok(TaggedValue::IntArray(read_ints(r)?))
+        }
+        22 => {
+            array_allowed(tag)?;
+            let len = tagged_read_len(r.i()?, "tagged object array")?;
+            let mut values = Vec::with_capacity(len.min(MAX_TAGGED_ARRAY));
+            for _ in 0..len {
+                values.push(read_object_inner(r, false, depth + 1)?);
+            }
+            Ok(TaggedValue::ObjectArray(values))
+        }
+        23 => Ok(TaggedValue::UnitCommand(r.us()?)),
+        other => Err(TypeIoError::UnknownTag {
+            what: "tagged object",
+            tag: other,
+        }),
+    }
+}
+
+/// Converts a signed array length, rejecting negatives and over-cap lengths.
+fn tagged_read_len(len: i32, what: &'static str) -> Result<usize, TypeIoError> {
+    let len = usize::try_from(len).map_err(|_| TypeIoError::InvalidValue {
+        what,
+        value: i64::from(len),
+    })?;
+    tagged_array_len(len, what)?;
+    Ok(len)
+}
+
+// ---------------------------------------------------------------------------
 // TraceInfo.
 // ---------------------------------------------------------------------------
 
@@ -1336,6 +1737,418 @@ pub fn read_trace_info(r: &mut TypeIoReader<'_>) -> Result<TraceInfo, TypeIoErro
         ips: read_strings(r, TRACE_LIST_LIMIT)?,
         names: read_strings(r, TRACE_LIST_LIMIT)?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Build plans, weapon mounts and ability data (PAR-0578).
+// ---------------------------------------------------------------------------
+//
+// Ported from `core/src/mindustry/io/TypeIO.java`: `writePlan`/`readPlan`
+// (`:645-680`), `writePlansQueueNet`/`readPlansQueueNet` (`:614-651`),
+// `writePlans`/`readPlans` (`:685-711`), `writeClientPlans`/`readClientPlans`
+// (`:716-772`), `writeMounts`/`readMounts` (`:393-427`) and
+// `writeAbilities`/`readAbilities` (`:429-455`). These bodies are used by the
+// entity/snapshot sync packets, not by the 23 ported `Call.*` kinds; they live
+// here because they are `TypeIO` wire formats.
+//
+// `writePayload`/`readPayload` are deliberately not ported here: upstream
+// delegates to `Payload.write/read` (`world/blocks/payloads/Payload.java`),
+// which serializes a unit's `writeSync` (entity sync) or a building's items;
+// that belongs with `mind-core`'s entity/save IO, not this crate.
+
+/// `TypeIO.maxSyncedPlans` (`TypeIO.java:49`): plans per network sync.
+pub const MAX_SYNCED_PLANS: usize = 20;
+/// `TypeIO.getMaxPlans` config budget (`TypeIO.java:576-594`).
+pub const MAX_SYNCED_PLAN_CONFIG_LEN: usize = 500;
+/// `Vars.maxPlayerPreviewPlans` (`Vars.java:107`).
+pub const MAX_PLAYER_PREVIEW_PLANS: usize = 1000;
+
+/// One `mindustry.entities.units.BuildPlan`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildPlan {
+    /// Deconstruct instead of place (`plan.breaking`).
+    pub breaking: bool,
+    /// Tile x.
+    pub x: i32,
+    /// Tile y.
+    pub y: i32,
+    /// Block to place (`None` for a break plan / unknown id).
+    pub block: Option<BlockId>,
+    /// Placement rotation.
+    pub rotation: u8,
+    /// Block config (`writeObject`; [`TaggedValue::Null`] when absent).
+    pub config: TaggedValue,
+}
+
+impl BuildPlan {
+    /// A deconstruct plan (`BuildPlan(x, y)` with `breaking = true`).
+    pub fn breaking(x: i32, y: i32) -> Self {
+        Self {
+            breaking: true,
+            x,
+            y,
+            block: None,
+            rotation: 0,
+            config: TaggedValue::Null,
+        }
+    }
+}
+
+/// `TypeIO.writePlan`: break flag, packed position, then block/rotation/config
+/// for a place plan.
+pub fn write_plan(w: &mut TypeIoWriter, plan: &BuildPlan) -> Result<(), TypeIoError> {
+    w.b(if plan.breaking { 1 } else { 0 });
+    w.i(pack_point2(plan.x, plan.y));
+    if !plan.breaking {
+        w.s(plan.block.map_or(-1, |block| block.0));
+        w.b(plan.rotation as i8);
+        // Always has a config upstream (`write.b(1)`).
+        w.b(1);
+        write_object(w, &plan.config)?;
+    }
+    Ok(())
+}
+
+/// `TypeIO.readPlan`.
+///
+/// Upstream returns `null` when `world.tile(position) == null`; this codec has
+/// no world, so the caller must validate the decoded position (the existing
+/// `ClientPlan` path in `mind-core` does that).
+pub fn read_plan(r: &mut TypeIoReader<'_>) -> Result<BuildPlan, TypeIoError> {
+    let kind = r.b()?;
+    let packed = r.i()?;
+    let (x, y) = (unpack_point2_x(packed), unpack_point2_y(packed));
+    if kind == 1 {
+        return Ok(BuildPlan::breaking(x, y));
+    }
+    let block = r.s()?;
+    let rotation = r.b()? as u8;
+    let has_config = r.b()? == 1;
+    let config = read_object(r)?;
+    Ok(BuildPlan {
+        breaking: false,
+        x,
+        y,
+        block: (block >= 0).then_some(BlockId(block)),
+        rotation,
+        config: if has_config {
+            config
+        } else {
+            TaggedValue::Null
+        },
+    })
+}
+
+/// `TypeIO.getMaxPlans`: at most [`MAX_SYNCED_PLANS`] plans, and it stops after
+/// the [`MAX_SYNCED_PLAN_CONFIG_LEN`]-byte config budget.
+pub fn max_synced_plans(plans: &[BuildPlan]) -> usize {
+    let used = plans.len().min(MAX_SYNCED_PLANS);
+    let mut total = 0usize;
+    for (index, plan) in plans.iter().take(used).enumerate() {
+        total = total.saturating_add(match &plan.config {
+            TaggedValue::Bytes(bytes) => bytes.len(),
+            TaggedValue::String(Some(text)) => text.len(),
+            _ => 0,
+        });
+        if total > MAX_SYNCED_PLAN_CONFIG_LEN {
+            return index + 1;
+        }
+    }
+    used
+}
+
+/// `TypeIO.writePlansQueueNet`: `i(-1)` for null, else `i(used)` + plans.
+pub fn write_plans_queue_net(
+    w: &mut TypeIoWriter,
+    plans: Option<&[BuildPlan]>,
+) -> Result<(), TypeIoError> {
+    let Some(plans) = plans else {
+        w.i(-1);
+        return Ok(());
+    };
+    let used = max_synced_plans(plans);
+    w.i(used as i32);
+    for plan in &plans[..used] {
+        write_plan(w, plan)?;
+    }
+    Ok(())
+}
+
+/// `TypeIO.readPlansQueueNet`: capped at [`MAX_SYNCED_PLANS`].
+pub fn read_plans_queue_net(
+    r: &mut TypeIoReader<'_>,
+) -> Result<Option<Vec<BuildPlan>>, TypeIoError> {
+    let used = r.i()?;
+    if used == -1 {
+        return Ok(None);
+    }
+    let used = usize::try_from(used).map_err(|_| TypeIoError::InvalidValue {
+        what: "plan queue length",
+        value: i64::from(used),
+    })?;
+    if used > MAX_SYNCED_PLANS {
+        return Err(TypeIoError::TooLarge {
+            what: "plan queue",
+            actual: used,
+            limit: MAX_SYNCED_PLANS,
+        });
+    }
+    let mut plans = Vec::with_capacity(used);
+    for _ in 0..used {
+        plans.push(read_plan(r)?);
+    }
+    Ok(Some(plans))
+}
+
+/// `TypeIO.writePlans` (`short` count, `-1` for null).
+pub fn write_plans(w: &mut TypeIoWriter, plans: Option<&[BuildPlan]>) -> Result<(), TypeIoError> {
+    let Some(plans) = plans else {
+        w.s(-1);
+        return Ok(());
+    };
+    if plans.len() > i16::MAX as usize {
+        return Err(TypeIoError::TooLarge {
+            what: "plan array",
+            actual: plans.len(),
+            limit: i16::MAX as usize,
+        });
+    }
+    w.s(plans.len() as i16);
+    for plan in plans {
+        write_plan(w, plan)?;
+    }
+    Ok(())
+}
+
+/// `TypeIO.readPlans` (`short` count; `-1` = null).
+pub fn read_plans(r: &mut TypeIoReader<'_>) -> Result<Option<Vec<BuildPlan>>, TypeIoError> {
+    let count = r.s()?;
+    if count == -1 {
+        return Ok(None);
+    }
+    let count = usize::try_from(count).map_err(|_| TypeIoError::InvalidValue {
+        what: "plan array length",
+        value: i64::from(count),
+    })?;
+    let mut plans = Vec::with_capacity(count.min(MAX_PLAYER_PREVIEW_PLANS));
+    for _ in 0..count {
+        plans.push(read_plan(r)?);
+    }
+    Ok(Some(plans))
+}
+
+/// One client build-preview plan (`TypeIO.writeClientPlans`,
+/// `TypeIO.ClientBuildPlans` entry).
+///
+/// The preview plan carries no breaking flag and only writes the rotation for
+/// blocks with `Block.rotate` (content knowledge the caller supplies through
+/// [`Self::rotates`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientPlan {
+    /// Tile x.
+    pub x: i32,
+    /// Tile y.
+    pub y: i32,
+    /// Block.
+    pub block: BlockId,
+    /// `Block.rotate`: whether the rotation byte is on the wire.
+    pub rotates: bool,
+    /// Placement rotation (ignored when `rotates` is false).
+    pub rotation: u8,
+    /// Config (`writeObject`; only null/number/boolean/content is valid).
+    pub config: TaggedValue,
+}
+
+/// `TypeIO.validClientPlanConfig`: links (and other structures) are not sent
+/// for preview plans, only `null`/numbers/booleans/content.
+pub fn valid_client_plan_config(value: &TaggedValue) -> bool {
+    matches!(
+        value,
+        TaggedValue::Null
+            | TaggedValue::Int(_)
+            | TaggedValue::Long(_)
+            | TaggedValue::Float(_)
+            | TaggedValue::Double(_)
+            | TaggedValue::Boolean(_)
+            | TaggedValue::Content { .. }
+    )
+}
+
+/// `TypeIO.writeClientPlans`: `s(0)` for null/empty, else `s(count)` + plans.
+pub fn write_client_plans(
+    w: &mut TypeIoWriter,
+    plans: Option<&[ClientPlan]>,
+) -> Result<(), TypeIoError> {
+    let Some(plans) = plans.filter(|plans| !plans.is_empty()) else {
+        w.s(0);
+        return Ok(());
+    };
+    if plans.len() > i16::MAX as usize {
+        return Err(TypeIoError::TooLarge {
+            what: "client plan array",
+            actual: plans.len(),
+            limit: i16::MAX as usize,
+        });
+    }
+    w.s(plans.len() as i16);
+    for plan in plans {
+        w.i(pack_point2(plan.x, plan.y));
+        w.s(plan.block.0);
+        if plan.rotates {
+            w.b(plan.rotation as i8);
+        }
+        let config = if valid_client_plan_config(&plan.config) {
+            &plan.config
+        } else {
+            &TaggedValue::Null
+        };
+        write_object(w, config)?;
+    }
+    Ok(())
+}
+
+/// `TypeIO.readClientPlans`; `rotates` resolves `Block.rotate` for the block id
+/// (content lives in `mind-core`, so the caller supplies it).
+pub fn read_client_plans(
+    r: &mut TypeIoReader<'_>,
+    rotates: impl Fn(u16) -> bool,
+) -> Result<Option<Vec<ClientPlan>>, TypeIoError> {
+    let amount = r.s()?;
+    if amount == 0 {
+        return Ok(None);
+    }
+    let amount = usize::try_from(amount).map_err(|_| TypeIoError::InvalidValue {
+        what: "client plan array length",
+        value: i64::from(amount),
+    })?;
+    if amount > MAX_PLAYER_PREVIEW_PLANS {
+        return Err(TypeIoError::TooLarge {
+            what: "client plan array",
+            actual: amount,
+            limit: MAX_PLAYER_PREVIEW_PLANS,
+        });
+    }
+    let mut plans = Vec::with_capacity(amount);
+    for _ in 0..amount {
+        // `writeClientPlans` writes `i(Point2.pack(x, y))`; upstream reads it
+        // back as two unsigned shorts (`read.us()`), which is the same bytes.
+        let x = i32::from(r.us()?);
+        let y = i32::from(r.us()?);
+        let block = r.us()?;
+        let rotating = rotates(block);
+        let rotation = if rotating { r.b()? as u8 } else { 0 };
+        let config = read_client_plan_config(r)?;
+        plans.push(ClientPlan {
+            x,
+            y,
+            block: BlockId(block as i16),
+            rotates: rotating,
+            rotation,
+            config,
+        });
+    }
+    Ok(Some(plans))
+}
+
+/// `TypeIO.readClientPlanConfig`: the reduced config tag set (0, 1, 2, 3, 5,
+/// 10, 11); every other tag is a rejection.
+fn read_client_plan_config(r: &mut TypeIoReader<'_>) -> Result<TaggedValue, TypeIoError> {
+    match r.ub()? {
+        0 => Ok(TaggedValue::Null),
+        1 => Ok(TaggedValue::Int(r.i()?)),
+        2 => Ok(TaggedValue::Long(r.l()?)),
+        3 => Ok(TaggedValue::Float(r.f()?)),
+        5 => Ok(TaggedValue::Content {
+            content_type: r.ub()?,
+            id: r.s()?,
+        }),
+        10 => Ok(TaggedValue::Boolean(r.bool()?)),
+        11 => Ok(TaggedValue::Double(r.d()?)),
+        other => Err(TypeIoError::UnknownTag {
+            what: "client plan config",
+            tag: other,
+        }),
+    }
+}
+
+/// One weapon mount state (`TypeIO.writeMounts`, `TypeIO.java:393-401`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WeaponMount {
+    /// `WeaponMount.shoot`.
+    pub shoot: bool,
+    /// `WeaponMount.rotate`.
+    pub rotate: bool,
+    /// Aim x.
+    pub aim_x: f32,
+    /// Aim y.
+    pub aim_y: f32,
+}
+
+/// `TypeIO.writeMounts`: `b(count)`, then `b(state)` + two floats per mount.
+pub fn write_mounts(w: &mut TypeIoWriter, mounts: &[WeaponMount]) -> Result<(), TypeIoError> {
+    if mounts.len() > u8::MAX as usize {
+        return Err(TypeIoError::TooLarge {
+            what: "weapon mounts",
+            actual: mounts.len(),
+            limit: u8::MAX as usize,
+        });
+    }
+    w.b(mounts.len() as i8);
+    for mount in mounts {
+        let state = (mount.shoot as u8) | ((mount.rotate as u8) << 1);
+        w.b(state as i8);
+        w.f(mount.aim_x);
+        w.f(mount.aim_y);
+    }
+    Ok(())
+}
+
+/// `TypeIO.readMounts(Reads)` (allocation-free variant: returns the states).
+pub fn read_mounts(r: &mut TypeIoReader<'_>) -> Result<Vec<WeaponMount>, TypeIoError> {
+    let len = r.b()?;
+    if len < 0 {
+        return Ok(Vec::new());
+    }
+    let mut mounts = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        let state = r.b()? as u8;
+        mounts.push(WeaponMount {
+            shoot: state & 1 != 0,
+            rotate: state & 2 != 0,
+            aim_x: r.f()?,
+            aim_y: r.f()?,
+        });
+    }
+    Ok(mounts)
+}
+
+/// `TypeIO.writeAbilities`: `b(count)` + one float per ability.
+pub fn write_abilities(w: &mut TypeIoWriter, abilities: &[f32]) -> Result<(), TypeIoError> {
+    if abilities.len() > u8::MAX as usize {
+        return Err(TypeIoError::TooLarge {
+            what: "abilities",
+            actual: abilities.len(),
+            limit: u8::MAX as usize,
+        });
+    }
+    w.b(abilities.len() as i8);
+    for data in abilities {
+        w.f(*data);
+    }
+    Ok(())
+}
+
+/// `TypeIO.readAbilities(Reads)`: `b(count)` + one float per ability.
+pub fn read_abilities(r: &mut TypeIoReader<'_>) -> Result<Vec<f32>, TypeIoError> {
+    let len = r.b()?;
+    if len < 0 {
+        return Ok(Vec::new());
+    }
+    let mut abilities = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        abilities.push(r.f()?);
+    }
+    Ok(abilities)
 }
 
 // ---------------------------------------------------------------------------
@@ -2686,5 +3499,321 @@ mod tests {
         assert_eq!(unpack_point2_x(pack_point2(3, 4)), 3);
         assert_eq!(unpack_point2_y(pack_point2(3, 4)), 4);
         assert_eq!(pack_point2(-1, -1), NULL_TILE_POS);
+    }
+}
+
+/// PAR-0578: the `writeObject` tagged codec plus the plan/mount/ability sync
+/// bodies.
+#[cfg(test)]
+mod object_io_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn encode_object(value: &TaggedValue) -> Vec<u8> {
+        let mut writer = TypeIoWriter::new();
+        write_object(&mut writer, value).unwrap();
+        writer.into_bytes()
+    }
+
+    fn decode_object(bytes: &[u8]) -> TaggedValue {
+        let mut reader = TypeIoReader::new(bytes);
+        let value = read_object(&mut reader).unwrap();
+        reader.expect_end().unwrap();
+        value
+    }
+
+    /// Every tag the Java `writeObject` can emit round-trips through the port;
+    /// `legacyType` reads back as null like `readObject`'s `yield null`.
+    #[test]
+    fn tagged_objects_round_trip_every_wire_tag() {
+        let values = vec![
+            TaggedValue::Null,
+            TaggedValue::Int(-5),
+            TaggedValue::Long(1 << 40),
+            TaggedValue::Float(1.5),
+            TaggedValue::String(Some("hello".to_string())),
+            TaggedValue::String(None),
+            TaggedValue::Content {
+                content_type: 2,
+                id: 7,
+            },
+            TaggedValue::IntSeq(vec![1, -2, 3]),
+            TaggedValue::Point2 { x: -3, y: 9 },
+            TaggedValue::Point2Array(vec![(1, 2), (-3, 4)]),
+            TaggedValue::TechNode {
+                content_type: 1,
+                id: 3,
+            },
+            TaggedValue::Boolean(true),
+            TaggedValue::Double(2.5),
+            TaggedValue::Building(1234),
+            TaggedValue::LAccess(5),
+            TaggedValue::Bytes(vec![1, 2, 3]),
+            TaggedValue::Bools(vec![true, false, true]),
+            TaggedValue::Unit(42),
+            TaggedValue::Vec2Array(vec![(1.0, 2.0), (-3.5, 4.5)]),
+            TaggedValue::Vec2 { x: 1.5, y: -2.5 },
+            TaggedValue::Team(3),
+            TaggedValue::IntArray(vec![7, -8]),
+            TaggedValue::ObjectArray(vec![
+                TaggedValue::Int(1),
+                TaggedValue::String(Some("x".to_string())),
+                TaggedValue::Null,
+            ]),
+            TaggedValue::UnitCommand(9),
+        ];
+        for value in values {
+            assert_eq!(decode_object(&encode_object(&value)), value, "{value:?}");
+        }
+
+        // `legacyType` (tag 15) skips one byte and reads as null upstream.
+        assert_eq!(decode_object(&[15, 0xff]), TaggedValue::Null);
+        // `Bullet`/`Seq` were written as tag 0 upstream.
+        assert_eq!(decode_object(&[0]), TaggedValue::Null);
+    }
+
+    /// Array/byte/string caps mirror `TypeIO.maxArraySize`/`maxByteArraySize`
+    /// and `readObjectSafe`'s 1200-char string cap; nested arrays (Java's
+    /// `allowArrays = false` recursion) are rejected.
+    #[test]
+    fn tagged_object_caps_and_nesting_are_enforced() {
+        // Byte array over `maxByteArraySize` cannot be written...
+        let huge = TaggedValue::Bytes(vec![0; MAX_TAGGED_BYTES + 1]);
+        let mut writer = TypeIoWriter::new();
+        assert!(matches!(
+            write_object(&mut writer, &huge),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+
+        // ...nor read: tag 14 + i(MAX+1).
+        let mut writer = TypeIoWriter::new();
+        writer.b(14);
+        writer.i((MAX_TAGGED_BYTES + 1) as i32);
+        assert!(matches!(
+            read_object(&mut TypeIoReader::new(writer.as_bytes())),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+
+        // An int seq over `maxArraySize` is rejected on write and read.
+        let huge_seq = TaggedValue::IntSeq(vec![0; MAX_TAGGED_ARRAY + 1]);
+        let mut writer = TypeIoWriter::new();
+        assert!(matches!(
+            write_object(&mut writer, &huge_seq),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+        let mut writer = TypeIoWriter::new();
+        writer.b(6);
+        writer.s((MAX_TAGGED_ARRAY + 1) as i16);
+        assert!(matches!(
+            read_object(&mut TypeIoReader::new(writer.as_bytes())),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+
+        // Nested arrays: an int seq inside an object array is `allowArrays =
+        // false` upstream, so it is a rejection (never a panic).
+        let mut writer = TypeIoWriter::new();
+        writer.b(22);
+        writer.i(1);
+        writer.b(6);
+        writer.s(1);
+        writer.i(7);
+        assert!(matches!(
+            read_object(&mut TypeIoReader::new(writer.as_bytes())),
+            Err(TypeIoError::InvalidValue {
+                what: "nested tagged array",
+                ..
+            })
+        ));
+
+        // An unknown tag is a rejection.
+        assert!(matches!(
+            read_object(&mut TypeIoReader::new(&[24])),
+            Err(TypeIoError::UnknownTag { tag: 24, .. })
+        ));
+    }
+
+    /// The network plan queue round-trips both plan shapes and is capped at
+    /// `maxSyncedPlans`/the config budget on write and read.
+    #[test]
+    fn plan_queue_round_trips_and_caps() {
+        let plans = vec![
+            BuildPlan {
+                breaking: false,
+                x: 3,
+                y: 4,
+                block: Some(BlockId(11)),
+                rotation: 2,
+                config: TaggedValue::Content {
+                    content_type: 2,
+                    id: 7,
+                },
+            },
+            BuildPlan::breaking(-3, -4),
+        ];
+        let mut writer = TypeIoWriter::new();
+        write_plans_queue_net(&mut writer, Some(&plans)).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        assert_eq!(read_plans_queue_net(&mut reader).unwrap(), Some(plans));
+
+        // Null plan list.
+        let mut writer = TypeIoWriter::new();
+        write_plans_queue_net(&mut writer, None).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        assert_eq!(read_plans_queue_net(&mut reader).unwrap(), None);
+
+        // The `short`-count variant (`writePlans`/`readPlans`).
+        let plans = vec![BuildPlan::breaking(1, 2)];
+        let mut writer = TypeIoWriter::new();
+        write_plans(&mut writer, Some(&plans)).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        assert_eq!(read_plans(&mut reader).unwrap(), Some(plans));
+        let mut writer = TypeIoWriter::new();
+        write_plans(&mut writer, None).unwrap();
+        assert_eq!(
+            read_plans(&mut TypeIoReader::new(writer.as_bytes())).unwrap(),
+            None
+        );
+
+        // Over-long queues are rejected on read, not truncated silently.
+        let mut writer = TypeIoWriter::new();
+        writer.i((MAX_SYNCED_PLANS + 1) as i32);
+        assert!(matches!(
+            read_plans_queue_net(&mut TypeIoReader::new(writer.as_bytes())),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+
+        // `getMaxPlans` budget: a 400-byte config then a 200-byte one crosses
+        // the 500-byte budget at plan 2.
+        let budget = vec![
+            BuildPlan {
+                config: TaggedValue::Bytes(vec![0; 400]),
+                ..BuildPlan::breaking(0, 0)
+            },
+            BuildPlan {
+                config: TaggedValue::Bytes(vec![0; 200]),
+                ..BuildPlan::breaking(0, 1)
+            },
+        ];
+        assert_eq!(max_synced_plans(&budget), 2);
+        let many = vec![BuildPlan::breaking(0, 0); MAX_SYNCED_PLANS + 5];
+        assert_eq!(max_synced_plans(&many), MAX_SYNCED_PLANS);
+    }
+
+    /// Client preview plans write the rotation only for rotating blocks and
+    /// drop non-preview configs (Java `validClientPlanConfig`).
+    #[test]
+    fn client_plans_round_trip_with_rotation_content() {
+        let plans = vec![
+            ClientPlan {
+                x: 5,
+                y: 6,
+                block: BlockId(3),
+                rotates: true,
+                rotation: 2,
+                config: TaggedValue::Int(5),
+            },
+            ClientPlan {
+                x: 7,
+                y: 8,
+                block: BlockId(4),
+                rotates: false,
+                rotation: 0,
+                config: TaggedValue::ObjectArray(vec![TaggedValue::Int(1)]),
+            },
+        ];
+        let mut writer = TypeIoWriter::new();
+        write_client_plans(&mut writer, Some(&plans)).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        let read = read_client_plans(&mut reader, |block| block == 3)
+            .unwrap()
+            .expect("plans");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0], plans[0]);
+        // A link config is not a valid preview config: it goes out as null.
+        assert_eq!(read[1].config, TaggedValue::Null);
+        assert_eq!(read[1].block, BlockId(4));
+        assert_eq!(read[1].rotation, 0);
+
+        // Empty/null writes read back as `None`.
+        let mut writer = TypeIoWriter::new();
+        write_client_plans(&mut writer, None).unwrap();
+        assert_eq!(
+            read_client_plans(&mut TypeIoReader::new(writer.as_bytes()), |_| true).unwrap(),
+            None
+        );
+
+        // The reduced config tag set rejects an array tag.
+        let mut writer = TypeIoWriter::new();
+        writer.s(1);
+        writer.i(pack_point2(1, 1));
+        writer.us(3);
+        writer.b(0); // rotation for the rotating block 3
+        writer.b(6); // int seq: not a valid client plan config
+        assert!(matches!(
+            read_client_plans(&mut TypeIoReader::new(writer.as_bytes()), |_| true),
+            Err(TypeIoError::UnknownTag { tag: 6, .. })
+        ));
+    }
+
+    /// `writeMounts`/`writeAbilities` bodies round-trip; the state byte packs
+    /// shoot/rotate.
+    #[test]
+    fn mounts_and_abilities_round_trip() {
+        let mounts = vec![
+            WeaponMount {
+                shoot: true,
+                rotate: false,
+                aim_x: 1.5,
+                aim_y: -2.5,
+            },
+            WeaponMount {
+                shoot: false,
+                rotate: true,
+                aim_x: 0.0,
+                aim_y: 3.0,
+            },
+            WeaponMount::default(),
+        ];
+        let mut writer = TypeIoWriter::new();
+        write_mounts(&mut writer, &mounts).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        assert_eq!(read_mounts(&mut reader).unwrap(), mounts);
+
+        let abilities = vec![0.0, 1.5, -2.0];
+        let mut writer = TypeIoWriter::new();
+        write_abilities(&mut writer, &abilities).unwrap();
+        let mut reader = TypeIoReader::new(writer.as_bytes());
+        assert_eq!(read_abilities(&mut reader).unwrap(), abilities);
+
+        // Over-long mount/ability lists are rejected on write.
+        let mut writer = TypeIoWriter::new();
+        assert!(matches!(
+            write_mounts(&mut writer, &vec![WeaponMount::default(); 256]),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+        let mut writer = TypeIoWriter::new();
+        assert!(matches!(
+            write_abilities(&mut writer, &vec![0.0; 256]),
+            Err(TypeIoError::TooLarge { .. })
+        ));
+    }
+
+    /// `KickReason.from_name` (the producer token parser).
+    #[test]
+    fn kick_reason_names_parse_back() {
+        assert_eq!(
+            KickReason::from_name("gameover"),
+            Some(KickReason::Gameover)
+        );
+        assert_eq!(
+            KickReason::from_name("ServerClose"),
+            Some(KickReason::ServerClose)
+        );
+        assert_eq!(KickReason::from_name(" vote "), Some(KickReason::Vote));
+        assert_eq!(KickReason::from_name("nope"), None);
+        for reason in KickReason::ALL {
+            assert_eq!(KickReason::from_name(reason.name()), Some(reason));
+        }
     }
 }

@@ -525,6 +525,28 @@ impl Sim {
             .unwrap_or(TeamId::SHARDED.0)
     }
 
+    /// `PlayerComp.team(team)` for a relay-assigned team (PAR-0600).
+    ///
+    /// Upstream `PlayerComp.team(team)` (`PlayerComp.java:266-271`) sets the
+    /// player's team and then `if(unit != null) unit.team(team)`. The editor
+    /// path (`HudFragment.setPlayerTeamEditor`, `HudFragment.java:714-718`) is
+    /// gated on `state.isEditor()`; a relay-assigned team must land in a live
+    /// match as well (module-side PvP balancer, GAPS #33 / PAR-0545), so this
+    /// setter skips the editor gate. The rules `defaultTeam` mirror that
+    /// [`Self::live_default_team`] reads for placement is the host's job
+    /// (`gdext/sim_host.rs::set_player_team_from_relay`).
+    pub fn set_relay_player_team(&mut self, team: u8) {
+        // `if(unit != null) unit.team(team)` (`PlayerComp.java:269`).
+        if let Some(unit) = self.player_unit()
+            && let Some(mut comp) = self.ecs.0.get_mut::<crate::entities::comp::TeamComp>(unit)
+        {
+            comp.team = team;
+        }
+        // The `PlayerComp.team` field: respawn/retry-spawn team and the
+        // `Player.team()` read model (`unit_runtime.rs::set_player_team`).
+        self.set_player_team(team);
+    }
+
     /// `Build.validPlace` for an explicit team against the live block runtime
     /// (`SimRuntime::can_place`).
     ///
@@ -3651,5 +3673,37 @@ mod ability_queue_tests {
             sim.unit_runtime().expect("runtime").units.is_empty(),
             "Units.canCreate rejected the spawn at cap"
         );
+    }
+}
+
+/// PAR-0600: the relay-assigned team setter (`PlayerComp.team` outside the
+/// editor gate).
+#[cfg(test)]
+mod relay_player_team_tests {
+    use super::*;
+    use crate::entities::comp::TeamComp;
+
+    /// A relay-assigned team moves both `PlayerComp.team` and the possessed
+    /// unit's `TeamComp` (`PlayerComp.java:266-271`), and the possessed unit is
+    /// kept (only its team changes).
+    #[test]
+    fn relay_team_moves_the_player_unit_and_respawn_team() {
+        let mut sim = Sim::new(7, 24, 24, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let unit = sim
+            .spawn_live_unit("alpha", 1, 32.0, 32.0, 0.0)
+            .expect("alpha unit spawned");
+        sim.player_unit = Some(unit);
+
+        sim.set_relay_player_team(3);
+
+        assert_eq!(sim.player_team, Some(3), "PlayerComp.team moved");
+        assert_eq!(
+            sim.ecs.0.get::<TeamComp>(unit).map(|comp| comp.team),
+            Some(3),
+            "possessed unit followed PlayerComp.team"
+        );
+        assert_eq!(sim.player_unit(), Some(unit), "unit stays possessed");
     }
 }

@@ -248,8 +248,51 @@ impl NetHost {
         pushed
     }
 
+    /// Publishes one server→client `@Remote` call produced by a host action
+    /// (PAR-0601 drop-in for `server/spacetimedb/src/relay/calls.rs`).
+    ///
+    /// The module validates host/admin rights, membership and payload size; a
+    /// rejected publish is logged and reported as `false` (the host action
+    /// itself already happened, like Java's fire-and-forget `Call.*`).
+    pub fn publish(&mut self, call: mind_stdb::calls::ProducedCall) -> bool {
+        let Some(match_id) = self.match_id else {
+            log::debug!("publish {:?}: no match", call.kind);
+            return false;
+        };
+        if !self.online {
+            log::debug!("publish {:?}: offline host", call.kind);
+            return false;
+        }
+        let Ok(payload) = call.encode_body() else {
+            log::warn!("publish {:?}: body encoding failed", call.kind);
+            return false;
+        };
+        match self
+            .connector
+            .publish_call(match_id, call.kind, call.target, payload)
+        {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("publish {:?} failed: {error}", call.kind);
+                false
+            }
+        }
+    }
+
+    /// `Call.infoMessage(String)` broadcast: the upstream game-over/next-map
+    /// notice (`ServerControl.java:116`). The chat `say` path stays the
+    /// `Call.sendMessage` equivalent.
+    pub fn info_message(&mut self, message: &str) -> bool {
+        self.publish(mind_stdb::calls::ProducedCall::info_message(message))
+    }
+
     /// `NetServer.kickAll(reason)` (`NetServer.java:1096-1100`): kicks every
     /// connected member and forgets them. Returns the number of kicks sent.
+    ///
+    /// Each target also gets the generated `Call.kick`/`Call.kickReason`
+    /// packet (`Player.kick(KickReason)`, `NetServer.java:453-520`),
+    /// `reason` parsed as a `KickReason` name (`"gameover"`, `"serverClose"`)
+    /// with `serverClose` as the console fallback.
     pub fn kick_all(&mut self, reason: &str) -> usize {
         let Some(match_id) = self.match_id else {
             self.players.clear();
@@ -263,10 +306,16 @@ impl NetHost {
             .collect();
         let count = targets.len();
         if self.online {
+            let kick_reason = mind_stdb::typeio::KickReason::from_name(reason)
+                .unwrap_or(mind_stdb::typeio::KickReason::ServerClose);
             for identity in targets {
                 if let Err(error) = self.connector.admin_kick(match_id, identity, reason) {
                     log::warn!("kick_all: {error}");
                 }
+                self.publish(mind_stdb::calls::ProducedCall::kick_reason(
+                    identity,
+                    kick_reason,
+                ));
             }
         }
         self.players.clear();
@@ -475,7 +524,15 @@ impl Admins for NetHost {
         let identity = self.identity_of(target)?;
         self.connector
             .admin_kick(match_id, identity, "Kicked by admin")
-            .map_err(|error| AdminError::Connector(error.to_string()))
+            .map_err(|error| AdminError::Connector(error.to_string()))?;
+        // `NetServer.adminRequest(kick)` ends with `other.kick(KickReason)`
+        // (`NetServer.java:453-520`); the module's `admin_kick` only records
+        // history, so the host publishes the call the client shows (PAR-0601).
+        self.publish(mind_stdb::calls::ProducedCall::kick(
+            identity,
+            "Kicked by admin",
+        ));
+        Ok(())
     }
 
     fn ban(&mut self, kind: BanKind, target: &str) -> Result<(), AdminError> {

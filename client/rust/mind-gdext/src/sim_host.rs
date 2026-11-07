@@ -4868,6 +4868,46 @@ impl MindSimHost {
         true
     }
 
+    /// Applies a relay-assigned team to the local player (PAR-0600).
+    ///
+    /// Same effect as [`Self::set_player_team`] without the editor gate: the
+    /// module's PvP balancer (`assign_team`, GAPS #33) assigns a team on
+    /// join/start, and `PlayerComp.team(team)` (`PlayerComp.java:266-271`) must
+    /// move the local player and its possessed unit. The rules `defaultTeam`
+    /// mirror moves too, because [`Self::player_team`] (and
+    /// `Sim::live_default_team` for the placement ghost) read it as
+    /// `player.team()`.
+    ///
+    /// Returns `false` for an out-of-range team (no live world is rejected by
+    /// the caller: a host without a sim has nothing to adopt).
+    pub fn set_player_team_from_relay(&mut self, team: i64) -> bool {
+        let teams = mind_core::game::team::Team::all().len();
+        if team < 0 || team as usize >= teams {
+            log::warn!("set_player_team_from_relay: team {team} out of range");
+            return false;
+        }
+        let team = team as u8;
+        self.sim.set_relay_player_team(team);
+        if let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
+        {
+            runtime.session.rules.default_team = team;
+        }
+        if let Some(mut rules) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::world::limits::BuildRules>()
+        {
+            rules.default_team = team;
+        }
+        log::info!("set_player_team_from_relay: relay player team {team}");
+        true
+    }
+
     /// `InputHandler.canMine` for the player unit (world-input seam).
     pub fn player_can_mine(&self, x: i16, y: i16) -> bool {
         self.sim.player_can_mine(x, y)

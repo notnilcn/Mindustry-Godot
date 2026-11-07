@@ -32,8 +32,8 @@ use mind_stdb::module_bindings::{
     AllAdminsTableAccessor, AllBansTableAccessor, AllMatchesTableAccessor, AllPlayersTableAccessor,
     AllWhitelistTableAccessor, BreakBlock, CallPacketKind, ChatKind, CommandKind, Custom, Gamemode,
     MatchPlayerState, MatchStatus, MemberRole, MyAdminActionsTableAccessor, MyKickTableAccessor,
-    MyMatchCallsTableAccessor, MyMatchChecksumsTableAccessor, MyMatchEventsTableAccessor,
-    MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
+    MyMatchCallsTableAccessor, MyMatchChatTableAccessor, MyMatchChecksumsTableAccessor,
+    MyMatchEventsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
     MyMatchSnapshotChunksTableAccessor, MyMatchSnapshotRequestsTableAccessor,
     MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor,
     MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind,
@@ -43,8 +43,8 @@ use mind_stdb::rows::RowView;
 use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
-    ConnectionConfig, Connector, ConnectorEvent, EventBus, HostParams, MatchSession, PlayerAction,
-    Roster, RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
+    ChatLog, ConnectionConfig, Connector, ConnectorEvent, EventBus, HostParams, MatchSession,
+    PlayerAction, Roster, RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
 };
 
 use crate::settings_hub;
@@ -207,6 +207,14 @@ pub struct MindNet {
     relay_outbox: Option<std::sync::Arc<std::sync::Mutex<Vec<mind_core::determinism::SimCommand>>>>,
     /// Member rows by identity hex (sender team/slot resolution, I08 T6).
     members: std::collections::BTreeMap<String, mind_stdb::module_bindings::RelayMember>,
+    /// Relay team last applied to the local sim (PAR-0600); `None` while
+    /// unassigned/offline so a repeated assignment still lands.
+    applied_relay_team: Option<u8>,
+    /// `my_match_chat` rows mirrored for the chat overlay (PAR-0121/0125):
+    /// the net facade's `chat_json()` projection.
+    chat: ChatLog,
+    /// `my_match_chat` binder (Game wave).
+    chat_binder: Option<TableBinder<MyMatchChatTableAccessor>>,
     /// Relay kinds already reported as "no sim equivalent" (log once).
     unmapped_kinds: std::collections::BTreeSet<String>,
     /// Player-list/trace aggregation over the roster tables (PAR-0122).
@@ -292,6 +300,9 @@ impl INode for MindNet {
             relay_match_id: 0,
             relay_outbox: None,
             members: std::collections::BTreeMap::new(),
+            applied_relay_team: None,
+            chat: ChatLog::new(),
+            chat_binder: None,
             unmapped_kinds: std::collections::BTreeSet::new(),
             roster: Roster::new(),
             all_players_binder: None,
@@ -342,6 +353,8 @@ impl INode for MindNet {
                         self.events.clear();
                         self.call_rows.clear();
                         self.calls.clear();
+                        self.chat.clear();
+                        self.applied_relay_team = None;
                     }
                     ConnectorEvent::Resync => {
                         self.session.on_resync();
@@ -349,6 +362,8 @@ impl INode for MindNet {
                         self.events.clear();
                         self.call_rows.clear();
                         self.calls.clear();
+                        self.chat.clear();
+                        self.applied_relay_team = None;
                     }
                     _ => {}
                 }
@@ -357,6 +372,11 @@ impl INode for MindNet {
             self.drain_my_matches();
             self.drain_members_rows();
             self.drain_roster();
+            // After the roster/team drains, so the admin/team filter is current
+            // before any chat row is applied (a filtered-out row is not
+            // resurrected by a later viewer change).
+            self.refresh_chat_viewer();
+            self.drain_server_chat();
             self.drain_server_events();
             self.drain_server_calls();
             self.drain_state_rows();
@@ -470,6 +490,8 @@ impl MindNet {
         self.events_binder = Some(connector.bind::<MyMatchEventsTableAccessor>("my_match_events"));
         // Server→client `@Remote` calls (GAPS #35 / PAR-0576).
         self.call_rows_binder = Some(connector.bind::<MyMatchCallsTableAccessor>("my_match_calls"));
+        // Chat rows for the overlay (`chat_json`, PAR-0121/0125).
+        self.chat_binder = Some(connector.bind::<MyMatchChatTableAccessor>("my_match_chat"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -936,6 +958,44 @@ impl MindNet {
             }));
         }
         GString::from(serde_json::Value::Array(out).to_string().as_str())
+    }
+
+    /// `my_match_chat` rows as a JSON array of `mind_stdb::ChatLine`
+    /// projections (PAR-0121/0125), chronological order.
+    ///
+    /// This is the net half of the `chatui` contract: `MindUi.chat_poll`
+    /// pulls it through `net_call("chat_json")` and re-filters nothing itself
+    /// (the log already drops rows the local viewer may not see).
+    #[func]
+    pub fn chat_json(&self) -> GString {
+        GString::from(chat_facade_json(&self.chat).to_string().as_str())
+    }
+
+    /// `my_match_events` rows as a JSON array of `mind_stdb::ServerEvent`
+    /// projections (GAPS #37), commit order.
+    ///
+    /// `MindUi.take_event_toasts` pulls it through `net_call("events_json")`
+    /// when the facade exposes it; [`Self::match_events_json`] stays the
+    /// debug/UI-inspection variant.
+    #[func]
+    pub fn events_json(&self) -> GString {
+        GString::from(events_facade_json(&self.events).to_string().as_str())
+    }
+
+    /// Local SpacetimeDB identity hex (64 lowercase hex chars), or `""` while
+    /// offline/before the handshake.
+    ///
+    /// The chat overlay and the admin/trace views read it through
+    /// `net_call("local_identity_hex")` (guarded; the offline `StdbConnector`
+    /// never carries a live identity).
+    #[func]
+    pub fn local_identity_hex(&self) -> GString {
+        let identity = self
+            .session
+            .local_identity()
+            .map(|identity| identity.to_hex().to_string())
+            .unwrap_or_default();
+        GString::from(identity.as_str())
     }
 
     /// Player-list rows (name, team, admin, connected, role) built from the
@@ -1747,6 +1807,42 @@ impl MindNet {
         if !members.is_empty() {
             self.last_members_json = format!("[{}]", members.join(","));
         }
+        // The relay's team assignment can change on join, start or a team
+        // switch (`assign_team`); the local sim must adopt it (PAR-0600).
+        self.apply_relay_team();
+    }
+
+    /// Applies the relay-assigned team to the local sim when [`Self::my_team`]
+    /// changes (PAR-0600).
+    ///
+    /// The module's PvP balancer assigns a team on join/start (GAPS #33); the
+    /// local player and its possessed unit must follow it exactly like
+    /// `PlayerComp.team(team)` (`PlayerComp.java:266-271`), otherwise placement
+    /// and ownership checks keep the world's default team. The applied value is
+    /// tracked so the setter runs once per assignment, not every frame.
+    fn apply_relay_team(&mut self) {
+        let team = match u8::try_from(self.my_team()) {
+            Ok(team) => team,
+            Err(_) => {
+                // Unassigned/offline: forget the last applied team so the next
+                // assignment lands even when it repeats.
+                self.applied_relay_team = None;
+                return;
+            }
+        };
+        if self.applied_relay_team == Some(team) {
+            return;
+        }
+        let Some(sim_host) = self.sim_host.as_mut() else {
+            return;
+        };
+        if sim_host
+            .bind_mut()
+            .set_player_team_from_relay(i64::from(team))
+        {
+            self.applied_relay_team = Some(team);
+            log::info!("MindNet: local sim adopted relay team {team}");
+        }
     }
 
     /// Maps a player-list action name to the plan-21 reducer and sends it
@@ -1808,6 +1904,13 @@ impl MindNet {
                         },
                     );
                 }
+                // PAR-0601: `adminRequest(trace)` answers the requesting admin
+                // with `Call.traceInfo(player.con, other, info)`
+                // (`NetServer.java:941`); the trace payload is the roster
+                // aggregation plus the module's `my_traces` answer.
+                if matches!(action, PlayerAction::RequestTrace) {
+                    self.publish_trace_call(&entry.identity);
+                }
                 true
             }
             Err(error) => {
@@ -1815,6 +1918,29 @@ impl MindNet {
                 false
             }
         }
+    }
+
+    /// Publishes `Call.traceInfo` to the requesting admin (PAR-0601).
+    ///
+    /// The relay has no arcnet return path, so the admin's own client receives
+    /// the call through `my_match_calls` (the target is the local identity, as
+    /// in Java, where `player.con` is the requester). The payload is the
+    /// roster's aggregated trace; the module's `my_traces` row still carries
+    /// the server-computed history (`Roster::trace_json`).
+    fn publish_trace_call(&mut self, identity_hex: &str) {
+        let Some(match_id) = self.session.match_id() else {
+            return;
+        };
+        let Some(me) = self.session.local_identity() else {
+            return;
+        };
+        let info = relay_trace_info(&self.roster.trace(identity_hex));
+        self.publish_call_packet(
+            match_id,
+            CallPacketKind::TraceInfo,
+            Some(me),
+            &CallPacket::TraceInfo { player: None, info },
+        );
     }
 
     /// Drains the call channel every frame (GAPS #35): effects the net layer
@@ -1883,6 +2009,36 @@ impl MindNet {
         for change in changes {
             self.events.apply(change);
         }
+    }
+
+    /// Applies every pending `my_match_chat` row to the chat mirror
+    /// (PAR-0121/0125). [`ChatLog::apply`] drops rows the current viewer may
+    /// not see, so the same log serves members and admins.
+    fn drain_server_chat(&mut self) {
+        let Some(changes) = self.chat_binder.as_ref().map(|binder| binder.drain()) else {
+            return;
+        };
+        for change in changes {
+            self.chat.apply(change);
+        }
+    }
+
+    /// Keeps the chat viewer in sync with the local identity, team and admin
+    /// flag (`ChatLog::set_viewer` re-filters already-retained lines on a team
+    /// switch or an admin grant/revoke).
+    fn refresh_chat_viewer(&mut self) {
+        let identity = self.session.local_identity();
+        let admin = self.session.is_host()
+            || identity.is_some_and(|identity| self.roster.is_admin(&identity.to_hex()));
+        let team = u8::try_from(self.my_team()).ok();
+        let identity_hex = identity.map(|identity| identity.to_hex().to_string());
+        if self.chat.viewer() == identity_hex.as_deref()
+            && self.chat.viewer_team() == team
+            && self.chat.viewer_admin() == admin
+        {
+            return;
+        }
+        self.chat.set_viewer(identity, team, admin);
     }
 
     /// Applies every pending `my_match_calls` row (GAPS #35 / PAR-0576).
@@ -2556,9 +2712,175 @@ fn probe_reachable(host: &str) -> bool {
     })
 }
 
+/// JSON array of the retained `ChatLine` projections (`MindNet.chat_json`).
+///
+/// Kept as a free function so the `chatui` facade shape is unit-testable from
+/// rows without a live `MindNet` node (no connector/server needed).
+fn chat_facade_json(chat: &ChatLog) -> serde_json::Value {
+    serde_json::Value::Array(chat.lines().iter().map(|line| line.to_json()).collect())
+}
+
+/// JSON array of the retained `ServerEvent` projections
+/// (`MindNet.events_json`).
+fn events_facade_json(events: &EventBus) -> serde_json::Value {
+    serde_json::Value::Array(
+        events
+            .events()
+            .iter()
+            .map(|event| event.to_json())
+            .collect(),
+    )
+}
+
+/// `Administration.TraceInfo` wire payload for `Call.traceInfo` (PAR-0601),
+/// projected from the relay roster trace.
+///
+/// The relay has no peer IP (`D2`: reducers never see a socket), so `ip`/`ips`
+/// stay empty; `modded`/`mobile` have no relay source and default to `false`.
+/// The uuid/counters/names come from the roster aggregation
+/// (`Roster::trace`), which mirrors `Administration.PlayerInfo`.
+fn relay_trace_info(trace: &mind_stdb::TraceInfo) -> mind_stdb::typeio::TraceInfo {
+    mind_stdb::typeio::TraceInfo {
+        ip: None,
+        uuid: Some(trace.identity.clone()),
+        locale: None,
+        modded: false,
+        mobile: false,
+        times_joined: i32::try_from(trace.sessions).unwrap_or(i32::MAX),
+        times_kicked: i32::try_from(trace.kicks.len()).unwrap_or(i32::MAX),
+        ips: Vec::new(),
+        names: trace.names.iter().cloned().map(Some).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_SERVER_ADDRESS, parse_server_address};
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::{
+        DEFAULT_SERVER_ADDRESS, chat_facade_json, events_facade_json, parse_server_address,
+        relay_trace_info,
+    };
+    use mind_stdb::module_bindings::{ChatKind, EventKind, MatchChat, MatchEvent};
+    use mind_stdb::{ChatLog, EventBus, Identity, RowChange, Timestamp};
+
+    fn identity(byte: u8) -> Identity {
+        Identity::from_byte_array([byte; 32])
+    }
+
+    fn chat_row(chat_id: u64, kind: ChatKind, text: &str) -> MatchChat {
+        MatchChat {
+            chat_id,
+            match_id: 7,
+            sender: identity(2),
+            kind,
+            team: Some(1),
+            text: text.to_string(),
+            target: None,
+            sent_at: Timestamp::from_micros_since_unix_epoch(chat_id as i64 * 1_000_000),
+        }
+    }
+
+    fn event_row(event_id: u64, kind: EventKind, detail: &str) -> MatchEvent {
+        MatchEvent {
+            event_id,
+            match_id: 7,
+            kind,
+            actor: Some(identity(2)),
+            target: None,
+            detail: detail.to_string(),
+            at: Timestamp::from_micros_since_unix_epoch(event_id as i64 * 1_000_000),
+        }
+    }
+
+    /// The chat facade is a JSON array of `ChatLine::to_json` rows built from
+    /// `my_match_chat` bindings (PAR-0121/0125); rows the viewer may not see
+    /// never reach the array.
+    #[test]
+    fn chat_facade_json_projects_bound_rows() {
+        let mut chat = ChatLog::new();
+        chat.set_viewer(Some(identity(2)), Some(1), false);
+        chat.apply(RowChange::Insert(chat_row(2, ChatKind::All, "second")));
+        chat.apply(RowChange::Insert(chat_row(1, ChatKind::All, "first")));
+        // Team-2 chat is invisible to a team-1 viewer.
+        chat.apply(RowChange::Insert(MatchChat {
+            team: Some(2),
+            ..chat_row(3, ChatKind::Team, "other team")
+        }));
+
+        let json = chat_facade_json(&chat);
+        let rows = json.as_array().expect("array");
+        assert_eq!(rows.len(), 2, "only the visible rows");
+        assert_eq!(rows[0]["id"], 1);
+        assert_eq!(rows[0]["text"], "first");
+        assert_eq!(rows[0]["kind"], "all");
+        assert_eq!(rows[1]["id"], 2);
+        assert_eq!(rows[0]["sender"], identity(2).to_hex().to_string());
+        assert_eq!(
+            chat.to_json(),
+            json,
+            "same projection as `ChatLog::to_json`"
+        );
+    }
+
+    /// The toast facade is a JSON array of `ServerEvent::to_json` rows built
+    /// from `my_match_events` bindings (GAPS #37).
+    #[test]
+    fn events_facade_json_projects_bound_rows() {
+        let mut events = EventBus::new();
+        events.apply(RowChange::Insert(event_row(
+            2,
+            EventKind::PlayerJoin,
+            "player joined",
+        )));
+        events.apply(RowChange::Insert(event_row(
+            1,
+            EventKind::MatchCreate,
+            "match created",
+        )));
+
+        let json = events_facade_json(&events);
+        let rows = json.as_array().expect("array");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], 1, "commit order, not insertion order");
+        assert_eq!(rows[0]["type"], "WorldLoadEvent");
+        assert_eq!(rows[0]["kind"], "MatchCreate");
+        assert_eq!(rows[1]["type"], "PlayerJoin");
+        assert_eq!(
+            events.to_json(),
+            json,
+            "same projection as `EventBus::to_json`"
+        );
+    }
+
+    /// PAR-0601: the `Call.traceInfo` payload projects the roster trace with
+    /// the relay's IP-less shape.
+    #[test]
+    fn relay_trace_info_projects_the_roster_trace() {
+        let identity = "ab".repeat(32);
+        let trace = mind_stdb::roster::TraceInfo {
+            identity: identity.clone(),
+            names: vec!["alice".to_string(), "alice2".to_string()],
+            sessions: 3,
+            connected: true,
+            last_join_micros: Some(1),
+            kicks: vec![("vote".to_string(), "cd".repeat(32), 2)],
+            actions: Vec::new(),
+            banned: false,
+            whitelisted: false,
+        };
+        let wire = relay_trace_info(&trace);
+        assert_eq!(wire.uuid.as_deref(), Some(identity.as_str()));
+        assert_eq!(wire.times_joined, 3);
+        assert_eq!(wire.times_kicked, 1);
+        assert_eq!(
+            wire.names,
+            vec![Some("alice".to_string()), Some("alice2".to_string())]
+        );
+        assert_eq!(wire.ip, None, "no peer IP reaches a reducer");
+        assert!(wire.ips.is_empty());
+        assert!(!wire.modded && !wire.mobile);
+    }
 
     #[test]
     fn server_address_parsing() {

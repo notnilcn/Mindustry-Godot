@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T00:22:40Z",
+  "updated": "2026-11-07T00:38:48Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -30702,13 +30702,21 @@
     },
     "PAR-0577": {
       "title": "GAPS #37 residual: EventType taxonomy exists but client-sim fire sites and module typed publication are missing",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "see referenced Java source (Logic/Control/NetServer EventType fire sites)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; host-side outbox drain + remaining fire sites noted as residuals"
             }
           }
         ]
@@ -30716,18 +30724,52 @@
       "action": {
         "godot": [
           {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib event"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo check -p mind-gdext"
+            }
+          }
+        ],
+        "java": [
+          {
             "tool": "note",
             "params": {
-              "text": "see runs/PAR-0577"
+              "text": "no Java leg run (brief forbids); twin verification pending"
             }
           }
         ]
       },
-      "claimed_by": "hx-protocol",
-      "claimed_at": "2026-11-06T22:03:58Z",
+      "claimed_by": "hx-eventtype",
+      "claimed_at": "2026-11-07T00:38:24Z",
       "severity": "P1",
       "gap": "PAR-0548 landed all 89 EventType classes + the {\"type\":...} JSON payload codec in mind-stdb/src/event_type.rs, the EventKind->class mapping, and ServerEvent::typed/EventBus::typed_after; MindNet binds my_match_events into the EventBus. Still missing, outside hx-protocol file ownership: (1) the client sim never fires UnitCreate/UnitDestroy/UnitDamage/UnitDrown/BulletCreate/BuildDamage/BuildSelect/Config/Deposit/Withdraw/CoreChange/Research/Unlock/... (mind-core has only 13 EventTypes in event.rs; fire sites live in mind-core sim/game); (2) server/spacetimedb/src/relay/events.rs EventKind (18 variants) has no variants for the new classes and never writes the typed detail envelope, so typed rows cannot arrive over STDB yet. The client decodes typed details as soon as the relay publishes them.",
-      "source": "PAR-0548 residual"
+      "source": "PAR-0548 residual",
+      "fix": "GAPS #37 fire sites landed (headless half). mind-core: event.rs now declares the missing upstream classes (WorldLoad/GameOver/SectorCapture/SectorLaunch/Unlock/Research/Deposit/BuildSelect/Config/PlayerJoin/PlayerLeave) and the define_events! bus gained a `flow` section: SimEvent keeps its exact 13 variants (no sim edits) while game-flow rows (GameEvent) dispatch through the same listener set via Events.dispatch_row/dispatch_game; EventRow is the outbox row and SimEvent/GameEvent::class_name() name the upstream EventType class (BlockPlaced/BlockBroken collapse onto BlockBuildEnd/BlockDestroy). PlaySession gains a bounded event_rows outbox (push_event_row/take_event_rows, EVENT_QUEUE_CAPACITY=256). Fire sites: play_map (WorldLoadEvent then PlayEvent), play_sector save-load (WorldLoadEvent), play_new_sector (SectorLaunchEvent after Play), logic_play (PlayEvent), sector_capture (SectorCaptureEvent.initial), raise_game_over/check_game_state/game_over/update_game_over (GameOverEvent.winner), campaign_tick_system unlock queue (UnlockEvent, deduped). server/spacetimedb relay/events.rs: emit() now writes the client EventType JSON envelope for MatchStart ({\"type\":\"PlayEvent\"}), MatchEnd (GameOverEvent winner 0 + reason text), PlayerJoin (PlayerJoin player:null + name text) and ConfigChange (ConfigEvent with value text); plain text rides in ignored extra fields; json_escape keeps the envelope valid; MatchCreate/PlayerLeave stay plain because the client toast renders MatchEvent.detail verbatim.",
+      "evidence": [
+        "cargo test -p mind-core --lib event (43 passed; includes play/runtime fire-site + bus round-trip tests)",
+        "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib (111 passed; typed envelope + escaping tests)",
+        "cargo check -p mind-gdext -p mind-headless (clean)",
+        "cargo fmt --check clean on the 4 touched files"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T00:38:48Z",
+          "by": "hx-eventtype",
+          "text": "Verified headlessly (no Java leg): mind-core game-flow fire sites queue typed EventRow rows (WorldLoad/Play/SectorLaunch/SectorCapture/GameOver/Unlock) that round-trip through the Events bus in tests; the relay publishes typed EventType envelopes for MatchStart/MatchEnd/PlayerJoin/ConfigChange. Residuals (outside hx-eventtype file ownership): (1) mind-gdext host drain of PlaySession.event_rows + bus ownership in MindCampaign::pump_runtime (client/rust/mind-gdext/src/campaign.rs); (2) PlayerJoin/Leave host-side fire sites + ResearchEvent (mind-gdext campaign/net), Config/Deposit/BuildSelect/BulletDestroy (mind-core sim/ or world/config.rs hot paths need a bus seam); (3) relay MatchCreate/PlayerLeave typed envelopes need mind-gdext/src/ui/fragments/toasts.rs to render the typed payload instead of raw detail; (4) server ConfigChange fire site (admin_set_config in server/spacetimedb/src/admin/mod.rs)."
+        }
+      ]
     },
     "PAR-0578": {
       "title": "GAPS #36 residual: TypeIO writeObject-tagged overloads (Call.effect data) and entity/plan sync codecs not ported",

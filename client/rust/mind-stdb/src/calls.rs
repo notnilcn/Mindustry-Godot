@@ -17,12 +17,48 @@
 //! layouts in `core/build/generated/.../mindustry/gen`); SpacetimeDB replaces
 //! the transport, not the packet bodies. The bodies are byte-for-byte the
 //! `*CallPacket.write(...)` payloads, so the module never has to know TypeIO.
+//!
+//! Producer status (PAR-0601): [`ProducedCall`] pairs a packet with the
+//! `publish_call` envelope, and the host wires it at the call sites it already
+//! triggers:
+//! - `infoMessage` — headless `NetHost::info_message` (game over / next map,
+//!   `ServerControl.java:116`). The whitelist rejection
+//!   (`NetServer.java:233`) happens in the module's join gate, which cannot
+//!   publish calls today, so it stays outstanding.
+//! - `kick`/`kickReason` — headless `Admins::kick`/`NetHost::kick_all`
+//!   (`NetServer.java:453-520`) and `MindNet.player_action("kick")`.
+//! - `traceInfo` — `MindNet.player_action("trace")` (`NetServer.java:941`).
+//!
+//! Remaining Java call sites (no producer yet; the constructors above are
+//! ready):
+//! - `menu`/`followUpMenu`/`hideFollowUpMenu` — `Menus.java:145-168` are the
+//!   client render handlers; core has no producer (mods call them). The port's
+//!   menu surface is `gx/ui` (`Menus`/dialog registry) and needs a host publish
+//!   seam when it grows one.
+//! - `menuBuilder`/`menuBuilderUpdate`/`hideMenuBuilder` —
+//!   `MenuBuilder.java:40-50` (`show`/`showAll`/`update`); the builder port is
+//!   `gx/ui`.
+//! - `setCameraPosition` — only the `NetClient.java:509` handler exists in
+//!   core; producers are mods/logic (`LExecutor`).
+//! - `sound`/`soundAt`/`effect`/`effectReliable`/`playMusic` — only
+//!   `NetClient.java` handlers plus the logic executor
+//!   (`LExecutor.java:2278` music); the logic port (`mc/logic`) owns those
+//!   producers.
+//! - `label`/`labelReliable`/`removeWorldLabel` — `Menus.label*` are render
+//!   handlers; the only core producer is `WorldLabelComp.hide`
+//!   (`WorldLabelComp.java:128/135`, removal only), ported under `mc/world`.
+//! - Logic-triggered `Call.effect(..., data)` overload (`EffectCallPacket2`,
+//!   `TypeIO.writeObject`) — body codec lives in
+//!   `call_packet::encode_effect_data_body`/`decode_effect_data_body`
+//!   (PAR-0578); the wire kind needs a module ABI append before it can ship.
 
 use std::collections::BTreeMap;
 
+use crate::Identity;
 use crate::binder::RowChange;
 use crate::call_packet::{self, CallError, CallKind, CallPacket};
 use crate::module_bindings::{CallPacketKind, MatchCall};
+use crate::typeio::{EffectId, KickReason, Rgba, SoundId, TraceInfo};
 
 /// Maximum call rows retained client-side. The server prunes the table by
 /// `CALL_RETENTION_SECS`, so this only bounds a reconnect replay spike.
@@ -58,6 +94,261 @@ pub fn call_kind(kind: CallPacketKind) -> CallKind {
         CallPacketKind::RemoveWorldLabel => CallKind::RemoveWorldLabel,
         CallPacketKind::Kick => CallKind::Kick,
         CallPacketKind::KickReason => CallKind::KickReason,
+    }
+}
+
+/// The module ABI kind for one client call kind (inverse of [`call_kind`]).
+///
+/// Used by the host-side producers ([`ProducedCall`]): a producer builds the
+/// packet first, this maps it onto the `match_call.kind` column the module
+/// stores. Exhaustive on purpose, like [`call_kind`].
+pub fn packet_kind(kind: CallKind) -> CallPacketKind {
+    match kind {
+        CallKind::InfoMessage => CallPacketKind::InfoMessage,
+        CallKind::Menu => CallPacketKind::Menu,
+        CallKind::FollowUpMenu => CallPacketKind::FollowUpMenu,
+        CallKind::HideFollowUpMenu => CallPacketKind::HideFollowUpMenu,
+        CallKind::MenuBuilder => CallPacketKind::MenuBuilder,
+        CallKind::MenuBuilderUpdate => CallPacketKind::MenuBuilderUpdate,
+        CallKind::HideMenuBuilder => CallPacketKind::HideMenuBuilder,
+        CallKind::SetCameraPosition => CallPacketKind::SetCameraPosition,
+        CallKind::Sound => CallPacketKind::Sound,
+        CallKind::SoundAt => CallPacketKind::SoundAt,
+        CallKind::Effect => CallPacketKind::Effect,
+        CallKind::EffectReliable => CallPacketKind::EffectReliable,
+        CallKind::PlayMusic => CallPacketKind::PlayMusic,
+        CallKind::TraceInfo => CallPacketKind::TraceInfo,
+        CallKind::Label => CallPacketKind::Label,
+        CallKind::LabelWithId => CallPacketKind::LabelWithId,
+        CallKind::LabelWithFlags => CallPacketKind::LabelWithFlags,
+        CallKind::LabelReliable => CallPacketKind::LabelReliable,
+        CallKind::LabelReliableWithId => CallPacketKind::LabelReliableWithId,
+        CallKind::LabelReliableWithFlags => CallPacketKind::LabelReliableWithFlags,
+        CallKind::RemoveWorldLabel => CallPacketKind::RemoveWorldLabel,
+        CallKind::Kick => CallPacketKind::Kick,
+        CallKind::KickReason => CallPacketKind::KickReason,
+    }
+}
+
+/// One server→client call a host action produces (PAR-0601).
+///
+/// `Connector::publish_call` takes `(match_id, kind, target, payload)`; this
+/// pairs a decoded [`CallPacket`] with that envelope so a host call site reads
+/// as one expression (`host.publish(ProducedCall::info_message(..))`). The
+/// module validates the kind/target; nothing here can mutate the sim.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProducedCall {
+    /// `match_call.kind` ABI value (derived from the packet's kind).
+    pub kind: CallPacketKind,
+    /// Single recipient (`None` = every match member, like a broadcast call).
+    pub target: Option<Identity>,
+    /// The packet; [`Self::encode_body`] is the `match_call.payload` value.
+    pub packet: CallPacket,
+}
+
+impl ProducedCall {
+    /// Broadcast `packet`.
+    pub fn broadcast(packet: CallPacket) -> Self {
+        Self {
+            kind: packet_kind(packet.kind()),
+            target: None,
+            packet,
+        }
+    }
+
+    /// One-recipient `packet`.
+    pub fn to(target: Identity, packet: CallPacket) -> Self {
+        Self {
+            kind: packet_kind(packet.kind()),
+            target: Some(target),
+            packet,
+        }
+    }
+
+    /// `match_call.payload` for this call.
+    pub fn encode_body(&self) -> Result<Vec<u8>, CallError> {
+        self.packet.encode_body()
+    }
+
+    /// `[kind][body]` frame (what the client channel pushes).
+    pub fn frame(&self) -> Result<Vec<u8>, CallError> {
+        self.packet.encode()
+    }
+
+    /// Debug projection (`{kind, target, packet}`; `packet` is
+    /// [`CallPacket::to_json`]).
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": format!("{:?}", self.kind),
+            "target": self.target.map(|target| target.to_hex().to_string()),
+            "packet": self.packet.to_json(),
+        })
+    }
+
+    /// `Menus.infoMessage(String)` broadcast (`ServerControl.java:116`).
+    pub fn info_message(message: impl Into<String>) -> Self {
+        Self::broadcast(CallPacket::InfoMessage {
+            message: Some(message.into()),
+        })
+    }
+
+    /// `Menus.infoMessage(NetConnection, String)` to one player
+    /// (`NetServer.java:233`, the whitelist rejection).
+    pub fn info_message_to(target: Identity, message: impl Into<String>) -> Self {
+        Self::to(
+            target,
+            CallPacket::InfoMessage {
+                message: Some(message.into()),
+            },
+        )
+    }
+
+    /// `Call.kick(NetConnection, String)` (`NetServer.adminRequest(kick)`).
+    pub fn kick(target: Identity, reason: impl Into<String>) -> Self {
+        Self::to(
+            target,
+            CallPacket::Kick {
+                reason: Some(reason.into()),
+            },
+        )
+    }
+
+    /// `Call.kick(NetConnection, KickReason)` (`Player.kick(KickReason)`).
+    pub fn kick_reason(target: Identity, reason: KickReason) -> Self {
+        Self::to(target, CallPacket::KickReason { reason })
+    }
+
+    /// `Call.traceInfo(Player, TraceInfo)` (`NetServer.java:941`).
+    pub fn trace_info(target: Identity, player: Option<i32>, info: TraceInfo) -> Self {
+        Self::to(target, CallPacket::TraceInfo { player, info })
+    }
+
+    /// `Call.setCameraPosition(float, float)` (`NetClient.java:509`).
+    pub fn set_camera_position(x: f32, y: f32) -> Self {
+        Self::broadcast(CallPacket::SetCameraPosition { x, y })
+    }
+
+    /// `Call.playMusic(String, boolean)` (`NetClient.java:265`).
+    pub fn play_music(track: impl Into<String>, interrupt: bool) -> Self {
+        Self::broadcast(CallPacket::PlayMusic {
+            music: Some(track.into()),
+            interrupt,
+        })
+    }
+
+    /// `Call.sound(Sound, float, float, float)`.
+    pub fn sound(sound: Option<SoundId>, volume: f32, pitch: f32, pan: f32) -> Self {
+        Self::broadcast(CallPacket::Sound {
+            sound,
+            volume,
+            pitch,
+            pan,
+        })
+    }
+
+    /// `Call.soundAt(Sound, float, float, float, float)`.
+    pub fn sound_at(sound: Option<SoundId>, x: f32, y: f32, volume: f32, pitch: f32) -> Self {
+        Self::broadcast(CallPacket::SoundAt {
+            sound,
+            x,
+            y,
+            volume,
+            pitch,
+        })
+    }
+
+    /// `Call.effect(Effect, float, float, float, Color)`.
+    pub fn effect(effect: Option<EffectId>, x: f32, y: f32, rotation: f32, color: Rgba) -> Self {
+        Self::broadcast(CallPacket::Effect {
+            effect,
+            x,
+            y,
+            rotation,
+            color,
+        })
+    }
+
+    /// `Call.effectReliable(Effect, float, float, float, Color)`.
+    pub fn effect_reliable(
+        effect: Option<EffectId>,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+    ) -> Self {
+        Self::broadcast(CallPacket::EffectReliable {
+            effect,
+            x,
+            y,
+            rotation,
+            color,
+        })
+    }
+
+    /// `Call.label(String, float, float, float)`.
+    pub fn label(message: impl Into<String>, duration: f32, world_x: f32, world_y: f32) -> Self {
+        Self::broadcast(CallPacket::Label {
+            message: Some(message.into()),
+            duration,
+            world_x,
+            world_y,
+        })
+    }
+
+    /// `Call.labelReliable(String, float, float, float)`.
+    pub fn label_reliable(
+        message: impl Into<String>,
+        duration: f32,
+        world_x: f32,
+        world_y: f32,
+    ) -> Self {
+        Self::broadcast(CallPacket::LabelReliable {
+            message: Some(message.into()),
+            duration,
+            world_x,
+            world_y,
+        })
+    }
+
+    /// `Call.removeWorldLabel(int)` (`WorldLabelComp.hide`).
+    pub fn remove_world_label(id: i32) -> Self {
+        Self::broadcast(CallPacket::RemoveWorldLabel { id })
+    }
+
+    /// `Call.menu(int, String, String, String[][])` (`Menus.java:147`).
+    pub fn menu(
+        menu_id: i32,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        options: Vec<Vec<Option<String>>>,
+    ) -> Self {
+        Self::broadcast(CallPacket::Menu {
+            menu_id,
+            title: Some(title.into()),
+            message: Some(message.into()),
+            options,
+        })
+    }
+
+    /// `Call.followUpMenu(int, String, String, String[][])`
+    /// (`Menus.java:156`).
+    pub fn follow_up_menu(
+        menu_id: i32,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        options: Vec<Vec<Option<String>>>,
+    ) -> Self {
+        Self::broadcast(CallPacket::FollowUpMenu {
+            menu_id,
+            title: Some(title.into()),
+            message: Some(message.into()),
+            options,
+        })
+    }
+
+    /// `Call.hideFollowUpMenu(int)` (`Menus.hideFollowUpMenu`).
+    pub fn hide_follow_up_menu(menu_id: i32) -> Self {
+        Self::broadcast(CallPacket::HideFollowUpMenu { menu_id })
     }
 }
 
@@ -427,5 +718,145 @@ mod tests {
         stream.clear();
         assert!(stream.is_empty());
         assert_eq!(stream.watermark(), None);
+    }
+}
+
+/// PAR-0601: the host-side call producers.
+#[cfg(test)]
+mod producer_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use crate::call_packet::decode;
+    use crate::typeio::{EffectId, KickReason, Rgba, SoundId, TraceInfo};
+
+    fn identity(byte: u8) -> Identity {
+        Identity::from_byte_array([byte; 32])
+    }
+
+    /// Every `ProducedCall` constructor round-trips through the same body
+    /// encoding `Connector::publish_call` sends and the same frame decoder the
+    /// client channel uses; the module kind is the inverse mapping.
+    #[test]
+    fn producers_round_trip_through_the_call_channel() {
+        let target = identity(2);
+        let options = vec![vec![Some("ok".to_string()), None]];
+        let produced = vec![
+            ProducedCall::info_message("hello"),
+            ProducedCall::info_message_to(target, "You are not whitelisted here."),
+            ProducedCall::kick(target, "bye"),
+            ProducedCall::kick_reason(target, KickReason::Gameover),
+            ProducedCall::trace_info(
+                target,
+                Some(7),
+                TraceInfo {
+                    uuid: Some("abc".to_string()),
+                    names: vec![Some("alice".to_string())],
+                    ..TraceInfo::default()
+                },
+            ),
+            ProducedCall::set_camera_position(8.0, 16.0),
+            ProducedCall::play_music("calm", true),
+            ProducedCall::sound(Some(SoundId(3)), 0.5, 1.0, 0.0),
+            ProducedCall::sound_at(Some(SoundId(3)), 1.0, 2.0, 0.5, 1.0),
+            ProducedCall::effect(
+                Some(EffectId(5)),
+                1.0,
+                2.0,
+                90.0,
+                Rgba {
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            ),
+            ProducedCall::effect_reliable(Some(EffectId(5)), 1.0, 2.0, 0.0, Rgba::default()),
+            ProducedCall::label("hi", 5.0, 3.0, 4.0),
+            ProducedCall::label_reliable("hi", 5.0, 3.0, 4.0),
+            ProducedCall::remove_world_label(9),
+            ProducedCall::menu(1, "title", "message", options.clone()),
+            ProducedCall::follow_up_menu(1, "title", "message", options),
+            ProducedCall::hide_follow_up_menu(1),
+        ];
+        for call in produced {
+            let body = call.encode_body().unwrap();
+            let frame = call.frame().unwrap();
+            assert_eq!(frame[0], call.packet.kind().ordinal(), "{:?}", call.kind);
+            assert_eq!(&frame[1..], body.as_slice());
+            assert_eq!(decode(&frame).unwrap(), call.packet, "{:?}", call.kind);
+            // `publish_call` receives this kind/target/payload triple.
+            assert_eq!(call.kind, packet_kind(call.packet.kind()));
+            assert_eq!(
+                call.kind,
+                packet_kind(call_kind(call.kind)),
+                "module ABI mapping is stable"
+            );
+        }
+
+        // Broadcast vs targeted kinds (module `is_targeted` requires a target
+        // for kick/traceInfo; infoMessage picks the broadcast overload).
+        assert!(ProducedCall::kick(target, "x").target.is_some());
+        assert!(
+            ProducedCall::kick_reason(target, KickReason::Vote)
+                .target
+                .is_some()
+        );
+        assert!(
+            ProducedCall::trace_info(target, None, TraceInfo::default())
+                .target
+                .is_some()
+        );
+        assert!(ProducedCall::info_message("x").target.is_none());
+        assert!(ProducedCall::set_camera_position(0.0, 0.0).target.is_none());
+    }
+
+    /// `packet_kind` is the exact inverse of `call_kind` over the whole
+    /// append-only ABI (a new kind fails to compile in both matches). The
+    /// generated client enum has no `ALL` const, so the module's 23-kind list
+    /// is spelled here like the transport test above.
+    #[test]
+    fn module_and_client_kind_mappings_are_inverse() {
+        let kinds = [
+            CallPacketKind::InfoMessage,
+            CallPacketKind::Menu,
+            CallPacketKind::FollowUpMenu,
+            CallPacketKind::HideFollowUpMenu,
+            CallPacketKind::MenuBuilder,
+            CallPacketKind::MenuBuilderUpdate,
+            CallPacketKind::HideMenuBuilder,
+            CallPacketKind::SetCameraPosition,
+            CallPacketKind::Sound,
+            CallPacketKind::SoundAt,
+            CallPacketKind::Effect,
+            CallPacketKind::EffectReliable,
+            CallPacketKind::PlayMusic,
+            CallPacketKind::TraceInfo,
+            CallPacketKind::Label,
+            CallPacketKind::LabelWithId,
+            CallPacketKind::LabelWithFlags,
+            CallPacketKind::LabelReliable,
+            CallPacketKind::LabelReliableWithId,
+            CallPacketKind::LabelReliableWithFlags,
+            CallPacketKind::RemoveWorldLabel,
+            CallPacketKind::Kick,
+            CallPacketKind::KickReason,
+        ];
+        for kind in kinds {
+            assert_eq!(packet_kind(call_kind(kind)), kind, "{kind:?}");
+        }
+        // Every client kind has a module kind and vice versa.
+        assert_eq!(CallKind::ALL.len(), kinds.len());
+    }
+
+    /// The debug JSON names the module kind and the recipient.
+    #[test]
+    fn producer_json_names_kind_target_and_packet() {
+        let call = ProducedCall::kick(identity(4), "bye");
+        let json = call.to_json();
+        assert_eq!(json["kind"], "Kick");
+        assert_eq!(json["target"], identity(4).to_hex().to_string());
+        assert_eq!(json["packet"]["body"]["reason"], "bye");
+        assert_eq!(json["packet"]["call"], "kick");
     }
 }
