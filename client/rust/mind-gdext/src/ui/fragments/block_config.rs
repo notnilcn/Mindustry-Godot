@@ -1218,7 +1218,10 @@ mod tests {
 
     #[test]
     fn rgba_packing_matches_arc() {
-        assert_eq!(arc_rgba(rgba_from_int(0xffd37fff)), 0xffd37f7f);
+        // Arc `Color.rgba8888()` packs `(int)(c * 255)` per channel, so an
+        // `0xff` alpha byte round-trips as `0xff` (the old expectation halved
+        // it by typo).
+        assert_eq!(arc_rgba(rgba_from_int(0xffd37fff)), 0xffd37fff);
         assert_eq!(
             rgba_from_int(0xffd37fff),
             Color::from_rgba8(255, 211, 127, 255)

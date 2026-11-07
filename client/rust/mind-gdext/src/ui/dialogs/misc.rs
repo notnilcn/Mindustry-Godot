@@ -68,7 +68,7 @@ pub fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
         "list_select" => Some(Box::new(ListSelectDialog::default())),
         "bans" => Some(Box::new(BansDialog::default())),
         "admins" => Some(Box::new(AdminsDialog::default())),
-        "traces" => Some(Box::new(TraceDialog::default())),
+        "traces" => Some(Box::new(TraceDialog)),
         "campaign_complete" => Some(Box::new(CampaignCompleteDialog::default())),
         _ => None,
     }
@@ -266,7 +266,8 @@ impl RosterKind {
         }
     }
 
-    /// The `MindUi.admin_action` verb (`unbanPlayerID` / `unAdminPlayer`).
+    /// The relay verb carried by `MindUi.admin_action`
+    /// (`MindNet.player_action`; Java `unbanPlayerID` / `unAdminPlayer`).
     fn action(self) -> &'static str {
         match self {
             Self::Bans => "unban",
@@ -305,6 +306,11 @@ struct RosterState {
     entries: Vec<RosterEntry>,
     /// The identity waiting for the `@confirm` answer.
     pending: String,
+    /// Identities whose `unban`/`unadmin` reducer was accepted: Java
+    /// `setup()` re-reads `netServer.admins` after the call
+    /// (`BansDialog.java:37-42`, `AdminsDialog.java:37-46`), so the row stays
+    /// gone even when the static dialog context still lists it.
+    removed: std::collections::BTreeSet<String>,
 }
 
 /// Reads `banned`/`admins` context rows: `PlayerInfo` dictionaries
@@ -415,7 +421,13 @@ fn roster_shown(dialog: &mut MindDialog, state: &Rc<RefCell<RosterState>>, kind:
     let entries = roster_entries(dialog.context_value(kind.context_key()));
     {
         let mut st = state.borrow_mut();
-        st.entries = entries;
+        // An accepted unban/unadmin already dropped its row; the context is a
+        // snapshot, so re-shown dialogs filter it through the removal set.
+        let removed = st.removed.clone();
+        st.entries = entries
+            .into_iter()
+            .filter(|entry| !removed.contains(&entry.id))
+            .collect();
         st.pending.clear();
     }
     roster_render(dialog, state, kind);
@@ -529,8 +541,19 @@ fn roster_connect_confirm(
         .set_meta(ROSTER_CONFIRM_META, &true.to_variant());
 }
 
+/// Whether an answered confirm removes the roster row on the redraw.
+///
+/// Java only re-reads the roster when the unban/unadmin call actually ran
+/// (`BansDialog.java:37-42` / `AdminsDialog.java:37-46`); a cancelled confirm
+/// or a dispatch the relay never accepted (no `MindNet`, single-player) must
+/// keep the row, because the shell never fakes a server action.
+fn roster_row_removed(confirmed: bool, accepted: bool, identifier: &str) -> bool {
+    confirmed && accepted && !identifier.is_empty()
+}
+
 /// Applies an answered confirm: `unbanPlayerID`/`unAdminPlayer` through the
-/// `MindUi.admin_action` relay seam, then re-draws the roster like `setup()`.
+/// `MindUi.admin_action` relay seam (`MindNet.player_action`), then re-draws
+/// the roster like `setup()`.
 fn roster_apply_confirm(
     dialog: &Gd<MindDialog>,
     state: &Rc<RefCell<RosterState>>,
@@ -541,13 +564,13 @@ fn roster_apply_confirm(
         let mut st = state.borrow_mut();
         std::mem::take(&mut st.pending)
     };
-    if confirmed && !pending.is_empty() && admin_action(kind.action(), &pending) {
+    let accepted = confirmed && !pending.is_empty() && admin_action(kind.action(), &pending);
+    if roster_row_removed(confirmed, accepted, &pending) {
         // The relay listener accepted the request: drop the row like the Java
         // `setup()` re-read of `netServer.admins`.
-        state
-            .borrow_mut()
-            .entries
-            .retain(|entry| entry.id != pending);
+        let mut st = state.borrow_mut();
+        st.removed.insert(pending.clone());
+        st.entries.retain(|entry| entry.id != pending);
     }
     if !dialog.is_instance_valid() {
         return;
@@ -557,8 +580,9 @@ fn roster_apply_confirm(
     roster_render(&mut bound, state, kind);
 }
 
-/// Forwards an admin roster action to `MindUi.admin_action`; false when the
-/// relay seam has no listener (the shell never fakes a server action).
+/// Forwards an admin roster action to `MindUi.admin_action` (the
+/// `MindNet.player_action` reducer seam); false when no relay accepted it (the
+/// shell never fakes a server action).
 fn admin_action(action: &str, identifier: &str) -> bool {
     let Some(mut ui) = kit::ui() else {
         return false;
@@ -1006,6 +1030,19 @@ mod tests {
         assert_eq!(RosterKind::Admins.action(), "unadmin");
         assert_eq!(RosterKind::Bans.empty_key(), "@server.bans.none");
         assert_eq!(RosterKind::Admins.empty_key(), "@server.admins.none");
+    }
+
+    #[test]
+    fn roster_rows_drop_only_after_a_confirmed_accepted_action() {
+        // Accepted unban/unadmin: the row leaves the redrawn roster and stays
+        // gone on re-show.
+        assert!(roster_row_removed(true, true, "uuid-1"));
+        // A cancelled confirm sends nothing (`ui.showConfirm` answer false).
+        assert!(!roster_row_removed(false, true, "uuid-1"));
+        // No relay/listener accepted the reducer: keep the row (never fake).
+        assert!(!roster_row_removed(true, false, "uuid-1"));
+        // A bare-name context has no identity to unban.
+        assert!(!roster_row_removed(true, true, ""));
     }
 
     #[test]

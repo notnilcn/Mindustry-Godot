@@ -67,7 +67,7 @@ fn shake_duration(intensity: f32, duration: f32) -> f32 {
 ///
 /// `width` is the `LightRenderer.line` capsule radius and `rgba` already folds
 /// the body's alpha (`Draw.color(tint, alpha)`).
-type FxLightLine = (f32, f32, f32, f32, f32, [f32; 4]);
+pub type FxLightLine = (f32, f32, f32, f32, f32, [f32; 4]);
 
 /// The line light an effect body draws, for bodies that call the line-form
 /// `Drawf.light(x, y, x2, y2, stroke, tint, alpha)` overload instead of the
@@ -129,6 +129,25 @@ fn build_fx_program(
         }
     }
     line
+}
+
+/// The named spawns a drained bus effect produces, in emission order: a named
+/// reference spawns itself; an inline composite flattens through
+/// `mind_core::fx::inline` (`MultiEffect` forwards the transform,
+/// `WrapEffect` overrides rotation/colour). Inline leaves with no named `Fx`
+/// id produce nothing (their renderer body is owned by the draw code).
+///
+/// Testable seam for `MindFx::spawn_bus_effect` (the pool itself needs Godot).
+fn bus_effect_spawns(
+    effect: &mind_core::content::registries::fx_meta::EffectRef,
+    rotation: f32,
+    color: Rgba,
+) -> Vec<(EffectId, f32, Rgba)> {
+    mind_core::fx::inline::flatten(effect, rotation, color)
+        .into_iter()
+        .filter(|emission| emission.effect != EffectId::NONE)
+        .map(|emission| (emission.effect, emission.rotation, emission.color))
+        .collect()
 }
 
 /// `MindFx` — effect/decal/trail/shake pool host + MCP probes.
@@ -259,6 +278,14 @@ impl MindFx {
     /// view pool. Shared by `FxEvent::Effect`/`EffectWithData`; the spawn is
     /// gated on `renderer.enableEffects` (`Effect.shouldCreate`,
     /// `Effect.java:142`).
+    ///
+    /// Inline references (`EffectRef::Inline`: `MultiEffect`/`WrapEffect`
+    /// composites from content, e.g. the `BurstDrill` drill effect at
+    /// `Blocks.java:3094`) are flattened first — `mind_core::fx::inline`
+    /// mirrors the upstream `create` overrides, so each named leaf spawns with
+    /// the wrapper's rotation/colour. Leaf inline bodies with no named `Fx`
+    /// id keep their draw-code half and produce no spawn here (documented in
+    /// that module).
     fn spawn_bus_effect(
         &mut self,
         effect: &mind_core::content::registries::fx_meta::EffectRef,
@@ -271,16 +298,12 @@ impl MindFx {
         if !self.settings.effects {
             return;
         }
-        let id = match effect {
-            mind_core::content::registries::fx_meta::EffectRef::Named(id) => *id,
-            mind_core::content::registries::fx_meta::EffectRef::Inline(_) => EffectId::NONE,
-        };
-        if id == EffectId::NONE {
-            return;
-        }
-        let def = registry().get(id);
         let snapshot = EmptySnapshot;
-        self.pool.spawn(def, x, y, rotation, color, data, &snapshot);
+        for (id, rotation, color) in bus_effect_spawns(effect, rotation, color) {
+            let def = registry().get(id);
+            self.pool
+                .spawn(def, x, y, rotation, color, data.clone(), &snapshot);
+        }
     }
 
     /// Executes one primitive; returns whether it was drawn.
@@ -1290,5 +1313,78 @@ mod tests {
             .is_none()
         );
         assert!(!program.is_empty(), "the jagged chain is still drawn");
+    }
+
+    /// `EffectRef::Inline` must not be dropped at spawn: the `BurstDrill`
+    /// `drillEffect = new MultiEffect(Fx.mineImpact, Fx.drillSteam, ...)`
+    /// (`Blocks.java:3094`) reaches the view bus as an inline composite and
+    /// every named leaf plays (`MultiEffect.java:20-27`).
+    #[test]
+    fn multi_effect_inline_flattens_to_named_spawns() {
+        use mind_core::content::registries::fx_meta::{EffectRef, EffectSpec};
+        let effect = EffectRef::Inline(Box::new(EffectSpec::multi(
+            1.0,
+            vec![
+                EffectRef::Named(EffectId::MINE_IMPACT),
+                EffectRef::Named(EffectId::DRILL_STEAM),
+            ],
+        )));
+        let color = Rgba::new(1.0, 0.5, 0.25, 1.0);
+        let spawns = bus_effect_spawns(&effect, 90.0, color);
+        assert_eq!(spawns.len(), 2);
+        assert_eq!(spawns[0], (EffectId::MINE_IMPACT, 90.0, color));
+        assert_eq!(spawns[1], (EffectId::DRILL_STEAM, 90.0, color));
+    }
+
+    /// `WrapEffect.create` (`WrapEffect.java:43-46`) creates the child at the
+    /// wrapper's rotation and colour instead of the caller's; the flatten must
+    /// carry those overrides into the spawn.
+    #[test]
+    fn wrap_effect_inline_overrides_rotation_and_colour() {
+        use mind_core::content::registries::fx_meta::{EffectRef, EffectSpec};
+        let tint = Rgba::new(0.9, 0.2, 0.1, 1.0);
+        // `Fx.mineImpactWave.wrap(Pal.redLight, 40f)` (`Blocks.java:3094`).
+        let effect = EffectRef::Inline(Box::new(EffectSpec::wrap_rotated(
+            EffectRef::Named(EffectId::MINE_IMPACT_WAVE),
+            tint,
+            40.0,
+        )));
+        let spawns = bus_effect_spawns(&effect, 180.0, Rgba::new(1.0, 1.0, 1.0, 1.0));
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].0, EffectId::MINE_IMPACT_WAVE);
+        assert_eq!(spawns[0].1, 40.0, "WrapEffect.rotation wins");
+        assert_eq!(spawns[0].2, tint, "WrapEffect.color wins");
+    }
+
+    /// A plain named reference still spawns exactly itself (no behaviour
+    /// change for the common bus path).
+    #[test]
+    fn named_effect_spawns_itself_once() {
+        use mind_core::content::registries::fx_meta::EffectRef;
+        let color = Rgba::new(0.2, 0.4, 0.6, 1.0);
+        let spawns = bus_effect_spawns(&EffectRef::Named(EffectId::POINT_BEAM), 12.0, color);
+        assert_eq!(spawns, vec![(EffectId::POINT_BEAM, 12.0, color)]);
+    }
+
+    /// A leaf inline body with no named `Fx` id has only its renderer half
+    /// (owned by the draw code), so it yields no spawn; `EffectId::NONE`
+    /// leaves are filtered too.
+    #[test]
+    fn inline_leaves_without_named_ids_spawn_nothing() {
+        use mind_core::content::registries::fx_meta::{EffectRef, EffectSpec};
+        let color = Rgba::new(1.0, 1.0, 1.0, 1.0);
+        let leaf = EffectRef::Inline(Box::new(EffectSpec::explosion()));
+        assert!(bus_effect_spawns(&leaf, 0.0, color).is_empty());
+        let none = EffectRef::Named(EffectId::NONE);
+        assert!(bus_effect_spawns(&none, 0.0, color).is_empty());
+        // A composite mixing a named leaf and a leaf-only body spawns just the
+        // named one.
+        let mixed = EffectRef::Inline(Box::new(EffectSpec::multi(
+            1.0,
+            vec![EffectRef::Named(EffectId::POINT_HIT), leaf],
+        )));
+        let spawns = bus_effect_spawns(&mixed, 0.0, color);
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].0, EffectId::POINT_HIT);
     }
 }

@@ -9,6 +9,7 @@
 //! 16.
 
 use crate::logic::executor::{Executor, MAX_GRAPHICS_BUFFER};
+use crate::logic::font;
 use crate::logic::value::{LogicObject, VarRef};
 
 /// `LogicDisplay.commandClear`.
@@ -109,9 +110,11 @@ pub fn cmd_p4(cmd: u64) -> i32 {
     ((cmd >> 54) & 0x3FF) as i32
 }
 
-/// `LogicFontMetrics` seam (plan 13 §8 R4); plan 16 supplies real atlas metrics.
+/// `LogicFontMetrics` seam (plan 13 §8 R4); [`DefaultLogicFontMetrics`] is the
+/// ported `Fonts.logic` font.
 pub trait LogicFontMetrics {
-    /// Whether the glyph exists (`Fonts.logic.getData().hasGlyph`).
+    /// Whether the layout emits a command for the glyph
+    /// (`Fonts.logic.getData().hasGlyph`).
     fn has_glyph(&self, c: char) -> bool;
     /// `spaceXadvance`.
     fn space_xadvance(&self) -> f32;
@@ -119,21 +122,28 @@ pub trait LogicFontMetrics {
     fn line_height(&self) -> f32;
 }
 
-/// Committed fallback metrics captured from the upstream logic font.
+/// The `Fonts.logic` metrics generated from the shipped `logic.ttf`
+/// (`crate::logic::font`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultLogicFontMetrics;
 
 impl LogicFontMetrics for DefaultLogicFontMetrics {
     fn has_glyph(&self, c: char) -> bool {
-        // ASCII coverage is what the ported scenarios exercise; plan 16 replaces
-        // this with the real glyph table.
-        c.is_ascii()
+        // `LExecutor.java:991`: `data.hasGlyph(next)`. Arc's `hasGlyph` is
+        // `missingGlyph != null || getGlyph(ch) != null`
+        // (`arc/graphics/g2d/Font.java:844-847`), and `Fonts.logic` always has
+        // a `missingGlyph` (`'\0'` is generated and `logic.ttf`'s `.notdef`
+        // box is non-empty, `FreeTypeFontGenerator.java:434-441`).
+        font::layout_has_glyph(c)
     }
     fn space_xadvance(&self) -> f32 {
-        8.0
+        // `LExecutor.java:953`: `(int)data.spaceXadvance`, 7 px for
+        // `logic.ttf` at 16 px.
+        font::logic_font_metrics().space_x_advance as f32
     }
     fn line_height(&self) -> f32 {
-        14.0
+        // `LExecutor.java:954`: `(int)data.lineHeight`, 13 px.
+        font::logic_font_metrics().line_height as f32
     }
 }
 
@@ -299,6 +309,75 @@ fn align_vertical(align: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Puts a numeric var into the arena (`var` for a draw operand).
+    fn put(exec: &mut Executor, name: &str, value: f64) -> VarRef {
+        let id = exec.arena.put_var(name);
+        exec.arena.get_mut(id).set_num(value);
+        VarRef::Local(id)
+    }
+
+    /// Runs the `print` branch of `DrawI` (`LExecutor.java:949-995`) and
+    /// returns the emitted `(x, y, char)` triples.
+    fn print_layout(text: &str, x: f64, y: f64, align: f64) -> Vec<(i32, i32, char)> {
+        let mut exec = Executor::new();
+        let world = bevy_ecs::world::World::new();
+        exec.text_buffer = text.to_owned();
+        let x = put(&mut exec, "x", x);
+        let y = put(&mut exec, "y", y);
+        let p1 = put(&mut exec, "p1", align);
+        let p2 = put(&mut exec, "p2", 0.0);
+        let p3 = put(&mut exec, "p3", 0.0);
+        let p4 = put(&mut exec, "p4", 0.0);
+        pack_draw(&world, &mut exec, COMMAND_PRINT, x, y, p1, p2, p3, p4);
+        exec.graphics_buffer
+            .iter()
+            .map(|cmd| {
+                (
+                    unpack_sign(cmd_x(*cmd)),
+                    unpack_sign(cmd_y(*cmd)),
+                    char::from_u32(unpack_sign(cmd_p1(*cmd)) as u32).unwrap_or('\0'),
+                )
+            })
+            .collect()
+    }
+
+    /// `advance = (int)data.spaceXadvance` = 7 and `lineHeight = 13`
+    /// (`LExecutor.java:953-954`; `Fonts.logic` at 16 px, see
+    /// `crate::logic::font`). The earlier port used 8/14, which drifted one
+    /// pixel per character.
+    #[test]
+    fn print_layout_uses_the_logic_font_metrics() {
+        // Centre align (`Align.center` = 16): width 2*7 = 14 -> x - 7,
+        // height 13 -> y - 6.
+        assert_eq!(
+            print_layout("AB", 100.0, 50.0, 16.0),
+            vec![(93, 44, 'A'), (100, 44, 'B')]
+        );
+        // Newline: `curY -= lineHeight`, `curX = x` (`LExecutor.java:984-988`).
+        assert_eq!(
+            print_layout("A\nB", 100.0, 50.0, 16.0),
+            vec![(97, 50, 'A'), (97, 37, 'B')]
+        );
+        // Left align does not change the vertical centring: Arc's `va` is
+        // `0.5` unless the align has a top/bottom bit
+        // (`LExecutor.java:969-970`), so a one-line string starts `y - 6`.
+        assert_eq!(print_layout("A", 20.0, 8.0, 4.0), vec![(20, 2, 'A')]);
+    }
+
+    /// `hasGlyph` is true for every character because `Fonts.logic` carries a
+    /// `missingGlyph` (`arc Font.java:844-847`), so undrawable characters still
+    /// advance the cursor and consume graphics-buffer slots.
+    #[test]
+    fn print_emits_every_character() {
+        // `DisplayCmdStruct` packs `p1` into 10 bits and `LogicDisplay` casts
+        // `(char)unpackSign(p1)` (`LogicDisplay.java:194-196`), so '€'
+        // (U+20AC) reaches the raster as 172 — Java truncates it the same way.
+        assert_eq!(
+            print_layout("é€", 10.0, 10.0, 4.0),
+            vec![(10, 4, 'é'), (17, 4, '\u{00AC}')]
+        );
+    }
 
     #[test]
     fn pack_unpack_roundtrip() {

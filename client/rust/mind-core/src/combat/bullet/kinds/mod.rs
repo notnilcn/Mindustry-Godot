@@ -3,9 +3,10 @@
 
 //! Per-kind bullet behaviors (`entities/bullet/*.java`).
 //!
-//! Each module mirrors one Java `BulletType` subclass. Kinds not yet given a
-//! dedicated implementation fall back to the base behavior (plan 10 §3.4);
-//! subsequent milestones add the remaining kind modules here.
+//! Each module mirrors one Java `BulletType` subclass. Every `BulletKind`
+//! resolves to a behavior (`behavior_for`); several kinds share a module or the
+//! base hook set (artillery/missile/explosion/bomb), matching Java's inherited
+//! `BulletType` bodies (plan 10 §3.4).
 
 pub mod basic;
 pub mod continuous;

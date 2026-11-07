@@ -29,6 +29,7 @@ bounded-per-tick `Executor` VM. It ports upstream `core/src/mindustry/logic/*` a
 | `script.rs` | `LogicScript`/`LogicFilter` runners (`run_logic_script`, `run_logic_script_in`, `run_logic_filter`, `run_standalone`). |
 | `world.rs` | Privileged world-instruction state and sinks: `LogicWorldState`, `LogicWorldEvent`, `LogicContentIndex`, `MessageState`, `run_query`/`run_fetch`/`run_set_rule`/`run_effect`. |
 | `display_raster.rs` | Deterministic CPU RGBA rasterizer for `LogicDisplay` (`DisplayRaster`, `process_commands`/`process_display`); view-side only, uploaded by `mind-gdext`. |
+| `font.rs` | `Fonts.logic` port: the generated glyph charset, the libGDX FreeType metrics generated from `assets/fonts/logic.ttf` (`BitmapFontMetrics`), and `Fonts.unicodeToName`/`getLargeIcon` for the world-processor icon tag. |
 | `executor/` | The `Executor` VM, `Instruction`, `build_statement`, the instruction-budget driver, and the `draw.rs`/`radar.rs`/`unit_control.rs` submodules. |
 | `blocks/` | Logic-block behaviors and shared state (`logic_block`, `memory`, `display`, `canvas`, `message`, `switch`, `io`) plus the `LogicRulesApi` rules seam. |
 | `tests.rs` | Ported `LogicTests.java` groups over a minimal registry fixture. |

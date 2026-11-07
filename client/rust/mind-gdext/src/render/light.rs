@@ -56,6 +56,7 @@ use mind_core::render::light::{CircleLight, LightAccumulator, SCALING, enabled};
 use mind_core::render::rules::RulesRenderView;
 use mind_core::render::scan::CameraView;
 
+use crate::fx::FxLightLine;
 use crate::sim_host::{BulletDraw, MindSimHost};
 
 use super::atlas_bind::{Quad, build_mesh};
@@ -707,6 +708,21 @@ pub fn bullet_line_light(bullet: &BulletDraw, def: &BulletDef) -> Option<LineLig
     }
 }
 
+/// Forwards the frame's `MindFx` effect line-light rows into the light buffer
+/// (`GAPS #49` follow-up). Each row is already a
+/// `LightRenderer.line(x, y, x2, y2, stroke, tint, alpha)` request: the FX
+/// program dropped the beam's circle-light stand-in (`fx.rs`
+/// `build_fx_program`), so this is the only light `Fx.pointBeam` emits.
+///
+/// A row with a non-positive stroke is dropped by
+/// [`LightBuffer::add_line`] exactly like Java's zero-area quad.
+pub(crate) fn forward_fx_light_lines(buffer: &mut LightBuffer, lines: &[FxLightLine]) {
+    for &(x, y, x2, y2, stroke, rgba) in lines {
+        // `add_line` folds `tint[0..3]` with the separate `alpha`.
+        buffer.add_line(x, y, x2, y2, stroke, rgba, rgba[3]);
+    }
+}
+
 /// `LightRenderer` — camera-sized light map + `Shaders.light` composite.
 pub struct LightRenderer {
     host: Gd<MindSimHost>,
@@ -776,12 +792,16 @@ impl LightRenderer {
     /// `fx_lights` are the frame's `Drawf.light` prims from `MindFx` (H03 T16):
     /// Java feeds the same requests into `renderer.lights` (`Drawf.java:301-
     /// 304`), gated by `LightRenderer.enabled()` — exactly `active` here.
+    /// `fx_light_lines` are the effect bodies' line-form `Drawf.light` rows
+    /// (`Fx.pointBeam`, GAPS #49 follow-up), stamped as `LightRenderer.line`
+    /// primitives by [`forward_fx_light_lines`].
     pub fn update(
         &mut self,
         view: &CameraView,
         rules: &RulesRenderView,
         draw_light: bool,
         fx_lights: &[(f32, f32, f32, [f32; 4], f32)],
+        fx_light_lines: &[FxLightLine],
     ) {
         let active =
             enabled(rules.lighting, rules.ambient_light[3], draw_light) && self.material.is_some();
@@ -829,6 +849,11 @@ impl LightRenderer {
             for (x, y, radius, color, opacity) in fx_lights {
                 self.buffer.add_circle(*x, *y, *radius, *color, *opacity);
             }
+            // GAPS #49 follow-up: the effect bodies' line-form `Drawf.light`
+            // rows (`Fx.pointBeam`) as `LightRenderer.line` primitives. The
+            // FX program already dropped the beam's circle stand-in, so this
+            // is the only light it emits.
+            forward_fx_light_lines(&mut self.buffer, fx_light_lines);
             // `LightRenderer.line` primitives from the beams whose
             // `BulletType.draw` overrides the default circle light with a
             // `Drawf.light(x, y, x2, y2, …)` (`bullet_line_light`).
@@ -1084,6 +1109,35 @@ mod tests {
         buffer.add_line(0.0, 0.0, 8.0, 8.0, 2.0, [1.0, 1.0, 1.0, 1.0], 0.5);
         assert_eq!(buffer.lines().len(), 1);
         assert_eq!(buffer.lines()[0].color[3], 0.5, "alpha from the opacity");
+    }
+
+    /// GAPS #49 follow-up: `MindFx.view_light_lines()` rows are
+    /// `LightRenderer.line(x, y, x2, y2, stroke, tint, alpha)` requests and
+    /// must reach the light buffer (the FX program already dropped the beam's
+    /// circle-light stand-in, so this is `Fx.pointBeam`'s only light).
+    #[test]
+    fn fx_line_lights_reach_the_light_buffer() {
+        // `Fx.pointBeam`: origin -> `Position` payload, stroke 20, tint
+        // `[1.0, 0.5, 0.25, 0.3]` (tint.a * 0.6 * fout folded at half life).
+        let rows: [FxLightLine; 2] = [
+            (100.0, 50.0, 300.0, 250.0, 20.0, [1.0, 0.5, 0.25, 0.3]),
+            // A zero/negative stroke row has no area and is dropped
+            // (`LightRenderer.line` inert), like Java's empty quad.
+            (0.0, 0.0, 8.0, 8.0, 0.0, [1.0, 1.0, 1.0, 1.0]),
+        ];
+        let mut buffer = LightBuffer::new();
+        forward_fx_light_lines(&mut buffer, &rows);
+        assert_eq!(buffer.lines().len(), 1);
+        let line = buffer.lines()[0];
+        assert_eq!(
+            (line.x, line.y, line.x2, line.y2, line.stroke),
+            (100.0, 50.0, 300.0, 250.0, 20.0)
+        );
+        assert_eq!(line.color, [1.0, 0.5, 0.25, 0.3]);
+        // The rows are additive to the other line sources (beams), never a
+        // replacement.
+        buffer.add_line(0.0, 0.0, 8.0, 0.0, 2.0, [1.0, 1.0, 1.0, 1.0], 1.0);
+        assert_eq!(buffer.lines().len(), 2);
     }
 
     /// The buffer pools every primitive and reports per-kind counts.

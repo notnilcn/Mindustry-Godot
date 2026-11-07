@@ -40,25 +40,31 @@
 //!   `gx/ui`.
 //! - `setCameraPosition` — only the `NetClient.java:509` handler exists in
 //!   core; producers are mods/logic (`LExecutor`).
-//! - `sound`/`soundAt`/`effect`/`effectReliable`/`playMusic` — only
-//!   `NetClient.java` handlers plus the logic executor
-//!   (`LExecutor.java:2278` music); the logic port (`mc/logic`) owns those
-//!   producers.
+//! - `sound`/`soundAt`/`effect`/`effectReliable`/`effectData`/`playMusic` —
+//!   only `NetClient.java` handlers plus the logic executor
+//!   (`LExecutor.java:2278` music, `LExecutor.java` effect data); the logic port
+//!   (`mc/logic`) owns those producers. [`ProducedCall::effect_data`] builds
+//!   the `EffectCallPacket2` call; the module ABI kind
+//!   (`CallPacketKind::EffectData`, appended by PAR-0578) and the mapping exist,
+//!   so logic only has to call it.
 //! - `label`/`labelReliable`/`removeWorldLabel` — `Menus.label*` are render
 //!   handlers; the only core producer is `WorldLabelComp.hide`
 //!   (`WorldLabelComp.java:128/135`, removal only), ported under `mc/world`.
-//! - Logic-triggered `Call.effect(..., data)` overload (`EffectCallPacket2`,
-//!   `TypeIO.writeObject`) — body codec lives in
-//!   `call_packet::encode_effect_data_body`/`decode_effect_data_body`
-//!   (PAR-0578); the wire kind needs a module ABI append before it can ship.
+//!
+//! The join-gate `infoMessage` (`NetServer.java:233`, whitelist rejection)
+//! stays outstanding for a structural reason, not a missing constructor: the
+//! rejected identity is not a `relay_member` yet, so `publish_call`'s
+//! target-membership check rejects it and `my_match_calls` (member semijoin)
+//! could not deliver the row anyway. A join-rejection notice needs its own
+//! identity-keyed row + view, not a `match_call` row.
 
 use std::collections::BTreeMap;
 
 use crate::Identity;
 use crate::binder::RowChange;
-use crate::call_packet::{self, CallError, CallKind, CallPacket};
+use crate::call_packet::{self, CallError, CallKind, CallPacket, EffectDataBody};
 use crate::module_bindings::{CallPacketKind, MatchCall};
-use crate::typeio::{EffectId, KickReason, Rgba, SoundId, TraceInfo};
+use crate::typeio::{self, EffectId, KickReason, Rgba, SoundId, TraceInfo};
 
 /// Maximum call rows retained client-side. The server prunes the table by
 /// `CALL_RETENTION_SECS`, so this only bounds a reconnect replay spike.
@@ -94,6 +100,7 @@ pub fn call_kind(kind: CallPacketKind) -> CallKind {
         CallPacketKind::RemoveWorldLabel => CallKind::RemoveWorldLabel,
         CallPacketKind::Kick => CallKind::Kick,
         CallPacketKind::KickReason => CallKind::KickReason,
+        CallPacketKind::EffectData => CallKind::EffectData,
     }
 }
 
@@ -127,6 +134,7 @@ pub fn packet_kind(kind: CallKind) -> CallPacketKind {
         CallKind::RemoveWorldLabel => CallPacketKind::RemoveWorldLabel,
         CallKind::Kick => CallPacketKind::Kick,
         CallKind::KickReason => CallPacketKind::KickReason,
+        CallKind::EffectData => CallPacketKind::EffectData,
     }
 }
 
@@ -283,6 +291,27 @@ impl ProducedCall {
             rotation,
             color,
         })
+    }
+
+    /// `Call.effect(Effect, float, float, float, Color, Object data)` — the
+    /// `EffectCallPacket2` overload (PAR-0578; module kind
+    /// `CallPacketKind::EffectData`).
+    pub fn effect_data(
+        effect: Option<EffectId>,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        data: typeio::TaggedValue,
+    ) -> Self {
+        Self::broadcast(CallPacket::EffectData(EffectDataBody {
+            effect,
+            x,
+            y,
+            rotation,
+            color,
+            data,
+        }))
     }
 
     /// `Call.label(String, float, float, float)`.
@@ -557,6 +586,7 @@ mod tests {
             CallPacketKind::RemoveWorldLabel,
             CallPacketKind::Kick,
             CallPacketKind::KickReason,
+            CallPacketKind::EffectData,
         ];
         assert_eq!(kinds.len(), CallKind::ALL.len());
         let mut ordinals = Vec::new();
@@ -565,7 +595,7 @@ mod tests {
             assert!(!ordinals.contains(&ordinal), "{kind:?} maps twice");
             ordinals.push(ordinal);
         }
-        assert_eq!(ordinals.len(), 23);
+        assert_eq!(ordinals.len(), 24);
     }
 
     /// A published row decodes to the exact packet its body was written from.
@@ -772,6 +802,17 @@ mod producer_tests {
                 },
             ),
             ProducedCall::effect_reliable(Some(EffectId(5)), 1.0, 2.0, 0.0, Rgba::default()),
+            ProducedCall::effect_data(
+                Some(EffectId(6)),
+                3.0,
+                4.0,
+                45.0,
+                Rgba::default(),
+                typeio::TaggedValue::ObjectArray(vec![
+                    typeio::TaggedValue::Int(1),
+                    typeio::TaggedValue::String(Some("hit".to_string())),
+                ]),
+            ),
             ProducedCall::label("hi", 5.0, 3.0, 4.0),
             ProducedCall::label_reliable("hi", 5.0, 3.0, 4.0),
             ProducedCall::remove_world_label(9),
@@ -813,7 +854,7 @@ mod producer_tests {
 
     /// `packet_kind` is the exact inverse of `call_kind` over the whole
     /// append-only ABI (a new kind fails to compile in both matches). The
-    /// generated client enum has no `ALL` const, so the module's 23-kind list
+    /// generated client enum has no `ALL` const, so the module's 24-kind list
     /// is spelled here like the transport test above.
     #[test]
     fn module_and_client_kind_mappings_are_inverse() {
@@ -841,12 +882,88 @@ mod producer_tests {
             CallPacketKind::RemoveWorldLabel,
             CallPacketKind::Kick,
             CallPacketKind::KickReason,
+            CallPacketKind::EffectData,
         ];
         for kind in kinds {
             assert_eq!(packet_kind(call_kind(kind)), kind, "{kind:?}");
         }
         // Every client kind has a module kind and vice versa.
         assert_eq!(CallKind::ALL.len(), kinds.len());
+    }
+
+    /// PAR-0578 residual: a row published with the appended module kind
+    /// `CallPacketKind::EffectData` decodes to the client's `EffectCallPacket2`
+    /// packet, byte-for-byte through the same binder path
+    /// `MindNet.push_call_frame` uses (module kind → client ordinal → body).
+    #[test]
+    fn effect_data_rows_round_trip_with_the_module_kind() {
+        use crate::call_packet::EffectDataBody;
+        use crate::typeio::TaggedValue;
+
+        let body = EffectDataBody {
+            effect: Some(EffectId(5)),
+            x: 1.5,
+            y: -2.5,
+            rotation: 90.0,
+            color: Rgba {
+                r: 255,
+                g: 128,
+                b: 0,
+                a: 255,
+            },
+            data: TaggedValue::ObjectArray(vec![
+                TaggedValue::Int(3),
+                TaggedValue::String(Some("hit".to_string())),
+            ]),
+        };
+        let payload = call_packet::encode_effect_data_body(
+            body.effect,
+            body.x,
+            body.y,
+            body.rotation,
+            body.color,
+            &body.data,
+        )
+        .unwrap();
+        // The exact row `publish_call(EffectData, ...)` stores: the module
+        // kind + the `EffectCallPacket2.write` body.
+        let row = MatchCall {
+            call_id: 1,
+            match_id: 3,
+            sender: Identity::from_byte_array([2u8; 32]),
+            kind: CallPacketKind::EffectData,
+            target: None,
+            payload,
+            sent_at: spacetimedb_sdk::Timestamp::from_micros_since_unix_epoch(1_000),
+        };
+
+        // The module kind maps to the appended client ordinal.
+        assert_eq!(call_kind(row.kind), CallKind::EffectData);
+        assert_eq!(call_kind(row.kind).ordinal(), 23);
+        assert_eq!(frame_for_row(&row)[0], 23);
+        // ...and the row decodes back to the exact EffectCallPacket2 call.
+        assert_eq!(
+            decode_row(&row).unwrap(),
+            CallPacket::EffectData(body.clone())
+        );
+        // The producer-side constructor sends the same kind/body triple.
+        let produced = ProducedCall::effect_data(
+            body.effect,
+            body.x,
+            body.y,
+            body.rotation,
+            body.color,
+            body.data.clone(),
+        );
+        assert_eq!(produced.kind, CallPacketKind::EffectData);
+        assert_eq!(
+            produced.encode_body().unwrap().as_slice(),
+            &frame_for_row(&row)[1..]
+        );
+        assert_eq!(
+            call_packet::decode(&produced.frame().unwrap()).unwrap(),
+            CallPacket::EffectData(body)
+        );
     }
 
     /// The debug JSON names the module kind and the recipient.

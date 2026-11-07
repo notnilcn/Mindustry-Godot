@@ -153,8 +153,12 @@ mod tests {
         assert_eq!(GROUP_BASE_TYPES.len(), 11);
         let manifest = manifest();
         let groups = manifest.groups();
-        for (index, (_, base)) in GROUP_BASE_TYPES.iter().enumerate() {
-            let kind = kind_for_base_type(base);
+        for (index, (group, _base)) in GROUP_BASE_TYPES.iter().enumerate() {
+            // `kind_for_base_type` is the many-to-one inverse (four groups
+            // share `Button`/`PanelContainer`), so deriving the group from its
+            // base class cannot round-trip. Pin the declaration order against
+            // the manifest's own group order instead; the inline fixture fills
+            // only the first two groups.
             let expected = match index {
                 0 => "drawables",
                 1 => "text_buttons",
@@ -168,8 +172,8 @@ mod tests {
                 9 => "dialogs",
                 _ => "trees",
             };
-            assert_eq!(kind, expected);
-            let _ = groups[index];
+            assert_eq!(*group, expected);
+            assert_eq!(groups[index].is_empty(), index > 1);
         }
     }
 }

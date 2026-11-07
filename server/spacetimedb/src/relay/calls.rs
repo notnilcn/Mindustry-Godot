@@ -6,10 +6,11 @@
 //! `Call.infoMessage`, `Call.menu`/`followUpMenu`/`hideFollowUpMenu`,
 //! `Call.menuBuilder`/`menuBuilderUpdate`/`hideMenuBuilder`,
 //! `Call.setCameraPosition`, `Call.sound`/`soundAt`, `Call.effect`/
-//! `effectReliable`, `Call.playMusic`, `Call.traceInfo`, the three `label` and
-//! three `labelReliable` overloads, `Call.removeWorldLabel` and
-//! `Call.kick`/`Call.kick(KickReason)` (`core/src/mindustry/core/NetServer.java`
-//! call sites; packet layouts in `core/build/generated/.../mindustry/gen`).
+//! `effectReliable`/`Call.effect(..., Object data)`, `Call.playMusic`,
+//! `Call.traceInfo`, the three `label` and three `labelReliable` overloads,
+//! `Call.removeWorldLabel` and `Call.kick`/`Call.kick(KickReason)`
+//! (`core/src/mindustry/core/NetServer.java` call sites; packet layouts in
+//! `core/build/generated/.../mindustry/gen`).
 //!
 //! A SpacetimeDB module has no arcnet transport, so each call becomes an
 //! append-only [`MatchCall`] row: [`publish_call`] stores the kind, the optional
@@ -80,11 +81,17 @@ pub enum CallPacketKind {
     Kick,
     /// `Call.kick(NetConnection, KickReason)`.
     KickReason,
+    /// `Call.effect(Effect, float, float, float, Color, Object data)` — the
+    /// `EffectCallPacket2` overload whose payload is a `TypeIO.writeObject`
+    /// tagged object (PAR-0578 residual; the body codec lives in
+    /// `mind-stdb/src/call_packet.rs`). Appended after the original 23 kinds;
+    /// broadcastable like the colour overload.
+    EffectData,
 }
 
 impl CallPacketKind {
     /// Every kind, in ABI order (append new variants at the end).
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::InfoMessage,
         Self::Menu,
         Self::FollowUpMenu,
@@ -108,6 +115,7 @@ impl CallPacketKind {
         Self::RemoveWorldLabel,
         Self::Kick,
         Self::KickReason,
+        Self::EffectData,
     ];
 
     /// Whether this call addresses exactly one connection upstream
@@ -140,6 +148,10 @@ pub struct MatchCall {
 }
 
 /// Publishes one server→client call (host/admin only; GAPS #35).
+///
+/// Every [`CallPacketKind`] is publishable, including the appended
+/// `EffectData` overload; the per-kind rules live in [`validate_call`] (the
+/// 64 KiB payload cap and the `kick`/`traceInfo` single-recipient rule).
 #[reducer]
 pub fn publish_call(
     ctx: &ReducerContext,
@@ -237,7 +249,14 @@ mod tests {
     #[test]
     fn call_kinds_are_distinct_and_append_only() {
         // The enum is schema ABI: a duplicate variant would be caught here.
-        assert_eq!(CallPacketKind::ALL.len(), 23);
+        // The original 23 kinds keep their order; `EffectData` (PAR-0578) is
+        // appended last.
+        assert_eq!(CallPacketKind::ALL.len(), 24);
+        assert_eq!(
+            CallPacketKind::ALL[23],
+            CallPacketKind::EffectData,
+            "new kinds append, never reorder"
+        );
         for (index, kind) in CallPacketKind::ALL.iter().enumerate() {
             assert!(
                 !CallPacketKind::ALL[..index].contains(kind),
@@ -293,5 +312,37 @@ mod tests {
         // A targeted broadcastable call still needs a member.
         assert!(validate_call(CallPacketKind::Menu, Some(target), 0, false).is_err());
         assert!(validate_call(CallPacketKind::Menu, Some(target), 0, true).is_ok());
+    }
+
+    /// PAR-0578 residual: the appended `EffectData` kind is publishable under
+    /// the same rules as the colour `Effect` overload — broadcast by default,
+    /// one member when targeted, and the same 64 KiB payload cap.
+    #[test]
+    fn effect_data_is_publishable_under_the_shared_caps() {
+        assert!(!CallPacketKind::EffectData.is_targeted());
+        assert!(validate_call(CallPacketKind::EffectData, None, 0, false).is_ok());
+        assert!(
+            validate_call(
+                CallPacketKind::EffectData,
+                None,
+                MAX_CALL_PAYLOAD_BYTES,
+                false
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_call(
+                CallPacketKind::EffectData,
+                None,
+                MAX_CALL_PAYLOAD_BYTES + 1,
+                false
+            )
+            .is_err()
+        );
+        let member = identity(9);
+        assert!(validate_call(CallPacketKind::EffectData, Some(member), 8, true).is_ok());
+        assert!(validate_call(CallPacketKind::EffectData, Some(member), 8, false).is_err());
+        // The old colour overload is a different kind and stays distinct.
+        assert_ne!(CallPacketKind::EffectData, CallPacketKind::Effect);
     }
 }

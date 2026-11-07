@@ -460,7 +460,12 @@ impl MindChatFragment {
     /// field whose text is only changed by the player.
     #[func]
     pub fn toggle(&mut self) {
-        if !net_active() {
+        // `ChatFragment.java:65`: `net.active() && input.keyTap(Binding.chat)
+        // && !hasOtherFocus && !lastFrameHadFocus && !ui.consolefrag.shown()`.
+        // `MindInput` already filters text focus/dialogs before the key edge
+        // reaches this method; the net and console gates stay here so the
+        // input seam and a direct `toggle()` call agree.
+        if !net_active() || console_shown() {
             return;
         }
         if self.state.shown {
@@ -948,6 +953,14 @@ fn local_admin() -> bool {
     net.call("local_admin", &[])
         .try_to::<bool>()
         .unwrap_or(false)
+}
+
+/// `ui.consolefrag.shown()`: the console HUD fragment is open, so the chat key
+/// must not toggle the input (`ChatFragment.java:65`).
+fn console_shown() -> bool {
+    kit::node("/root/Spine/Ui/UiRoot/HudGroup/console")
+        .and_then(|node| node.try_cast::<Control>().ok())
+        .is_some_and(|console| console.is_visible_in_tree())
 }
 
 /// `world.tiles` bounds for the ping parse.

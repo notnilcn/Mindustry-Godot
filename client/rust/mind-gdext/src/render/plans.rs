@@ -26,9 +26,14 @@ use godot::prelude::*;
 use mind_core::content::registries::blocks::BlockDef;
 use mind_core::content::{BlockId, BlockKind, ContentRegistry};
 use mind_core::input::PlaceMode;
+use mind_core::input::placement::{
+    MAX_SCHEMATIC_SIZE, NormalizeResult, OverlapCheck, SelectionShow, WorldRect, normalize_area,
+    overlap_check, plan_world_rect, selection_world_rect, should_draw_overlap_check,
+};
 use mind_core::render::block_region_candidates;
 use mind_core::render::drawf;
 use mind_core::render::drawf::pal;
+use mind_core::world::TilePos;
 
 use crate::input::MindInput;
 use crate::render::blocks::rotates_sprite;
@@ -70,6 +75,16 @@ enum DrawCmd {
         w: f32,
         h: f32,
         stroke: f32,
+        color: Color,
+    },
+    /// `Drawf.dashLine` (`Drawf.java:227-234`): `segments` divisions of the
+    /// line, every other one drawn (stroke 3 `Pal.gray`, then stroke 1 colour).
+    DashLine {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        segments: i32,
         color: Color,
     },
 }
@@ -223,6 +238,36 @@ impl INode2D for PlanOverlay {
                 }
             }
 
+            // `DesktopInput.drawTop` selection half (`DesktopInput.java:
+            // 130-145`): the F schematic-copy rect or the B rebuild rect plus
+            // its corner marks. The end tile is the raw cursor; Java draws this
+            // at `Layer.overlayUI`, the port keeps one pass and draws it before
+            // the paste ghosts (packet order, documented deviation).
+            if let (Some((show, start)), Some(cursor)) = (view.selection, view.cursor) {
+                self.push_selection(&mut cmds, &guard, content, show, start, cursor);
+            }
+
+            // `selectPlans` paste ghosts (`DesktopInput.java:175-185`): the
+            // copied plans follow the cursor, under the cursor preview. The
+            // Java second pass (`drawOverPlan` -> `drawPlanConfigTop`) is a
+            // block-config overlay the port's ghost draws do not carry.
+            for plan in &view.select_plans {
+                if plan.breaking || plan.block == BlockId::AIR {
+                    continue;
+                }
+                let valid = guard.preview_can_place(plan.x, plan.y, plan.block, plan.rotation);
+                self.push_ghost(
+                    &mut cmds,
+                    content,
+                    plan.x,
+                    plan.y,
+                    plan.rotation,
+                    plan.block,
+                    valid,
+                    pulse,
+                );
+            }
+
             let selected = view.block.filter(|block| *block != BlockId::AIR);
             if view.mode == PlaceMode::Placing && selected.is_some() {
                 // Line branch: one ghost per dragged plan, the arrow on the
@@ -300,6 +345,9 @@ impl INode2D for PlanOverlay {
                             color: canvas::color_u32(drawf::to_bits(pal::ACCENT)),
                         });
                     }
+                    // `drawOverlapCheck(block, cursorX, cursorY, valid)`
+                    // (`InputHandler.java:1499-1516`), after `drawPlan`.
+                    self.push_overlap_check(&mut cmds, &guard, content, cx, cy, block, valid);
                 }
             }
 
@@ -370,6 +418,16 @@ impl INode2D for PlanOverlay {
                     color,
                 } => {
                     canvas::rect_line(&mut base, *x, *y, *w, *h, *stroke, *color);
+                }
+                DrawCmd::DashLine {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    segments,
+                    color,
+                } => {
+                    canvas::dash_line(&mut base, *x1, *y1, *x2, *y2, *segments, *color);
                 }
             }
         }
@@ -611,6 +669,171 @@ impl PlanOverlay {
             color: remove,
         });
     }
+
+    /// `DesktopInput.drawTop` selection half (`DesktopInput.java:130-145`):
+    /// the F schematic-copy rect (`drawSelection(.., maxSchematicSize)` in
+    /// `Pal.accent`) or the B rebuild rect (`drawRebuildSelection`,
+    /// `Pal.sapBullet`) plus the rebuild corner marks
+    /// (`InputHandler.java:1724-1752`).
+    fn push_selection(
+        &mut self,
+        cmds: &mut Vec<DrawCmd>,
+        host: &MindSimHost,
+        content: &ContentRegistry,
+        show: SelectionShow,
+        start: (i32, i32),
+        cursor: (i32, i32),
+    ) {
+        let Some(draw) = selection_draw(show, start, cursor) else {
+            return;
+        };
+        // `Lines.stroke(2f); Draw.color(col1); Lines.rect(x, y - 1, ..);
+        // Draw.color(col2); Lines.rect(x, y, ..)`.
+        for (dy, color) in [(-1.0, draw.back), (0.0, draw.front)] {
+            cmds.push(DrawCmd::Rect {
+                x: draw.rect.x,
+                y: draw.rect.y + dy,
+                w: draw.rect.w,
+                h: draw.rect.h,
+                stroke: 2.0,
+                color: canvas::color_f4(color),
+            });
+        }
+        if show == SelectionShow::Rebuild {
+            self.push_rebuild_corners(cmds, host, content, draw.area, draw.rect);
+        }
+    }
+
+    /// `InputHandler.drawRebuildSelection` corner marks
+    /// (`InputHandler.java:1724-1752`): first the team's ghost rebuild plans
+    /// whose bounds overlap the selection (in `Pal.sapBullet`), then the
+    /// deduped derelicts [`MindSimHost::rebuild_highlight_tiles`] accepts.
+    fn push_rebuild_corners(
+        &mut self,
+        cmds: &mut Vec<DrawCmd>,
+        host: &MindSimHost,
+        content: &ContentRegistry,
+        area: NormalizeResult,
+        rect: WorldRect,
+    ) {
+        let sap = canvas::color_f4(pal::SAP_BULLET);
+        // `for(BlockPlan plan : player.team().data().plans) block.bounds(..)
+        // .overlaps(Tmp.r1)`.
+        for (x, y, _rotation, block) in host.team_block_plans() {
+            let Some(def) = content.block(block) else {
+                continue;
+            };
+            let plan = plan_world_rect(i32::from(x), i32::from(y), def.size, def.offset, false);
+            if plan.overlaps(rect) {
+                self.push_selected_corners(
+                    cmds,
+                    i32::from(x),
+                    i32::from(y),
+                    def.size,
+                    def.offset,
+                    sap,
+                );
+            }
+        }
+        // `world.tileBuilding` dedupe + `canRepairDerelict` (`:1742-1752`).
+        for (x, y, _block, size, offset) in host.rebuild_highlight_tiles(area) {
+            self.push_selected_corners(cmds, x, y, size, offset, sap);
+        }
+    }
+
+    /// `InputHandler.drawOverlapCheck` (`InputHandler.java:1499-1516`): the
+    /// enemy blocker's `block-select` corners plus the dashed warning line.
+    /// Gated by `!valid && rules.placeRangeCheck && blocker.wasVisible`
+    /// ([`should_draw_overlap_check`]).
+    #[allow(clippy::too_many_arguments)] // mirrors the Java drawOverlapCheck parameter set
+    fn push_overlap_check(
+        &mut self,
+        cmds: &mut Vec<DrawCmd>,
+        host: &MindSimHost,
+        content: &ContentRegistry,
+        x: i32,
+        y: i32,
+        block: BlockId,
+        valid: bool,
+    ) {
+        // Cheap gates first: the enemy scan is O(buildings).
+        let range_check = host.place_range_check();
+        if valid || !range_check {
+            return;
+        }
+        let Some(def) = content.block(block) else {
+            return;
+        };
+        let Some((bx, by, size, visible)) = host.placement_blocker(x, y, block) else {
+            return;
+        };
+        if !should_draw_overlap_check(valid, range_check, visible) {
+            return;
+        }
+        let remove = canvas::color_f4(pal::REMOVE);
+        // `Drawf.selected(blocker, Pal.remove)`.
+        self.push_selected_corners(cmds, bx, by, size, size_offset(size), remove);
+        // `blocker.x/y` is the building's world centre
+        // (`tile.worldx()` = `tile.x * 8 + Block.offset`).
+        let offset = size_offset(size);
+        let centre = (bx as f32 * 8.0 + offset, by as f32 * 8.0 + offset);
+        let check: OverlapCheck = overlap_check(x, y, def.size, def.offset, centre, size);
+        cmds.push(DrawCmd::DashLine {
+            x1: check.from.0,
+            y1: check.from.1,
+            x2: check.to.0,
+            y2: check.to.1,
+            segments: check.segments,
+            color: remove,
+        });
+    }
+}
+
+/// One resolved F/B selection draw (`InputHandler.drawSelection` /
+/// `drawRebuildSelection`, `InputHandler.java:1757-1806`).
+struct SelectionDraw {
+    /// `Placement.normalizeDrawArea(Blocks.air, .., snap=false, scaling=1f)`.
+    rect: WorldRect,
+    /// The unbounded/clamped tile span the B rebuild corner scan walks
+    /// (`Placement.normalizeArea`).
+    area: NormalizeResult,
+    /// `col1`: the `y - 1` pair line (`Pal.accentBack` / `Pal.sapBulletBack`).
+    back: [f32; 4],
+    /// `col2`: the rect itself (`Pal.accent` / `Pal.sapBullet`).
+    front: [f32; 4],
+}
+
+/// Resolves the held-key selection into its rect + colours
+/// (`InputHandler.java:1757-1772`: F = `(maxSchematicSize, accentBack, accent)`,
+/// B = `(0, sapBulletBack, sapBullet)`).
+fn selection_draw(
+    show: SelectionShow,
+    start: (i32, i32),
+    cursor: (i32, i32),
+) -> Option<SelectionDraw> {
+    let (max_length, back, front) = match show {
+        SelectionShow::None => return None,
+        SelectionShow::Schematic => (MAX_SCHEMATIC_SIZE, pal::ACCENT_BACK, pal::ACCENT),
+        SelectionShow::Rebuild => (0, pal::SAP_BULLET_BACK, pal::SAP_BULLET),
+    };
+    let (Ok(sx), Ok(sy)) = (i16::try_from(start.0), i16::try_from(start.1)) else {
+        return None;
+    };
+    let (Ok(cx), Ok(cy)) = (i16::try_from(cursor.0), i16::try_from(cursor.1)) else {
+        return None;
+    };
+    Some(SelectionDraw {
+        rect: selection_world_rect(TilePos::new(sx, sy), TilePos::new(cx, cy), max_length),
+        area: normalize_area(start.0, start.1, cursor.0, cursor.1, 0, false, max_length),
+        back,
+        front,
+    })
+}
+
+/// `Block.offset` (`Block.java:774`): `((size + 1) % 2) * tilesize / 2f`, i.e.
+/// 0 for odd sizes and 4 for even ones.
+fn size_offset(size: i32) -> f32 {
+    ((size.max(1) + 1) % 2) as f32 * 4.0
 }
 
 /// Java `Block.rotate && Block.drawArrow`; `BlockDef` has no `rotate` field, so
@@ -661,4 +884,87 @@ fn tile_block_def<'a>(
         return None;
     }
     content.block(host.grid().tile(x, y).block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `DesktopInput.drawTop` F selection (`InputHandler.java:1757-1771`):
+    /// `Selection.normalizeDrawArea(air, .., snap=false, scaling=1f)` clamped
+    /// to `Vars.maxSchematicSize` (64) and drawn in `Pal.accentBack` (the
+    /// `y - 1` pair) over `Pal.accent`.
+    #[test]
+    fn schematic_selection_clamps_to_max_schematic_size() {
+        let draw =
+            selection_draw(SelectionShow::Schematic, (0, 0), (70, 10)).expect("F selection rect");
+        // `min * 8 - 4` .. `max * 8 + 4`, with `max` clamped to 64 tiles.
+        assert!((draw.rect.x + 4.0).abs() < 1e-4, "x {}", draw.rect.x);
+        assert!(
+            (draw.rect.w - (64.0 * 8.0 + 8.0)).abs() < 1e-4,
+            "w {}",
+            draw.rect.w
+        );
+        assert!((draw.rect.h - (10.0 * 8.0 + 8.0)).abs() < 1e-4);
+        assert_eq!(draw.back, pal::ACCENT_BACK);
+        assert_eq!(draw.front, pal::ACCENT);
+        // `normalizeArea` clamp: the rebuild corner scan sees the same span.
+        assert_eq!((draw.area.x, draw.area.x2), (0, 64));
+        assert_eq!((draw.area.y, draw.area.y2), (0, 10));
+    }
+
+    /// `InputHandler.drawRebuildSelection` (`InputHandler.java:1724-1752`):
+    /// `maxLength = 0` is unbounded and the pair is
+    /// `Pal.sapBulletBack`/`Pal.sapBullet`; the corner scan is not clamped.
+    #[test]
+    fn rebuild_selection_is_unbounded_and_sap_coloured() {
+        let draw =
+            selection_draw(SelectionShow::Rebuild, (10, 10), (5, 5)).expect("B selection rect");
+        assert!((draw.rect.x - (5.0 * 8.0 - 4.0)).abs() < 1e-4);
+        assert!((draw.rect.w - (5.0 * 8.0 + 8.0)).abs() < 1e-4);
+        assert!((draw.rect.h - (5.0 * 8.0 + 8.0)).abs() < 1e-4);
+        assert_eq!(draw.back, pal::SAP_BULLET_BACK);
+        assert_eq!(draw.front, pal::SAP_BULLET);
+        // A 200-tile drag stays unbounded (Java `999999999` for the derelict
+        // scan and `0` for the rect).
+        let far = selection_draw(SelectionShow::Rebuild, (0, 0), (200, 0)).expect("far B rect");
+        assert_eq!((far.area.x, far.area.x2), (0, 200));
+        assert!((far.rect.w - (200.0 * 8.0 + 8.0)).abs() < 1e-4);
+    }
+
+    /// Nothing draws while the gate is off (`SelectionShow::None`).
+    #[test]
+    fn no_selection_show_resolves_nothing() {
+        assert!(selection_draw(SelectionShow::None, (0, 0), (4, 4)).is_none());
+    }
+
+    /// `Block.offset` (`Block.java:774`) parity for the blocker corners and
+    /// the dash-line centre, which only receive the size from
+    /// `MindSimHost::placement_blocker`:
+    /// `((size + 1) % 2) * tilesize / 2f`.
+    #[test]
+    fn blocker_size_offset_matches_block_offset() {
+        assert_eq!(size_offset(1), 0.0);
+        assert_eq!(size_offset(2), 4.0);
+        assert_eq!(size_offset(3), 0.0);
+        assert_eq!(size_offset(4), 4.0);
+        // Degenerate sizes clamp to the 1-tile case.
+        assert_eq!(size_offset(0), 0.0);
+        assert_eq!(size_offset(-2), 0.0);
+    }
+
+    /// `Drawf.dashLineDst` divides the cursor->blocker line into
+    /// `dst / tilesize * 1.6` segments (`Drawf.java:219-234`); the warning line
+    /// starts at the cursor block's edge and ends at the blocker's edge
+    /// (`InputHandler.java:1504-1510`).
+    #[test]
+    fn overlap_warning_line_uses_the_blocker_edges() {
+        let check = overlap_check(0, 0, 1, 0.0, (80.0, 0.0), 2);
+        // Cursor block half = 4, blocker half = 8, so from/to sit on the edges.
+        assert!((check.from.0 - 4.0).abs() < 1e-4);
+        assert!((check.from.1).abs() < 1e-4);
+        assert!((check.to.0 - 72.0).abs() < 1e-4);
+        assert!((check.to.1).abs() < 1e-4);
+        assert_eq!(check.segments, ((72.0 - 4.0) / 8.0 * 1.6) as i32);
+    }
 }

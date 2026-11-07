@@ -20,7 +20,9 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::io::{NativeFs, Paths};
-use mind_core::mods::assets::{DataAsset, DataAssetData, DataAssetType, ModDataManager};
+use mind_core::mods::assets::{
+    DataAsset, DataAssetData, DataAssetType, DataAssets, ModDataManager,
+};
 use mind_core::mods::provider::{ModBootContent, ModContentFailure};
 use mind_core::mods::{ModListEntry, ModListing, Mods};
 use mind_core::version::BuildInfo;
@@ -273,6 +275,42 @@ impl MindMods {
         mind_core::content::boot::collect_boot_content(&mut self.mods, &NativeFs)
     }
 
+    /// One mod's content records for the ModsDialog `@mods.viewcontent` list.
+    ///
+    /// Java reads the live `Vars.content` and filters `c.minfo.mod == mod` +
+    /// `!c.isHidden()` (`ModsDialog.java:455-481`). The gdext facade has no
+    /// content-registry probe — [`MindCampaign`](crate::campaign::MindCampaign)
+    /// owns `ContentRegistry` and `minfo.mod_id` is not projected — so the same
+    /// set is derived from the mod's `content/<kind>/**.json` files
+    /// (`Mods.collect_content_files`), which is exactly what content boot
+    /// registers for enabled, non-hidden mods. Rows are
+    /// `{type, name, stem, path}` with `name` the registered
+    /// `<mod>-<stem>` (`Content.transformName`), the key `ui.content.show`
+    /// takes.
+    ///
+    /// Deviation: a content file that failed to parse still appears here
+    /// (Java drops errored content from `Vars.content`); the row keeps `path`.
+    #[func]
+    pub fn content_for(&mut self, name: GString) -> Array<VarDictionary> {
+        let target = name.to_string();
+        let mut out = Array::<VarDictionary>::new();
+        for file in self.mods.collect_content_files(&NativeFs) {
+            if file.mod_name != target {
+                continue;
+            }
+            let mut row = VarDictionary::new();
+            row.set(&"type".to_variant(), &file.type_.name().to_variant());
+            row.set(
+                &"name".to_variant(),
+                &format!("{}-{}", target, file.stem).to_variant(),
+            );
+            row.set(&"stem".to_variant(), &file.stem.to_variant());
+            row.set(&"path".to_variant(), &file.path.to_variant());
+            out.push(&row);
+        }
+        out
+    }
+
     /// Builds the enabled mods' asset overlay (`Mods.packSprites` +
     /// `DataBundleLoader` + sound overrides) and hands it to `MindAssets`
     /// (I07 T4 bundles / T5 sprites+sounds). No-op until the asset autoload has
@@ -404,6 +442,23 @@ impl MindMods {
         let mut out = PackedStringArray::new();
         for error in self.data.content_errors() {
             out.push(&GString::from(error.as_str()));
+        }
+        out
+    }
+
+    /// `state.data.getMissingAssets()` (`DataManager.java:264-267`): external
+    /// data assets whose cache/override file is absent, as `{type, name, path}`
+    /// rows (`LoadDialog.java:225-249` renders `type: path` per row after a
+    /// save load).
+    #[func]
+    pub fn missing_assets(&self) -> Array<VarDictionary> {
+        let mut out = Array::<VarDictionary>::new();
+        for asset in self.data.get_missing_assets() {
+            let mut row = VarDictionary::new();
+            row.set(&"type".to_variant(), &asset.type_.kind().to_variant());
+            row.set(&"name".to_variant(), &asset.name.to_variant());
+            row.set(&"path".to_variant(), &asset.path.to_variant());
+            out.push(&row);
         }
         out
     }

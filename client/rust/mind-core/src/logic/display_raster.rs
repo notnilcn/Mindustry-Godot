@@ -66,20 +66,57 @@ pub struct ImageRef<'a> {
     pub pixels: &'a [Rgba],
 }
 
-/// One logic-font glyph with libGDX placement metrics
-/// (`Fonts.logic.getData().getGlyph`).
+/// One logic-font glyph (`Fonts.logic.getData().getGlyph`).
+///
+/// The placement fields follow Godot's `Font` metrics, because that is what the
+/// view-side provider reads (`mind-gdext::display_context`): `x_offset` is the
+/// rect's left edge from the pen and `y_offset` its **top** edge from the
+/// baseline in the y-down font convention (negative above the baseline,
+/// `Font.get_glyph_offset`). The glyph bitmap includes the font atlas' 1 px
+/// pad on every side; [`Glyph::print_center`] folds both into Java's
+/// `LogicDisplay` placement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Glyph {
     /// Glyph bitmap (row 0 = top).
     pub image: RgbaImage,
-    /// `glyph.xoffset`.
+    /// Rect left edge from the pen (libGDX `glyph.xoffset`,
+    /// `Font.get_glyph_offset().x`).
     pub x_offset: f32,
-    /// `glyph.yoffset`.
+    /// Rect top edge from the baseline, y-down (`Font.get_glyph_offset().y`).
+    /// libGDX's `glyph.yoffset` is the opposite corner; see
+    /// [`Glyph::print_center`].
     pub y_offset: f32,
-    /// `BitmapFontData.capHeight`.
+    /// Font cap height for callers that lay text out. Not read by the
+    /// placement: Arc folds `capHeight` into `FontData.ascent`
+    /// (`FreeTypeFontGenerator.java:377-383`), and the provider reports
+    /// Godot's padded glyph metric here, not Arc's value.
     pub cap_height: f32,
-    /// `BitmapFontData.ascent`.
+    /// Font ascender for callers that lay text out. Not read by the
+    /// placement; [`Glyph::print_center`] documents the Arc/Godot conversion.
     pub ascent: f32,
+}
+
+impl Glyph {
+    /// The glyph rect's centre in `LogicDisplay` command space for a `print` at
+    /// `(x, y)` (`LogicDisplay.java:233`).
+    ///
+    /// Java: `x + w/2 + glyph.xoffset`,
+    /// `y + h/2 + glyph.yoffset + capHeight + ascent`.
+    ///
+    /// With libGDX metrics `ascent = rawAscender - capHeight` and
+    /// `glyph.yoffset = -(h - top) - rawAscender`
+    /// (`FreeTypeFontGenerator.java:618-621`), the vertical sum collapses to
+    /// `y + top - h/2`. The provider's Godot metrics already measure `h`
+    /// including the 1 px atlas pad and `y_offset` from the baseline to the
+    /// padded rect's top, so the same expression is `y - y_offset - h/2`.
+    pub fn print_center(&self, x: f32, y: f32) -> (f32, f32) {
+        let width = self.image.width as f32;
+        let height = self.image.height as f32;
+        (
+            x + width / 2.0 + self.x_offset,
+            y - self.y_offset - height / 2.0,
+        )
+    }
 }
 
 /// View-side image provider (icons from the atlas, glyphs from the logic
@@ -183,6 +220,30 @@ impl DisplayRaster {
         if let Some(slot) = self.pixels.get_mut(index) {
             *slot = color;
         }
+    }
+
+    /// Blends `src` over one pixel (`SpriteBatch`'s
+    /// `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`), so a transparent texel leaves
+    /// the buffer untouched.
+    fn blend_pixel(&mut self, x: i32, y: i32, src: Rgba) {
+        let alpha = src & 0xff;
+        if alpha == 0 {
+            return;
+        }
+        if alpha == 0xff {
+            self.set_pixel(x, y, src);
+            return;
+        }
+        let Some(dst) = self.pixel(x, y) else {
+            return;
+        };
+        let mix = |from: u32, to: u32| (from * alpha + to * (255 - alpha)) / 255;
+        let channel = |value: Rgba, shift: u32| (value >> shift) & 0xff;
+        let r = mix(channel(src, 24), channel(dst, 24));
+        let g = mix(channel(src, 16), channel(dst, 16));
+        let b = mix(channel(src, 8), channel(dst, 8));
+        let a = mix(alpha, channel(dst, 0));
+        self.set_pixel(x, y, (r << 24) | (g << 16) | (b << 8) | a);
     }
 
     /// Fills the whole buffer with the RGB of `color` at alpha 255
@@ -424,7 +485,10 @@ impl DisplayRaster {
                 else {
                     continue;
                 };
-                self.set_pixel(px, py, mul_rgba(pixel, tint));
+                // `Draw.rect` is alpha-blended, so a transparent texel (a
+                // glyph-ish mask's pad row, a cut-out icon) leaves the buffer
+                // alone instead of punching the background out.
+                self.blend_pixel(px, py, mul_rgba(pixel, tint));
             }
         }
     }
@@ -555,14 +619,17 @@ pub fn process_commands(
             }
             COMMAND_PRINT => {
                 let glyph_char = char::from_u32(p1 as u32).unwrap_or('\0');
-                if let Some(glyph) = images.glyph(glyph_char) {
-                    // `LogicDisplay.java:207-216`: the glyph region is drawn
-                    // with its centre at `x + width/2 + xoffset`,
-                    // `y + height/2 + yoffset + capHeight + ascent`.
+                // `LogicDisplay.java:228-229`: `getGlyph` is null for a
+                // character outside `Fonts.logic`'s generated set, so nothing is
+                // drawn (the layout still advanced the cursor).
+                if crate::logic::font::has_glyph(glyph_char)
+                    && let Some(glyph) = images.glyph(glyph_char)
+                {
+                    // `LogicDisplay.java:230-234`: the glyph region's centre,
+                    // see [`Glyph::print_center`].
+                    let (cx, cy) = glyph.print_center(x, y);
                     let gw = glyph.image.width as f32;
                     let gh = glyph.image.height as f32;
-                    let cx = x + gw / 2.0 + glyph.x_offset;
-                    let cy = y + gh / 2.0 + glyph.y_offset + glyph.cap_height + glyph.ascent;
                     raster.blit(
                         ImageRef {
                             width: glyph.image.width,
@@ -1038,6 +1105,180 @@ mod tests {
             field(p3),
             field(p4),
         )
+    }
+
+    /// Draw context with one fixed glyph for every character.
+    struct TestImages {
+        glyph: Option<Glyph>,
+    }
+
+    impl TestImages {
+        fn glyph(glyph: Glyph) -> Self {
+            Self { glyph: Some(glyph) }
+        }
+    }
+
+    impl DisplayDrawContext for TestImages {
+        fn icon(&self, _content_type: u8, _id: u16) -> Option<RgbaImage> {
+            None
+        }
+        fn glyph(&self, _c: char) -> Option<Glyph> {
+            self.glyph.clone()
+        }
+    }
+
+    impl DisplayImages for TestImages {
+        fn icon(&self, content_type: u8, id: u16) -> Option<RgbaImage> {
+            DisplayDrawContext::icon(self, content_type, id)
+        }
+        fn glyph(&self, c: char) -> Option<Glyph> {
+            DisplayDrawContext::glyph(self, c)
+        }
+        fn display(&self, _index: i32) -> Option<ImageRef<'_>> {
+            None
+        }
+    }
+
+    /// The real `logic.ttf` 'A' mask from Godot's `FontFile` at 16 px: an 8x10
+    /// padded rect with a 6x8 glyph inset by 1 px on every side, the rect top
+    /// 9 px above the baseline.
+    fn capped_glyph() -> Glyph {
+        let mut pixels = vec![0u32; 8 * 10];
+        for row in 1..9 {
+            for col in 1..7 {
+                pixels[row * 8 + col] = WHITE;
+            }
+        }
+        Glyph {
+            image: RgbaImage {
+                width: 8,
+                height: 10,
+                pixels,
+            },
+            x_offset: 0.0,
+            y_offset: -9.0,
+            cap_height: 7.0,
+            ascent: 3.0,
+        }
+    }
+
+    /// `print` places the glyph rect with Java's `LogicDisplay` geometry
+    /// (`LogicDisplay.java:230-234`): for the 8x10 padded mask above, the
+    /// content lands in `[x+1, x+7) x [y, y+8)`; the transparent pad ring must
+    /// not touch the buffer.
+    #[test]
+    fn print_places_glyphs_with_java_geometry() {
+        let mut r = raster(80, 80);
+        let mut queue = VecDeque::new();
+        queue.push_back(cmd(COMMAND_PRINT, 20, 10, 'A' as i32, 0, 0, 0));
+        let images = TestImages::glyph(capped_glyph());
+        assert!(process_commands(&mut r, &mut queue, &images));
+        for y in 0..80 {
+            for x in 0..80 {
+                let expected = (21..27).contains(&x) && (10..18).contains(&y);
+                let pixel = r.pixel(x, y).unwrap_or(0);
+                assert_eq!(
+                    pixel,
+                    if expected { WHITE } else { 0x0000_00ff },
+                    "pixel ({x},{y})"
+                );
+            }
+        }
+    }
+
+    /// A small glyph sits on the baseline too: 'a' is 7x8 with a 5x6 inset.
+    #[test]
+    fn print_places_a_lowercase_glyph_on_the_baseline() {
+        let mut pixels = vec![0u32; 7 * 8];
+        for row in 1..7 {
+            for col in 1..6 {
+                pixels[row * 7 + col] = WHITE;
+            }
+        }
+        let glyph = Glyph {
+            image: RgbaImage {
+                width: 7,
+                height: 8,
+                pixels,
+            },
+            x_offset: 0.0,
+            y_offset: -7.0,
+            cap_height: 7.0,
+            ascent: 3.0,
+        };
+        let mut r = raster(32, 32);
+        let mut queue = VecDeque::new();
+        queue.push_back(cmd(COMMAND_PRINT, 8, 8, 'a' as i32, 0, 0, 0));
+        assert!(process_commands(
+            &mut r,
+            &mut queue,
+            &TestImages::glyph(glyph)
+        ));
+        for y in 0..32 {
+            for x in 0..32 {
+                let expected = (9..14).contains(&x) && (8..14).contains(&y);
+                assert_eq!(
+                    r.pixel(x, y),
+                    Some(if expected { WHITE } else { 0x0000_00ff }),
+                    "pixel ({x},{y})"
+                );
+            }
+        }
+    }
+
+    /// `LogicDisplay.java:228-229`: a character outside `Fonts.logic`'s
+    /// generated set has no glyph, so nothing is drawn even if a provider
+    /// returns a bitmap for it. Space has a glyph (`getGlyph(' ')`) but a
+    /// zero-height region (`FreeTypeFontGenerator.java:508-517`), so it draws
+    /// nothing either.
+    #[test]
+    fn print_skips_characters_outside_the_generated_set() {
+        let mut r = raster(16, 16);
+        let mut queue = VecDeque::new();
+        queue.push_back(cmd(COMMAND_PRINT, 4, 4, 'é' as i32, 0, 0, 0));
+        // U+20AC is 172 after the 10-bit `DisplayCmd.p1` truncation, which the
+        // generated set does not contain either; 402 (`ƒ`) is outside it too.
+        queue.push_back(cmd(COMMAND_PRINT, 4, 4, 172, 0, 0, 0));
+        queue.push_back(cmd(COMMAND_PRINT, 4, 4, 402, 0, 0, 0));
+        let images = TestImages::glyph(capped_glyph());
+        assert!(process_commands(&mut r, &mut queue, &images));
+        assert!(
+            r.pixels.iter().all(|pixel| *pixel == 0x0000_00ff),
+            "no pixel is drawn"
+        );
+    }
+
+    /// `Draw.rect` blends (`SpriteBatch` `GL_SRC_ALPHA,
+    /// GL_ONE_MINUS_SRC_ALPHA`): transparent texels leave the buffer alone and
+    /// partial alpha mixes with the destination.
+    #[test]
+    fn blit_blends_transparent_and_partial_texels() {
+        let mut r = raster(8, 8);
+        // Row 0 (top) is [transparent, white]; row 1 is [50% white, white].
+        let image = RgbaImage {
+            width: 2,
+            height: 2,
+            pixels: vec![0x0000_0000, 0xffff_ffff, 0xffff_ff80, 0xffff_ffff],
+        };
+        r.blit(
+            ImageRef {
+                width: image.width,
+                height: image.height,
+                pixels: &image.pixels,
+            },
+            4.0,
+            4.0,
+            2.0,
+            2.0,
+            0.0,
+            WHITE,
+        );
+        assert_eq!(r.pixel(3, 4), Some(0x0000_00ff), "transparent texel");
+        assert_eq!(r.pixel(4, 4), Some(WHITE), "opaque texel");
+        assert_eq!(r.pixel(4, 3), Some(WHITE), "opaque texel");
+        // 50% white over the black background: `(255*128 + 0*127) / 255 = 128`
+        // for r/g/b; the destination alpha 255 mixes to 191.
+        assert_eq!(r.pixel(3, 3), Some(0x8080_80bf), "half-alpha texel");
     }
 
     /// `clear` fills the whole buffer with the RGB and alpha 255.

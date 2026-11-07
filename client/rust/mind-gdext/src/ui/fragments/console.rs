@@ -255,7 +255,10 @@ mod tests {
 
     #[test]
     fn bbcode_brackets_are_escaped() {
-        assert_eq!(escape_bbcode("a[b]c"), "a[lb]b[lb]c");
+        // Godot BBCode only treats `[` as an escape introducer; a bare `]` is
+        // literal text. `[lb]` prints `[`, so escaping both brackets (the old
+        // expectation) would render "a[b[c".
+        assert_eq!(escape_bbcode("a[b]c"), "a[lb]b]c");
         assert_eq!(escape_bbcode("plain"), "plain");
     }
 

@@ -6577,7 +6577,8 @@ fn tile_world(tile: TilePos) -> (f32, f32) {
 /// and the type has weapons (`unit.lookAt`: `moveToward(rotation, angle,
 /// rotateSpeed * speedMultiplier)`, UnitComp.java:491). Moving units keep
 /// facing their velocity (already applied by the movement pass). The
-/// `Predict.intercept` lead is not ported (aims at the target position).
+/// `Predict.intercept` lead is applied through
+/// `combat::targeting::intercept_positions` (AIController.java:124).
 fn face_target(
     world: &mut World,
     content: &ContentRegistry,

@@ -3,15 +3,16 @@
 
 //! `EnvRenderers` host (`graphics/EnvRenderers.java`, plan 16 §3.8/M6).
 //!
-//! Owns the ordered [`EnvRegistry`] and the default underwater pass. The
-//! scorching noise pass and the particle/ray FX bodies are plan 17's; this
-//! module draws the underwater tint quad at `Layer.light + 1` (reusing the
-//! `Layer::Light` band) and exposes the selection contract
-//! `add_env_renderer(env, pass)`.
+//! Owns the ordered [`EnvRegistry`] and the underwater/scorching registration.
+//! The plan-17 bodies (underwater caustics + 50-ray/suspended-particle passes
+//! and the scorching `distortAlpha` noise layers) are appended to the frame
+//! program by `fx/env.rs`; this module draws the underwater tint quad at
+//! `Layer.light + 1` (reusing the `Layer::Light` band) and exposes the selection
+//! contract `add_env_renderer(env, pass)`.
 //!
-//! Deviation S16-7: the additive caustics blit and 50-ray/suspended-particle
-//! passes need plan 03's `rays`/`particle` region binding and plan 17's
-//! `Weather.drawParticles`; this slice draws the water-tint fill only.
+//! Deviation S16-7: the tint is drawn here as a band fill while the additive
+//! caustics/rays/particles ride the plan-17 `fx/env.rs` program; the two halves
+//! share the `EnvRegistry` selection order.
 
 use godot::classes::{Mesh, MeshInstance2D, Node2D};
 use godot::prelude::*;

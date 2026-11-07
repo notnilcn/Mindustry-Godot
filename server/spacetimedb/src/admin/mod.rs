@@ -36,8 +36,8 @@ use crate::main::tables::AuditKind;
 use crate::relay::methods::{is_admin, require_match, valid_content_name, window_expired};
 use crate::relay::reducers::send_match_command_impl;
 use crate::relay::tables::{
-    AdminSwitchTeam, AdminTileOp, CommandKind, MatchKick, RunWave, match_kick, match_state,
-    relay_member,
+    AdminSwitchTeam, AdminTileOp, CommandKind, MatchKick, MatchStatus, RunWave, match_kick,
+    match_state, relay_match, relay_member,
 };
 
 /// Module-wide server configuration, singleton `id = 0` (plan §6.1).
@@ -367,6 +367,32 @@ fn parse_u64(value: &str) -> Result<u64, String> {
         .trim()
         .parse::<u64>()
         .map_err(|_| format!("invalid integer `{value}`"))
+}
+
+/// `ConfigEvent` value text for one `server_config` change (GAPS #37).
+///
+/// `admin_set_config` stores this in the published `match_event` detail (the
+/// client `EventBus` decodes it as `{"type":"ConfigEvent",...,"value":...}`,
+/// see [`crate::relay::events::typed_detail`]) and in the audit line.
+pub(crate) fn config_change_detail(field: &str, value: &str) -> String {
+    format!("{field}={value}")
+}
+
+/// Match ids that observe a module-global `server_config` change: every
+/// non-ended match, the same live-match filter as `relay/views.rs`.
+///
+/// `server_config` is a module singleton, so a config write is not scoped to
+/// the writer's match; Java's `Config` change listeners are server-wide and
+/// every live session sees them. Split out of the reducer so the fan-out is
+/// unit-testable (a `ReducerContext` cannot be constructed in module tests).
+pub(crate) fn config_change_targets(
+    matches: impl IntoIterator<Item = (u64, MatchStatus)>,
+) -> Vec<u64> {
+    matches
+        .into_iter()
+        .filter(|(_, status)| *status != MatchStatus::Ended)
+        .map(|(match_id, _)| match_id)
+        .collect()
 }
 
 // ---- reducer plumbing -------------------------------------------------------
@@ -733,13 +759,26 @@ pub fn admin_set_config(ctx: &ReducerContext, field: String, value: String) -> R
         _ => return Err(format!("unknown server config field `{field}`")),
     };
     ctx.db.server_config().id().update(updated);
-    record(
-        ctx,
-        AdminActionKind::SetConfig,
-        None,
-        None,
-        format!("{field}={value}"),
-    );
+    // GAPS #37: publish the typed `ConfigEvent` row the client `EventBus`
+    // decodes. `server_config` is module-global, so every live match observes
+    // the change (Java fires the in-process `Config` listeners server-wide).
+    let detail = config_change_detail(&field, &value);
+    for match_id in config_change_targets(
+        ctx.db
+            .relay_match()
+            .iter()
+            .map(|row| (row.match_id, row.status)),
+    ) {
+        crate::relay::events::emit(
+            ctx,
+            match_id,
+            crate::relay::events::EventKind::ConfigChange,
+            Some(ctx.sender()),
+            None,
+            detail.clone(),
+        );
+    }
+    record(ctx, AdminActionKind::SetConfig, None, None, detail);
     Ok(())
 }
 
@@ -1223,6 +1262,52 @@ mod tests {
         assert!(AdminActionKind::RunWave.emits_command());
         assert!(!AdminActionKind::Kick.emits_command());
         assert!(!AdminActionKind::SetConfig.emits_command());
+    }
+
+    /// GAPS #37: `admin_set_config` publishes one typed `ConfigEvent` row per
+    /// live match. The reducer itself needs a `ReducerContext` (the module has
+    /// no test harness that can build one), so the fire site's data path is
+    /// split into the tested pieces: the fan-out predicate, the `field=value`
+    /// detail, and the `ConfigEvent` envelope `relay::events` produces from it.
+    #[test]
+    fn config_change_publishes_the_typed_envelope_to_live_matches() {
+        // Lobby + Running are live; Ended is not.
+        assert_eq!(
+            config_change_targets([
+                (1, MatchStatus::Lobby),
+                (2, MatchStatus::Ended),
+                (3, MatchStatus::Running),
+            ]),
+            vec![1, 3]
+        );
+        assert!(config_change_targets([]).is_empty());
+        assert!(config_change_targets([(9, MatchStatus::Ended)]).is_empty());
+
+        let detail = config_change_detail("motd", "hello");
+        assert_eq!(detail, "motd=hello");
+        // The emitted row is the typed envelope the client `EventBus` decodes.
+        let envelope = crate::relay::events::typed_detail(
+            crate::relay::events::EventKind::ConfigChange,
+            &detail,
+        )
+        .expect("config change is a typed event");
+        assert_eq!(
+            envelope,
+            r#"{"type":"ConfigEvent","tile":null,"player":null,"value":"motd=hello"}"#
+        );
+        // Every writable field produces a value the envelope can carry.
+        for field in ["server_name", "auto_pause", "uuid_change_limit"] {
+            assert!(known_server_config_field(field));
+            let detail = config_change_detail(field, "1");
+            assert!(detail.starts_with(field));
+            assert!(
+                crate::relay::events::typed_detail(
+                    crate::relay::events::EventKind::ConfigChange,
+                    &detail
+                )
+                .is_some()
+            );
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod blocks;
 pub mod display_raster;
 pub mod enums;
 pub mod executor;
+pub mod font;
 pub mod fx;
 pub mod globals;
 pub mod ops;

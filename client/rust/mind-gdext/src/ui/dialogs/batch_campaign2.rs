@@ -2757,7 +2757,7 @@ fn schematic_labels_replace(labels: &mut [String], from: &str, to: &str) -> bool
 }
 
 /// `tags.swap(idx, idx ± 1)` for the `@editor.moveup`/`@editor.movedown` cells.
-fn schematics_tag_swap(tags: &mut Vec<String>, index: usize, delta: isize) -> bool {
+fn schematics_tag_swap(tags: &mut [String], index: usize, delta: isize) -> bool {
     let Some(target) = index.checked_add_signed(delta) else {
         return false;
     };

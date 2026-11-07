@@ -103,8 +103,21 @@ pub struct MindPlayerListFragment {
     /// The floating per-player menu (`new BaseDialog(user.coloredName())`).
     menu: Option<Gd<Control>>,
     menu_body: Option<Gd<VBoxContainer>>,
+    /// Bottom action row buttons in `MENU_ACTIONS` order (Bans/Admins are
+    /// disabled for relay clients like Java's `disabled(b -> net.client())`).
+    footer: Vec<Gd<Button>>,
     pending: Option<PendingAction>,
     pending_votekick: Option<String>,
+    /// Local relay identity hex (`MindNet.local_identity_hex`); `""` offline.
+    local_identity: String,
+    /// `net.server()`: the local session hosts the match
+    /// (`MindNet.local_admin`, `HostDialog.runHost`).
+    is_server: bool,
+    /// `player.admin`: the host, or the local identity's roster row carries the
+    /// global admin record.
+    local_admin: bool,
+    /// `player.team()` (`MindNet.my_team`); `None` while unassigned.
+    local_team: Option<u8>,
 }
 
 #[godot_api]
@@ -135,6 +148,8 @@ impl MindPlayerListFragment {
             .map(|count| count.max(0) as usize)
             .unwrap_or(connected);
         self.rows = rows;
+        self.refresh_local_player();
+        self.sync_footer();
         self.update_header(count);
         let Some(mut content) = self.content.clone() else {
             return;
@@ -196,19 +211,15 @@ impl MindPlayerListFragment {
     #[func]
     fn open_player_menu(&mut self, player: GString) {
         let player = player.to_string();
-        let Some(row) = self
-            .rows
-            .iter()
-            .find(|row| row.display_name() == player)
-            .cloned()
-        else {
+        let Some(row) = self.row_by_target(&player).cloned() else {
             return;
         };
         self.fill_player_menu(&row);
         self.set_menu_visible(true);
     }
 
-    /// One menu button (`t.button("@player.ban", ...)` etc.).
+    /// One menu button (`t.button("@player.ban", ...)` etc.). `player` is the
+    /// row target ([`row_target`]), not necessarily the display name.
     #[func]
     fn menu_pressed(&mut self, player: GString, action: GString) {
         let player = player.to_string();
@@ -265,7 +276,17 @@ impl MindPlayerListFragment {
             return;
         };
         if confirmed {
-            self.dispatch_player_action(&pending.player, &pending.action, 0);
+            let sent = self.dispatch_player_action(&pending.player, &pending.action, 0);
+            if !sent {
+                // No relay (or no authority/rejected reducer): the shell never
+                // fakes a server action. Java's list only exists in a live
+                // match, so there is no upstream message for this state.
+                log::info!(
+                    "[ui] player_action {} on {} not sent",
+                    pending.action,
+                    pending.player
+                );
+            }
         }
     }
 
@@ -346,6 +367,7 @@ impl MindPlayerListFragment {
             });
             button.connect("pressed", &callable);
             menu.add_child(&button);
+            self.footer.push(button);
         }
         column.add_child(&menu);
 
@@ -386,11 +408,13 @@ impl MindPlayerListFragment {
         body.add_child(&accent_divider());
         let mut list = VBoxContainer::new_alloc();
         list.add_theme_constant_override("separation", 3);
-        // The roster carries no local identity, so the Java `user != player`
-        // clauses cannot be evaluated; the relay enforces authority (team and
-        // admin verbs are admin/host reducers) server-side.
-        for action in menu_actions_for(row, false, true, true) {
-            let button = menu_button(action, self.to_gd(), &row.display_name());
+        // `allowTeamSwitch` is `!state.isCampaign() && (rules.pvp ||
+        // rules.infiniteResources)` upstream; the fragment has no rules feed, so
+        // the relay's admin-authority check stands in (documented deviation).
+        let is_self = row_is_local(row, &self.local_identity);
+        let target = row_target(row);
+        for action in menu_actions_for(row, is_self, true, self.is_server) {
+            let button = menu_button(action, self.to_gd(), &target);
             list.add_child(&button);
         }
         body.add_child(&list);
@@ -413,7 +437,8 @@ impl MindPlayerListFragment {
         };
         clear_children(&body);
         // `new BaseDialog(Core.bundle.get("player.team") + ": " + user.name)`.
-        let title = format!("{}: {player}", kit::t("@player.team"));
+        let label = self.row_label(player);
+        let title = format!("{}: {label}", kit::t("@player.team"));
         body.add_child(&factory::label(&title));
         body.add_child(&accent_divider());
         let mut grid = GridContainer::new_alloc();
@@ -474,22 +499,37 @@ impl MindPlayerListFragment {
             line.add_child(&factory::glyph_label("admin", 20, styles::ACCENT));
         }
 
-        let mut menu = factory::glyph_button("menu", "menu", "emptyi");
-        menu.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
-        let mut target = self.to_gd();
-        let player = GString::from(row.display_name().as_str());
-        let callable = Callable::from_fn("player_row_menu", move |_args: &[&Variant]| {
-            let _ = target.call("open_player_menu", &[player.to_variant()]);
-        });
-        menu.connect("pressed", &callable);
-        line.add_child(&menu);
-
-        // `else if(!user.isLocal() && !user.admin && net.client() && ...)`.
-        if votekick_eligible(row, total) {
+        // `if(net.server() || (player.admin && (!user.admin || user == player)))`
+        // (`PlayerListFragment.rebuild`): otherwise the row menu is unavailable
+        // and the votekick hammer is the only action (`else if` branch).
+        let is_self = row_is_local(row, &self.local_identity);
+        // `allowTeamSwitch` (rules pvp/infiniteResources) has no fragment feed
+        // in the port; the relay's admin gate bounds the visible verbs.
+        let allow_team_switch = true;
+        let menu_visible = row_menu_visible(
+            self.is_server,
+            self.local_admin,
+            row,
+            is_self,
+            allow_team_switch,
+        );
+        if menu_visible {
+            let mut menu = factory::glyph_button("menu", "menu", "emptyi");
+            menu.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
+            let mut target = self.to_gd();
+            let player = GString::from(row_target(row).as_str());
+            let callable = Callable::from_fn("player_row_menu", move |_args: &[&Variant]| {
+                let _ = target.call("open_player_menu", &[player.to_variant()]);
+            });
+            menu.connect("pressed", &callable);
+            line.add_child(&menu);
+        } else if votekick_eligible(row, total, is_self, !self.is_server, self.local_team) {
+            // `else if(!user.isLocal() && !user.admin && net.client() &&
+            // Groups.player.size() >= 3 && player.team() == user.team())`.
             let mut hammer = factory::glyph_button("hammer", "kick", "emptyi");
             hammer.set_custom_minimum_size(Vector2::new(ROW_HEIGHT, ROW_HEIGHT));
             let mut target = self.to_gd();
-            let player = GString::from(row.display_name().as_str());
+            let player = GString::from(row_target(row).as_str());
             let callable = Callable::from_fn("player_row_votekick", move |_args: &[&Variant]| {
                 let _ = target.call(
                     "menu_pressed",
@@ -502,12 +542,15 @@ impl MindPlayerListFragment {
         panel
     }
 
-    /// Asks `MindUi.show_confirm` for a Ban/Kick/Admin verb.
+    /// Asks `MindUi.show_confirm` for a Ban/Kick/Admin verb (`player` is the
+    /// dispatch target; the message formats the display name like Java's
+    /// `Core.bundle.format("confirmban", user.name)`).
     fn request_confirm(&mut self, player: &str, action: &str) {
         let Some(key) = confirm_key(action) else {
             return;
         };
-        let text = kit::tm_format(key, &[player]).to_string();
+        let label = self.row_label(player);
+        let text = kit::tm_format(key, &[label.as_str()]).to_string();
         self.pending = Some(PendingAction {
             player: player.to_owned(),
             action: action.to_owned(),
@@ -517,9 +560,15 @@ impl MindPlayerListFragment {
         }
     }
 
-    /// `Trace` row button: read the roster trace and open `TraceDialog` with it
-    /// as context (Java receives the same info from `AdminAction.trace`).
+    /// `Trace` row button: request the server-computed trace
+    /// (`Call.adminRequest(user, AdminAction.trace, null)`,
+    /// `PlayerListFragment.java:168`) and open `TraceDialog` with the roster
+    /// aggregation the relay already mirrors (Java opens it on `Call.traceInfo`).
     fn open_trace(&self, player: &str) {
+        // The reducer also publishes the `Call.traceInfo` answer to this client
+        // (`MindNet.player_action("trace")` -> `admin_request_trace`); a relay
+        // without the target row simply leaves the dialog on the local view.
+        self.dispatch_player_action(player, "trace", 0);
         let Some(mut ui) = kit::ui() else {
             return;
         };
@@ -531,7 +580,9 @@ impl MindPlayerListFragment {
         } else {
             String::new()
         };
-        let context = trace_context_json(player, &trace);
+        // The dialog prints `Player.name`, not the identity it was requested by.
+        let label = self.row_label(player);
+        let context = trace_context_json(&label, &trace);
         if ui.has_method("open_dialog") {
             let _ = ui.call(
                 "open_dialog",
@@ -543,16 +594,19 @@ impl MindPlayerListFragment {
         }
     }
 
-    /// `ui.showTextInput("@votekick.reason", ...)` (`Icon.hammer` row).
+    /// `ui.showTextInput("@votekick.reason", ...)` (`Icon.hammer` row). The
+    /// relay's `/votekick` resolves a current username (not an identity), so the
+    /// command uses the display name.
     fn open_votekick(&mut self, player: &str) {
-        self.pending_votekick = Some(player.to_owned());
+        let label = self.row_label(player);
+        self.pending_votekick = Some(label.clone());
         let Some(mut ui) = kit::ui() else {
             return;
         };
         if !ui.has_method("show_text_input") {
             return;
         }
-        let message = kit::tm_format("@votekick.reason.message", &[player]).to_string();
+        let message = kit::tm_format("@votekick.reason.message", &[label.as_str()]).to_string();
         let _ = ui.call(
             "show_text_input",
             &[
@@ -611,6 +665,77 @@ impl MindPlayerListFragment {
             return None;
         }
         ui.call("player_count", &[]).try_to::<i64>().ok()
+    }
+
+    /// The row a menu callback targets (`Player.uuid` or, for an unresolved
+    /// row, the display name the relay still resolves).
+    fn row_by_target(&self, target: &str) -> Option<&PlayerRow> {
+        self.rows
+            .iter()
+            .find(|row| row_target(row) == target || row.display_name() == target)
+    }
+
+    /// `Player.name` for a menu target: confirm/prompt text formats the
+    /// username like Java, while the action itself carries the identity.
+    fn row_label(&self, target: &str) -> String {
+        self.row_by_target(target)
+            .map(PlayerRow::display_name)
+            .unwrap_or_else(|| target.to_owned())
+    }
+
+    /// Reads the local relay identity, host/admin rights and team
+    /// (`net.server()`, `player.admin`, `player.team()` in
+    /// `PlayerListFragment.rebuild`). Values stay empty/false without a net
+    /// facade, so no row menu is offered when nothing can serve it.
+    fn refresh_local_player(&mut self) {
+        self.local_identity = self.net_text("local_identity_hex");
+        self.is_server = self.net_bool("local_admin");
+        self.local_team = self
+            .net_i64("my_team")
+            .and_then(|team| u8::try_from(team).ok());
+        let identity = self.local_identity.clone();
+        let self_admin = self
+            .rows
+            .iter()
+            .any(|row| row_is_local(row, &identity) && row.admin);
+        self.local_admin = self.is_server || self_admin;
+    }
+
+    /// `disabled(b -> net.client())` on the Bans/Admins footer buttons: only
+    /// the hosting session can open the server's roster dialogs.
+    fn sync_footer(&mut self) {
+        for (index, button) in self.footer.iter_mut().enumerate() {
+            if index < 2 {
+                button.set_disabled(!self.is_server);
+            }
+        }
+    }
+
+    /// One optional `MindNet` accessor (`has_method`-guarded).
+    fn net_call(&self, method: &str) -> Option<Variant> {
+        let mut net = kit::net()?;
+        if !net.has_method(method) {
+            return None;
+        }
+        Some(net.call(method, &[]))
+    }
+
+    fn net_text(&self, method: &str) -> String {
+        self.net_call(method)
+            .and_then(|value| value.try_to::<GString>().ok())
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    }
+
+    fn net_bool(&self, method: &str) -> bool {
+        self.net_call(method)
+            .and_then(|value| value.try_to::<bool>().ok())
+            .unwrap_or(false)
+    }
+
+    fn net_i64(&self, method: &str) -> Option<i64> {
+        self.net_call(method)
+            .and_then(|value| value.try_to::<i64>().ok())
     }
 
     /// `pane.label(... "players.single" : "players" ...)`.
@@ -796,8 +921,9 @@ fn header_key(count: usize) -> &'static str {
 }
 
 /// The row menu verbs in Java order (`PlayerListFragment.rebuild`). `is_self`
-/// hides the peer-only verbs; the relay roster cannot identify the local row,
-/// so callers pass `false`.
+/// hides the peer-only verbs; `can_admin` is Java's `!net.client() && !user.isLocal()`
+/// (server-only admin toggle). `allow_team_switch` is the rules gate the
+/// fragment cannot read (see [`row_menu_visible`]).
 fn menu_actions_for(
     row: &PlayerRow,
     is_self: bool,
@@ -815,6 +941,40 @@ fn menu_actions_for(
         actions.push(if row.admin { "unadmin" } else { "admin" });
     }
     actions
+}
+
+/// Whether the roster row is the local player (`Player.isLocal()`): the relay
+/// roster carries no local column, so the identity `MindNet.local_identity_hex`
+/// returns is matched against the row identity.
+fn row_is_local(row: &PlayerRow, local_identity: &str) -> bool {
+    !local_identity.is_empty() && row.identity.eq_ignore_ascii_case(local_identity)
+}
+
+/// The action target for a row: the full identity (`Player.uuid`) so the relay
+/// lookup is exact even when two peers share a name; a row whose username has
+/// not arrived yet falls back to the display name (`roster.find` accepts both).
+fn row_target(row: &PlayerRow) -> String {
+    if row.identity.is_empty() {
+        row.display_name()
+    } else {
+        row.identity.clone()
+    }
+}
+
+/// Java `PlayerListFragment.rebuild` row-menu gate:
+/// `net.server() || (player.admin && (!user.admin || user == player))`, then
+/// `allowTeamSwitch || user != player` for the menu button itself.
+///
+/// A plain relay client therefore gets no per-row menu (unavailable state) and
+/// falls through to the votekick hammer; the host and admins do.
+fn row_menu_visible(
+    server: bool,
+    self_admin: bool,
+    row: &PlayerRow,
+    is_self: bool,
+    allow_team_switch: bool,
+) -> bool {
+    (server || (self_admin && (!row.admin || is_self))) && (allow_team_switch || !is_self)
 }
 
 /// The icon + bundle key for one menu verb (Java `@player.*` buttons).
@@ -859,11 +1019,24 @@ fn confirm_key(action: &str) -> Option<&'static str> {
     }
 }
 
-/// Java votekick row condition: a connected, non-admin peer when at least
-/// three players are online. The local/team clauses rely on the local player
-/// identity the relay roster does not expose (see the module note).
-fn votekick_eligible(row: &PlayerRow, connected: usize) -> bool {
-    row.connected && !row.admin && connected >= VOTE_MIN_PLAYERS
+/// Java votekick row (`PlayerListFragment.rebuild`, the `else if` of the menu
+/// branch): `!user.isLocal() && !user.admin && net.client() &&
+/// Groups.player.size() >= 3 && player.team() == user.team()`, on a connected
+/// row. The local team/identity come from `MindNet.my_team`/
+/// `MindNet.local_identity_hex`.
+fn votekick_eligible(
+    row: &PlayerRow,
+    connected: usize,
+    is_self: bool,
+    client: bool,
+    local_team: Option<u8>,
+) -> bool {
+    !is_self
+        && row.connected
+        && !row.admin
+        && client
+        && connected >= VOTE_MIN_PLAYERS
+        && local_team.is_some_and(|team| row.team == Some(team))
 }
 
 /// `Call.sendChatMessage("/votekick #" + user.id + " " + reason)`; the relay
@@ -987,6 +1160,11 @@ mod tests {
             menu_actions_for(&peer, true, false, true),
             Vec::<&str>::new()
         );
+        // Java `!net.client()`: a relay client never gets the admin toggle.
+        assert_eq!(
+            menu_actions_for(&peer, false, true, false),
+            ["ban", "kick", "trace", "team"]
+        );
     }
 
     #[test]
@@ -1063,17 +1241,70 @@ mod tests {
     }
 
     #[test]
-    fn votekick_needs_three_live_non_admins() {
+    fn votekick_needs_three_live_teammates_and_a_client_session() {
         let peer = row("Bob", Some(1), false, true);
         let admin = row("Admin", Some(1), true, true);
-        assert!(!votekick_eligible(&peer, 2));
-        assert!(votekick_eligible(&peer, 3));
-        assert!(!votekick_eligible(&admin, 5));
         let offline = row("Off", Some(1), false, false);
-        assert!(!votekick_eligible(&offline, 5));
+        // `Groups.player.size() >= 3`.
+        assert!(!votekick_eligible(&peer, 2, false, true, Some(1)));
+        assert!(votekick_eligible(&peer, 3, false, true, Some(1)));
+        // `!user.admin`.
+        assert!(!votekick_eligible(&admin, 5, false, true, Some(1)));
+        // `!user.isLocal()`.
+        assert!(!votekick_eligible(&peer, 5, true, true, Some(1)));
+        // `net.client()`.
+        assert!(!votekick_eligible(&peer, 5, false, false, Some(1)));
+        // `player.team() == user.team()` (unassigned never qualifies).
+        assert!(!votekick_eligible(&peer, 5, false, true, Some(2)));
+        assert!(!votekick_eligible(&peer, 5, false, true, None));
+        assert!(!votekick_eligible(&offline, 5, false, true, Some(1)));
         assert_eq!(
             votekick_command(" Bob ", " griefing "),
             "/votekick Bob griefing"
         );
+    }
+
+    #[test]
+    fn row_menu_gate_matches_the_java_server_admin_clauses() {
+        let peer = row("Bob", Some(1), false, true);
+        let admin = row("Admin", Some(1), true, true);
+        // `net.server()`: the host sees every row menu.
+        assert!(row_menu_visible(true, true, &peer, false, true));
+        assert!(row_menu_visible(true, true, &admin, false, true));
+        // `player.admin && (!user.admin || user == player)`.
+        assert!(row_menu_visible(false, true, &peer, false, true));
+        assert!(!row_menu_visible(false, true, &admin, false, true));
+        assert!(row_menu_visible(false, true, &admin, true, true));
+        // A plain client gets no row menu at all (unavailable state).
+        assert!(!row_menu_visible(false, false, &peer, false, true));
+        assert!(!row_menu_visible(false, false, &peer, true, true));
+        // Self only on `allowTeamSwitch`; the port's rules fallback keeps it on.
+        assert!(row_menu_visible(true, true, &peer, true, true));
+        assert!(!row_menu_visible(true, true, &peer, true, false));
+    }
+
+    #[test]
+    fn local_rows_match_the_local_identity_case_insensitively() {
+        let mut identity_row = row("Me", Some(1), false, true);
+        identity_row.identity = String::from("ABCDEF12");
+        assert!(row_is_local(&identity_row, "abcdef12"));
+        assert!(!row_is_local(&identity_row, "abcdef"));
+        assert!(!row_is_local(&identity_row, ""));
+        assert!(!row_is_local(&row("Bob", Some(1), false, true), "abcdef12"));
+    }
+
+    #[test]
+    fn row_target_prefers_the_identity_and_falls_back_to_the_name() {
+        let peer = row("Bob", Some(1), false, true);
+        assert_eq!(row_target(&peer), "Bob");
+        let mut resolved = row("Bob", Some(1), false, true);
+        resolved.identity = String::from("ab12cd34");
+        assert_eq!(row_target(&resolved), "ab12cd34");
+        // An unresolved username keeps the identity prefix `display_name`
+        // derives so the row stays addressable.
+        let mut unresolved = row("Bob", Some(1), false, true);
+        unresolved.identity = String::from("ab12cd34");
+        unresolved.name.clear();
+        assert_eq!(row_target(&unresolved), "ab12cd34");
     }
 }

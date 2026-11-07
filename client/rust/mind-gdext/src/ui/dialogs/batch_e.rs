@@ -4702,6 +4702,7 @@ fn objective_set_element(
 }
 
 /// The generic field interpreter (`_make_editor`).
+#[allow(clippy::too_many_arguments)] // one parameter per Java `_make_editor` arg
 fn objective_editor(
     node: &Gd<MindDialog>,
     index: i64,
@@ -5080,7 +5081,7 @@ fn objective_seq_editor(
 
 /// The `ObjectiveMarker` interpreter (`MapObjectivesDialog.defaultInterpreter`
 /// + `getProvider(ObjectiveMarker.class)`, `:236-256`): the class button plus
-/// the selected marker class's field rows.
+///   the selected marker class's field rows.
 fn objective_marker_editor(node: &Gd<MindDialog>, value_sink: &ObjectiveValue) -> Gd<Control> {
     let mut box_ = VBoxContainer::new_alloc();
     box_.add_theme_constant_override("separation", 2);

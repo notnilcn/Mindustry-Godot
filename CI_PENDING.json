@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-07T00:32:03Z",
+  "updated": "2026-11-07T00:50:06Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1624,6 +1624,41 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib accelerator; ... mods; ... -p mind-gdext --lib accelerator; ... batch_f",
       "expected": "accelerator 15+4, mods 167, batch_f 9; full lib 3114",
       "risk": "AbilitySpec mapping; classes fixture; accelerator sim_host seam; cutscene FX pending",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-005006",
+      "created_at": "2026-11-07T00:50:06Z",
+      "agent": "hx-wave-n",
+      "branch": "main",
+      "head": "ff278592",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src,client/rust/mind-stdb,client/rust/mind-gdext/src/net,server/spacetimedb",
+      "summary": "Game-flow events + net facade/team/calls/TypeIO (PAR-0577/0600/0601/0578)",
+      "files": [
+        "client/rust/mind-core/src/event.rs",
+        "client/rust/mind-core/src/game/play.rs",
+        "client/rust/mind-core/src/game/runtime.rs",
+        "server/spacetimedb/src/relay/events.rs",
+        "client/rust/mind-core/src/sim/mod.rs",
+        "client/rust/mind-gdext/src/net/mod.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "client/rust/mind-stdb/src/typeio.rs",
+        "client/rust/mind-stdb/src/call_packet.rs",
+        "client/rust/mind-stdb/src/calls.rs",
+        "client/rust/mind-headless/src/server/net_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "cargo-check-all-targets"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib event; ... -p mind-stdb --lib; ... -p mind-headless --lib server",
+      "expected": "event 43, mind-stdb 106, headless 74, gdext net 14",
+      "risk": "relay typed detail changes MatchEvent detail; effect-data kind needs module append; sim/mod team setter",
       "status": "pending"
     }
   ]

@@ -4,10 +4,13 @@
 //! `SerpuloPlanetGenerator` (plan 06 §3.11). Ported from
 //! `maps/planet/SerpuloPlanetGenerator.java`.
 //!
-//! Deviations (OD6-A/OD6-B, structural parity): `state.rules.*`,
-//! `Schematics.placeLaunchLoadout`, `Waves.generate`, `BaseGenerator` ruins and
-//! `Planets.serpulo.sectors` reads are plan-11/12 hooks and are not applied
-//! (they do not change the base terrain); `trimDark` reads `World.getDarkness`'s
+//! Deviations (OD6-A/OD6-B, structural parity): the tile-only `generate` pass
+//! does not apply `state.rules.*`/`Waves.generate` (they run in `generate_rules`
+//! against the live runtime) and leaves the launch loadout + `BaseGenerator`
+//! ruins to `place_structures` (`place_launch_loadout` + `place_ruins`, H05
+//! T4/T6). `Planets.serpulo.sectors` reads arrive through `set_sector_glow`
+//! (globe emissive/megabase glow), so `getEmissiveColor` is ported; `trimDark`
+//! reads `World.getDarkness`'s
 //! border + generated-sector polygon terms at generation time (GAPS #28); plan
 //! 02 lacks `Floor.liquidDrop`, so the name-keyed `block_info::is_liquid` table
 //! stands in for `liquidDrop != null`.
@@ -1790,8 +1793,10 @@ impl WorldGenerator for SerpuloPlanetGenerator {
             tile.block = block;
         }
 
-        // Ruins (`basegen.generate`) are skipped: the plan-11 `BaseRegistry` is
-        // empty in mind-core, and upstream places nothing without loaded parts.
+        // Ruins (`basegen.generate`) run in `place_structures` (`place_ruins`):
+        // the tile-only `generate` pass cannot place schematics (no
+        // `WorldCtx`/ECS), so the derelict-build pass is deferred to the
+        // structure hook wired after generation (H05 T4/T6).
 
         // Remove invalid ores.
         for index in 0..tiles.len() {
@@ -1810,16 +1815,19 @@ impl WorldGenerator for SerpuloPlanetGenerator {
             }
         }
 
-        // `Schematics.placeLaunchLoadout` is a plan-12 hook (no tile effect).
+        // `Schematics.placeLaunchLoadout` also runs in `place_structures`
+        // (`place_launch_loadout`), not in this tile-only pass.
         for &(ex, ey) in &self.enemy_spawns {
             if tiles.in_bounds(ex, ey) {
                 tiles.get_mut(ex, ey).overlay = self.ids.spawn;
             }
         }
 
-        // `basegen.generate` (ruins) stays a named residual: placing schematics
-        // needs the plan-07 `WorldCtx`/ECS, which `WorldGenerator::generate`
-        // (tiles only) cannot carry; `postGenerate`'s wall fixes land with it.
+        // The ruins pass (`basegen.generate`) is implemented in
+        // `place_structures` (`place_ruins`, SerpuloPlanetGenerator.java:633-711):
+        // placing schematics needs the plan-07 `WorldCtx`/ECS, which
+        // `WorldGenerator::generate` (tiles only) cannot carry;
+        // `postGenerate`'s wall fixes land there too.
     }
 
     /// `state.rules.*` + `Waves.generate` half of `SerpuloPlanetGenerator.generate`

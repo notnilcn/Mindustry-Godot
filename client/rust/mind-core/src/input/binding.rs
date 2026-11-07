@@ -1196,6 +1196,12 @@ mod tests {
         assert_eq!(state.axis_of(MOVE_X, "a"), Some(-1.0));
         assert_eq!(state.axis_of(MOVE_X, "d"), Some(1.0));
         assert_eq!(state.axis_of(MOVE_X, "q"), None);
+        // `Binding.java:10-11`: both movement axes are WASD (`move_x` A/D,
+        // `move_y` S/W); the editor and the in-game camera read them through
+        // `Core.input.axis` (`MapView.java:180-185`, `DesktopInput.java:979-980`).
+        assert_eq!(state.axis_of(MOVE_Y, "s"), Some(-1.0));
+        assert_eq!(state.axis_of(MOVE_Y, "w"), Some(1.0));
+        assert_eq!(state.axis_of(MOVE_Y, "a"), None);
     }
 
     #[test]

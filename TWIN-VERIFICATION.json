@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T00:38:48Z",
+  "updated": "2026-11-07T02:01:13Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -14000,6 +14000,11 @@
           "at": "2026-11-06T23:34:23Z",
           "by": "hx-chatui",
           "text": "Client UI remainder landed (hx-chatui, worktree Mindustry-Godot-session2): PAR-0593. gx/ui now binds mind-stdb ChatLine/ChatLog: MindUi ChatFeed + chat_poll/chat_apply_rows_json/chat_rows_json/chat_set_viewer, chat_send forwards to MindNet.send_chat; MindChatFragment renders the my_match_chat rows with team/all/admin tabs and the ChatFormatter colours. PAR-0121 status unchanged (verified)."
+        },
+        {
+          "at": "2026-11-07T01:40:44Z",
+          "by": "hx-admin-ui",
+          "text": "PAR-0603 adds the missing keyboard half: Binding.chat (Enter) routes to Effect::ToggleFragment(\"chat\") -> MindChatFragment.toggle (console-gated), and the /a admin tab remains gated by MindNet.local_admin. Test: cargo test -p mind-gdext --lib chat_binding_routes (passed)."
         }
       ],
       "claimed_by": "hx-stdb",
@@ -14067,6 +14072,11 @@
           "at": "2026-11-06T15:35:29Z",
           "by": "hx-net",
           "text": "Action-path fix included: NetHost::match_id is now observed from the my_match row (MatchSession.match_id is never set on the host path because a host never calls join), so say/kick/runwave/kick_all now reach the reducers on a live match instead of failing with 'no match is hosted'. The live serve smoke showed 1 relay_member player in status."
+        },
+        {
+          "at": "2026-11-07T01:40:44Z",
+          "by": "hx-admin-ui",
+          "text": "PAR-0603 wires the roster action seam the PAR-0122 client half left stubbed: MindUi.admin_action now sends the unban/unadmin reducer and Bans/Admins re-render on an accepted action."
         }
       ],
       "claimed_by": "hx-net",
@@ -16877,7 +16887,14 @@
       "title": "J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)",
       "status": "fixing",
       "claimed_by": "p1-orch",
-      "claimed_at": "2026-11-03T14:26:17Z"
+      "claimed_at": "2026-11-03T14:26:17Z",
+      "notes": [
+        {
+          "at": "2026-11-07T01:42:56Z",
+          "by": "hx-j08",
+          "text": "2026-11-07 hx-j08 (headless, no Java leg): closed the input + logic-font sub-items; display/canvas four, logic-picker five and sub-dialog five stay open (UI-owned, need gx/ui). (1) WASD bindings + resetSaved guard were ALREADY at HEAD from L07 T2 (d25ff196) and T4 (9e51cfb4), not open: KeyBindTable move_x=a/d, move_y=s/w (mind-core/src/input/binding.rs:283-299); MindInput.binding_axis -> DesktopBridge::binding_axis/key_axis (mind-gdext/src/input/mod.rs:1456, input/desktop.rs); editor pan in mind-gdext/src/ui/editor_views.rs pan_keys (MapView.java:180-185, 15*delta/zoom); resetSaved via EditorTool::press_resets_saved/drag_resets_saved (mind-core/src/editor/tool.rs:122-143) wired at mind-gdext/src/editor/mod.rs:2519/2560. Added the missing seam tests. (2) The logic bitmap-font residual was real: the port guessed spaceXadvance=8/lineHeight=14 (Fonts.logic is 7/13), placed every glyph with capHeight+ascent added on top of Godot's already-baseline offset (~12 px too high), and overwrote transparent glyph pad texels instead of alpha-blending. Ported Fonts.logic's FreeType metric generation over assets/fonts/logic.ttf plus the Fonts.java:92 charset and Fonts.unicodeToName/getLargeIcon (mind-core/src/logic/font.rs); print layout + display glyph placement now match Java (verified against a headless Godot FontFile probe of the real font: 'A' 8x10 pad @offset -9 -> Java centre y+4). See PAR-0609/PAR-0610. Out-of-ownership follow-up: mind-headless draw golden moves to e93494cdd0eecde9 (was 82572433be79fab9, logic_scenarios.rs:1481); gdext provider still logs a Godot error for the space glyph (0x0 image) and cannot draw the '\\0' .notdef box."
+        }
+      ]
     },
     "PAR-0408": {
       "title": "Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)",
@@ -28760,6 +28777,11 @@
           "at": "2026-11-06T14:03:19Z",
           "by": "hx-ui",
           "text": "Headless pass: context accepts PlayerInfo dicts (id/lastIP/lastName; uuid/ip/name aliases) or legacy bare names; rows + cancel + confirm are built from that context and the action goes through MindUi.admin_action (no relay listener yet -> false, no fake). Unit tests cover the kind mapping, Java row markup, trace row order/defaults and lists; the dialog sweep builds/shows all three dialogs with failed=0."
+        },
+        {
+          "at": "2026-11-07T01:40:41Z",
+          "by": "hx-admin-ui",
+          "text": "PAR-0603 closes the dialog action loop: MindUi.admin_action dispatches unban/unadmin through MindNet.player_action (no longer gated on a signal listener), and an accepted confirm drops the row and keeps it filtered on re-show; a cancelled or rejected action keeps the row (never faked). Follow-up outside UI ownership: Bans/Admins still get no context rows because MindNet exposes no bans_json/admins_json projection."
         }
       ]
     },
@@ -30151,6 +30173,11 @@
           "at": "2026-11-06T23:27:31Z",
           "by": "hx-smallfix",
           "text": "Headless fix: BurstDrill shake/drillEffect are data now (BurstDrillDef), vanilla impact/eruption drills install shake=4 + their Java MultiEffect, and fx::inline expands inline Multi/Wrap specs to named Fx spawns at the burst. Tests: burst_drill_burst_fires_sound_and_view_cues (shake 4, mineImpact/drillSteam item-tinted, mineImpactWave red-light rot 40), vanilla_burst_drills_override_shake_and_drill_effect, fx::inline (5), mind-core full lib 3102 passed."
+        },
+        {
+          "at": "2026-11-07T01:15:15Z",
+          "by": "hx-render3",
+          "text": "View-side inline effect fix (packet item 3, 2026-11-07 mg-w8 @ 25721387): gx/fx.rs MindFx::spawn_bus_effect no longer drops EffectRef::Inline - it now flattens through mind_core::fx::inline::flatten (MultiEffect children, WrapEffect rotation/colour overrides) and spawns one pool effect per named leaf; EffectId::NONE leaves are skipped. This closes the view half of the PAR-0565 inline MultiEffect playback (the sim half already used fx::inline::play). Tests: cargo test -p mind-gdext --lib fx::tests -> 8 passed (multi_effect_inline_flattens_to_named_spawns, wrap_effect_inline_overrides_rotation_and_colour, named_effect_spawns_itself_once, inline_leaves_without_named_ids_spawn_nothing)."
         }
       ]
     },
@@ -30256,6 +30283,11 @@
           "at": "2026-11-06T20:59:44Z",
           "by": "hx-playerlist",
           "text": "Headless fix pass (no Java leg): UI wiring, row/menu/votekick/trace paths and pure mapping tests verified by cargo test/check plus the manifest dialog sweep and a clean headless boot. Live relay data (real roster rows from a SpacetimeDB match, reducer round-trip, admin/kick/ban effects) still needs the server twin pass; the row menu's self-only clauses and allowTeamSwitch rules gate are documented deviations (relay roster exposes no local identity/colour and the UI has no rules read model — the server enforces authority)."
+        },
+        {
+          "at": "2026-11-07T01:40:41Z",
+          "by": "hx-admin-ui",
+          "text": "Client remainder closed under PAR-0603: the row menu now follows Java's net.server()/player.admin gate, the votekick hammer is its else-branch (client, >=3 players, teammate), row verbs target the full identity, the Trace row dispatches AdminAction.trace before opening TraceDialog, and Bans/Admins footer buttons disable for clients. Unit tests: cargo test -p mind-gdext --lib ui::fragments::player_list (12 passed)."
         }
       ]
     },
@@ -30761,13 +30793,24 @@
         "cargo test -p mind-core --lib event (43 passed; includes play/runtime fire-site + bus round-trip tests)",
         "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib (111 passed; typed envelope + escaping tests)",
         "cargo check -p mind-gdext -p mind-headless (clean)",
-        "cargo fmt --check clean on the 4 touched files"
+        "cargo fmt --check clean on the 4 touched files",
+        "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib (113 passed; admin_set_config ConfigEvent fan-out helper + typed-envelope test)"
       ],
       "notes": [
         {
           "at": "2026-11-07T00:38:48Z",
           "by": "hx-eventtype",
           "text": "Verified headlessly (no Java leg): mind-core game-flow fire sites queue typed EventRow rows (WorldLoad/Play/SectorLaunch/SectorCapture/GameOver/Unlock) that round-trip through the Events bus in tests; the relay publishes typed EventType envelopes for MatchStart/MatchEnd/PlayerJoin/ConfigChange. Residuals (outside hx-eventtype file ownership): (1) mind-gdext host drain of PlaySession.event_rows + bus ownership in MindCampaign::pump_runtime (client/rust/mind-gdext/src/campaign.rs); (2) PlayerJoin/Leave host-side fire sites + ResearchEvent (mind-gdext campaign/net), Config/Deposit/BuildSelect/BulletDestroy (mind-core sim/ or world/config.rs hot paths need a bus seam); (3) relay MatchCreate/PlayerLeave typed envelopes need mind-gdext/src/ui/fragments/toasts.rs to render the typed payload instead of raw detail; (4) server ConfigChange fire site (admin_set_config in server/spacetimedb/src/admin/mod.rs)."
+        },
+        {
+          "at": "2026-11-07T01:49:34Z",
+          "by": "hx-modcall",
+          "text": "Residual (4) closed (server ConfigChange fire site): admin_set_config now publishes EventKind::ConfigChange (typed ConfigEvent envelope, value=field=value) to every non-ended match, because server_config is a module-global singleton and Java's Config listeners are server-wide; the fan-out predicate and envelope are asserted in admin::tests::config_change_publishes_the_typed_envelope_to_live_matches (a ReducerContext cannot be built in module unit tests). Also assessed the optional join-gate infoMessage producer: it cannot be a match_call row - a rejected joiner is not a relay_member (publish_call target-membership check) and my_match_calls is a member semijoin, so the row could never be delivered; closing it needs an identity-keyed join-notice row+view (schema append) plus a mind-gdext subscription, outside this packet."
+        },
+        {
+          "at": "2026-11-07T02:01:08Z",
+          "by": "hx-campaign2",
+          "text": "Residual closed headlessly: MindCampaign now owns an Events bus (init-installed recorder listeners per EventType class) and pump_runtime drains PlaySession.take_event_rows() into it (runtime session authoritative; facade clone rows dropped) with a facade-only fallback drain when no runtime is installed; new host fire sites: MindCampaign::fire_player_event (net roster connected-flag transitions in MindNet::drain_members_rows -> PlayerJoin/PlayerLeave, member_id truncated to the wire u32) and ResearchEvent on result.complete in MindCampaign::research (item/liquid/unit payloads only). Toasts render typed EventType payloads for MatchStart/MatchEnd/PlayerJoin/ConfigChange plus the new relay MatchCreate/PlayerLeave envelopes (no raw JSON detail). Remaining residual: mind-core event::EventContent has no Block(u16) variant, so block/status research cannot publish ResearchEvent/UnlockEvent (mind-core/src/event.rs, outside packet); PlaySession rows still carry only flow rows + SimEvent::PlayEvent; Config/Deposit/BuildSelect sim fire sites unchanged."
         }
       ]
     },
@@ -30810,13 +30853,21 @@
       "fix": "client/rust/mind-stdb/src/typeio.rs: TaggedValue + write_object/read_object (all 24 TypeIO.java:38-65 tags incl. content/techNode/point2 arrays/object arrays, maxArraySize/maxByteArraySize/readObjectSafe 1200-char caps, nested-array rejection, legacy->null) and the plan/mount/ability sync codecs (BuildPlan write/read, writePlansQueueNet/readPlansQueueNet with maxSyncedPlans+500-byte config budget, writePlans/readPlans, ClientPlan writeClientPlans/readClientPlans with reduced config tags, WeaponMount, ability data). client/rust/mind-stdb/src/call_packet.rs: encode_effect_data_body/decode_effect_data_body port the EffectCallPacket2 (Call.effect(..., Object data)) body. writePayload/readPayload stays mind-core entity IO (Payload.write serializes unit writeSync/building items) and the effect-data wire kind needs an appended module CallPacketKind before it can ship - both documented.",
       "evidence": [
         "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib (106 passed; 7 new object_io/effect_data tests round-trip every tag, caps, plan queues, client plans, mounts/abilities)",
-        "cargo check --manifest-path client/rust/Cargo.toml -p mind-gdext (clean)"
+        "cargo check --manifest-path client/rust/Cargo.toml -p mind-gdext (clean)",
+        "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib (113 passed; CallPacketKind::EffectData appended as the 24th kind, publish caps + append-only tests)",
+        "cargo test -p mind-stdb --lib (108 passed; EffectCallPacket2 frames as CallKind ordinal 23, module-kind row round-trip, ProducedCall::effect_data)",
+        "spacetime 2.10.1 generate --check: bindings drift-clean (only CallPacketKind::EffectData appended)"
       ],
       "notes": [
         {
           "at": "2026-11-07T00:22:30Z",
           "by": "hx-net3",
           "text": "writeObject-tagged effect(data) overload ported as a tested body codec; plan/client-plan/mount/ability TypeIO sync bodies ported and tested. Residual: the EffectCallPacket2 wire kind is not in the frozen 23-kind module ABI (one appended module variant + calls::call_kind entry needed), and writePayload/readPayload belongs to mind-core entity IO."
+        },
+        {
+          "at": "2026-11-07T01:49:34Z",
+          "by": "hx-modcall",
+          "text": "EffectCallPacket2 wire kind closed (residual of PAR-0578): module CallPacketKind::EffectData appended as the 24th kind (publish_call accepts it broadcast/targeted under the same host/admin gate + 64 KiB MAX_CALL_PAYLOAD_BYTES), module_bindings regenerated with the pinned spacetime 2.10.1 CLI and drift-clean (only call_packet_kind_type.rs gained the variant), client CallKind::EffectData at ordinal 23 with CallPacket::EffectData, calls::call_kind/packet_kind entries and ProducedCall::effect_data; row->[kind][body]->packet round-trip tested through frame_for_row/decode_row. The producer itself (LExecutor logic effect-data call sites) still belongs to mc/logic and is not wired."
         }
       ]
     },
@@ -30948,7 +30999,7 @@
     },
     "PAR-0582": {
       "title": "GAPS #49 follow-up: Fx.pointBeam line-light rows from MindFx (light-pass consumer pending)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "godot": [
           {
@@ -30964,20 +31015,29 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib fx::tests"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
             }
           }
         ]
       },
-      "claimed_by": "hx-gxint",
-      "claimed_at": "2026-11-06T22:14:15Z",
+      "claimed_by": "hx-render3",
+      "claimed_at": "2026-11-07T01:14:53Z",
       "severity": "P2",
       "source": "GAPS.md#49",
       "gap": "MindFx.view_lights only collected PrimKind::Light circles, so the one vanilla effect body that uses the line-form Drawf.light -- Fx.pointBeam (Fx.java:152-160: Drawf.light(e.x, e.y, pos.x, pos.y, 20f, e.color, 0.6f*e.fout())) -- was rendered as a circle light at the beam origin (the core body emits emit.light as a stand-in). Fx.lightning (Fx.java:189-206) and Fx.chainLightning/chainEmp (Fx.java:2877-2949) add NO light in Java, so the packet premise that they need line lights is wrong for the Java oracle.",
-      "fix": "MindFx now derives line-light rows (x1,y1,x2,y2,width,rgba) for Fx.pointBeam live states (origin -> Position payload, stroke 20, alpha tint.a*0.6*fout) via fx_line_light(), drops the body circle-Light prims for that effect in build_fx_program(), and exposes view_light_lines() (cleared/refilled per draw). Remaining consumer work: MindWorldRenderer must forward view_light_lines() into render/light.rs LightBuffer::add_line (render.rs forwards only view_lights() today; render.rs/render/light.rs are outside this packet file ownership).",
+      "fix": "render.rs forwards MindFx.view_light_lines() into LightRenderer::update -> forward_fx_light_lines -> LightBuffer::add_line every frame (LightRenderer.line semantics: stroke, tint, folded alpha); FxLightLine is now pub. fx.rs build_fx_program already drops the pointBeam circle-light prim, so the row is the only light that effect emits. Zero-stroke rows are dropped by add_line (no-area quad).",
       "evidence": [
-        "cargo test -p mind-gdext --lib fx::tests -> 4 passed (point_beam_emits_a_line_light_row, point_beam_drops_the_circle_light_approximation, lightning_effects_do_not_emit_line_lights, shake_duration_falls_back_to_intensity)",
-        "cargo check -p mind-gdext clean; headless boot exit 0"
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light (13 passed, incl. fx_line_lights_reach_the_light_buffer)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib fx::tests (8 passed)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/run-cpu-intensive-task.sh --build + --godot --headless --path client --quit (exit 0)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:15:04Z",
+          "by": "hx-render3",
+          "text": "Headless fix pass 2026-11-07 (mg-w8 @ 25721387): consumer wired end-to-end in code+unit tests. render.rs reads view_light_lines() once after the FX draw and light.update stamps them as line primitives; the circle stand-in was already removed at the FX program level (point_beam_drops_the_circle_light_approximation). Not visually confirmed in-engine (packet forbids interactive Godot/MCP) - Java twin pass pending. Note the 1-frame latency convention: MindFx collects rows in _draw, the renderer light pass runs in the next frame process (same as the existing view_lights feed)."
+        }
       ]
     },
     "PAR-0583": {
@@ -31401,7 +31461,7 @@
     },
     "PAR-0592": {
       "title": "GAPS #47 residual: schematic copy rect + paste preview ghosts, rebuild-select rect, drawOverlapCheck and other players' plans are not drawn",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "godot": [
           {
@@ -31417,27 +31477,36 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans"
             }
           }
         ]
       },
-      "claimed_by": "hx-visuals",
-      "claimed_at": "2026-11-06T23:23:18Z",
+      "claimed_by": "hx-render3",
+      "claimed_at": "2026-11-07T01:14:53Z",
       "severity": "P1",
       "source": "GAPS.md#47",
       "gap": "GAPS #47 (PAR-0472 closed only the RTS command drag box). Verified missing at HEAD 179144d7: (1) DesktopInput.drawTop has no F-selection copy rect (DesktopInput.java:133-145 drawSelection) and no B rebuild-select rect (InputHandler.java:1724-1752 drawRebuildSelection); PlacementView exposes no selection state. (2) The F-copy paste preview plans (selectPlans, DesktopInput.java:175-185 drawPlan/drawOverPlan) are tracked in DesktopBridge but never drawn: render/plans.rs draws only the break rect, queued plans and the cursor ghost. (3) drawOverlapCheck (InputHandler.java:1499-1516) has no port at all: no enemy-blocker corners and no dashed warning line. (4) drawOtherBuildPlans (InputHandler.java:1392-1440) has no port; only TeamData.plans ghosts are drawn (BlockRenderer.drawDestroyed).",
-      "fix": "mind-core half landed: WorldRect/block_world_rect/plan_world_rect (Block.java:1023-1025, BuildPlan.java:125-131), selection_world_rect + selection_label (Placement.normalizeDrawArea(air) for the F/B rects), SelectionShow gate (DesktopInput.java:133-145), OverlapCheck geometry + should_draw_overlap_check (InputHandler.java:1499-1516), rebuild_selection_tiles (InputHandler.java:1742-1752), other_plan_drawable/other_plan_alpha/plan_anim_scale_step (Block.java:854-862). Visual legs pending the render hook (gx/render/** owned by another agent) and, for other players, net preview-plan sync.",
+      "fix": "Visual half landed on top of the mc geometry. PlacementView gains selection: Option<(SelectionShow,(i32,i32))> (latched schem_start + F/B held flags mirrored from key edges + place mode + text focus, via selection_show) and select_plans (paste ghosts). MindSimHost gains append-only placement_blocker (world::build::get_enemy_overlap + BuildingComp origin/size + entities::comp::Building.was_visible, fog-off => visible), rebuild_highlight_tiles (mc rebuild_selection_tiles over derelict_repair_plan), place_range_check. render/plans.rs draws in packet order: break rect, queued plans, F/B rect (accent/sap back at y-1 + front stroke 2) plus rebuild corners (team ghost plans via plan_world_rect overlap, then derelicts), selectPlans paste ghosts, cursor/line ghost + drawPlace ranges, drawOverlapCheck corners + new DrawCmd::DashLine (canvas::dash_line: Lines.dashLine divisions, Pal.gray stroke 3 then colour stroke 1), destroyed ghosts. Residuals: drawSelection size text (java withText) not drawn; selectPlans drawOverPlan config-top pass not ported; drawOtherBuildPlans other-player plans still need net preview-plan sync (mc other_plan_* left unwired); Java draws the F/B rect at Layer.overlayUI above the plan layer, the port draws it below the paste/cursor ghosts (single-pass deviation documented in code).",
       "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans (5 passed)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::canvas (2 passed, dash_line_segments_match_arc)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop::tests (26 passed incl. placement_view_reports_held_selection, key_edges_refresh_the_selection_held_flags, placement_view_reports_select_plans)",
         "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement (41 passed)",
         "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit"
+        "tools/run-cpu-intensive-task.sh --build",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit (exit 0)"
       ],
       "notes": [
         {
           "at": "2026-11-06T23:23:29Z",
           "by": "hx-visuals",
           "text": "Landed (tested headlessly, 41 placement-filter tests green): mind-core/src/input/placement.rs now exposes WorldRect (strict ARC Rect.overlaps/contains), block_world_rect (Block.java:1023-1025), plan_world_rect (BuildPlan.java:125-131 breaking=-100 empty rect), selection_world_rect+selection_label (Placement.normalizeDrawArea(air, snap=false, scaling=1); F=MAX_SCHEMATIC_SIZE 64, B=0 unbounded), SelectionShow (DesktopInput.java:133-145: breaking/hasKeyboard suppress, F needs latched start, F beats B), OverlapCheck+should_draw_overlap_check+overlap_check (InputHandler.java:1499-1516 line from cursor-block edge to blocker edge, Drawf.dashLineDst segments), rebuild_selection_tiles (InputHandler.java:1742-1752 origin dedupe + canRepairDerelict), other_plan_drawable/other_plan_alpha (0.7 hover / 0.25) / plan_anim_scale_step (Block.java:854-862). NOT yet visible: the draw calls need render/plans.rs (owned by another agent) - see fix/hook fields. Other players' plans additionally need net preview-plan sync (MindNet mirrors only remote player state; no plan rows)."
+        },
+        {
+          "at": "2026-11-07T01:15:12Z",
+          "by": "hx-render3",
+          "text": "Headless fix pass 2026-11-07 (mg-w8 @ 25721387): the four GAPS #47 residuals now have a production draw path: (1) F copy rect + B rebuild rect with their corners, (2) selectPlans paste ghosts, (3) drawOverlapCheck corners + dashed line, (4) other players plans still blocked on net preview-plan sync (not a render hook). Geometry is unit-tested in mc (41 placement tests) and the gdext draw assembly is covered by 8 new focused tests; cargo check/build and headless boot pass. NOT visually confirmed in-engine (packet forbids interactive Godot/MCP): run tools/run-cpu-intensive-task.sh --build then a Java-vs-Godot twin walk to confirm pixels - the F rect needs 2+ tiles dragged with F held, B needs a derelict/ghost plan in the box, and the overlap warning needs Rules.placeRangeCheck (Erekir default) + an enemy blocker."
         }
       ]
     },
@@ -31833,12 +31902,479 @@
     },
     "PAR-0602": {
       "title": "Accelerator launch cutscene: sim lightning/coreLandDust and drawLaunch ascent unported",
-      "status": "seeded",
-      "claimed_by": "hx-accelerator",
-      "claimed_at": "2026-11-07T00:14:09Z",
+      "status": "verified",
+      "claimed_by": "hx-campaign2",
+      "claimed_at": "2026-11-07T02:01:02Z",
       "severity": "P2",
       "gap": "PAR-0296 residual after the draw/glow pass landed: AcceleratorBuild.beginLaunch spawns 20 Lightning bolts (damage 40, lightningOffset 24, length 5-25) and 13 coreLandDust rings every 2 ticks (Accelerator.java:364-387); updateLaunch rolls an extra bolt per tick after the charge (:423-429); drawLaunch draws the ascending core with thrusters/clouds and the white fade image (:440-556,343-354). The port emits coreLaunchConstruct/launchAccelerator FX + acceleratorLaunch/Charge/Construct sounds and the charge rings, but not the lightning/dust/ascending-core sequence. Hook: MindCampaign::pump_accelerator_launch (gx/campaign.rs) should call the new mind_core::world::blocks::campaign::accelerator::LaunchSequence + render::accelerator::launch_lightning helpers (sim-side combat::lightning::create) at the charge tick and schedule the dust rings; the drawLaunch/cloud/fade half lives in the host render path.",
-      "source": "PAR-0296 note; docs/L06-sim-campaign-residuals_summary.md T7"
+      "source": "PAR-0296 note; docs/L06-sim-campaign-residuals_summary.md T7",
+      "fix": "pump_accelerator_launch now drives AcceleratorBuild.beginLaunch/updateLaunch from the shared LaunchSequence (charge 220 / switch 334 / total 340): the charge tick spawns the 20-bolt burst as Fx.lightning polylines (mind_core::render::accelerator::launch_bolts + combat::lightning::view_polyline, the unobstructed Lightning.create walk) and schedules the 13 coreLandDust rings at charge+i*2 (launch_sequence.dust_ring/dust_rays; each ray snaps to its tile corner and is tinted with the floor mapColor * (1.7 + range(0.15)) via MindFx.spawn_view_effect); updateLaunch rolls its per-tick bolt from LaunchSequence::lightning_chance; beginLaunch white cover is wired through MindUiRoot.fade_in_node().start_white(30/60) at total-30. Tests: campaign timeline (13 rings, 155 outer rays, chance 0.46), 20 bolts with 2-12-point polylines, charge-only lightning chance, dust ring geometry/chances, view_polyline determinism. Residual visual legs: the sim-damage branches (Lightning.create needs a CombatCtx; a MindSimHost::spawn_lightning seam is required), the drawLaunch ascending-core sprite/thrusters and the clouds overlay (render/accelerator.rs has the cutscene phase but no display-scale/cloudColor data; ui/landing.rs, outside this packet, holds the reusable CoreBlock drawLanding template).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib campaign::tests (16 passed)",
+        "cargo test -p mind-core --lib accelerator (17 passed)",
+        "cargo test -p mind-core --lib lightning (22 passed, incl. view_polyline)",
+        "cargo check -p mind-gdext clean",
+        "tools/run-cpu-intensive-task.sh --build + --godot --headless --path client --quit exit 0"
+      ],
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-gdext --lib campaign::tests"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib accelerator"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo check -p mind-gdext"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg run (brief forbids)"
+            }
+          }
+        ]
+      },
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg run (brief forbids); twin verification pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; cutscene wiring unit-tested, Java twin pending"
+            }
+          }
+        ]
+      },
+      "notes": [
+        {
+          "at": "2026-11-07T02:01:08Z",
+          "by": "hx-campaign2",
+          "text": "Verified headlessly (no Java leg): the accelerator cutscene timeline/lightning/dust/white-fade wiring landed in gx/campaign.rs (pump_accelerator_launch) + mind-core render::accelerator helpers (launch_bolts/launch_bolt/dust_rays) + combat::lightning::view_polyline; campaign tests pin the 340-tick schedule, 13 rings at charge+i*2, 20 bolts, and the post-charge lightning chance. Remaining visual legs (need files outside the packet): (1) sim-damage Lightning.create branches (damage 40) need a MindSimHost/sim seam; (2) drawLaunch ascending core + thrusters/clouds overlay need renderer frame data (display scale + rules.cloudColor); ui/landing.rs already has the CoreBlock drawLanding template but is outside this packet."
+        }
+      ]
+    },
+    "PAR-0603": {
+      "title": "GAPS #34/#39 client remainder: MindUi.admin_action relay listener + roster refresh, player-list row authority gates, Binding.chat toggle",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "core/src/mindustry/ui/fragments/PlayerListFragment.java v146:129-247; ui/dialogs/BansDialog.java:23-44; AdminsDialog.java:23-48; ui/fragments/ChatFragment.java:61-84"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "client/rust/mind-gdext/src/ui/ui_host.rs (admin_action), ui/dialogs/misc.rs (roster refresh), ui/fragments/player_list.rs (authority gates/targets/trace), ui/fragments/chat.rs (console gate), input/desktop.rs (Binding.chat)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "Java server + 2 clients: player-list row menu Ban/Kick/Trace/Team/Admin, Bans/Admins confirm unban/unadmin, Enter opens chat, /a only for an admin"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-admin-ui",
+      "claimed_at": "2026-11-07T01:40:34Z",
+      "severity": "P1",
+      "gap": "Headless audit at ff278592: MindUi.admin_action only checked signal connections and returned false (BansDialog/AdminsDialog confirm -> no reducer, row kept); nothing called MindNet.player_action from that seam. PlayerListFragment showed the row menu for every row regardless of host/admin rights, never dispatched AdminAction.trace, and left Bans/Admins enabled for clients; Binding.chat (Enter) fell through DesktopInput dispatch so MindChatFragment.toggle was unreachable from the keyboard (the /a tab itself was already gated by MindNet.local_admin).",
+      "source": "GAPS.md#34,GAPS.md#39,GAPS.md#40",
+      "fix": "MindUi.admin_action now normalizes the roster verb (unban/unadmin + Java unbanPlayerID/unAdminPlayer spellings) and dispatches through MindNet.player_action (the same reducer seam as player_action); the admin_action signal remains a fallback seam and the call returns false without a relay so no row is faked removed. Bans/Admins roster rows are dropped only on a confirmed+accepted action and stay filtered when the dialog is re-shown (RosterState.removed). PlayerListFragment now reads MindNet.local_identity_hex/local_admin/my_team: the per-row menu follows Java's net.server() || (player.admin && (!user.admin || user == player)) gate, the votekick hammer is its else-branch (client, >=3 players, teammate, not self/admin), Bans/Admins footer buttons disable for clients, row actions target the full identity (labels stay usernames), and the Trace row sends AdminAction.trace before opening the dialog. Binding.chat (Enter) now routes to Effect::ToggleFragment(\"chat\") and MindChatFragment.toggle no-ops while the console fragment is shown; the /a tab was already gated by MindNet.local_admin.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib admin_verbs (5 ui_host tests)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::misc (12)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::player_list (12)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop (24, incl. chat_binding_routes_to_the_fragment_toggle)",
+        "tools/run-cpu-intensive-task.sh --build",
+        "dialog_sweep_check.tscn: DIALOGCHECK: failed=0",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit: exit 0",
+        "cargo fmt --all --check: clean"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:40:38Z",
+          "by": "hx-admin-ui",
+          "text": "Headless verification: MindUi.admin_action -> MindNet.player_action (Roster::find resolves the identity prefix/name) with a pure parse_admin_action test; roster refresh predicate (confirmed+accepted+non-empty id) tested; player-list authority gates/menu-vs-votekick else-branch/identity targets tested; Binding.chat routed to the chat fragment toggle and console-gated. Remaining net-side blockers for a live run: (1) MindNet.player_action resolves targets through Roster::find, so unban of a banned identity with no relay_member row returns false - the net facade needs an identity-direct admin action (Java unbanPlayerID/unAdminPlayer take PlayerInfo.id); (2) Bans/Admins dialogs still receive no context because the net facade exposes no bans_json/admins_json projection, so they render the empty state until that data path lands."
+        }
+      ]
+    },
+    "PAR-0604": {
+      "title": "GAPS #46: GameOverDialog lacks the multiplayer waiting/disconnect states and the difficulty.guide notice",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-ui3",
+      "claimed_at": "2026-11-07T01:27:25Z",
+      "severity": "P2",
+      "gap": "GameOverDialog.java:101-140 renders @gameover.waiting + @gameover.disconnect for net.client() and the one-time @difficulty.guide BaseDialog after @continue; the port only had @continue/@menu.",
+      "source": "GAPS.md#46",
+      "fix": "GameOverDialog.java:101-140 parity: net.client() renders @gameover.waiting under the stats block and replaces @continue with @gameover.disconnect (MindNet.leave_match + return_to_menu); the @continue branch evaluates the Java gate (allowCampaignRules, attempts>=2, difficulty normal, Core.settings.getBoolOnce(\"difficultyguide\")) and opens a BaseDialog-style notice with @hide / @difficulty.guide.confirm (-> CampaignRulesDialog).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib difficulty_guide -> 1 passed",
+        "godot --headless res://scenes/tools/dialog_sweep_check.tscn -> failed=0 (restart dialog shows/hides/reshows)",
+        "godot --headless --path client --quit -> rc=0",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:56:32Z",
+          "by": "hx-ui3",
+          "text": "Headless: difficulty-guide gate unit test + game-over dialog sweep; the waiting/disconnect branch needs a live MindNet session and the notice a campaign sector, so both remain for the Java/live pass."
+        }
+      ]
+    },
+    "PAR-0605": {
+      "title": "GAPS #46: LoadDialog has no corrupted/missing-save failure state (and no missing-asset dialog)",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-ui3",
+      "claimed_at": "2026-11-07T01:27:30Z",
+      "severity": "P2",
+      "gap": "LoadDialog.java:225-265 catches SaveException and shows @save.corrupted, and a missing-asset dialog lists state.data.getMissingAssets(); the port closed the browser and dropped IO load failures (root.rs: Load failures keep their dedicated dialogs, but none exist).",
+      "source": "GAPS.md#46",
+      "fix": "LoadDialog.java:225-265 parity with a port deviation: slot pre-flight via SaveIO.isSaveValid distinguishes missing vs corrupt; the browser stays open and renders the @save.corrupted state (light-gray path/reason) with @loadgame retry and @back keep-playing; after a successful load MindMods.missing_assets feeds the @save.assets.missing body (inline list, no collapser).",
+      "evidence": [
+        "cargo test -p mind-gdext --lib save_file_check -> 1 passed (missing/corrupt/valid)",
+        "godot --headless res://scenes/tools/dialog_sweep_check.tscn -> failed=0 (load+save dialogs)",
+        "godot --headless --path client --quit -> rc=0",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:56:32Z",
+          "by": "hx-ui3",
+          "text": "Headless: SaveIO pre-flight unit test + load/save dialog sweep. The failure panel and the missing-asset modal were not exercised by a live failed load; Java closes the browser then shows a modal (port keeps it open by design). Missing-asset check uses the global ModDataManager, not a save-scoped one."
+        }
+      ]
+    },
+    "PAR-0606": {
+      "title": "GAPS #46: PlanetDialog has no SectorSubmissions link",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-ui3",
+      "claimed_at": "2026-11-07T01:27:30Z",
+      "severity": "P2",
+      "gap": "PlanetDialog.java:1329-1335 adds @sectors.viewsubmission for SectorSubmissions.getSectorThread(sector) when Vars.showSectorSubmissions; the port had no table and no row.",
+      "source": "GAPS.md#46",
+      "fix": "PlanetDialog.java:1328-1335 parity: ported SectorSubmissions tables (51 generic registerThread links + 46 registerSectors map links), getSectorThread precedence (mapFileLink over threadLink), and the @sectors.viewsubmission row (Icon.link, 54 px) in the selected-sector panel. Gated by the showSectorSubmissions setting (upstream Vars.showSectorSubmissions=false, never enabled) and sector.has_enemy_base (SectorView has no raw generateEnemyBase projection); Serpulo only.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib sector_submission -> 1 passed (51/46 tables, map-file priority, 103 thread, unknown null)",
+        "godot --headless res://scenes/tools/dialog_sweep_check.tscn -> failed=0 (planet dialog)",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:56:32Z",
+          "by": "hx-ui3",
+          "text": "Headless: table/lookup unit test + planet dialog sweep. Upstream Vars.showSectorSubmissions is hard false, so the row is unreachable in normal play; set the showSectorSubmissions setting to render it for a live check. generateEnemyBase is approximated with SectorView.has_enemy_base."
+        }
+      ]
+    },
+    "PAR-0607": {
+      "title": "GAPS #44: ModsDialog has no per-mod View Content list",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "no Java leg (headless fix pass)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-ui3",
+      "claimed_at": "2026-11-07T01:27:30Z",
+      "severity": "P2",
+      "gap": "ModsDialog.java:455-481 lists every registered UnlockableContent whose minfo.mod == mod behind @mods.viewcontent; the port details block had no content seam.",
+      "source": "GAPS.md#44",
+      "fix": "ModsDialog.java:455-481 parity: MindMods.content_for(name) (read-only host probe) lists an enabled, non-hidden mod's content/<kind>/**.json files as registered <mod>-<stem> records; the details block gains the @mods.viewcontent button and an expandable 50 px icon grid (14/row, per-type glyph fallback) that opens the existing content dialog. Deviation: the seam is the mod's boot content files because ContentRegistry is owned by MindCampaign and projects no minfo.mod_id; a file that failed to parse is still listed.",
+      "evidence": [
+        "godot --headless res://scenes/tools/dialog_sweep_check.tscn -> failed=0 (mods dialog shows/hides/reshows)",
+        "godot --headless --path client --quit -> rc=0",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T01:56:32Z",
+          "by": "hx-ui3",
+          "text": "Headless: boot + mods dialog sweep only; the content grid needs an installed mod (content/<kind>/*.json) and a live/MCP render to screenshot. Accessor is file-based because the registry has no mod-provenance probe."
+        }
+      ]
+    },
+    "PAR-0608": {
+      "title": "Player list is unreachable in-game: Binding.player_list (Tab) has no input handler and nothing calls MindPlayerListFragment.toggle",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0608"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-admin-ui",
+      "claimed_at": "2026-11-07T01:41:01Z",
+      "severity": "P1",
+      "gap": "At ff278592 the player-list overlay builds in HudGroup and its admin actions are wired to the relay, but input/desktop.rs has no `player_list` dispatch arm and a repo grep finds no caller of MindPlayerListFragment.toggle. Java DesktopInput.java:233-235 runs `if(net.active() && keyTap(Binding.playerList) && (scene.getKeyboardFocus() == null || ...)) ui.listfrag.toggle();`; the port therefore never shows the fragment, so GAPS #39 row actions are unreachable in a live client.",
+      "source": "GAPS.md#39",
+      "evidence": [
+        "grep -rn \"player_list\" client/rust/mind-gdext/src/input client/rust/mind-gdext/src/ui/root.rs -> only mind_core binding ids",
+        "grep -rn MindPlayerListFragment client/rust/mind-gdext/src -> definition only"
+      ]
+    },
+    "PAR-0609": {
+      "title": "GAPS #68/#47 J08 input residual: editor WASD pan + resetSaved guard (verify + pin seam)",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0609"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-j08",
+      "claimed_at": "2026-11-07T01:43:05Z",
+      "severity": "P2",
+      "gap": "PAR-0407 recorded WASD bindings + the resetSaved guard as open. Both are at HEAD (L07 T2 d25ff196: KeyBindTable move_x a/d, move_y s/w; MapView.act pan through MindInput.binding_axis; EditorTool press/drag resetSaved), but the binding-axis name->value seam had no test and the editor pan path was only verified in-engine.",
+      "fix": "No behaviour change needed. Extracted DesktopBridge::binding_axis(bindings, name) (Core.input.axis(Binding) equivalent: registry name lookup over KeyBindTable + key_axis) with MindInput.binding_axis delegating; tests pin WASD (a/d, s/w), both-held cancel, rebind follow-through, wheel axis 0, unknown/non-axis 0; mind-core input::binding::tests::defaults_seed_state now pins move_y S/W too.",
+      "evidence": [
+        "cargo test -p mind-core --lib input: 173 passed",
+        "cargo test -p mind-gdext --lib move_binding: 1 passed",
+        "cargo test -p mind-gdext --lib rebound_move: 1 passed"
+      ],
+      "source": "GAPS.md #68/#47; docs/L07-editor-logic-residuals_summary.md T2; docs/L-round-twin-verification.md item 11"
+    },
+    "PAR-0610": {
+      "title": "GAPS #68/#47 J08 logic display font: Fonts.logic metrics + print layout + glyph placement + unicodeToName",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0610"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-j08",
+      "claimed_at": "2026-11-07T01:43:18Z",
+      "severity": "P1",
+      "gap": "PAR-0407 T4 landed a Godot-FontFile glyph provider but the pure font data was guessed: LExecutor print layout used spaceXadvance 8 / lineHeight 14 (Fonts.logic is 7/13, so text drifted 1 px per char and 1 px per line), LogicDisplay glyph placement added capHeight+ascent on top of Godot y_offset that already carries the baseline (~12 px too high; printed text clipped off the display top), blit overwrote transparent glyph pad texels (1 px halo of erased background), and Fonts.unicodeToName/getLargeIcon existed only partially in gdext (fontgen icon codes unresolved). Layout also filtered on c.is_ascii() while Arc hasGlyph is always true for Fonts.logic (missingGlyph from .notdef).",
+      "fix": "New mind-core/src/logic/font.rs ports Fonts.logic: GLYPH_CHARS (Fonts.java:92 + synthesised space), has_glyph (getGlyph != null) vs layout_has_glyph (Arc Font.java:844-847 missingGlyph), and a pure TrueType metric generator (FreeTypeFontGenerator.java:339-383) over the shipped assets/fonts/logic.ttf -> ascent 3, capHeight 7 (M), xHeight 6 (x), lineHeight 13, spaceXadvance 7, missingGlyph true; unicode_to_name (content region then capitalised css name) and large_icon (iconLarge glyph vs Core.atlas.find, default \\uF8D4 fallback) for LogicBlock.java:715-724. executor/draw.rs uses the metrics (7/13, always-emit hasGlyph); display_raster.rs gates commandPrint on has_glyph, places glyphs through Glyph::print_center (Java LogicDisplay.java:233; verified vs A 8x10 @ -9 -> y+4 and a/~ from a headless Godot FontFile probe) and blits with Draw.rect-style straight-alpha blending.",
+      "evidence": [
+        "cargo test -p mind-core --lib logic: 241 passed",
+        "cargo test -p mind-core --lib logic::font: 5 passed",
+        "cargo test -p mind-core --lib display_raster: 12 passed",
+        "cargo test -p mind-core --lib logic::executor::draw: 4 passed",
+        "cargo test -p mind-core --lib: 3180 passed / 4 ignored",
+        "cargo check -p mind-gdext: ok"
+      ],
+      "source": "GAPS.md #68/#47; docs/L07-editor-logic-residuals.md T4; docs/L-round-twin-verification.md item 11"
     }
   },
   "recipes": {

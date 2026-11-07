@@ -53,6 +53,8 @@ pub enum CallPacketKind {
     Kick,
 
     KickReason,
+
+    EffectData,
 }
 
 impl __sdk::InModule for CallPacketKind {

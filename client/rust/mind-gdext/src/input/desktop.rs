@@ -22,7 +22,8 @@ use mind_core::input::{
     BindingState, BindingValue, ClientPlan, DesktopController, InventoryKind, KeyBindTable,
     PayloadAction, PlaceMode, PlacementWorld, RawEvent, RemoteAction, SelectRect, SelectableUnit,
     ids, line::LineBlock, line::LineParams, line::PlanBlockInfo, line::flip_plans_about,
-    line::rotate_plans_about, select_typed_units, select_unit_tap, select_units_rect,
+    line::rotate_plans_about, placement::SelectionShow, placement::selection_show,
+    select_typed_units, select_unit_tap, select_units_rect,
 };
 use mind_core::world::build::can_replace;
 use mind_core::world::{ConfigKind, TilePos, WorldGrid};
@@ -133,6 +134,14 @@ pub struct PlacementView {
     /// commandRectY)` — the size is signed. `None` outside a held select drag;
     /// the committed tile rect the state keeps after release is not this.
     pub command_rect: Option<(f32, f32, f32, f32)>,
+    /// Held-key selection (`DesktopInput.drawTop`, `DesktopInput.java:133-145`):
+    /// the `SelectionShow` kind plus the latched start tile (`schemX/schemY`).
+    /// The rectangle's end is [`Self::cursor`] (Java `cursorX/cursorY`).
+    /// `None` while nothing draws (breaking, keyboard focus, no latch).
+    pub selection: Option<(SelectionShow, (i32, i32))>,
+    /// Copied plans pasted under the cursor (`DesktopInput.drawBottom`,
+    /// `DesktopInput.java:175-185` `selectPlans`).
+    pub select_plans: Vec<ClientPlan>,
 }
 
 /// A UI-side action the shell must resolve against the scene tree.
@@ -517,6 +526,13 @@ pub struct DesktopBridge {
     /// `schemX/schemY`: the start tile of an F/B selection drag
     /// (`InputHandler.schemX`; `-1` cleared).
     schem_start: Option<(i32, i32)>,
+    /// `keyDown(Binding.schematicSelect)` mirror for the F selection rect
+    /// (`DesktopInput.java:140`). The draw pass has no binding table, so the
+    /// flag is recomputed from the held key set on every raw key event.
+    schematic_held: bool,
+    /// `keyDown(Binding.rebuildSelect)` mirror (`DesktopInput.java:142`), same
+    /// cadence as [`Self::schematic_held`].
+    rebuild_held: bool,
     /// `schematicX/schematicY`: the copied plans' reference tile; plan shifts
     /// are deltas from the raw cursor to it (`DesktopInput.pollInputPlayer`).
     schematic_origin: (i32, i32),
@@ -617,6 +633,8 @@ impl DesktopBridge {
             last_config: HashMap::new(),
             config_selected: None,
             schem_start: None,
+            schematic_held: false,
+            rebuild_held: false,
             schematic_origin: (0, 0),
             last_action: String::new(),
             action_count: 0,
@@ -682,6 +700,18 @@ impl DesktopBridge {
     /// Drops held keys (focus loss must not leave the camera panning).
     pub fn clear_keys(&mut self) {
         self.pressed.clear();
+        self.schematic_held = false;
+        self.rebuild_held = false;
+    }
+
+    /// Mirrors `keyDown(schematicSelect/rebuildSelect)` into the two fields the
+    /// draw pass reads (`DesktopInput.drawTop`, `DesktopInput.java:133-145`).
+    /// Called on every raw key edge, including key-ups that arrive while a text
+    /// field owns the keyboard (`handle` still removes them from `pressed`), so
+    /// a focus change cannot leave a stale selection rectangle.
+    fn refresh_selection_held(&mut self, bindings: &BindingState) {
+        self.schematic_held = self.key_down(bindings, ids::SCHEMATIC_SELECT);
+        self.rebuild_held = self.key_down(bindings, ids::REBUILD_SELECT);
     }
 
     /// Removes and returns the pending effects.
@@ -728,6 +758,21 @@ impl DesktopBridge {
         }
     }
 
+    /// `Core.input.axis(Binding)` by registry name (`MindInput.binding_axis`):
+    /// `-1`/`0`/`1` from the held keys, with no gameplay/dialog gate. The map
+    /// editor polls `move_x`/`move_y` through this while its dialog is open
+    /// (`MapView.act`, `editor/MapView.java:180-185`); unknown or non-axis
+    /// binds read 0.
+    pub fn binding_axis(&self, bindings: &BindingState, name: &str) -> f32 {
+        let Some(index) = KeyBindTable::all()
+            .iter()
+            .position(|bind| bind.name == name)
+        else {
+            return 0.0;
+        };
+        self.key_axis(bindings, index as u16)
+    }
+
     /// Whether an axis/key binding drives the wheel (`scroll`).
     fn axis_is_scroll(bindings: &BindingState, id: u16) -> bool {
         match bindings.value(id) {
@@ -772,6 +817,10 @@ impl DesktopBridge {
         match event {
             RawEvent::KeyDown { code } => {
                 let fresh = self.pressed.insert(code.clone());
+                // `DesktopInput.drawTop` reads both selection keys from the
+                // binding table; mirror them for the draw pass (`isPlacing`
+                // only refreshes on key edges, matching Java's keyDown poll).
+                self.refresh_selection_held(bindings);
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(true);
                 }
@@ -793,6 +842,9 @@ impl DesktopBridge {
             }
             RawEvent::KeyUp { code } => {
                 self.pressed.remove(&code);
+                // Runs before the text-focus gate so a release swallowed by a
+                // focused field still clears the F/B held flag.
+                self.refresh_selection_held(bindings);
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(false);
                 }
@@ -1221,6 +1273,16 @@ impl DesktopBridge {
                     self.effects
                         .push(Effect::ToggleFragment(String::from("console")));
                 }
+                self.fire_hotkey(name);
+            }
+            "chat" => {
+                // `ChatFragment.java:65`: `net.active() && keyTap(chat) &&
+                // !hasOtherFocus && !lastFrameHadFocus && !ui.consolefrag.shown()`
+                // -> `toggle()`. `handle` already drops text-focus/dialog edges
+                // (`hasOtherFocus`/`hasField`), and the chat fragment owns the
+                // net-active and console gates, so the bridge only routes it.
+                self.effects
+                    .push(Effect::ToggleFragment(String::from("chat")));
                 self.fire_hotkey(name);
             }
             "research" => {
@@ -2303,6 +2365,20 @@ impl DesktopBridge {
     /// Snapshot for the placement overlay pass (G03 T2).
     pub fn placement_view(&self) -> PlacementView {
         let mode = self.controller.state.place_mode;
+        // `DesktopInput.drawTop` gate (`DesktopInput.java:133-145`): breaking
+        // mode and keyboard focus suppress both rects, F needs a latched start
+        // and beats B. The latch is `schemX/schemY`; the rect end is the cursor.
+        let show = selection_show(
+            self.schem_start.is_some(),
+            self.schematic_held,
+            self.rebuild_held,
+            mode == PlaceMode::Breaking,
+            self.text_focus,
+        );
+        let selection = match (show, self.schem_start) {
+            (SelectionShow::None, _) | (_, None) => None,
+            (show, Some(start)) => Some((show, start)),
+        };
         PlacementView {
             cursor: self.cursor_tile(),
             block: self.controller.state.block,
@@ -2327,6 +2403,10 @@ impl DesktopBridge {
                 }
                 _ => None,
             },
+            selection,
+            // `selectPlans` (`DesktopInput.java:175-185`): the copied plans
+            // pasted under the cursor, drawn every frame while non-empty.
+            select_plans: self.controller.state.select_plans.clone(),
         }
     }
 
@@ -4434,6 +4514,62 @@ fn camera_world_corner(camera: &Gd<MindCamera2D>, x: f32, y: f32) -> (f32, f32) 
 mod tests {
     use super::*;
 
+    /// `Binding.java:10-11` binds `move_x` to A/D and `move_y` to S/W;
+    /// `MapView.act` (`editor/MapView.java:180-185`) polls them through
+    /// `Core.input.axis`, which holds `-1`/`1` per held direction and cancels
+    /// when both are down (`Input.java:210-218`).
+    #[test]
+    fn move_bindings_read_the_wasd_axes() {
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 0.0);
+        assert_eq!(bridge.binding_axis(&bindings, "move_y"), 0.0);
+
+        bridge.handle(&bindings, RawEvent::key_down("d"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 1.0);
+        assert_eq!(bridge.binding_axis(&bindings, "move_y"), 0.0);
+        bridge.handle(&bindings, RawEvent::key_down("a"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 0.0);
+        bridge.handle(&bindings, RawEvent::key_up("a"));
+        bridge.handle(&bindings, RawEvent::key_up("d"));
+
+        bridge.handle(&bindings, RawEvent::key_down("s"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_y"), -1.0);
+        bridge.handle(&bindings, RawEvent::key_down("w"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_y"), 0.0);
+        bridge.handle(&bindings, RawEvent::key_up("s"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_y"), 1.0);
+
+        // Unknown names, single-key binds and cleared axes read 0.
+        assert_eq!(bridge.binding_axis(&bindings, "not_a_binding"), 0.0);
+        assert_eq!(bridge.binding_axis(&bindings, "select"), 0.0);
+    }
+
+    /// A rebound axis (`KeybindDialog.rebind`) is what the editor pan reads: the
+    /// physical WASD keys no longer move the map.
+    #[test]
+    fn rebound_move_axis_replaces_wasd() {
+        let mut bridge = DesktopBridge::new();
+        let mut bindings = BindingState::new();
+        bindings.set_axis(ids::MOVE_X, Some("j"), Some("l"));
+        bridge.handle(&bindings, RawEvent::key_down("d"));
+        assert_eq!(
+            bridge.binding_axis(&bindings, "move_x"),
+            0.0,
+            "physical d is unbound"
+        );
+        bridge.handle(&bindings, RawEvent::key_down("l"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 1.0);
+        bridge.handle(&bindings, RawEvent::key_down("j"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 0.0);
+        bridge.handle(&bindings, RawEvent::key_up("j"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 1.0);
+        // A wheel axis has no held key: `Core.input.axis(Binding.zoom)`'s
+        // keyboard branch never produces a value (`Input.java:210-218`).
+        bindings.set_axis(ids::MOVE_X, None, Some("scroll"));
+        assert_eq!(bridge.binding_axis(&bindings, "move_x"), 0.0);
+    }
+
     #[test]
     fn skip_wave_gate_matches_the_skip_button() {
         // `HudFragment.canSkipWave` (`HudFragment.java:1234-1236`) with the
@@ -4505,6 +4641,50 @@ mod tests {
         bridge.text_focus = true;
         bridge.handle(&bindings, RawEvent::key_down("k"));
         assert!(!bridge.effects.contains(&Effect::SkipWave));
+    }
+
+    #[test]
+    fn chat_binding_routes_to_the_fragment_toggle() {
+        // `ChatFragment.java:65`/`DesktopInput.update`: `Binding.chat` (Enter)
+        // opens/closes the chat input. Before this the binding fell through
+        // `dispatch_action`'s `_ => {}` arm, so Enter never reached
+        // `MindChatFragment.toggle` (`Effect::ToggleFragment("chat")`).
+        assert_eq!(BindingState::new().name(ids::CHAT), Some("enter"));
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        let mut bindings = BindingState::new();
+        bindings.set_key(ids::CHAT, "enter");
+
+        bridge.handle(&bindings, RawEvent::key_down("enter"));
+        assert_eq!(bridge.last_action, "chat");
+        assert!(
+            bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("chat")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("enter"));
+
+        // `!hasOtherFocus`: a focused field/dialog consumes the edge (the
+        // fragment would otherwise steal focus from a text prompt).
+        bridge.take_effects();
+        bridge.text_focus = true;
+        bridge.handle(&bindings, RawEvent::key_down("enter"));
+        assert!(
+            !bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("chat")))
+        );
+        // Release between probes: only a fresh press edge dispatches.
+        bridge.handle(&bindings, RawEvent::key_up("enter"));
+        bridge.text_focus = false;
+        bridge.ui_dialog = true;
+        bridge.handle(&bindings, RawEvent::key_down("enter"));
+        assert!(
+            !bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("chat")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("enter"));
     }
 
     #[test]
@@ -4877,6 +5057,111 @@ mod tests {
         assert_eq!(view.break_rect, Some(((1, 1), (3, 4))));
         assert_eq!(view.mode, PlaceMode::Breaking);
         assert!(view.line_plans.is_empty());
+    }
+
+    #[test]
+    fn placement_view_reports_held_selection() {
+        // GAPS #47 residual (`DesktopInput.drawTop`, `DesktopInput.java:
+        // 133-145`): the F/B rectangle is exposed as `(kind, start)` only while
+        // the key is held with a latched `schemX/schemY`, F beats B, and
+        // breaking mode / keyboard focus suppress both.
+        let mut bridge = DesktopBridge::new();
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        bridge.schem_start = Some((2, 3));
+        // No key held: nothing draws even with a stale latch.
+        assert_eq!(bridge.placement_view().selection, None);
+
+        bridge.schematic_held = true;
+        assert_eq!(
+            bridge.placement_view().selection,
+            Some((SelectionShow::Schematic, (2, 3)))
+        );
+        // F beats B (`if(keyDown(schematicSelect) …) else if(keyDown(
+        // rebuildSelect))`).
+        bridge.rebuild_held = true;
+        assert_eq!(
+            bridge.placement_view().selection,
+            Some((SelectionShow::Schematic, (2, 3)))
+        );
+        // F released -> the rebuild rect.
+        bridge.schematic_held = false;
+        assert_eq!(
+            bridge.placement_view().selection,
+            Some((SelectionShow::Rebuild, (2, 3)))
+        );
+        // `Core.scene.hasKeyboard()` suppresses both rects.
+        bridge.text_focus = true;
+        assert_eq!(bridge.placement_view().selection, None);
+        bridge.text_focus = false;
+        // `mode != breaking`.
+        bridge.controller.state.place_mode = PlaceMode::Breaking;
+        assert_eq!(bridge.placement_view().selection, None);
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        // The latch is required for the F rect (`schemX != -1`).
+        bridge.schem_start = None;
+        assert_eq!(bridge.placement_view().selection, None);
+    }
+
+    #[test]
+    fn key_edges_refresh_the_selection_held_flags() {
+        // The draw pass has no binding table, so `handle` mirrors
+        // `keyDown(schematicSelect/rebuildSelect)` into the view on every key
+        // edge — including a key-up while a text field owns the keyboard.
+        let bindings = BindingState::new();
+        // Defaults (`Binding.schematicSelect` = F, `rebuildSelect` = B).
+        assert_eq!(bindings.name(ids::SCHEMATIC_SELECT), Some("f"));
+        assert_eq!(bindings.name(ids::REBUILD_SELECT), Some("b"));
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        bridge.handle(
+            &bindings,
+            RawEvent::KeyDown {
+                code: String::from("f"),
+            },
+        );
+        assert!(bridge.schematic_held);
+        bridge.text_focus = true;
+        bridge.handle(
+            &bindings,
+            RawEvent::KeyUp {
+                code: String::from("f"),
+            },
+        );
+        assert!(
+            !bridge.schematic_held,
+            "a release swallowed by a focused field must still clear the flag"
+        );
+        bridge.text_focus = false;
+        bridge.handle(
+            &bindings,
+            RawEvent::KeyDown {
+                code: String::from("b"),
+            },
+        );
+        assert!(bridge.rebuild_held);
+        // Focus loss drops every held key (and the selection flags).
+        bridge.clear_keys();
+        assert!(!bridge.rebuild_held && !bridge.schematic_held);
+    }
+
+    #[test]
+    fn placement_view_reports_select_plans() {
+        // `selectPlans` paste ghosts follow the cursor until `clearBuilding`.
+        let mut bridge = DesktopBridge::new();
+        bridge.controller.state.select_plans =
+            vec![ClientPlan::place(4, 5, 2, BlockId::STONE_WALL)];
+        let view = bridge.placement_view();
+        assert_eq!(view.select_plans.len(), 1);
+        assert_eq!(
+            (
+                view.select_plans[0].x,
+                view.select_plans[0].y,
+                view.select_plans[0].rotation
+            ),
+            (4, 5, 2)
+        );
+        bridge.controller.state.select_plans.clear();
+        assert!(bridge.placement_view().select_plans.is_empty());
     }
 
     #[test]

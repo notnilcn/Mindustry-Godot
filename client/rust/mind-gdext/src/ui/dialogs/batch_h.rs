@@ -51,11 +51,14 @@ use godot::classes::text_server::AutowrapMode;
 use godot::classes::texture_rect::StretchMode;
 use godot::classes::{
     Button, CenterContainer, ColorRect, Control, HBoxContainer, Json, LineEdit, Node, Panel,
-    PanelContainer, RichTextLabel, StyleBoxEmpty, StyleBoxFlat, Texture2D, Time, VBoxContainer,
+    PanelContainer, ProjectSettings, RichTextLabel, StyleBoxEmpty, StyleBoxFlat, Texture2D, Time,
+    VBoxContainer,
 };
 use godot::global::HorizontalAlignment;
 use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
+
+use mind_core::io::{FileSystem, NativeFs, SaveIo};
 
 use super::super::dialog::{DialogController, MindDialog};
 use super::super::kit::widgets::border_image::MindBorderImage;
@@ -885,6 +888,12 @@ struct LoadState {
     pending_save: String,
     /// `SaveDialog._request_new`: the next text-input answer names a new slot.
     pending_new_name: bool,
+    /// The slot whose pre-flight load check failed; the grid renders the
+    /// `@save.corrupted` state with a retry/back choice instead of loading it
+    /// (`LoadDialog.java:225-265`, which closes and shows the error modal).
+    failed_slot: Option<VarDictionary>,
+    /// Human-readable failure detail (missing path / unreadable file).
+    failed_detail: String,
 }
 
 impl Default for LoadState {
@@ -902,6 +911,8 @@ impl Default for LoadState {
             pending_export: String::new(),
             pending_save: String::new(),
             pending_new_name: false,
+            failed_slot: None,
+            failed_detail: String::new(),
         }
     }
 }
@@ -1178,7 +1189,7 @@ fn load_rebuild_list(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
         return;
     };
     clear_table_nodes(&mut grid);
-    let (slots, hidden, needle) = {
+    let (slots, hidden, needle, failed_slot, failed_detail) = {
         let st = state.borrow();
         let slots: Vec<Variant> = st.slots.iter_shared().collect();
         let needle = st
@@ -1186,7 +1197,13 @@ fn load_rebuild_list(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
             .clone()
             .map(|field| field.get_text().to_string().trim().to_lowercase())
             .unwrap_or_default();
-        (slots, st.hidden.clone(), needle)
+        (
+            slots,
+            st.hidden.clone(),
+            needle,
+            st.failed_slot.clone(),
+            st.failed_detail.clone(),
+        )
     };
     // `array.sort((slot, other) -> -Long.compare(slot.getTimestamp(),
     // other.getTimestamp()))` — newest first (`LoadDialog.java:93`). The
@@ -1195,6 +1212,18 @@ fn load_rebuild_list(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
     slots.sort_by_key(|slot| std::cmp::Reverse(load_slot_timestamp(slot)));
     let columns = ((dialog.base().get_viewport_rect().size.x / 470.0) as i64).max(1);
     let dialog_gd = dialog.to_gd();
+    // `catch(SaveException)` state (`LoadDialog.java:225-265`) above the grid:
+    // the reason + retry/keep-playing choice, so a failed slot never closes the
+    // browser (the port's deliberate deviation from Java's close-then-modal).
+    if let Some(slot) = failed_slot {
+        let panel = load_failure_panel(&dialog_gd, state, &slot, &failed_detail);
+        grid.bind_mut()
+            .add(&panel)
+            .grow_x()
+            .colspan(columns as i32)
+            .pad(8.0);
+        grid.bind_mut().row();
+    }
     let mut any = false;
     let mut count = 0i64;
     for entry in &slots {
@@ -1567,6 +1596,43 @@ fn load_card_pressed(
         ui_show_confirm(&kit::t("@save.overwrite").to_string());
         return;
     }
+    load_attempt(dialog, state, slot);
+}
+
+/// A save slot's pre-flight state (`SaveIO.isSaveValid`/`File.exists`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveFileCheck {
+    Ok,
+    Missing,
+    Invalid,
+}
+
+/// `LoadDialog.runLoadSave` (`LoadDialog.java:225-265`) with the port's
+/// pre-flight validation: Java closes the browser, then catches `SaveException`
+/// and shows `@save.corrupted` as a modal. Validating first keeps the browser
+/// open so the `@save.corrupted` state can render in place with the
+/// retry/keep-playing choice.
+fn load_attempt(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, slot: &VarDictionary) {
+    let check = load_check_slot(slot);
+    if check != SaveFileCheck::Ok {
+        let detail = load_failure_detail(slot, check);
+        {
+            let mut st = state.borrow_mut();
+            st.failed_slot = Some(slot.clone());
+            st.failed_detail = detail;
+        }
+        if dialog.is_instance_valid() {
+            let mut node = dialog.clone();
+            let mut bound = node.bind_mut();
+            load_rebuild_list(&mut bound, state);
+        }
+        return;
+    }
+    {
+        let mut st = state.borrow_mut();
+        st.failed_slot = None;
+        st.failed_detail.clear();
+    }
     emit_dialog_signal(
         dialog,
         "slot_selected",
@@ -1574,6 +1640,184 @@ fn load_card_pressed(
     );
     load_load_slot(slot);
     load_close(dialog, LoadKind::Load);
+    schedule_missing_asset_check();
+}
+
+/// `SaveIO.isSaveValid` (`LoadDialog.java:225-265`): the primary `.msav` (or
+/// its backup) must parse far enough to read meta.
+fn load_check_slot(slot: &VarDictionary) -> SaveFileCheck {
+    let stem = load_slot_stem(slot);
+    if stem.is_empty() {
+        return SaveFileCheck::Missing;
+    }
+    let path = format!("user://saves/{stem}.msav");
+    let native = ProjectSettings::singleton().globalize_path(&path);
+    save_file_check(std::path::Path::new(native.to_string().as_str()))
+}
+
+/// Missing vs unreadable/corrupt for one `.msav` path (`SaveIo::is_save_valid`
+/// accepts the backup next to it, like `SaveIO.isSaveValid`).
+fn save_file_check(path: &std::path::Path) -> SaveFileCheck {
+    if NativeFs.read(path).is_err() {
+        return SaveFileCheck::Missing;
+    }
+    if SaveIo::is_save_valid(&NativeFs, path) {
+        SaveFileCheck::Ok
+    } else {
+        SaveFileCheck::Invalid
+    }
+}
+
+/// The light-gray failure line under `@save.corrupted`.
+fn load_failure_detail(slot: &VarDictionary, check: SaveFileCheck) -> String {
+    let stem = load_slot_stem(slot);
+    let file = format!("user://saves/{stem}.msav");
+    match check {
+        SaveFileCheck::Ok => String::new(),
+        SaveFileCheck::Missing => format!("save file not found: {file}"),
+        SaveFileCheck::Invalid => format!("save file is unreadable or corrupt: {file}"),
+    }
+}
+
+/// `@save.corrupted` failure state: the reason plus a retry (`@loadgame`) /
+/// keep-playing (`@back`) choice, rendered above the slot grid.
+fn load_failure_panel(
+    dialog: &Gd<MindDialog>,
+    state: &Rc<RefCell<LoadState>>,
+    slot: &VarDictionary,
+    detail: &str,
+) -> Gd<PanelContainer> {
+    // code-instantiated: the failure text/actions are data-driven.
+    let mut panel = PanelContainer::new_alloc();
+    let mut box_ = StyleBoxFlat::new_gd();
+    box_.set_bg_color(styles::BLACK_3);
+    for side in [Side::LEFT, Side::RIGHT, Side::TOP, Side::BOTTOM] {
+        box_.set_content_margin(side, 12.0);
+    }
+    panel.add_theme_stylebox_override("panel", &box_);
+    let mut column = VBoxContainer::new_alloc();
+    column.add_theme_constant_override("separation", 6);
+    panel.add_child(&column);
+    let reason_text =
+        kit::markup_text(&format!("[accent]{}", kit::t("@save.corrupted"))).to_string();
+    let reason = factory::label(&reason_text);
+    {
+        let mut rich: Gd<RichTextLabel> = reason.clone().upcast();
+        rich.set_autowrap_mode(AutowrapMode::WORD_SMART);
+        rich.set_horizontal_alignment(HorizontalAlignment::CENTER);
+    }
+    column.add_child(&reason);
+    if !detail.is_empty() {
+        let detail_text = kit::markup_text(&format!("[lightgray]({detail})")).to_string();
+        let detail_label = factory::label(&detail_text);
+        {
+            let mut rich: Gd<RichTextLabel> = detail_label.clone().upcast();
+            rich.set_autowrap_mode(AutowrapMode::WORD_SMART);
+            rich.set_horizontal_alignment(HorizontalAlignment::CENTER);
+        }
+        column.add_child(&detail_label);
+    }
+    let mut actions = HBoxContainer::new_alloc();
+    actions.set_alignment(AlignmentMode::CENTER);
+    actions.add_theme_constant_override("separation", 8);
+    // Retry the same slot (`@loadgame` = the browser's own action label).
+    let mut retry = factory::button(&kit::t("@loadgame").to_string());
+    retry.set_custom_minimum_size(Vector2::new(180.0, 48.0));
+    {
+        let dialog_for = dialog.clone();
+        let state_for = state.clone();
+        let slot_for = slot.clone();
+        let callable = Callable::from_fn("load_failure_retry", move |_args: &[&Variant]| {
+            load_attempt(&dialog_for, &state_for, &slot_for);
+            Variant::nil()
+        });
+        retry.connect("pressed", &callable);
+    }
+    actions.add_child(&retry);
+    // Keep playing: dismiss the failure and close the browser.
+    let mut back = factory::button(&kit::t("@back").to_string());
+    back.set_custom_minimum_size(Vector2::new(140.0, 48.0));
+    {
+        let dialog_for = dialog.clone();
+        let state_for = state.clone();
+        let callable = Callable::from_fn("load_failure_back", move |_args: &[&Variant]| {
+            {
+                let mut st = state_for.borrow_mut();
+                st.failed_slot = None;
+                st.failed_detail.clear();
+            }
+            load_close(&dialog_for, LoadKind::Load);
+            Variant::nil()
+        });
+        back.connect("pressed", &callable);
+    }
+    actions.add_child(&back);
+    column.add_child(&actions);
+    panel
+}
+
+/// `LoadDialog.runLoadSave`'s missing-asset branch (`LoadDialog.java:231-249`):
+/// after the load applies, `state.data.getMissingAssets()` rows are listed in
+/// the `@save.assets.missing` modal. The port has no save-scoped data manager,
+/// so the check runs once the queued load completed and renders the global
+/// manager's missing external assets inline (no collapser toggle).
+fn schedule_missing_asset_check() {
+    let Some(root) = kit::tree_root() else {
+        return;
+    };
+    let mut tree = root.get_tree();
+    let mut timer = tree.create_timer(0.5);
+    let callable = Callable::from_fn("load_missing_assets_check", |_args: &[&Variant]| {
+        report_missing_assets();
+        Variant::nil()
+    });
+    let _ = timer.connect("timeout", &callable);
+}
+
+/// Shows `@save.assets.missing` with the `type: path` rows when the completed
+/// load left external data assets without a cache file.
+fn report_missing_assets() {
+    let Some(mut host) = kit::node("/root/Spine/SimHost") else {
+        return;
+    };
+    if host.has_method("io_pending")
+        && host.call("io_pending", &[]).try_to::<i64>().unwrap_or(0) > 0
+    {
+        // The load has not applied yet; the next boot/map will re-check.
+        return;
+    }
+    let Some(mut mods) = kit::node("/root/MindMods") else {
+        return;
+    };
+    if !mods.has_method("missing_assets") {
+        return;
+    }
+    let Ok(rows) = mods.call("missing_assets", &[]).try_to::<VarArray>() else {
+        return;
+    };
+    if rows.is_empty() {
+        return;
+    }
+    let mut body = kit::tm("@save.assets.missing.info").to_string();
+    for entry in rows.iter_shared() {
+        let Ok(row) = entry.try_to::<VarDictionary>() else {
+            continue;
+        };
+        let kind = dict_string(&row, "type");
+        let path = dict_string(&row, "path");
+        body.push_str(&format!("\n[accent]{kind}: [lightgray]{path}"));
+    }
+    if let Some(mut ui) = kit::ui()
+        && ui.has_method("show_text")
+    {
+        let _ = ui.call(
+            "show_text",
+            &[
+                kit::t("@save.assets.missing").to_variant(),
+                GString::from(body.as_str()).to_variant(),
+            ],
+        );
+    }
 }
 
 /// `SaveDialog._emit_save`: hand the slot to the live facade (which queues the
@@ -2416,4 +2660,41 @@ fn campaign_rules_apply(
             value,
         ],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh half-unique temp path for the save-check tests.
+    fn temp_file(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mind-savecheck-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join(name)
+    }
+
+    /// `SaveIO.isSaveValid` pre-flight: a missing file is `Missing`, a garbage
+    /// file is `Invalid`, and a written save header is `Ok`. This is the
+    /// `@save.corrupted` discriminator behind the load dialog's failure state.
+    #[test]
+    fn save_file_check_classifies_missing_invalid_and_valid() {
+        let missing = temp_file("missing.msav");
+        assert_eq!(save_file_check(&missing), SaveFileCheck::Missing);
+
+        let corrupt = temp_file("corrupt.msav");
+        let _ = std::fs::write(&corrupt, b"not-a-save");
+        assert_eq!(save_file_check(&corrupt), SaveFileCheck::Invalid);
+
+        use mind_core::io::save::versions::v1::base_meta_tags;
+        use mind_core::io::save::{SaveOptions, WriteContext};
+        let ctx = WriteContext::meta_only(base_meta_tags(8, 8, 2, "test-map"));
+        let bytes = SaveIo::write_to_vec(&ctx, &SaveOptions::new())
+            .expect("write a meta-only save fixture");
+        let valid = temp_file("valid.msav");
+        let _ = std::fs::write(&valid, bytes);
+        assert_eq!(save_file_check(&valid), SaveFileCheck::Ok);
+
+        let _ = std::fs::remove_file(&corrupt);
+        let _ = std::fs::remove_file(&valid);
+    }
 }

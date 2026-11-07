@@ -2417,7 +2417,7 @@ fn effects_preview_host(dialog: &mut MindDialog) -> Option<Rc<RefCell<EffectsPre
             fx.set_scale(Vector2::splat(scale));
             fx.bind_mut().tick_view();
         }
-        if state.tick % EFFECTS_PREVIEW_RESPAWN_TICKS == 0 {
+        if state.tick.is_multiple_of(EFFECTS_PREVIEW_RESPAWN_TICKS) {
             state.fx.clone().bind_mut().spawn_effect(
                 GString::from(fx_name.as_str()),
                 0.0,

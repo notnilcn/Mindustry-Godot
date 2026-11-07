@@ -5,10 +5,10 @@
 //!
 //! Ported from `core/src/mindustry/entities/units/AIController.java`. Upstream
 //! stores these as instance methods on the abstract `AIController`; the port
-//! expresses them as free functions over [`AiCtx`] (plan 11 deviation 3: no
-//! `Prov`/closure controllers). The pieces that need plan-12 `TeamData`, the
-//! plan-13 `LogicAI` radar cache or the plan-08 payload runtime are marked with
-//! an explicit `TODO(plan NN)` and kept inert until those land.
+//! expresses them as [`AiCtx`] methods over the live ECS world (plan 11
+//! deviation 3: no `Prov`/closure controllers). The helpers are live: the
+//! controller kinds and `sim/unit_runtime.rs` use them, and the `LogicAI`
+//! targeting / payload paths they used to defer to are implemented there.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;

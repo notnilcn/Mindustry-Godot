@@ -6,9 +6,9 @@
 //!
 //! Deviations (OD6-A/OD6-B, structural parity): the upstream seed is
 //! `state.rules.sector.planet.id`; the headless harness passes `WorldParams`
-//! instead so per-seed goldens are meaningful. `state.rules.*`,
-//! `Schematics.placeLaunchLoadout` and `Waves.generate` are plan-11/12 hooks and
-//! are not applied here (they do not change tile data).
+//! instead so per-seed goldens are meaningful. The tile-only `generate` pass
+//! does not apply `state.rules.*` or `Waves.generate` (no live runtime here);
+//! `Schematics.placeLaunchLoadout` runs in `place_structures` (H05 T4).
 
 use crate::content::{BlockId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
@@ -428,8 +428,9 @@ impl WorldGenerator for AsteroidGenerator {
             tiles.get_mut(px, py).overlay = spawn;
         }
 
-        // `Schematics.placeLaunchLoadout(sx, sy)`, `state.rules.*` and
-        // `Waves.generate` are plan-12 hooks (no tile effect).
+        // `Schematics.placeLaunchLoadout(sx, sy)` runs in `place_structures`
+        // (H05 T4); `state.rules.*` and `Waves.generate` need the live runtime
+        // and are not part of this generator.
     }
 }
 

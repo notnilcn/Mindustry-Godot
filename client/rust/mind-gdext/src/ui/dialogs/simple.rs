@@ -626,13 +626,21 @@ impl FullTextDialog {
 mod tests {
     use super::*;
 
+    /// Arc `Strings.capitalize` (`arc/util/Strings.java:446-461`) upper-cases
+    /// the first character and any character following `_`/`-`; whitespace does
+    /// NOT start a new word. `Links.LinkEntry` (`Links.java:52`) calls it on
+    /// `name.replace("-", " ")`, so a kebab-case name whose bundle key is
+    /// missing renders e.g. "google-play" as "Google play", not "Google Play".
     #[test]
     fn capitalize_matches_arc_strings() {
         assert_eq!(capitalize("discord"), "Discord");
-        assert_eq!(capitalize("google play"), "Google Play");
-        assert_eq!(capitalize("f droid"), "F Droid");
-        assert_eq!(capitalize("dev builds"), "Dev Builds");
+        assert_eq!(capitalize("google play"), "Google play");
+        assert_eq!(capitalize("f droid"), "F droid");
+        assert_eq!(capitalize("dev builds"), "Dev builds");
         assert_eq!(capitalize("itch.io"), "Itch.io");
+        // The separators Arc's doc comment names ("test_string" -> "Test String").
+        assert_eq!(capitalize("test_string"), "Test String");
+        assert_eq!(capitalize("google-play"), "Google Play");
     }
 
     #[test]

@@ -5,9 +5,10 @@
 //!
 //! Ported from `core/src/mindustry/ai/RtsAI.java`. This module owns the
 //! deterministic squad grouping and target-selection halves (grouping idle
-//! commanded units by `flag`, nearest-unassigned target pick). The per-tick
-//! `TeamData` wiring, defense triggers and `estimateStats` weighting are plan 12
-//! (`RtsAI.update` is called per active `TeamData`).
+//! commanded units by `flag`, nearest-unassigned target pick), the
+//! `estimateStats` weighting and the update timer. `game/runtime.rs` drives
+//! `RtsAI.update` for every active `TeamData` and applies its defense/attack
+//! orders to the live unit runtime.
 
 use bevy_ecs::entity::Entity;
 

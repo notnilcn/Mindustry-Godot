@@ -1478,7 +1478,7 @@ mod tests {
         assert_eq!(save.code, "wait 1.5\nset done 1\n");
 
         let draw = draw_report(true, 30).expect("logic_draw");
-        assert_eq!(draw.checksum, "82572433be79fab9");
+        assert_eq!(draw.checksum, "e93494cdd0eecde9");
         assert_eq!(draw.commands, 10);
         assert_eq!(draw.operations, 1);
         assert_eq!(draw.text, "");

@@ -30,7 +30,7 @@ use godot::classes::text_server::AutowrapMode;
 use godot::classes::tween::{EaseType, TransitionType};
 use godot::classes::{
     Button, CanvasItem, CenterContainer, ColorRect, Control, HBoxContainer, Json, Label, LineEdit,
-    MarginContainer, Node, PanelContainer, StyleBoxFlat, Timer, VBoxContainer,
+    MarginContainer, Node, PanelContainer, RichTextLabel, StyleBoxFlat, Timer, VBoxContainer,
 };
 use godot::global::HorizontalAlignment;
 use godot::obj::{NewAlloc, NewGd};
@@ -953,6 +953,24 @@ const BLOCK_WIDTH: f32 = 600.0;
 const BLOCK_MAX_HEIGHT: f32 = 550.0;
 /// `Pal.darkestGray` (`graphics/Pal.java:61`): the colour every row animates to.
 const DARKEST_GRAY: Color = Color::from_rgba(0.1, 0.1, 0.1, 1.0);
+/// `@gameover.waiting` (`bundle.properties:26`): the client-only campaign
+/// "waiting for next map" line (`GameOverDialog.java:130-133`).
+const GAMEOVER_WAITING_KEY: &str = "@gameover.waiting";
+/// `@gameover.disconnect` (`bundle.properties:24`): the client-only campaign
+/// button that drops the match and returns to the menu
+/// (`GameOverDialog.java:105-111`).
+const GAMEOVER_DISCONNECT_KEY: &str = "@gameover.disconnect";
+/// `Core.settings` key for the one-time difficulty notice
+/// (`GameOverDialog.java:115`, `Core.settings.getBoolOnce("difficultyguide")`).
+const DIFFICULTY_GUIDE_SETTING: &str = "difficultyguide";
+/// `@difficulty.guide.title` / `@difficulty.guide` / `@difficulty.guide.confirm`
+/// (`bundle.properties:967-969`).
+const DIFFICULTY_GUIDE_TITLE_KEY: &str = "@difficulty.guide.title";
+const DIFFICULTY_GUIDE_KEY: &str = "@difficulty.guide";
+const DIFFICULTY_GUIDE_CONFIRM_KEY: &str = "@difficulty.guide.confirm";
+/// The shared `BaseDialog` shell for popups with no manifest entry (the
+/// difficulty notice); it is instantiated on demand like Java's `new BaseDialog`.
+const DIALOG_BASE_SCENE: &str = "res://scenes/ui/dialogs/mind_dialog_base.tscn";
 
 /// `GameOverDialog` — the game-over summary (manifest dialog `restart`).
 ///
@@ -1064,6 +1082,21 @@ impl GameOverDialog {
         if playtime >= 0 {
             rows.add_child(&playtime_row(playtime));
         }
+        // `if(state.isCampaign() && net.client())` (`GameOverDialog.java:130-133`):
+        // a multiplayer campaign client gets the "waiting for next map" line
+        // under the stats block, 20 px below it.
+        if Self::is_campaign(dialog) && net_client() {
+            table.bind_mut().row();
+            // code-instantiated: the waiting line is a bundle string.
+            let waiting =
+                factory::styled_label(&kit::tm(GAMEOVER_WAITING_KEY).to_string(), "outlineLabel");
+            table
+                .bind_mut()
+                .add(&waiting)
+                .pad_top(20.0)
+                .align(kit::Align::Center);
+            table.bind_mut().row();
+        }
         self.build_buttons(dialog);
     }
 
@@ -1099,13 +1132,29 @@ impl GameOverDialog {
         dict_bool(&sector_state(), "campaign", false)
     }
 
-    /// `GameOverDialog.java:101-140`: campaign gets `@continue` (planet map),
-    /// other modes get `@menu` (the standalone menu); both are 60 px tall.
+    /// `GameOverDialog.java:101-140`: campaign gets `@continue` (planet map) or
+    /// the client's `@gameover.disconnect`; other modes get `@menu` (the
+    /// standalone menu); all are 60 px tall.
     fn build_buttons(&mut self, dialog: &mut MindDialog) {
         dialog.clear_buttons();
         let campaign = Self::is_campaign(dialog);
         let dialog_gd = dialog.to_gd();
-        let mut button = if campaign {
+        let mut button = if campaign && net_client() {
+            // `if(net.client()) buttons.button("@gameover.disconnect", …)`
+            // (`GameOverDialog.java:105-111`): a multiplayer campaign client
+            // cannot continue the map alone, so the only campaign action is
+            // leaving the match back to the menu.
+            dialog.add_button(
+                &kit::t(GAMEOVER_DISCONNECT_KEY).to_string(),
+                Some(dialog_press(
+                    "gameover_disconnect",
+                    &dialog_gd,
+                    disconnect_pressed,
+                )),
+                "",
+                170.0,
+            )
+        } else if campaign {
             dialog.add_button(
                 &kit::t("@continue").to_string(),
                 Some(dialog_press(
@@ -1304,10 +1353,252 @@ fn current_playtime_ms() -> i64 {
         .unwrap_or(-1)
 }
 
-/// `GameOverDialog.java:130-138`: campaign continues to the planet map.
+/// `GameOverDialog.java:112-129`: campaign continues to the planet map, then
+/// (non-client only) shows the one-time difficulty notice when the sector has
+/// already been attempted twice on `normal`.
 fn continue_pressed(dialog: &mut MindDialog) {
     dialog.close();
     open_named_dialog("planet", "");
+    if let Some(planet) = difficulty_guide_planet() {
+        // `Time.runTask(10f, …)` after `ui.planet.show()`: build the notice on
+        // the next idle so the planet page is laid out first.
+        defer_action("gameover_difficulty_guide", move || {
+            show_difficulty_guide(&planet);
+        });
+    }
+}
+
+/// `GameOverDialog.java:105-111`: the campaign client leaves the match and
+/// returns to the menu (`logic.reset(); net.reset(); hide(); state.set(menu)`).
+fn disconnect_pressed(dialog: &mut MindDialog) {
+    dialog.close();
+    // `net.reset()`: the relay session/leaders are scoped to the match.
+    if let Some(mut net) = kit::net()
+        && net.has_method("leave_match")
+    {
+        let _ = net.call("leave_match", &[]);
+    }
+    // `logic.reset()` + menu through the single return-to-menu path.
+    if let Some(mut root) = kit::node("/root/Spine/Ui/UiRoot")
+        && root.has_method("return_to_menu")
+    {
+        let _ = root.call("return_to_menu", &[]);
+    }
+}
+
+/// `net.client()`: an active match that this node does not host. The port has
+/// no `net.server()`; `MindNet.local_admin()` is the host flag
+/// (`ModsDialog`/`Call` gating uses it).
+fn net_client() -> bool {
+    if !net_active() {
+        return false;
+    }
+    let Some(mut net) = kit::net() else {
+        return false;
+    };
+    if !net.has_method("local_admin") {
+        return true;
+    }
+    !net.call("local_admin", &[])
+        .try_to::<bool>()
+        .unwrap_or(false)
+}
+
+/// `Core.settings.getBoolOnce(key)` (`arc Settings.getBoolOnce`): read the flag,
+/// write `true`, and report whether this was the first read.
+fn settings_flag_once(key: &str) -> bool {
+    let seen = ui_call("settings_get_flag", &[GString::from(key).to_variant()])
+        .and_then(|value| value.try_to::<bool>().ok())
+        .unwrap_or(false);
+    if !seen {
+        let _ = ui_call(
+            "settings_put_flag",
+            &[GString::from(key).to_variant(), true.to_variant()],
+        );
+    }
+    !seen
+}
+
+/// `GameOverDialog.java:115` gate for the one-time difficulty notice:
+/// `allowCampaignRules && attempts >= 2 && difficulty == normal &&
+/// Core.settings.getBoolOnce("difficultyguide")`.
+fn difficulty_guide_should_show(
+    allow_campaign_rules: bool,
+    attempts: i64,
+    difficulty: &str,
+    first_read: bool,
+) -> bool {
+    allow_campaign_rules && attempts >= 2 && difficulty == "normal" && first_read
+}
+
+/// `campaign_views_json(planet)` through the campaign facade (`{}` when absent).
+fn campaign_views_for(planet: &str) -> VarDictionary {
+    campaign_call("campaign_views_json", &[GString::from(planet).to_variant()])
+        .and_then(|value| value.try_to::<GString>().ok())
+        .and_then(|text| Json::parse_string(&text).try_to::<VarDictionary>().ok())
+        .unwrap_or_default()
+}
+
+/// The object rows of one `campaign_views_json` array field.
+fn view_rows(views: &VarDictionary, key: &str) -> Vec<VarDictionary> {
+    views
+        .get(key)
+        .and_then(|value| value.try_to::<VarArray>().ok())
+        .map(|rows| {
+            rows.iter_shared()
+                .filter_map(|row| row.try_to::<VarDictionary>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Resolves the one-time difficulty notice for the sector that just ended.
+///
+/// Java reads `prev.planet.allowCampaignRules`, `prev.info.attempts`,
+/// `prev.planet.campaignRules.difficulty` and the `difficultyguide` setting;
+/// the port has them in the `campaign_views_json` projection (`planets`,
+/// `sectors[].stats.attempts`, `rules.difficulty`) plus `get_sector_state` for
+/// the active planet/sector. Returns the planet name to pass to
+/// `CampaignRulesDialog` (`ui.campaignRules.show(prev.planet)`).
+fn difficulty_guide_planet() -> Option<String> {
+    let state = sector_state();
+    if !dict_bool(&state, "campaign", false) {
+        return None;
+    }
+    let planet = dict_string(&state, "planet");
+    let sector = dict_i64(&state, "sector", -1);
+    if planet.is_empty() || sector < 0 {
+        return None;
+    }
+    // A campaign client never runs the `@continue` arm (`GameOverDialog.java:105`).
+    if net_client() {
+        return None;
+    }
+    let views = campaign_views_for(&planet);
+    let allow_campaign_rules = view_rows(&views, "planets")
+        .iter()
+        .find(|row| dict_string(row, "name") == planet)
+        .map(|row| dict_bool(row, "allow_campaign_rules", false))
+        .unwrap_or(false);
+    let attempts = view_rows(&views, "sectors")
+        .iter()
+        .find(|row| dict_i64(row, "id", -1) == sector)
+        .map(|row| {
+            row.get("stats")
+                .and_then(|value| value.try_to::<VarDictionary>().ok())
+                .map(|stats| dict_i64(&stats, "attempts", 0))
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let difficulty = views
+        .get("rules")
+        .and_then(|value| value.try_to::<VarDictionary>().ok())
+        .map(|rules| dict_string(&rules, "difficulty"))
+        .unwrap_or_default();
+    // Java's `&&` evaluates left to right: getBoolOnce only writes when the
+    // other three gates pass.
+    if !allow_campaign_rules || attempts < 2 || difficulty != "normal" {
+        return None;
+    }
+    let first_read = settings_flag_once(DIFFICULTY_GUIDE_SETTING);
+    difficulty_guide_should_show(allow_campaign_rules, attempts, &difficulty, first_read)
+        .then_some(planet)
+}
+
+/// `GameOverDialog.java:117-128`: `new BaseDialog("@difficulty.guide.title")`
+/// with a 500 px (400 mobile) wrapped statement and two 200x60 buttons —
+/// `@hide` and `@difficulty.guide.confirm` (opens `CampaignRulesDialog`).
+///
+/// The port registers no dialog scene for this one-time notice, so the shared
+/// `mind_dialog_base.tscn` shell is instantiated directly (the same node every
+/// manifest dialog inherits) and lives under `UiRoot/DialogLayer` until it is
+/// replaced on a later game over.
+fn show_difficulty_guide(planet: &str) {
+    let Some(mut layer) = kit::node("/root/Spine/Ui/UiRoot/DialogLayer") else {
+        return;
+    };
+    if let Some(mut previous) = layer.get_node_or_null("difficulty_guide") {
+        previous.queue_free();
+    }
+    let Ok(scene) =
+        godot::tools::try_load::<godot::classes::PackedScene>(&GString::from(DIALOG_BASE_SCENE))
+    else {
+        return;
+    };
+    let Some(mut node) = scene.instantiate() else {
+        return;
+    };
+    let Ok(dialog) = node.clone().try_cast::<MindDialog>() else {
+        return;
+    };
+    node.set_name("difficulty_guide");
+    layer.add_child(&node);
+    let width = if is_mobile() { 400.0 } else { 500.0 };
+    let dialog_gd = dialog.clone();
+    let mut dialog_node = dialog_gd.clone();
+    {
+        let mut bound = dialog_node.bind_mut();
+        // `BaseDialog("@difficulty.guide.title")` + `setFillParent(false)`.
+        bound.set_title_key(DIFFICULTY_GUIDE_TITLE_KEY);
+        bound.should_pause = false;
+        bound.clear_content();
+        bound.clear_buttons();
+        if let Some(mut panel) = bound.panel() {
+            panel.set_custom_minimum_size(Vector2::new(width + 40.0, 0.0));
+        }
+        let mut table = bound.content_table();
+        // code-instantiated: the notice body is a bundle string.
+        let label = factory::label(&kit::tm(DIFFICULTY_GUIDE_KEY).to_string());
+        {
+            let mut rich: Gd<RichTextLabel> = label.clone().upcast();
+            rich.set_autowrap_mode(AutowrapMode::WORD_SMART);
+            rich.set_horizontal_alignment(HorizontalAlignment::CENTER);
+            rich.set_custom_minimum_size(Vector2::new(width, 0.0));
+        }
+        // `dialog.cont.add("@difficulty.guide").width(...).wrap().pad(10f)`
+        table.bind_mut().add(&label).pad(10.0);
+        // `buttons.defaults().size(200f, 60f).pad(2f)`
+        let hide_target = dialog_gd.clone();
+        let hide = Callable::from_fn("difficulty_guide_hide", move |_args: &[&Variant]| {
+            if hide_target.is_instance_valid() {
+                let mut target = hide_target.clone();
+                target.bind_mut().hide_dialog();
+            }
+            Variant::nil()
+        });
+        let mut hide_button =
+            bound.add_button(&kit::t("@hide").to_string(), Some(hide), "cancel", 200.0);
+        hide_button.set_custom_minimum_size(Vector2::new(200.0, 60.0));
+        let confirm_target = dialog_gd.clone();
+        let planet = planet.to_string();
+        let confirm = Callable::from_fn("difficulty_guide_confirm", move |_args: &[&Variant]| {
+            if confirm_target.is_instance_valid() {
+                let mut target = confirm_target.clone();
+                target.bind_mut().hide_dialog();
+            }
+            // `Vars.ui.campaignRules.show(prev.planet)`.
+            let mut context = VarDictionary::new();
+            context.set("planet", &GString::from(planet.as_str()).to_variant());
+            if let Some(mut ui) = kit::ui() {
+                let _ = ui.call(
+                    "open_dialog",
+                    &[
+                        GString::from("campaign_rules").to_variant(),
+                        Json::stringify(&context.to_variant()).to_variant(),
+                    ],
+                );
+            }
+            Variant::nil()
+        });
+        let mut confirm_button = bound.add_button(
+            &kit::t(DIFFICULTY_GUIDE_CONFIRM_KEY).to_string(),
+            Some(confirm),
+            "book",
+            200.0,
+        );
+        confirm_button.set_custom_minimum_size(Vector2::new(200.0, 60.0));
+    }
+    dialog_node.bind_mut().show_dialog();
 }
 
 /// Non-campaign `@menu` (`GameOverDialog.java:134-138`):
@@ -3024,5 +3315,21 @@ mod tests {
         let unknown = join_safe_connect("", protocol).expect("unversioned host must gate");
         assert_eq!(unknown.reason_key, "@server.kicked.serverOutdated");
         assert_eq!(unknown.server_version, "?");
+    }
+
+    /// `GameOverDialog.java:115`: every clause of the difficulty-guide gate is
+    /// required, and the `getBoolOnce` flag folds into `first_read`.
+    #[test]
+    fn difficulty_guide_gate_requires_all_java_clauses() {
+        assert!(difficulty_guide_should_show(true, 2, "normal", true));
+        // `allowCampaignRules`.
+        assert!(!difficulty_guide_should_show(false, 2, "normal", true));
+        // `info.attempts >= 2`.
+        assert!(!difficulty_guide_should_show(true, 1, "normal", true));
+        // `campaignRules.difficulty == Difficulty.normal`.
+        assert!(!difficulty_guide_should_show(true, 5, "hard", true));
+        assert!(!difficulty_guide_should_show(true, 5, "casual", true));
+        // `Core.settings.getBoolOnce("difficultyguide")`: already read once.
+        assert!(!difficulty_guide_should_show(true, 2, "normal", false));
     }
 }

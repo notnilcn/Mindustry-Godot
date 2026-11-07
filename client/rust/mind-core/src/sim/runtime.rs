@@ -2899,9 +2899,7 @@ mod tests {
     /// a `UnitFactory`'s selected plan requirements (`ConsumeItemDynamic`).
     #[test]
     fn dynamic_consume_bridge_reads_factory_plan_items() {
-        use crate::world::consumers::{
-            ConsumeInstance, ConsumeInstanceKind, DynamicConsume, runtime_efficiency,
-        };
+        use crate::world::consumers::{ConsumeInstance, ConsumeInstanceKind, runtime_efficiency};
 
         let mut sim = Sim::new(1, 24, 24, BlockId::AIR, BlockId::AIR);
         sim.install_block_runtime().expect("runtime");

@@ -109,6 +109,60 @@ pub(crate) fn dash_circle(canvas: &mut Node2D, x: f32, y: f32, r: f32, color: Co
     }
 }
 
+/// `Lines.dashLine(x, y, x2, y2, divisions)` (`Lines.java:310-317`): the line
+/// is split into `divisions` equal pieces and every other one is drawn.
+/// Returns `[x1, y1, x2, y2]` per dash.
+pub(crate) fn dash_line_segments(
+    x: f32,
+    y: f32,
+    x2: f32,
+    y2: f32,
+    divisions: i32,
+) -> Vec<[f32; 4]> {
+    if divisions <= 0 {
+        return Vec::new();
+    }
+    let (dx, dy) = (x2 - x, y2 - y);
+    let mut out = Vec::with_capacity((divisions / 2) as usize);
+    let mut i = 0;
+    while i < divisions {
+        let t0 = i as f32 / divisions as f32;
+        let t1 = (i + 1) as f32 / divisions as f32;
+        out.push([x + t0 * dx, y + t0 * dy, x + t1 * dx, y + t1 * dy]);
+        i += 2;
+    }
+    out
+}
+
+/// `Drawf.dashLine(color, x, y, x2, y2, divisions)` (`Drawf.java:227-234`):
+/// stroke 3 `Pal.gray` dashed line at the colour's alpha, then stroke 1
+/// `color` (`Drawf.dashLineDst` derives `divisions` from the distance).
+pub(crate) fn dash_line(
+    canvas: &mut Node2D,
+    x: f32,
+    y: f32,
+    x2: f32,
+    y2: f32,
+    divisions: i32,
+    color: Color,
+) {
+    let segments = dash_line_segments(x, y, x2, y2, divisions);
+    let mut gray = color_f4(pal::GRAY);
+    gray.a = color.a;
+    for s in &segments {
+        canvas
+            .draw_line_ex(Vector2::new(s[0], s[1]), Vector2::new(s[2], s[3]), gray)
+            .width(3.0)
+            .done();
+    }
+    for s in &segments {
+        canvas
+            .draw_line_ex(Vector2::new(s[0], s[1]), Vector2::new(s[2], s[3]), color)
+            .width(1.0)
+            .done();
+    }
+}
+
 /// `Drawf.circles(x, y, rad, color)` (`Drawf.java:410-415`): stroke 3
 /// `Pal.gray` circle, then stroke 1 `color`. Side count `Lines.circleVertices`
 /// (`Lines.java:24-26`).
@@ -466,7 +520,31 @@ fn pack_points(pts: &[(f32, f32)]) -> PackedVector2Array {
 
 #[cfg(test)]
 mod tests {
-    use super::target_spikes;
+    use super::{dash_line_segments, target_spikes};
+
+    /// `Lines.dashLine` (`Lines.java:310-317`) splits the span into `divisions`
+    /// equal pieces and draws the even-indexed ones: 8 divisions over 80 px is
+    /// 4 dashes of 10 px starting at the endpoints.
+    #[test]
+    fn dash_line_segments_match_arc() {
+        let segs = dash_line_segments(0.0, 0.0, 80.0, 0.0, 8);
+        assert_eq!(segs.len(), 4);
+        assert_eq!(segs[0], [0.0, 0.0, 10.0, 0.0]);
+        // Every other piece: the last drawn is i = 6 -> 60..70, not the
+        // trailing 70..80 piece (odd index).
+        assert_eq!(segs[3], [60.0, 0.0, 70.0, 0.0]);
+        // Diagonal: the first of two divisions ends at the midpoint.
+        let diag = dash_line_segments(0.0, 0.0, 30.0, 40.0, 2);
+        assert_eq!(diag.len(), 1);
+        assert!((diag[0][2] - 15.0).abs() < 1e-5);
+        assert!((diag[0][3] - 20.0).abs() < 1e-5);
+        // `Drawf.dashLineDst` can round to 0 segments for a short line
+        // (`(int)(dst / tilesize * 1.6)`), and an odd division count keeps the
+        // trailing full piece.
+        assert!(dash_line_segments(0.0, 0.0, 8.0, 0.0, 0).is_empty());
+        assert_eq!(dash_line_segments(0.0, 0.0, 8.0, 0.0, 1).len(), 1);
+        assert_eq!(dash_line_segments(0.0, 0.0, 8.0, 0.0, 3).len(), 2);
+    }
 
     #[test]
     fn target_spike_geometry_matches_lines() {

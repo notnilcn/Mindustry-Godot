@@ -1451,15 +1451,21 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("markers"));
         let draw_light = self.draw_light;
         // H03 T16: the FX system's collected `Drawf.light` requests feed the
-        // light pass (`LightRenderer.add` on the Java side).
-        let fx_lights: Vec<(f32, f32, f32, [f32; 4], f32)> = wiring::optional(&self.fx)
-            .map(|fx| fx.bind().view_lights().to_vec())
+        // light pass (`LightRenderer.add` on the Java side). GAPS #49
+        // follow-up: the effect bodies' line-form rows (`Fx.pointBeam`) are
+        // forwarded too; the FX program already dropped the beam's circle
+        // stand-in, so the rows are its only light (`LightRenderer.line`).
+        let (fx_lights, fx_light_lines) = wiring::optional(&self.fx)
+            .map(|fx| {
+                let fx = fx.bind();
+                (fx.view_lights().to_vec(), fx.view_light_lines().to_vec())
+            })
             .unwrap_or_default();
         if let Some(light) = self.light.as_mut() {
             // `Renderer.draw`: the light composite only runs when
             // `Rules.lighting` is set; the ambient alpha comes from the
             // `Rules` `ambientLight` alpha (never a hardcoded near-black).
-            light.update(&view, &self.rules, draw_light, &fx_lights);
+            light.update(&view, &self.rules, draw_light, &fx_lights, &fx_light_lines);
             let light_stats = light.stats();
             self.stats.light_rebuilds = light_stats.rebuilds;
             self.stats.light_circles = light_stats.lights;

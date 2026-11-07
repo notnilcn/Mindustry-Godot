@@ -1454,14 +1454,7 @@ impl MindInput {
     /// binds read 0.
     #[func]
     pub fn binding_axis(&self, name: GString) -> f32 {
-        let name = name.to_string();
-        let Some(index) = KeyBindTable::all()
-            .iter()
-            .position(|bind| bind.name == name)
-        else {
-            return 0.0;
-        };
-        self.bridge.key_axis(&self.bindings, index as u16)
+        self.bridge.binding_axis(&self.bindings, &name.to_string())
     }
 
     /// `DesktopInput.updateMovement` inputs for the sim host:

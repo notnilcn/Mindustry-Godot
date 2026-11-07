@@ -925,26 +925,43 @@ impl MindUi {
     }
 
     /// Forwards a ban/admin roster action (`BansDialog`'s `unbanPlayerID`,
-    /// `AdminsDialog`'s `unAdminPlayer`) to the relay seam; false when nothing
-    /// is listening, so the shell never fakes a server action. The listener is
-    /// plan 21's relay wiring (the same seam as [`Self::player_action`]).
+    /// `AdminsDialog`'s `unAdminPlayer`) to the relay reducer seam
+    /// (`MindNet.player_action`, the same path as [`Self::player_action`]) and
+    /// re-emits the `admin_action` signal for any external listener.
+    ///
+    /// Java's `netServer.admins.unbanPlayerID(id)`/`unAdminPlayer(id)`
+    /// (`BansDialog.java:37-42`, `AdminsDialog.java:37-46`) take the
+    /// `PlayerInfo.id` identity directly, so `identifier` travels verbatim.
+    /// Returns false when the net facade is absent (single-player/menu scenes)
+    /// or the reducer was not sent: the shell never fakes a server action, and
+    /// the roster dialog keeps the row.
     #[func]
     pub fn admin_action(&mut self, action: GString, identifier: GString) -> bool {
-        let node = self.to_gd();
-        let connections = node.get_signal_connection_list("admin_action");
-        if connections.is_empty() {
-            log::info!(
-                "[ui] admin_action {} on {} gated on plan 21 relay",
-                action,
-                identifier
-            );
+        let Some((verb, target)) =
+            parse_admin_action(action.to_string().as_str(), identifier.to_string().as_str())
+        else {
+            log::warn!("[ui] admin_action: unsupported `{action}` on `{identifier}`");
             return false;
+        };
+        if self.dispatch_player_action(
+            GString::from(target.as_str()),
+            GString::from(verb.as_str()),
+            0,
+        ) {
+            return true;
         }
-        let _ = self.base_mut().emit_signal(
-            "admin_action",
-            &[action.to_variant(), identifier.to_variant()],
-        );
-        true
+        // The plan-21 signal stays a seam for a non-net listener; report
+        // success only when one is actually attached.
+        let node = self.to_gd();
+        if !node.get_signal_connection_list("admin_action").is_empty() {
+            let _ = self.base_mut().emit_signal(
+                "admin_action",
+                &[action.to_variant(), identifier.to_variant()],
+            );
+            return true;
+        }
+        log::info!("[ui] admin_action {verb} on {target}: no relay or listener");
+        false
     }
 
     /// Executes a console line through the Rust command registry (OD1).
@@ -1705,6 +1722,27 @@ fn parse_player_action(action: &str, fallback: i64) -> (String, i64) {
     (trimmed.to_owned(), fallback)
 }
 
+/// Normalizes a roster admin verb to the relay reducer verb plus its target
+/// identity (`MindUi.admin_action`).
+///
+/// The roster dialogs dispatch their `RosterKind::action` names (`unban` /
+/// `unadmin`, `BansDialog.java:37-42` / `AdminsDialog.java:37-46`); the Java
+/// method spellings (`unbanPlayerID`, `unAdminPlayer`) the signal docs use are
+/// accepted too. Every other verb — and an empty identity — is rejected so a
+/// typo cannot silently reach a different reducer.
+fn parse_admin_action(action: &str, identifier: &str) -> Option<(String, String)> {
+    let identifier = identifier.trim();
+    if identifier.is_empty() {
+        return None;
+    }
+    let verb = match action.trim().to_ascii_lowercase().as_str() {
+        "unban" | "unbanplayerid" => "unban",
+        "unadmin" | "unadminplayer" => "unadmin",
+        _ => return None,
+    };
+    Some((String::from(verb), identifier.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1730,5 +1768,40 @@ mod tests {
             parse_player_action("team:not-a-number", 3),
             (String::from("team"), 3)
         );
+    }
+
+    #[test]
+    fn admin_verbs_map_to_the_roster_reducers() {
+        // `BansDialog`/`AdminsDialog` verbs (`RosterKind::action`).
+        assert_eq!(
+            parse_admin_action("unban", "ab12"),
+            Some((String::from("unban"), String::from("ab12")))
+        );
+        assert_eq!(
+            parse_admin_action(" unadmin ", " cd34 "),
+            Some((String::from("unadmin"), String::from("cd34")))
+        );
+        // The Java method spellings named by the `admin_action` docs.
+        assert_eq!(
+            parse_admin_action("unbanPlayerID", "ab12"),
+            Some((String::from("unban"), String::from("ab12")))
+        );
+        assert_eq!(
+            parse_admin_action("unAdminPlayer", "cd34"),
+            Some((String::from("unadmin"), String::from("cd34")))
+        );
+    }
+
+    #[test]
+    fn unknown_or_empty_admin_actions_are_rejected() {
+        // Player-list verbs are not roster actions: each goes through
+        // `player_action`, never this seam.
+        for verb in ["", "kick", "ban", "admin", "trace", "team", "whitelist"] {
+            assert_eq!(parse_admin_action(verb, "ab12"), None, "verb `{verb}`");
+        }
+        // An identity is required (`PlayerInfo.id`); the dialogs hide the row
+        // when it is missing rather than unbanning everyone.
+        assert_eq!(parse_admin_action("unban", ""), None);
+        assert_eq!(parse_admin_action("unadmin", "   "), None);
     }
 }

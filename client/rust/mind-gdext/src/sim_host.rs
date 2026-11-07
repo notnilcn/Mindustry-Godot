@@ -8597,6 +8597,106 @@ impl MindSimHost {
         )
     }
 
+    /// `Rules.placeRangeCheck` for the drawOverlapCheck gate
+    /// (`InputHandler.java:1500`). Rust-only seam for the placement overlay
+    /// (GAPS #47 residual).
+    pub fn place_range_check(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BuildRules>()
+            .is_some_and(|rules| rules.place_range_check)
+    }
+
+    /// `Build.getEnemyOverlap` plus `blocker.wasVisible` (`InputHandler.java:
+    /// 1500-1502`): the enemy building whose placement-check radius overlaps
+    /// `(x, y)`, as `(origin_x, origin_y, block_size, visible)`.
+    ///
+    /// `visible` folds the port's fog convention (`Building::was_visible` is
+    /// only written by the fog pass; with `Rules.fog` off every building is
+    /// visible, like Java's block renderer setting `wasVisible = true` for
+    /// every drawn building — same rule as `render/shadow.rs`). Rust-only seam
+    /// for the placement overlay (GAPS #47 residual).
+    pub fn placement_blocker(
+        &self,
+        x: i32,
+        y: i32,
+        block: BlockId,
+    ) -> Option<(i32, i32, i32, bool)> {
+        let world = &self.sim.ecs.0;
+        let def = self.content_snapshot.as_ref()?.block(block)?;
+        let rules = world
+            .get_resource::<mind_core::world::limits::BuildRules>()?
+            .clone();
+        let table = world.get_resource::<mind_core::world::block::BlockTable>()?;
+        // `Build.getEnemyOverlap(block, player.team(), cursorX, cursorY)`; the
+        // rules gate `placeRangeCheck` is the caller's (`drawOverlapCheck`).
+        let entity = mind_core::world::build::get_enemy_overlap(
+            world,
+            table,
+            &rules,
+            def,
+            self.sim.live_default_team(),
+            x,
+            y,
+        )?;
+        let building = world.get::<BuildingComp>(entity)?;
+        // `Building.wasVisible` (`BuildingComp.java:77`) is tracked on the
+        // richer `entities::comp::Building` component the runtime also puts on
+        // the entity (`BlockInstance::spawn`).
+        let was_visible = world
+            .get::<mind_core::entities::comp::Building>(entity)
+            .is_none_or(|building| building.was_visible);
+        let size = table
+            .get(building.block)
+            .map(|instance| instance.def.size.max(1))
+            .unwrap_or(1);
+        Some((
+            i32::from(building.pos.x()),
+            i32::from(building.pos.y()),
+            size,
+            was_visible || !rules.fog,
+        ))
+    }
+
+    /// `InputHandler.drawRebuildSelection`'s derelict half
+    /// (`InputHandler.java:1742-1752`): the deduped team-0 ("derelict")
+    /// buildings inside `area` that `canRepairDerelict` accepts, as
+    /// `(origin_x, origin_y, block, size, offset)` corner draw inputs.
+    ///
+    /// The scan/dedupe/predicate order is the Godot-free
+    /// [`mind_core::input::placement::rebuild_selection_tiles`]; `area` is the
+    /// unbounded `Placement.normalizeArea` of the B-selection. Rust-only seam
+    /// for the placement overlay (GAPS #47 residual).
+    pub fn rebuild_highlight_tiles(
+        &self,
+        area: mind_core::input::placement::NormalizeResult,
+    ) -> Vec<(i32, i32, BlockId, i32, f32)> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let ecs = &self.sim.ecs.0;
+        let grid = &self.sim.grid;
+        let origins = mind_core::input::placement::rebuild_selection_tiles(
+            area,
+            |x, y| {
+                let entity = grid.tiles.getn(x, y).and_then(|tile| tile.build)?;
+                let building = ecs.get::<BuildingComp>(entity)?;
+                Some((i32::from(building.pos.x()), i32::from(building.pos.y())))
+            },
+            |x, y| self.sim.derelict_repair_plan(x, y).is_some(),
+        );
+        origins
+            .into_iter()
+            .filter_map(|(x, y)| {
+                let entity = grid.tiles.getn(x, y).and_then(|tile| tile.build)?;
+                let building = ecs.get::<BuildingComp>(entity)?;
+                let def = content.block(building.block)?;
+                Some((x, y, building.block, def.size, def.offset))
+            })
+            .collect()
+    }
+
     // ---- G03 T3 build-plan / beam seams (Rust-only) ----
 
     /// One player-builder draw state (`BuilderComp.drawBuilding`, G03 T3).

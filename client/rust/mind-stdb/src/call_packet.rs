@@ -19,9 +19,9 @@
 //! only needs to prepend the kind byte. Ported calls (all server→client):
 //! `infoMessage`, `menu`/`followUpMenu`/`hideFollowUpMenu`, `menuBuilder`/
 //! `menuBuilderUpdate`/`hideMenuBuilder`, `setCameraPosition`, `sound`,
-//! `soundAt`, `effect`, `effectReliable`, `playMusic`, `traceInfo`, the three
-//! `label` and three `labelReliable` overloads, `removeWorldLabel`, `kick`
-//! (string and [`KickReason`] forms).
+//! `soundAt`, `effect` (colour and `Object data` overloads), `effectReliable`,
+//! `playMusic`, `traceInfo`, the three `label` and three `labelReliable`
+//! overloads, `removeWorldLabel`, `kick` (string and [`KickReason`] forms).
 //!
 //! Not ported (owned elsewhere or awaiting another subsystem): the animation
 //! snapshot family (`entitySnapshot`, `stateSnapshot`, `blockSnapshot`, ...),
@@ -30,10 +30,10 @@
 //! `UiEventKind` already carries over the relay.
 //!
 //! The `effect` overload with an `Object data` payload (`EffectCallPacket2`,
-//! `TypeIO.writeObject`) is ported as a body codec
-//! ([`encode_effect_data_body`]/[`decode_effect_data_body`], PAR-0578); it has
-//! no `CallKind` yet because the 23-kind module ABI would need an appended
-//! `CallPacketKind` variant (server-lane change).
+//! `TypeIO.writeObject`) is [`CallKind::EffectData`], the 24th kind appended by
+//! PAR-0578: the body codec is [`encode_effect_data_body`]/
+//! [`decode_effect_data_body`], and the module's appended
+//! `CallPacketKind::EffectData` maps onto it (`crate::calls::call_kind`).
 //!
 //! Malformed/unknown calls never panic: [`decode`] rejects them with
 //! [`CallError`] and [`CallChannel`] records the rejection while continuing to
@@ -100,11 +100,15 @@ pub enum CallKind {
     Kick,
     /// `Call.kick(NetConnection, KickReason)`.
     KickReason,
+    /// `Call.effect(Effect, float, float, float, Color, Object data)` — the
+    /// `EffectCallPacket2` overload (`TypeIO.writeObject` payload; PAR-0578).
+    /// Appended after the original 23 kinds.
+    EffectData,
 }
 
 impl CallKind {
     /// Every kind, in ABI order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::InfoMessage,
         Self::Menu,
         Self::FollowUpMenu,
@@ -128,6 +132,7 @@ impl CallKind {
         Self::RemoveWorldLabel,
         Self::Kick,
         Self::KickReason,
+        Self::EffectData,
     ];
 
     /// Wire ordinal.
@@ -166,6 +171,7 @@ impl CallKind {
             Self::RemoveWorldLabel => "RemoveWorldLabelCallPacket",
             Self::Kick => "KickCallPacket",
             Self::KickReason => "KickCallPacket2",
+            Self::EffectData => "EffectCallPacket2",
         }
     }
 
@@ -192,6 +198,7 @@ impl CallKind {
             }
             Self::RemoveWorldLabel => "removeWorldLabel",
             Self::Kick | Self::KickReason => "kick",
+            Self::EffectData => "effect",
         }
     }
 }
@@ -426,6 +433,10 @@ pub enum CallPacket {
         /// Reason enum.
         reason: KickReason,
     },
+    /// `Call.effect(Effect, float, float, float, Color, Object data)`: the
+    /// `EffectCallPacket2` overload with a tagged `TypeIO.writeObject` payload
+    /// (PAR-0578; `CallKind::EffectData`, ordinal 23).
+    EffectData(EffectDataBody),
 }
 
 impl CallPacket {
@@ -455,6 +466,7 @@ impl CallPacket {
             Self::RemoveWorldLabel { .. } => CallKind::RemoveWorldLabel,
             Self::Kick { .. } => CallKind::Kick,
             Self::KickReason { .. } => CallKind::KickReason,
+            Self::EffectData(_) => CallKind::EffectData,
         }
     }
 
@@ -639,6 +651,16 @@ impl CallPacket {
             Self::RemoveWorldLabel { id } => writer.i(*id),
             Self::Kick { reason } => typeio::write_string(&mut writer, reason.as_deref())?,
             Self::KickReason { reason } => typeio::write_kick(&mut writer, *reason),
+            Self::EffectData(body) => {
+                return encode_effect_data_body(
+                    body.effect,
+                    body.x,
+                    body.y,
+                    body.rotation,
+                    body.color,
+                    &body.data,
+                );
+            }
         }
         Ok(writer.into_bytes())
     }
@@ -827,6 +849,16 @@ impl CallPacket {
                 "reason": reason.name(),
                 "bundleKey": reason.bundle_key(),
                 "quiet": reason.quiet(),
+            }),
+            Self::EffectData(body) => serde_json::json!({
+                "effect": body.effect.map(|effect| effect.0),
+                "x": body.x,
+                "y": body.y,
+                "rotation": body.rotation,
+                "color": body.color.to_string(),
+                // No JSON TaggedValue projection yet; the debug form keeps the
+                // tag and payload visible without inventing a wire shape.
+                "data": format!("{:?}", body.data),
             }),
         }
     }
@@ -1049,6 +1081,12 @@ fn read_body(reader: &mut TypeIoReader<'_>, kind: CallKind) -> Result<CallPacket
         CallKind::KickReason => CallPacket::KickReason {
             reason: typeio::read_kick(reader)?,
         },
+        CallKind::EffectData => {
+            // The tagged-object body has its own reader/`expect_end`; hand it
+            // the whole remainder so a trailing byte is still rejected.
+            let rest = reader.bytes(reader.remaining())?;
+            CallPacket::EffectData(decode_effect_data_body(rest)?)
+        }
     };
     Ok(call)
 }
@@ -1308,7 +1346,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use crate::typeio::{MenuValue, UiKey, UiValue};
+    use crate::typeio::{MenuValue, TaggedValue, UiKey, UiValue};
 
     fn menu_result_node() -> UiNode {
         UiNode::new(UiKey::Table)
@@ -1463,6 +1501,22 @@ mod tests {
             CallPacket::KickReason {
                 reason: KickReason::Banned,
             },
+            CallPacket::EffectData(EffectDataBody {
+                effect: Some(EffectId(6)),
+                x: 3.0,
+                y: 4.0,
+                rotation: 45.0,
+                color: Rgba {
+                    r: 9,
+                    g: 8,
+                    b: 7,
+                    a: 6,
+                },
+                data: TaggedValue::ObjectArray(vec![
+                    TaggedValue::Int(1),
+                    TaggedValue::String(Some("payload".to_string())),
+                ]),
+            }),
         ]
     }
 
@@ -1493,9 +1547,14 @@ mod tests {
             assert!(kind.packet_name().contains("CallPacket"));
             assert!(!kind.call_name().is_empty());
         }
-        assert_eq!(CallKind::from_ordinal(23), None);
+        assert_eq!(CallKind::from_ordinal(24), None);
         assert_eq!(CallKind::LabelWithId.packet_name(), "LabelCallPacket2");
         assert_eq!(CallKind::LabelWithFlags.packet_name(), "LabelCallPacket3");
+        // PAR-0578 residual: the data overload appends, never reorders.
+        assert_eq!(CallKind::EffectData.ordinal(), 23);
+        assert_eq!(CallKind::EffectData.packet_name(), "EffectCallPacket2");
+        assert_eq!(CallKind::EffectData.call_name(), "effect");
+        assert_eq!(CallKind::ALL[23], CallKind::EffectData);
     }
 
     #[test]
@@ -1508,7 +1567,10 @@ mod tests {
             }))
         ));
         assert_eq!(decode(&[200]), Err(CallError::UnknownCall(200)));
-        assert_eq!(decode(&[23]), Err(CallError::UnknownCall(23)));
+        // The append-only ABI now ends at ordinal 23 (`EffectData`); the next
+        // ordinal is still unknown, and 23 with no body is a truncated call.
+        assert_eq!(decode(&[24]), Err(CallError::UnknownCall(24)));
+        assert!(matches!(decode(&[23]), Err(CallError::Codec(_))));
 
         // Truncated body (kind byte present, fields missing).
         let mut bytes = CallPacket::SetCameraPosition { x: 1.0, y: 2.0 }
@@ -1751,6 +1813,52 @@ mod effect_data_tests {
         body.push(0xff);
         assert!(matches!(
             decode_effect_data_body(&body),
+            Err(CallError::Codec(TypeIoError::TrailingBytes { .. }))
+        ));
+    }
+
+    /// The appended wire kind frames the same body: `[23][body]` decodes back
+    /// to `CallPacket::EffectData` and rejects a trailing byte, so a published
+    /// module row (kind `EffectData`) survives the client binder unchanged.
+    #[test]
+    fn effect_data_call_frames_and_decodes() {
+        use crate::call_packet::{CallKind, CallPacket, EffectDataBody, decode};
+
+        let body = EffectDataBody {
+            effect: Some(EffectId(5)),
+            x: 1.5,
+            y: 2.5,
+            rotation: 90.0,
+            color: color(),
+            data: TaggedValue::ObjectArray(vec![
+                TaggedValue::Int(3),
+                TaggedValue::String(Some("hit".to_string())),
+            ]),
+        };
+        let call = CallPacket::EffectData(body.clone());
+        let frame = call.encode().unwrap();
+        assert_eq!(frame[0], CallKind::EffectData.ordinal());
+        assert_eq!(frame[0], 23);
+        assert_eq!(
+            &frame[1..],
+            encode_effect_data_body(
+                body.effect,
+                body.x,
+                body.y,
+                body.rotation,
+                body.color,
+                &body.data
+            )
+            .unwrap()
+            .as_slice()
+        );
+        assert_eq!(decode(&frame).unwrap(), call);
+
+        // A trailing byte after a complete tagged body is still rejected.
+        let mut corrupt = frame;
+        corrupt.push(0);
+        assert!(matches!(
+            decode(&corrupt),
             Err(CallError::Codec(TypeIoError::TrailingBytes { .. }))
         ));
     }

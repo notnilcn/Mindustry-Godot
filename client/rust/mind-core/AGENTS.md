@@ -36,12 +36,12 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 | `maps` | Map registry (`Maps`), generators, previews, shuffle and planet/sector map glue. |
 | `math` | Noise, interpolation, `WindowedMean` and `ArcRand` helpers. |
 | `mods` | Mod manager: discovery, states, dependency ordering, import/remove, patching and assets. |
-| `platform` | `Platform` host seam, `HeadlessPlatform`, launch args and client hooks. |
+| `platform` | `Platform` host seam, `HeadlessPlatform`, launch args, `PerfCounter`, Intel/Nvidia GPU probes and the offline BeControl update check. |
 | `random` | Exact `java.util.Random` (`JavaRandom`) plus `Rand`. |
 | `render` | Godot-free render data/scan: layers, caches, `RenderQueue`, bands and visible-set scans. |
 | `scenario` | Scenario file schema and command-log JSONL. |
 | `schedule` | Reserved `SimSet` slot order and `build_p0_schedule`. |
-| `service` | Achievement/stat `GameService` seam and the no-op `NullService`. |
+| `service` | Achievement/stat `GameService` seam: `NullService` is the inert default, `LocalGameService` + `ServiceTracker` (in `game`) persist real local stats. |
 | `sim` | The spine: `Sim`, `SimBuilder`, `FixedStepRunner`, `SimClock`, `IoQueue`, the opt-in plan-07 live block runtime (`runtime`) and state dump. |
 | `time` | Arc `Time` parity: delta provider and delayed-run queue. |
 | `ui` | Godot-free UI data/format/model logic. |

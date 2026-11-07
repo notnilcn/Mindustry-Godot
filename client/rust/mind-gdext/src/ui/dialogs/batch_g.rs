@@ -889,6 +889,9 @@ struct ModsState {
     any_disabled: bool,
     /// The `@mod.import` chooser overlay.
     import_overlay: Option<Gd<Control>>,
+    /// Internal name whose `@mods.viewcontent` grid is expanded
+    /// (`ModsDialog.java:461-481` `currentContent`).
+    open_content: String,
 }
 
 /// `@mods` — the loaded-mod list (`ModsDialog.java`).
@@ -2007,7 +2010,7 @@ fn mods_add_mod_row(state: &Rc<RefCell<ModsState>>, st: &mut ModsState, entry: &
     }
 
     if st.open_details == mod_name {
-        mods_add_details(st, &mod_name);
+        mods_add_details(state, st, &mod_name);
     }
 }
 
@@ -2056,7 +2059,7 @@ fn mods_row_label(markup: &str) -> Gd<MindLabel> {
 }
 
 /// `showMod`: the expanded details block (upstream opens a BaseDialog).
-fn mods_add_details(st: &mut ModsState, mod_name: &str) {
+fn mods_add_details(state: &Rc<RefCell<ModsState>>, st: &mut ModsState, mod_name: &str) {
     let Some(mut list) = st.list.clone() else {
         return;
     };
@@ -2136,11 +2139,143 @@ fn mods_add_details(st: &mut ModsState, mod_name: &str) {
     }
     box_.add_child(&actions);
 
+    // `Seq<UnlockableContent> all = …` + `if(all.any()) … button("@mods.viewcontent")`
+    // (`ModsDialog.java:455-481`): the per-mod content grid. Java opens a second
+    // `BaseDialog`; the port expands the grid inside the details block (the same
+    // inline pattern as the details themselves).
+    let content = mods_content(mod_name);
+    if !content.is_empty() {
+        // code-instantiated: the view-content label is a bundle string.
+        let mut view_content = factory::button(&bt("@mods.viewcontent"));
+        view_content.set_custom_minimum_size(Vector2::new(300.0, 50.0));
+        {
+            let slot = state.clone();
+            let name = mod_name.to_string();
+            let callable = Callable::from_fn("mods_view_content", move |_args: &[&Variant]| {
+                if let Ok(mut st) = slot.try_borrow_mut() {
+                    mods_toggle_content(&slot, &mut st, &name);
+                }
+                Variant::nil()
+            });
+            view_content.connect("pressed", &callable);
+        }
+        box_.add_child(&view_content);
+        if st.open_content == mod_name {
+            box_.add_child(&mods_content_grid(&content));
+        }
+    }
+
     {
         let mut bound = list.bind_mut();
         bound.add(&box_).grow_x().pad(6.0);
         bound.row();
     }
+}
+
+/// `MindMods.content_for(name)` rows (`{type, name, stem, path}`); empty when
+/// the mod ships no content (Java's `all.any()` gate).
+fn mods_content(name: &str) -> Vec<VarDictionary> {
+    let Some(mut mods) = mods_node() else {
+        return Vec::new();
+    };
+    if !mods.has_method("content_for") {
+        return Vec::new();
+    }
+    mods.call("content_for", &[GString::from(name).to_variant()])
+        .try_to::<VarArray>()
+        .map(|rows| {
+            rows.iter_shared()
+                .filter_map(|row| row.try_to::<VarDictionary>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `d.cont.pane(cs -> …)` (`ModsDialog.java:466-479`): 50 px icon buttons in
+/// rows of 14 (Java: `min(width / Scl.scl(110), 14)`), each opening
+/// `ui.content.show(c)`.
+fn mods_content_grid(content: &[VarDictionary]) -> Gd<VBoxContainer> {
+    // code-instantiated: the grid is data-driven from the mod's content files.
+    let mut grid = VBoxContainer::new_alloc();
+    grid.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    grid.add_theme_constant_override("separation", 4);
+    for chunk in content.chunks(14) {
+        let mut row = HBoxContainer::new_alloc();
+        row.add_theme_constant_override("separation", 4);
+        for entry in chunk {
+            row.add_child(&mods_content_icon(entry));
+        }
+        grid.add_child(&row);
+    }
+    grid
+}
+
+/// One content icon (`cs.button(new TextureRegionDrawable(c.uiIcon), Styles.flati,
+/// iconMed, () -> ui.content.show(c))`, `ModsDialog.java:467-473`).
+fn mods_content_icon(entry: &VarDictionary) -> Gd<Button> {
+    let content_name = dict_string(entry, "name");
+    let content_type = dict_string(entry, "type");
+    // code-instantiated: one icon button per content record.
+    let mut button = Button::new_alloc();
+    button.set_theme_type_variation("flati");
+    button.set_custom_minimum_size(Vector2::new(50.0, 50.0));
+    let icon = format!("{content_type}-{content_name}-ui");
+    if let Some(texture) = kit::icon_texture(&icon) {
+        let mut image = TextureRect::new_alloc();
+        image.set_texture(&texture);
+        image.set_expand_mode(godot::classes::texture_rect::ExpandMode::IGNORE_SIZE);
+        image.set_stretch_mode(godot::classes::texture_rect::StretchMode::KEEP_ASPECT_CENTERED);
+        image.set_mouse_filter(MouseFilter::IGNORE);
+        image.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+        button.add_child(&image);
+    } else {
+        // No shipped icon: fall back to the content-type glyph.
+        let glyph_name = match content_type.as_str() {
+            "liquid" => "liquid",
+            "unit" => "units",
+            "block" => "blocks",
+            _ => "book",
+        };
+        let mut glyph = factory::glyph_label(glyph_name, 26, Color::WHITE);
+        glyph.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
+        glyph.set_mouse_filter(MouseFilter::IGNORE);
+        button.add_child(&glyph);
+    }
+    // `tooltip(c.localizedName)`; the port has no per-mod bundle key here, so
+    // the file stem is the honest label.
+    button.set_tooltip_text(&GString::from(dict_string(entry, "stem").as_str()));
+    {
+        let content_name = content_name.clone();
+        let callable = Callable::from_fn("mods_content_info", move |_args: &[&Variant]| {
+            let name = content_name.clone();
+            defer_action("mods_content_info_now", move || {
+                if let Some(node) = dialog_node("mods")
+                    && let Ok(dialog) = node.try_cast::<MindDialog>()
+                {
+                    super::batch_a::open_content_info(&dialog, &name);
+                }
+            });
+            Variant::nil()
+        });
+        button.connect("pressed", &callable);
+    }
+    button
+}
+
+/// `_toggle_content(mod_name)`: expand/collapse one mod's content grid.
+fn mods_toggle_content(state: &Rc<RefCell<ModsState>>, st: &mut ModsState, mod_name: &str) {
+    st.open_content = if st.open_content == mod_name {
+        String::new()
+    } else {
+        mod_name.to_string()
+    };
+    let query = st
+        .search
+        .clone()
+        .filter(|search| search.is_instance_valid())
+        .map(|search| search.get_text().to_string())
+        .unwrap_or_default();
+    mods_rebuild_list(state, st, &query);
 }
 
 /// `_toggle_details(mod_name)`.
