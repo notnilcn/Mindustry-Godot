@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T02:01:13Z",
+  "updated": "2026-11-07T02:30:03Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -32272,35 +32272,69 @@
     },
     "PAR-0608": {
       "title": "Player list is unreachable in-game: Binding.player_list (Tab) has no input handler and nothing calls MindPlayerListFragment.toggle",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "core/src/mindustry/input/DesktopInput.java:233-235 (Binding.playerList -> ui.listfrag.toggle); core/src/mindustry/ui/fragments/PlayerListFragment.java:40-84"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "client/rust/mind-gdext/src/input/desktop.rs (player_list arm), ui/fragments/player_list.rs (toggle/close_overlay/Escape)"
             }
           }
         ]
       },
       "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "Java client in a relay match: press Tab to show/hide the player list; Escape closes the row menu then the overlay"
+            }
+          }
+        ],
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0608"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
       },
-      "claimed_by": "hx-admin-ui",
-      "claimed_at": "2026-11-07T01:41:01Z",
+      "claimed_by": "hx-net4",
+      "claimed_at": "2026-11-07T02:29:20Z",
       "severity": "P1",
       "gap": "At ff278592 the player-list overlay builds in HudGroup and its admin actions are wired to the relay, but input/desktop.rs has no `player_list` dispatch arm and a repo grep finds no caller of MindPlayerListFragment.toggle. Java DesktopInput.java:233-235 runs `if(net.active() && keyTap(Binding.playerList) && (scene.getKeyboardFocus() == null || ...)) ui.listfrag.toggle();`; the port therefore never shows the fragment, so GAPS #39 row actions are unreachable in a live client.",
       "source": "GAPS.md#39",
       "evidence": [
-        "grep -rn \"player_list\" client/rust/mind-gdext/src/input client/rust/mind-gdext/src/ui/root.rs -> only mind_core binding ids",
-        "grep -rn MindPlayerListFragment client/rust/mind-gdext/src -> definition only"
+        "cargo test -p mind-gdext --lib player (25 passed; input::desktop::tests::player_list_binding_routes_to_the_fragment_toggle)",
+        "cargo test -p mind-gdext --lib net:: (15 passed)",
+        "cargo check -p mind-gdext",
+        "tools/run-cpu-intensive-task.sh --build (mind-gdext .so rebuilt)",
+        "headless res://scenes/tools/dialog_sweep_check.tscn: DIALOGCHECK: failed=0",
+        "headless boot: godot --headless --path client --quit exit 0"
+      ],
+      "fix": "input/desktop.rs routes Binding.player_list (Tab, DesktopInput.java:233-235) to Effect::ToggleFragment(\"player_list\") -> MindPlayerListFragment.toggle; the fragment owns the relay/in-game gate (relay_in_game) and the text-focus gate comes from DesktopBridge.handle. player_list.rs close paths go through close_overlay (hides, resets search, releases search focus, emits close_requested); Escape closes the floating row menu first, then the overlay, and defers to dialogs/console/minimap above it (MindUiRoot.on_escape).",
+      "notes": [
+        {
+          "at": "2026-11-07T02:29:33Z",
+          "by": "hx-net4",
+          "text": "Headless fix pass: wired Binding.player_list -> MindPlayerListFragment.toggle through the existing Effect::ToggleFragment fragment mediator (HudGroup/player_list), plus Escape close (row menu first) that yields to dialogs/console/minimap. Unit coverage: desktop bridge arm (in-game, text-focus/dialog gated, menu no-op) and the dialog-context projection. Java twin still pending: Tab/Escape in a live relay match."
+        }
       ]
     },
     "PAR-0609": {
@@ -32375,6 +32409,78 @@
         "cargo check -p mind-gdext: ok"
       ],
       "source": "GAPS.md #68/#47; docs/L07-editor-logic-residuals.md T4; docs/L-round-twin-verification.md item 11"
+    },
+    "PAR-0611": {
+      "title": "Admin blocker: Bans/Admins dialogs render 'none' (player_list opens them with no roster context) and unban/unadmin cannot target an offline identity",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "core/src/mindustry/ui/dialogs/BansDialog.java:23-44; ui/dialogs/AdminsDialog.java:23-48; core/src/mindustry/net/Administration.java (PlayerInfo)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "client/rust/mind-stdb/src/roster.rs (projections), mind-gdext/src/net/mod.rs (bans_json/admins_json/player_action), ui/fragments/player_list.rs (open_dialog context)"
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "Java server + 2 clients: ban an identity, disconnect it, open Bans/Admins and unban/unadmin the offline identity"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib net::"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-net4",
+      "claimed_at": "2026-11-07T02:29:38Z",
+      "severity": "P1",
+      "gap": "At 5fe2fd2f the relay roster subscribed all_bans/all_admins/all_whitelist but kept only identity sets, so MindNet had no bans_json()/admins_json() and MindPlayerListFragment.open_dialog(\"bans\"/\"admins\") passed an empty context: BansDialog/AdminsDialog setup() read no `banned`/`admins` rows and always rendered @server.bans.none/@server.admins.none even with records. Separately MindNet.player_action resolved every target through Roster::find (relay_member rows), so BansDialog.unbanPlayerID/AdminsDialog.unAdminPlayer on an offline banned identity failed with \"no player matching\" before the reducer ran.",
+      "source": "packet: net projections for the admin UI (GAPS #34/#39 remainder)",
+      "evidence": [
+        "cargo test -p mind-stdb --lib (109 passed)",
+        "cargo test -p mind-gdext --lib player (25 passed)",
+        "cargo test -p mind-gdext --lib net:: (15 passed)",
+        "cargo check -p mind-gdext",
+        "headless dialog_sweep_check: DIALOGCHECK: failed=0"
+      ],
+      "fix": "mind-stdb Roster keeps the admin_identity/player_ban/whitelist_entry subscription rows (BTreeMap by identity) and projects bans_json()/admins_json()/whitelist_json() as [{id,lastIP,lastName,reason,bannedBy,createdAt,expiresAt}] PlayerInfo-shaped rows (lastName falls back to the identity prefix; lastIP stays empty per deviation D2). MindNet exposes bans_json()/admins_json()/whitelist_json(); MindPlayerListFragment.open_dialog(\"bans\"/\"admins\") now hands the matching projection to MindUi.open_dialog as {banned:[...]}/{admins:[...]}, the keys dialogs/misc.rs roster_entries reads. MindNet.player_action resolves a full 64-char identity hex directly (is_identity_hex) before falling back to Roster::find, so unban/unadmin of an offline identity reaches admin_unban/admin_grant.",
+      "notes": [
+        {
+          "at": "2026-11-07T02:29:43Z",
+          "by": "hx-net4",
+          "text": "Landing: roster keeps full subscription rows; Bans/Admins dialogs get {banned}/{admins} context from the new MindNet projections; identity-direct player_action makes offline-identity unban/unadmin work. Residual: lastIP is empty (relay schema has no client address, D2); the all_bans/all_admins views are admin-gated server-side, so a non-admin host still sees the empty state."
+        }
+      ]
     }
   },
   "recipes": {

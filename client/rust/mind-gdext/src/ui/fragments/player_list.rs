@@ -23,9 +23,11 @@ use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::{LayoutPreset, SizeFlags};
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
-    Button, CenterContainer, Control, GridContainer, HBoxContainer, IControl, LineEdit,
-    PanelContainer, ScrollContainer, StyleBox, StyleBoxFlat, VBoxContainer,
+    Button, CenterContainer, Control, GridContainer, HBoxContainer, IControl, InputEvent,
+    InputEventKey, LineEdit, PanelContainer, ScrollContainer, StyleBox, StyleBoxFlat,
+    VBoxContainer,
 };
+use godot::global::Key;
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
@@ -125,8 +127,42 @@ impl IControl for MindPlayerListFragment {
     fn ready(&mut self) {
         self.base_mut().set_anchors_preset(LayoutPreset::FULL_RECT);
         self.base_mut().set_visible(false);
+        // Escape handling (`PlayerListFragment` has no upstream key handler:
+        // Java reserves Escape for the pause menu, but the port's overlay
+        // covers the HUD, so it consumes the key while up).
+        self.base_mut().set_process_unhandled_key_input(true);
         self.build();
         self.connect_prompts();
+    }
+
+    /// Escape dismisses the overlay (and its floating row menu first).
+    ///
+    /// `PlayerListFragment` is a plain HUD fragment in Java and never sees
+    /// Escape (`Control.java:746-750` opens the pause menu); PAR-0608's input
+    /// contract closes the port's overlay with the same key instead. A dialog,
+    /// the console or the fullscreen minimap is above the list, so those win
+    /// and `MindUiRoot.on_escape` handles the key (`_unhandled_key_input` must
+    /// not mark it handled to keep that path working).
+    fn unhandled_key_input(&mut self, event: Gd<InputEvent>) {
+        if !self.base().is_visible() {
+            return;
+        }
+        let Ok(key) = event.clone().try_cast::<InputEventKey>() else {
+            return;
+        };
+        if !key.is_pressed() || key.is_echo() || key.get_keycode() != Key::ESCAPE {
+            return;
+        }
+        if self.menu.as_ref().is_some_and(|menu| menu.is_visible()) {
+            self.close_menu();
+        } else if !self.overlay_above() {
+            self.close_overlay();
+        } else {
+            return;
+        }
+        if let Some(mut viewport) = self.base().get_viewport() {
+            viewport.set_input_as_handled();
+        }
     }
 }
 
@@ -184,12 +220,11 @@ impl MindPlayerListFragment {
         if visible && !relay_in_game() {
             return;
         }
-        self.base_mut().set_visible(visible);
         if visible {
+            self.base_mut().set_visible(true);
             self.rebuild();
         } else {
-            self.close_menu();
-            self.reset_search();
+            self.close_overlay();
         }
     }
 
@@ -260,12 +295,7 @@ impl MindPlayerListFragment {
         match action.to_string().as_str() {
             "server.bans" => self.open_dialog("bans"),
             "server.admins" => self.open_dialog("admins"),
-            _ => {
-                self.close_menu();
-                self.base_mut().set_visible(false);
-                self.reset_search();
-                self.base_mut().emit_signal("close_requested", &[]);
-            }
+            _ => self.close_overlay(),
         }
     }
 
@@ -762,16 +792,71 @@ impl MindPlayerListFragment {
         }
     }
 
-    /// `MindUi.open_dialog(name, "")` with the menu row's bundle key mapped to
+    /// Hides the overlay and resets its transient state (`toggle`'s close half,
+    /// the footer `@close` button and Escape). Releasing the search field's
+    /// focus matters: a hidden `LineEdit` that still owns keyboard focus would
+    /// keep swallowing game input.
+    fn close_overlay(&mut self) {
+        self.close_menu();
+        self.base_mut().set_visible(false);
+        self.reset_search();
+        if let Some(mut field) = self.search_field.clone() {
+            field.release_focus();
+        }
+        self.base_mut().emit_signal("close_requested", &[]);
+    }
+
+    /// Whether a `MindUi` dialog or a sibling HUD overlay (console, fullscreen
+    /// minimap) is above the player list. `MindUiRoot.on_escape` closes those
+    /// first (`Control.java:746-750`), so the fragment must not consume the
+    /// key then.
+    fn overlay_above(&self) -> bool {
+        if let Some(mut ui) = kit::ui()
+            && ui.has_method("has_dialog")
+            && ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
+        {
+            return true;
+        }
+        ["console", "minimap"].iter().any(|name| {
+            self.base()
+                .get_node_or_null(format!("../{name}").as_str())
+                .and_then(|node| node.try_cast::<Control>().ok())
+                .is_some_and(|control| control.is_visible())
+        })
+    }
+
+    /// `MindUi.open_dialog(name, ctx)` with the menu row's bundle key mapped to
     /// the manifest registry name (`@server.bans` -> `bans`).
+    ///
+    /// The Bans/Admins dialogs read their rows from the dialog context
+    /// (`BansDialog.setup` re-reads `netServer.admins.getBanned()`), so the
+    /// roster projections ride along: `MindNet.bans_json()`/`admins_json()`
+    /// (the `all_bans`/`all_admins` subscription rows) land on the `banned`/
+    /// `admins` keys `dialogs/misc.rs`'s `roster_entries` parses — without
+    /// them the dialogs render their "none" empty state.
     fn open_dialog(&self, key: &str) {
         let Some(mut ui) = kit::ui() else {
             return;
         };
+        let context = self.dialog_context(key);
         let _ = ui.call(
             "open_dialog",
-            &[GString::from(key).to_variant(), GString::new().to_variant()],
+            &[
+                GString::from(key).to_variant(),
+                GString::from(context.as_str()).to_variant(),
+            ],
         );
+    }
+
+    /// Context JSON for a dialog opened from the footer: `{"banned": [...]}`
+    /// from `MindNet.bans_json()` or `{"admins": [...]}` from
+    /// `MindNet.admins_json()`; empty for any other dialog.
+    fn dialog_context(&self, key: &str) -> String {
+        match key {
+            "bans" => roster_dialog_context("banned", &self.net_text("bans_json")),
+            "admins" => roster_dialog_context("admins", &self.net_text("admins_json")),
+            _ => String::new(),
+        }
     }
 
     /// `confirm_result`/`text_input_result` hooks (once per fragment).
@@ -844,6 +929,22 @@ fn clear_children(node: &Gd<VBoxContainer>) {
         let mut child = child.clone();
         child.queue_free();
     }
+}
+
+/// `MindUi.open_dialog` context for a roster dialog.
+///
+/// `key` is the context key the dialog controller reads
+/// (`RosterKind::context_key`: `banned`/`admins`); `payload` is the roster
+/// projection (`MindNet.bans_json`/`admins_json`). Malformed or absent payloads
+/// degrade to an empty array, which renders the dialog's `@server.*.none` row.
+fn roster_dialog_context(key: &str, payload: &str) -> String {
+    let rows = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .filter(serde_json::Value::is_array)
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let mut context = serde_json::Map::new();
+    context.insert(key.to_owned(), rows);
+    serde_json::Value::Object(context).to_string()
 }
 
 /// Parses `MindNet.players_json()` (`[]` on malformed/absent payloads).
@@ -1201,6 +1302,41 @@ mod tests {
         assert_eq!(header_key(0), "players");
         assert_eq!(header_key(1), "players.single");
         assert_eq!(header_key(2), "players");
+    }
+
+    #[test]
+    fn roster_dialog_contexts_carry_the_projection() {
+        // PAR-0122/admin blocker: `open_dialog("bans", ctx)` must hand the
+        // `BansDialog` its `banned` rows (the dialog's `setup` re-reads
+        // `netServer.admins`), otherwise it renders `@server.bans.none`.
+        let context = roster_dialog_context(
+            "banned",
+            r#"[{"id":"aa","lastIP":"","lastName":"Alice"},{"id":"bb","lastIP":"","lastName":"Bob"}]"#,
+        );
+        let value: serde_json::Value = serde_json::from_str(&context).expect("valid context");
+        assert_eq!(value["banned"].as_array().map(Vec::len), Some(2));
+        assert_eq!(value["banned"][0]["id"], "aa");
+        assert_eq!(value["banned"][1]["lastName"], "Bob");
+        // The admins dialog reads the `admins` key.
+        let context = roster_dialog_context("admins", r#"[{"id":"cc","lastName":"Carol"}]"#);
+        let value: serde_json::Value = serde_json::from_str(&context).expect("valid context");
+        assert_eq!(value["admins"][0]["lastName"], "Carol");
+        // Absent/malformed payloads degrade to an empty array (the dialog's
+        // empty state), never to a missing key or invalid JSON.
+        assert_eq!(
+            roster_dialog_context("banned", ""),
+            r#"{"banned":[]}"#,
+            "no relay facade"
+        );
+        assert_eq!(
+            roster_dialog_context("admins", "not-json"),
+            r#"{"admins":[]}"#
+        );
+        assert_eq!(
+            roster_dialog_context("banned", r#"{"id":"aa"}"#),
+            r#"{"banned":[]}"#,
+            "an object payload is not a row array"
+        );
     }
 
     #[test]

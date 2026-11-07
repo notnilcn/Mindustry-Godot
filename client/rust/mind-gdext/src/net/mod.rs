@@ -1006,6 +1006,34 @@ impl MindNet {
         GString::from(self.roster.players_json().to_string().as_str())
     }
 
+    /// Ban roster rows (`[{id, lastIP, lastName, reason, ...}]`) built from the
+    /// `all_bans` subscription rows (`player_ban`), for the player list's
+    /// `open_dialog("bans")` context (`BansDialog`).
+    ///
+    /// The rows are identity-direct: an offline banned identity has no
+    /// `relay_member` row, so the dialog cannot go through
+    /// [`Roster::find`]/[`Roster::players`]. `lastIP` stays empty (deviation
+    /// D2: the relay schema carries no client addresses).
+    #[func]
+    pub fn bans_json(&self) -> GString {
+        GString::from(self.roster.bans_json().to_string().as_str())
+    }
+
+    /// Admin roster rows (`[{id, lastIP, lastName, grantedBy, grantedAt}]`)
+    /// built from the `all_admins` subscription rows (`admin_identity`), for
+    /// the player list's `open_dialog("admins")` context (`AdminsDialog`).
+    #[func]
+    pub fn admins_json(&self) -> GString {
+        GString::from(self.roster.admins_json().to_string().as_str())
+    }
+
+    /// Whitelist roster rows (`[{id, lastIP, lastName, addedBy, addedAt}]`)
+    /// built from the `all_whitelist` subscription rows (`whitelist_entry`).
+    #[func]
+    pub fn whitelist_json(&self) -> GString {
+        GString::from(self.roster.whitelist_json().to_string().as_str())
+    }
+
     /// Relay-assigned team for the local player (`relay_member.team`,
     /// GAPS #33 / PAR-0545), or `-1` when unassigned/offline.
     ///
@@ -1894,12 +1922,17 @@ impl MindNet {
     /// (`PlayerListFragment` Ban/Kick/Trace/Team/Admin buttons, `PlayerListFragment.java:149-247`).
     fn dispatch_player_action(&mut self, action: GString, target: GString, value: i64) -> bool {
         let target = target.to_string();
-        let Some(entry) = self.roster.find(target.as_str()) else {
+        // GAPS #34/#39: the roster dialogs act on a `PlayerInfo.id` identity
+        // (`BansDialog`'s `unbanPlayerID`, `AdminsDialog`'s `unAdminPlayer`),
+        // and a banned/unadmin'd identity is usually offline (no
+        // `relay_member` row), so a full identity hex must resolve directly
+        // instead of through `Roster::find`.
+        let Some(identity_hex) = resolve_action_target(&self.roster, target.as_str()) else {
             log::warn!("player_action: no player matching `{target}`");
             return false;
         };
-        let Ok(identity) = mind_stdb::Identity::from_hex(&entry.identity) else {
-            log::warn!("player_action: bad identity `{}`", entry.identity);
+        let Ok(identity) = mind_stdb::Identity::from_hex(&identity_hex) else {
+            log::warn!("player_action: bad identity `{identity_hex}`");
             return false;
         };
         let Some(match_id) = self.session.match_id() else {
@@ -1954,7 +1987,7 @@ impl MindNet {
                 // (`NetServer.java:941`); the trace payload is the roster
                 // aggregation plus the module's `my_traces` answer.
                 if matches!(action, PlayerAction::RequestTrace) {
-                    self.publish_trace_call(&entry.identity);
+                    self.publish_trace_call(&identity_hex);
                 }
                 true
             }
@@ -2786,6 +2819,27 @@ fn roster_player_id(member_id: u64) -> u32 {
     u32::try_from(member_id).unwrap_or(u32::MAX)
 }
 
+/// Resolves a player-action target the way the console and the roster dialogs
+/// address one.
+///
+/// A full identity hex wins verbatim: Java's `BansDialog`/`AdminsDialog` call
+/// `unbanPlayerID`/`unAdminPlayer` with `PlayerInfo.id`
+/// (`BansDialog.java:37-42`, `AdminsDialog.java:37-46`), and an offline
+/// banned/unadmin'd identity has no `relay_member` row for [`Roster::find`] to
+/// match. Every other target keeps the name/identity-prefix roster lookup.
+fn resolve_action_target(roster: &Roster, target: &str) -> Option<String> {
+    let target = target.trim();
+    if is_identity_hex(target) {
+        return Some(target.to_ascii_lowercase());
+    }
+    roster.find(target).map(|entry| entry.identity)
+}
+
+/// Whether `text` is a full 64-char identity hex (`PlayerInfo.id`).
+fn is_identity_hex(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// `Administration.TraceInfo` wire payload for `Call.traceInfo` (PAR-0601),
 /// projected from the relay roster trace.
 ///
@@ -2812,14 +2866,85 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::{
-        DEFAULT_SERVER_ADDRESS, chat_facade_json, events_facade_json, parse_server_address,
-        relay_trace_info,
+        DEFAULT_SERVER_ADDRESS, chat_facade_json, events_facade_json, is_identity_hex,
+        parse_server_address, relay_trace_info, resolve_action_target,
     };
-    use mind_stdb::module_bindings::{ChatKind, EventKind, MatchChat, MatchEvent};
-    use mind_stdb::{ChatLog, EventBus, Identity, RowChange, Timestamp};
+    use mind_stdb::module_bindings::{
+        ChatKind, EventKind, MatchChat, MatchEvent, MemberRole, Player, RelayMember,
+    };
+    use mind_stdb::{ChatLog, EventBus, Identity, Roster, RowChange, Timestamp};
 
     fn identity(byte: u8) -> Identity {
         Identity::from_byte_array([byte; 32])
+    }
+
+    fn member(byte: u8) -> RelayMember {
+        let now = Timestamp::from_micros_since_unix_epoch(1_000_000);
+        RelayMember {
+            member_id: u64::from(byte),
+            match_id: 7,
+            identity: identity(byte),
+            joined_at: now,
+            role: MemberRole::Player,
+            team: Some(1),
+            connected: true,
+            ready: true,
+            last_seen_at: now,
+            kicked_reason: None,
+        }
+    }
+
+    fn roster_player(byte: u8, username: &str) -> Player {
+        let now = Timestamp::from_micros_since_unix_epoch(2_000_000);
+        Player {
+            identity: identity(byte),
+            username: username.to_owned(),
+            created_at: now,
+            last_seen_at: now,
+            protocol_version: 1,
+            color: 0xffff_ffff,
+        }
+    }
+
+    /// The admin roster dialogs dispatch `unban`/`unadmin` on a `PlayerInfo.id`
+    /// (`BansDialog.java:37-42` / `AdminsDialog.java:37-46`); that identity is
+    /// normally offline, so it must resolve without a `relay_member` row.
+    #[test]
+    fn player_actions_resolve_offline_identity_hex() {
+        let mut roster = Roster::new();
+        roster.apply_member(RowChange::Insert(member(2)));
+        roster.apply_player(RowChange::Insert(roster_player(2, "Alice")));
+        let alice = identity(2).to_hex().to_string();
+        // Roster name/identity-prefix lookups still work for live rows.
+        assert_eq!(resolve_action_target(&roster, "Alice"), Some(alice.clone()));
+        assert_eq!(
+            resolve_action_target(&roster, "alice "),
+            Some(alice.clone())
+        );
+        assert_eq!(resolve_action_target(&roster, "ali"), None);
+        assert_eq!(resolve_action_target(&roster, ""), None);
+        // An identity with no member/player row resolves verbatim (the ban row
+        // is the only record the dialogs have).
+        let offline = identity(9).to_hex().to_string();
+        assert_eq!(
+            resolve_action_target(&roster, &offline),
+            Some(offline.clone())
+        );
+        assert_eq!(
+            resolve_action_target(&roster, &offline.to_ascii_uppercase()),
+            Some(offline.clone()),
+            "identities normalize to lowercase hex"
+        );
+        // Only a full 64-char hex takes the direct path: a short prefix is a
+        // roster lookup, never a truncated identity.
+        assert!(!is_identity_hex(&"ab".repeat(31)));
+        assert!(!is_identity_hex(&format!("{}z", "ab".repeat(31))));
+        assert!(is_identity_hex(&"AB".repeat(32)));
+        assert_eq!(
+            resolve_action_target(&roster, &"cd".repeat(31)),
+            None,
+            "63 chars is not an identity"
+        );
     }
 
     fn chat_row(chat_id: u64, kind: ChatKind, text: &str) -> MatchChat {

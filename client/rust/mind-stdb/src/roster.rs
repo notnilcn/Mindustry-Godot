@@ -19,7 +19,7 @@
 //! columns in the relay schema, so `PlayerEntry::locale` stays empty and the
 //! trace shows session/kick/action history instead of IP history.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use spacetimedb_sdk::Identity;
 
@@ -232,14 +232,21 @@ impl PlayerAction {
 }
 
 /// Live relay player roster (`NetServer.admins` + `Groups.player` halves).
+///
+/// The admin/ban/whitelist columns keep their whole subscription rows (not just
+/// the identity) so the Bans/Admins dialogs can render a
+/// `[{id, lastIP, lastName, ...}]` roster: Java's `BansDialog`/`AdminsDialog`
+/// read `PlayerInfo.lastIP`/`lastName` (`BansDialog.java:30-36`,
+/// `AdminsDialog.java:30-36`). Deviation D2 still applies: the relay schema has
+/// no client addresses, so `lastIP` stays empty.
 #[derive(Debug, Default)]
 pub struct Roster {
     members: BTreeMap<String, RelayMember>,
     players: BTreeMap<String, Player>,
     sessions: BTreeMap<String, Vec<PlayerSession>>,
-    admins: BTreeSet<String>,
-    bans: BTreeSet<String>,
-    whitelist: BTreeSet<String>,
+    admins: BTreeMap<String, AdminIdentity>,
+    bans: BTreeMap<String, PlayerBan>,
+    whitelist: BTreeMap<String, WhitelistEntry>,
     kicks: Vec<MatchKick>,
     actions: Vec<AdminActionLog>,
     traces: Vec<PlayerTrace>,
@@ -312,50 +319,55 @@ impl Roster {
         }
     }
 
-    /// Applies an `admin_identity` change.
+    /// Applies an `admin_identity` change. The whole row is kept for the
+    /// Admins dialog projection.
     pub fn apply_admin(&mut self, change: RowChange<AdminIdentity>) {
-        let identity = match &change {
-            RowChange::Insert(row) | RowChange::Delete(row) => row.identity.to_hex().to_string(),
-            RowChange::Update { old, .. } => old.identity.to_hex().to_string(),
-        };
         match change {
-            RowChange::Delete(_) => {
-                self.admins.remove(&identity);
+            RowChange::Insert(row) => {
+                self.admins.insert(row.identity.to_hex().to_string(), row);
             }
-            _ => {
-                self.admins.insert(identity);
+            RowChange::Update { old, new } => {
+                self.admins.remove(&old.identity.to_hex().to_string());
+                self.admins.insert(new.identity.to_hex().to_string(), new);
+            }
+            RowChange::Delete(row) => {
+                self.admins.remove(&row.identity.to_hex().to_string());
             }
         }
     }
 
-    /// Applies a `player_ban` change.
+    /// Applies a `player_ban` change. The whole row is kept for the Bans dialog
+    /// projection (reason/expiry).
     pub fn apply_ban(&mut self, change: RowChange<PlayerBan>) {
-        let identity = match &change {
-            RowChange::Insert(row) | RowChange::Delete(row) => row.identity.to_hex().to_string(),
-            RowChange::Update { old, .. } => old.identity.to_hex().to_string(),
-        };
         match change {
-            RowChange::Delete(_) => {
-                self.bans.remove(&identity);
+            RowChange::Insert(row) => {
+                self.bans.insert(row.identity.to_hex().to_string(), row);
             }
-            _ => {
-                self.bans.insert(identity);
+            RowChange::Update { old, new } => {
+                self.bans.remove(&old.identity.to_hex().to_string());
+                self.bans.insert(new.identity.to_hex().to_string(), new);
+            }
+            RowChange::Delete(row) => {
+                self.bans.remove(&row.identity.to_hex().to_string());
             }
         }
     }
 
-    /// Applies a `whitelist_entry` change.
+    /// Applies a `whitelist_entry` change. The whole row is kept for the
+    /// whitelist projection.
     pub fn apply_whitelist(&mut self, change: RowChange<WhitelistEntry>) {
-        let identity = match &change {
-            RowChange::Insert(row) | RowChange::Delete(row) => row.identity.to_hex().to_string(),
-            RowChange::Update { old, .. } => old.identity.to_hex().to_string(),
-        };
         match change {
-            RowChange::Delete(_) => {
-                self.whitelist.remove(&identity);
+            RowChange::Insert(row) => {
+                self.whitelist
+                    .insert(row.identity.to_hex().to_string(), row);
             }
-            _ => {
-                self.whitelist.insert(identity);
+            RowChange::Update { old, new } => {
+                self.whitelist.remove(&old.identity.to_hex().to_string());
+                self.whitelist
+                    .insert(new.identity.to_hex().to_string(), new);
+            }
+            RowChange::Delete(row) => {
+                self.whitelist.remove(&row.identity.to_hex().to_string());
             }
         }
     }
@@ -455,17 +467,17 @@ impl Roster {
 
     /// Whether an identity holds a global admin record.
     pub fn is_admin(&self, identity: &str) -> bool {
-        self.admins.contains(identity)
+        self.admins.contains_key(identity)
     }
 
     /// Whether an identity holds a ban record.
     pub fn is_banned(&self, identity: &str) -> bool {
-        self.bans.contains(identity)
+        self.bans.contains_key(identity)
     }
 
     /// Whether an identity holds a whitelist record.
     pub fn is_whitelisted(&self, identity: &str) -> bool {
-        self.whitelist.contains(identity)
+        self.whitelist.contains_key(identity)
     }
 
     /// `NetServer.assigner` (`NetServer.java:57-75`): PvP balancing across the
@@ -559,14 +571,105 @@ impl Roster {
             last_join_micros: last_join,
             kicks,
             actions,
-            banned: self.bans.contains(&identity),
-            whitelisted: self.whitelist.contains(&identity),
+            banned: self.bans.contains_key(&identity),
+            whitelisted: self.whitelist.contains_key(&identity),
         }
     }
 
     /// The player list as a JSON array (UI `player_list_json`).
     pub fn players_json(&self) -> serde_json::Value {
         serde_json::Value::Array(self.players().iter().map(PlayerEntry::to_json).collect())
+    }
+
+    /// The ban roster as `Administration.PlayerInfo`-shaped JSON rows for
+    /// `MindNet.bans_json()` and the `BansDialog` context
+    /// (`[{id, lastIP, lastName, reason, bannedBy, createdAt, expiresAt}]`).
+    ///
+    /// `id` is the identity the unban reducer takes (`BansDialog`'s
+    /// `unbanPlayerID(info.id)`); it exists even when the identity is offline,
+    /// which is why the roster dialogs cannot resolve through `relay_member`
+    /// rows alone. Deviation D2 keeps `lastIP` empty (the relay schema has no
+    /// client addresses); the ban row's metadata rides along for the console/UI.
+    pub fn bans_json(&self) -> serde_json::Value {
+        let mut rows: Vec<(&String, &PlayerBan)> = self.bans.iter().collect();
+        rows.sort_by(|left, right| {
+            self.record_name(left.0)
+                .cmp(&self.record_name(right.0))
+                .then_with(|| left.0.cmp(right.0))
+        });
+        serde_json::Value::Array(
+            rows.into_iter()
+                .map(|(identity, ban)| {
+                    serde_json::json!({
+                        "id": identity,
+                        "lastIP": "",
+                        "lastName": self.record_name(identity),
+                        "reason": ban.reason,
+                        "bannedBy": ban.banned_by.to_hex().to_string(),
+                        "createdAt": ban.created_at.to_micros_since_unix_epoch(),
+                        "expiresAt": ban.expires_at.map(|at| at.to_micros_since_unix_epoch()),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// The global admin roster as JSON rows for `MindNet.admins_json()` and the
+    /// `AdminsDialog` context (`[{id, lastIP, lastName, grantedBy, grantedAt}]`).
+    pub fn admins_json(&self) -> serde_json::Value {
+        let mut rows: Vec<(&String, &AdminIdentity)> = self.admins.iter().collect();
+        rows.sort_by(|left, right| {
+            self.record_name(left.0)
+                .cmp(&self.record_name(right.0))
+                .then_with(|| left.0.cmp(right.0))
+        });
+        serde_json::Value::Array(
+            rows.into_iter()
+                .map(|(identity, admin)| {
+                    serde_json::json!({
+                        "id": identity,
+                        "lastIP": "",
+                        "lastName": self.record_name(identity),
+                        "grantedBy": admin.granted_by.to_hex().to_string(),
+                        "grantedAt": admin.granted_at.to_micros_since_unix_epoch(),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// The whitelist as JSON rows for `MindNet.whitelist_json()`
+    /// (`[{id, lastIP, lastName, addedBy, addedAt}]`).
+    pub fn whitelist_json(&self) -> serde_json::Value {
+        let mut rows: Vec<(&String, &WhitelistEntry)> = self.whitelist.iter().collect();
+        rows.sort_by(|left, right| {
+            self.record_name(left.0)
+                .cmp(&self.record_name(right.0))
+                .then_with(|| left.0.cmp(right.0))
+        });
+        serde_json::Value::Array(
+            rows.into_iter()
+                .map(|(identity, entry)| {
+                    serde_json::json!({
+                        "id": identity,
+                        "lastIP": "",
+                        "lastName": self.record_name(identity),
+                        "addedBy": entry.added_by.to_hex().to_string(),
+                        "addedAt": entry.added_at.to_micros_since_unix_epoch(),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// `PlayerInfo.lastName`: the known username, else the identity prefix the
+    /// player list also falls back to, so an offline roster row still renders.
+    fn record_name(&self, identity: &str) -> String {
+        self.players
+            .get(identity)
+            .map(|player| player.username.clone())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| identity.chars().take(8).collect())
     }
 
     /// The trace as JSON (trace dialog / console).
@@ -612,7 +715,7 @@ impl Roster {
                 .map(|player| player.username.clone())
                 .unwrap_or_default(),
             team: member.team,
-            admin: self.admins.contains(&identity),
+            admin: self.admins.contains_key(&identity),
             connected: member.connected,
             role: format!("{:?}", member.role).to_ascii_lowercase(),
             locale: String::new(),
@@ -908,6 +1011,132 @@ mod tests {
         let trace = roster.trace(&identity_hex);
         assert!(!trace.banned);
         assert!(trace.whitelisted);
+    }
+
+    /// The Bans/Admins/Whitelist dialogs need `PlayerInfo`-shaped rows for
+    /// identities that are not live members (an offline banned identity must
+    /// still render, and its `id` is what unban/unadmin dispatches).
+    #[test]
+    fn admin_roster_projections_render_offline_identities() {
+        let mut roster = Roster::new();
+        let now = Timestamp::from_micros_since_unix_epoch(3_000_000);
+        let expires = Timestamp::from_micros_since_unix_epoch(9_000_000);
+        // Bob is a known player with an admin record.
+        roster.apply_player(RowChange::Insert(player(3, "Bob")));
+        roster.apply_admin(RowChange::Insert(AdminIdentity {
+            identity: identity(3),
+            granted_by: identity(1),
+            granted_at: now,
+        }));
+        // Alice is banned across sessions; she has no `relay_member` row.
+        roster.apply_player(RowChange::Insert(player(2, "Alice")));
+        roster.apply_ban(RowChange::Insert(PlayerBan {
+            ban_id: 1,
+            identity: identity(2),
+            reason: "spam".to_owned(),
+            banned_by: identity(1),
+            created_at: now,
+            expires_at: Some(expires),
+        }));
+        // Identity 5 was never seen: only its ban row exists.
+        roster.apply_ban(RowChange::Insert(PlayerBan {
+            ban_id: 2,
+            identity: identity(5),
+            reason: "grief".to_owned(),
+            banned_by: identity(1),
+            created_at: now,
+            expires_at: None,
+        }));
+        roster.apply_whitelist(RowChange::Insert(WhitelistEntry {
+            identity: identity(2),
+            added_by: identity(1),
+            added_at: now,
+        }));
+
+        let bans = roster.bans_json();
+        let rows = bans.as_array().expect("array");
+        assert_eq!(rows.len(), 2);
+        let row_for = |byte: u8| {
+            let id = identity(byte).to_hex().to_string();
+            rows.iter()
+                .find(|row| row["id"] == id)
+                .expect("row for identity")
+        };
+        let alice = row_for(2);
+        assert_eq!(alice["lastName"], "Alice");
+        assert_eq!(alice["lastIP"], "", "deviation D2: no relay addresses");
+        assert_eq!(alice["reason"], "spam");
+        assert_eq!(alice["bannedBy"], identity(1).to_hex().to_string());
+        assert_eq!(alice["createdAt"], 3_000_000);
+        assert_eq!(alice["expiresAt"], 9_000_000);
+        // An unseen identity still projects a row: `lastName` falls back to the
+        // identity prefix so the dialog never renders a blank entry.
+        let unseen = row_for(5);
+        assert_eq!(unseen["lastName"], identity(5).to_hex().to_string()[..8]);
+        assert_eq!(unseen["expiresAt"], serde_json::Value::Null);
+        // Rows sort by `lastName`, so the unseen identity's prefix comes first.
+        assert_eq!(rows[0]["id"], identity(5).to_hex().to_string());
+        assert_eq!(rows[1]["id"], identity(2).to_hex().to_string());
+
+        let admins = roster.admins_json();
+        let rows = admins.as_array().expect("array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], identity(3).to_hex().to_string());
+        assert_eq!(rows[0]["lastName"], "Bob");
+        assert_eq!(rows[0]["grantedBy"], identity(1).to_hex().to_string());
+        assert_eq!(rows[0]["grantedAt"], 3_000_000);
+
+        let whitelist = roster.whitelist_json();
+        let rows = whitelist.as_array().expect("array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], identity(2).to_hex().to_string());
+        assert_eq!(rows[0]["lastName"], "Alice");
+        assert_eq!(rows[0]["addedAt"], 3_000_000);
+
+        // Updates replace the row in place (the reducer rewrites the record),
+        // and deletes drop it.
+        let mut updated = PlayerBan {
+            ban_id: 1,
+            identity: identity(2),
+            reason: "spam".to_owned(),
+            banned_by: identity(1),
+            created_at: now,
+            expires_at: Some(expires),
+        };
+        updated.reason = String::from("spam, appeal denied");
+        roster.apply_ban(RowChange::Update {
+            old: PlayerBan {
+                reason: String::from("spam"),
+                ..updated.clone()
+            },
+            new: updated,
+        });
+        let updated = roster.bans_json();
+        let alice = updated.as_array().expect("array");
+        let alice = alice
+            .iter()
+            .find(|row| row["id"] == identity(2).to_hex().to_string())
+            .expect("Alice's row");
+        assert_eq!(alice["reason"], "spam, appeal denied");
+        assert!(roster.is_banned(&identity(2).to_hex().to_string()));
+        roster.apply_ban(RowChange::Delete(PlayerBan {
+            ban_id: 2,
+            identity: identity(5),
+            reason: String::new(),
+            banned_by: identity(1),
+            created_at: now,
+            expires_at: None,
+        }));
+        assert_eq!(roster.bans_json().as_array().map(Vec::len), Some(1));
+        roster.clear();
+        assert!(roster.bans_json().as_array().is_some_and(Vec::is_empty));
+        assert!(roster.admins_json().as_array().is_some_and(Vec::is_empty));
+        assert!(
+            roster
+                .whitelist_json()
+                .as_array()
+                .is_some_and(Vec::is_empty)
+        );
     }
 
     /// Every action names its reducer and dispatches through the connector

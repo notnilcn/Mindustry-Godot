@@ -1285,6 +1285,18 @@ impl DesktopBridge {
                     .push(Effect::ToggleFragment(String::from("chat")));
                 self.fire_hotkey(name);
             }
+            "player_list" => {
+                // `DesktopInput.java:233-235`: `net.active() &&
+                // keyTap(Binding.playerList)` -> `ui.listfrag.toggle()`
+                // (`Binding.playerList` defaults to Tab). `handle` already
+                // drops text-focus/dialog edges (`scene.getKeyboardFocus() ==
+                // null`), and the fragment owns the relay/in-game gate
+                // (`relay_in_game`, from `net.active() && state.isGame()`), so
+                // the bridge only routes the toggle.
+                self.effects
+                    .push(Effect::ToggleFragment(String::from("player_list")));
+                self.fire_hotkey(name);
+            }
             "research" => {
                 // `DesktopInput.java:446-461`: J/N toggle campaign screens only
                 // while a campaign sector is live.
@@ -4687,6 +4699,61 @@ mod tests {
                 .contains(&Effect::ToggleFragment(String::from("chat")))
         );
         bridge.handle(&bindings, RawEvent::key_up("enter"));
+    }
+
+    #[test]
+    fn player_list_binding_routes_to_the_fragment_toggle() {
+        // PAR-0608: `DesktopInput.java:233-235` runs
+        // `ui.listfrag.toggle()` on `keyTap(Binding.playerList)` (Tab). Before
+        // the fix the `player_list` binding fell through `dispatch_action`'s
+        // `_ => {}` arm, so `MindPlayerListFragment.toggle` was never called.
+        assert_eq!(BindingState::new().name(ids::PLAYER_LIST), Some("tab"));
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        let mut bindings = BindingState::new();
+        bindings.set_key(ids::PLAYER_LIST, "tab");
+
+        bridge.handle(&bindings, RawEvent::key_down("tab"));
+        assert_eq!(bridge.last_action, "player_list");
+        assert!(
+            bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("player_list")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("tab"));
+
+        // `scene.getKeyboardFocus() == null`: a focused field/dialog consumes
+        // the edge (except Java's in-list focus clause, which the fragment's
+        // own search field owns).
+        bridge.take_effects();
+        bridge.text_focus = true;
+        bridge.handle(&bindings, RawEvent::key_down("tab"));
+        assert!(
+            !bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("player_list")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("tab"));
+        bridge.text_focus = false;
+        bridge.ui_dialog = true;
+        bridge.handle(&bindings, RawEvent::key_down("tab"));
+        assert!(
+            !bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("player_list")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("tab"));
+        bridge.ui_dialog = false;
+
+        // Outside a game (menu) the binding does not run (`state.isGame()`).
+        bridge.in_game = false;
+        bridge.handle(&bindings, RawEvent::key_down("tab"));
+        assert!(
+            !bridge
+                .effects
+                .contains(&Effect::ToggleFragment(String::from("player_list")))
+        );
+        bridge.handle(&bindings, RawEvent::key_up("tab"));
     }
 
     #[test]
