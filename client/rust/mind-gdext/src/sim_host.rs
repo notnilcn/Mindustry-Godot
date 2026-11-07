@@ -10265,6 +10265,14 @@ impl MindSimHost {
         }
         out
     }
+
+    /// Interplanetary Accelerator draw rows (`AcceleratorBuild.draw`,
+    /// world/blocks/campaign/Accelerator.java:140-236) for
+    /// `render/accelerator.rs`: the live `CampaignState`/`Building` counters plus
+    /// the block's drawn footprint. Rust-only seam (like `pad_draws`).
+    pub fn accelerator_draws(&mut self) -> Vec<mind_core::render::accelerator::AcceleratorDraw> {
+        mind_core::render::accelerator::accelerator_rows(&mut self.sim.ecs.0)
+    }
 }
 
 /// `UnitFactory.draw` preview numbers: `(unit, progress / plan.time)` for the

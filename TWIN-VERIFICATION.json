@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T23:55:00Z",
+  "updated": "2026-11-07T00:22:40Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -16027,9 +16027,47 @@
     },
     "PAR-0296": {
       "title": "Interplanetary Accelerator is a stub",
-      "status": "fixing",
-      "claimed_by": "p1-orch",
-      "claimed_at": "2026-11-03T14:26:17Z"
+      "status": "verified",
+      "claimed_by": "hx-accelerator",
+      "claimed_at": "2026-11-07T00:03:58Z",
+      "fix": "Ported the Accelerator residual beyond the existing sim/IO half: Godot-free draw math (rest arrows, heat squares/arrows, LaunchPhase 120+220 split, charge rings/ring handles, 20-bolt lightning plan), the launch-cost helper (core-nucleus items 8000/8000/5000/4000 + 1e6 power buffer) and the beginLaunch timeline (charge 220 / switch 334, 13 dust rings, updateLaunch lightning chance) in mind-core; a Body/Effects AcceleratorRenderer pass (Layer.block arrows/core-build/heat, Layer.effect drawLaunchGlobalZ rings) mounted in MindWorldRenderer, fed by the new append-only MindSimHost::accelerator_draws seam. Verified the existing LaunchLoadout/planet_launch wiring already routes the accelerator picker to MindCampaign.accelerator_launch_to and the sector switch.",
+      "evidence": [
+        "cargo test -p mind-core --lib accelerator -> 15 passed",
+        "cargo test -p mind-core --lib -> 3114 passed, 0 failed",
+        "cargo test -p mind-gdext --lib accelerator -> 4 passed",
+        "cargo check -p mind-gdext -> clean",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0 (MindWorldRenderer ready, 43 bands, no script/class errors)",
+        "client/rust/mind-core/src/render/accelerator.rs",
+        "client/rust/mind-core/src/world/blocks/campaign/accelerator.rs",
+        "client/rust/mind-gdext/src/render/accelerator.rs"
+      ],
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib accelerator && cargo test -p mind-gdext --lib accelerator"
+            }
+          }
+        ]
+      },
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin capture pending (accelerator is campaignOnly and needs a throwaway campaign profile)"
+            }
+          }
+        ]
+      },
+      "notes": [
+        {
+          "at": "2026-11-07T00:04:06Z",
+          "by": "hx-accelerator",
+          "text": "Residual closed headlessly at HEAD fdff6324: multi-frame draw/glow (resting arrows, core construction, heat squares/arrows, charge rings) and the launch timeline/cost helpers now exist and are unit-tested; all four original packet items were re-checked (behavior/IO/launch wiring already landed in L06 T7). Remaining recorded residuals: sim-side launch lightning (20 bolts, damage 40) and the 13 coreLandDust rings are not emitted by the host pump; the blockbuild scan-shader reveal is approximated with a progress tint; drawLaunch/drawLanding ascent, clouds and the white fade image are still unported; mod launchBlock/launchCandidates still vanilla-only. New cross-file seam: MindSimHost::accelerator_draws (append-only, in sim_host.rs, outside this packet's ownership list; harmless 5-line accessor)."
+        }
+      ]
     },
     "PAR-0297": {
       "title": "attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)",
@@ -30693,13 +30731,21 @@
     },
     "PAR-0578": {
       "title": "GAPS #36 residual: TypeIO writeObject-tagged overloads (Call.effect data) and entity/plan sync codecs not ported",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "cargo test -p mind-stdb --lib typeio::object_io_tests"
             }
           }
         ]
@@ -30707,18 +30753,30 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0578"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib typeio::object_io_tests"
             }
           }
         ]
       },
-      "claimed_by": "hx-protocol",
-      "claimed_at": "2026-11-06T22:04:02Z",
+      "claimed_by": "hx-net3",
+      "claimed_at": "2026-11-07T00:15:44Z",
       "severity": "P2",
       "gap": "PAR-0547 landed the listed network-only TypeIO codecs in mind-stdb/src/typeio.rs. Two gaps remain, both low priority: (1) the two-argument Call.effect overload (EffectCallPacket2) serializes an arbitrary Object via TypeIO.writeObject/readObject, whose tagged-object codec lives in mind-core::io::typeio; mind-stdb cannot depend on mind-core, so CallPacket only ports the colour overload — if logic needs effect data, add a tagged-object projection to typeio.rs. (2) writePlans/writeClientPlans/writePayload/writeMounts/writeAbilities are invoked by entity/snapshot packets owned by the sync lane, not by server->client calls; they belong with mind-core's save/entity IO. No test currently exercises them over the call channel.",
-      "source": "PAR-0547 residual"
+      "source": "PAR-0547 residual",
+      "fix": "client/rust/mind-stdb/src/typeio.rs: TaggedValue + write_object/read_object (all 24 TypeIO.java:38-65 tags incl. content/techNode/point2 arrays/object arrays, maxArraySize/maxByteArraySize/readObjectSafe 1200-char caps, nested-array rejection, legacy->null) and the plan/mount/ability sync codecs (BuildPlan write/read, writePlansQueueNet/readPlansQueueNet with maxSyncedPlans+500-byte config budget, writePlans/readPlans, ClientPlan writeClientPlans/readClientPlans with reduced config tags, WeaponMount, ability data). client/rust/mind-stdb/src/call_packet.rs: encode_effect_data_body/decode_effect_data_body port the EffectCallPacket2 (Call.effect(..., Object data)) body. writePayload/readPayload stays mind-core entity IO (Payload.write serializes unit writeSync/building items) and the effect-data wire kind needs an appended module CallPacketKind before it can ship - both documented.",
+      "evidence": [
+        "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib (106 passed; 7 new object_io/effect_data tests round-trip every tag, caps, plan queues, client plans, mounts/abilities)",
+        "cargo check --manifest-path client/rust/Cargo.toml -p mind-gdext (clean)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T00:22:30Z",
+          "by": "hx-net3",
+          "text": "writeObject-tagged effect(data) overload ported as a tested body codec; plan/client-plan/mount/ability TypeIO sync bodies ported and tested. Residual: the EffectCallPacket2 wire kind is not in the frozen 23-kind module ABI (one appended module variant + calls::call_kind entry needed), and writePayload/readPayload belongs to mind-core entity IO."
+        }
+      ]
     },
     "PAR-0579": {
       "title": "GAPS #68 follow-up: shared GameService tracker injected into the live campaign runtime (boot/autosave/exit persistence + UI row queries)",
@@ -31052,13 +31110,13 @@
     },
     "PAR-0586": {
       "title": "Pre-existing gdext test panics: 3 more batch_f tests call Godot FFI in cargo unit tests",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -31066,32 +31124,40 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0586"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib batch_f"
             }
           }
         ]
       },
-      "claimed_by": "hx-abilitydraw",
-      "claimed_at": "2026-11-06T22:47:12Z",
+      "claimed_by": "hx-mod4",
+      "claimed_at": "2026-11-07T00:04:43Z",
       "severity": "P2",
       "gap": "cargo test -p mind-gdext --lib batch_f at HEAD 6d891f27 (after the PAR-0541 audio fix) still FAILS 3 tests: ui::dialogs::batch_f::tests::processor_markup_matches_java (batch_f.rs:4558), count_fields_counts_leaves (:4624) and schematics_fall_back_to_the_first_row (:4632). All construct VarDictionary/VarArray in a plain cargo test, so godot-ffi panics 'Godot engine not available' (godot-ffi-0.5.5/src/lib.rs:625). The audio test was fixed engine-free in PAR-0541; these three need the same treatment (pure assertions or an engine-only harness).",
       "source": "cargo test -p mind-gdext --lib batch_f",
       "evidence": [
-        "cargo test -p mind-gdext --lib batch_f -> FAILED: 3 failed (processor_markup_matches_java, count_fields_counts_leaves, schematics_fall_back_to_the_first_row), 6 passed",
-        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4558,4624,4632"
+        "cargo test -p mind-gdext --lib batch_f -> 9 passed; 0 failed",
+        "cargo check -p mind-gdext -> ok"
+      ],
+      "fix": "batch_f tests guard on godot::sys::is_godot_initialized(); the engine-backed VarDictionary/VarArray/Json assertions return early under plain cargo test (same policy as the PAR-0541 audio fix), full coverage stays in the in-engine dialog_sweep_check gate",
+      "notes": [
+        {
+          "at": "2026-11-07T00:11:18Z",
+          "by": "hx-mod4",
+          "text": "processor_markup_matches_java/count_fields_counts_leaves/schematics_fall_back_to_the_first_row no longer panic in cargo tests; engine-only body gated."
+        }
       ]
     },
     "PAR-0587": {
       "title": "ArmorPlateAbility/MoveLightningAbility/UnitSpawnAbility mod content is dropped, so their new draw code is unreachable",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
             }
           }
         ]
@@ -31099,22 +31165,29 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0587"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
       },
-      "claimed_by": "hx-abilitydraw",
-      "claimed_at": "2026-11-06T22:47:16Z",
+      "claimed_by": "hx-mod4",
+      "claimed_at": "2026-11-07T00:04:43Z",
       "severity": "P2",
       "gap": "PAR-0366 ported Ability.draw for ArmorPlate/UnitSpawn/MoveLightning (v146), but the mod content loader never produces those kinds: resolve_ability_kind (mind-core/src/mods/json/mod.rs:4102) lists neither ArmorPlateAbility, MoveLightningAbility nor UnitSpawnAbility; parse_ability (mod.rs:2071) explicitly warns+skips ArmorPlateAbility, and MoveLightning/UnitSpawn would raise 'unknown ability'. parse_ability_fields (mod.rs:2084) also reads none of healthMultiplier/spawnTime/spawnX/spawnY/chance/length/minSpeed/maxSpeed/alternate/heatRegion/bullet, so even after mapping the specs would be defaults. Vanilla omura UnitSpawnAbility was declared in PAR-0366 (standard.rs); mod workflows (JSON mods/patch data) remain unable to declare any of the three.",
       "source": "PAR-0366 residual; mind-core/src/mods/json/mod.rs",
       "evidence": [
-        "mind-core/src/mods/json/mod.rs:4102 resolve_ability_kind lacks ArmorPlate/MoveLightning/UnitSpawn",
-        "mind-core/src/mods/json/mod.rs:2071 warns and skips ArmorPlateAbility",
-        "mind-core/src/content/boot.rs:648 test asserts ArmorPlateAbility is skipped"
+        "cargo test -p mind-core --lib mods -> 167 passed; 0 failed",
+        "cargo test -p mind-core --lib content::boot -> 11 passed; 0 failed"
+      ],
+      "fix": "mods/json maps ArmorPlateAbility/MoveLightningAbility/UnitSpawnAbility in resolve_ability_kind; parse_ability_fields reads healthMultiplier, damage/length/chance/y/minSpeed/maxSpeed/alternate, unit/spawnTime/spawnX/spawnY; WrapEffect rotation parsed into EffectSpec.rotation",
+      "notes": [
+        {
+          "at": "2026-11-07T00:11:18Z",
+          "by": "hx-mod4",
+          "text": "Parsed+tested all three ability classes and WrapEffect rotation; boot classes fixture now keeps ArmorPlateAbility (test updated in mind-core/src/content/boot.rs)."
+        }
       ]
     },
     "PAR-0588": {
@@ -31618,13 +31691,21 @@
     },
     "PAR-0600": {
       "title": "GAPS #33 residual: client sim never adopts the relay-assigned PvP team",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "cargo test -p mind-core --lib relay_team; cargo check -p mind-gdext"
             }
           }
         ]
@@ -31632,29 +31713,49 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0600"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-core --lib relay_team"
             }
           }
         ]
       },
-      "claimed_by": "hx-net2",
-      "claimed_at": "2026-11-06T23:54:32Z",
+      "claimed_by": "hx-net3",
+      "claimed_at": "2026-11-07T00:15:43Z",
       "severity": "P2",
       "source": "PAR-0545 residual",
       "gap": "PAR-0545 landed the module-side PvP balancer (match_team/publish_match_teams + assign_team on join/start) and the client read seam (MindNet.my_team/publish_team_data, relay_member.team in players_json/SenderOrigin). But the local sim's player team is never updated: MindSimHost::set_player_team (client/rust/mind-gdext/src/sim_host.rs) returns false unless rules.editor, so a relay-assigned team changes the roster and other players' command team resolution while the local player keeps its world default (rules.defaultTeam/possessed unit team). Needs a sim-owner non-editor setter (PlayerComp.team semantics) plus a net/ call site when the own relay_member row's team changes.",
-      "fix": "Not fixed in this pass (sim_host.rs is outside the hx-net2 file ownership). Suggested: add MindSimHost::set_player_team_from_relay(team) that skips the editor gate, moves the possessed unit's TeamComp, sim.set_player_team and the rules default team; call it from MindNet::drain_members_rows when the local member's team changes."
+      "fix": "Added Sim::set_relay_player_team (client/rust/mind-core/src/sim/mod.rs: PlayerComp.team semantics: possessed unit TeamComp + player_team), MindSimHost::set_player_team_from_relay (append-only, editor gate removed, rules defaultTeam mirror moved) and MindNet::apply_relay_team: gx/net adopts MindNet.my_team() whenever the local relay_member row changes, tracking applied_relay_team so it runs once per assignment. Unit test covers unit+player team move.",
+      "evidence": [
+        "cargo test --manifest-path client/rust/Cargo.toml -p mind-core --lib relay_team (1 passed: sim::relay_player_team_tests::relay_team_moves_the_player_unit_and_respawn_team)",
+        "cargo test --manifest-path client/rust/Cargo.toml -p mind-headless --lib server (74 passed)",
+        "cargo check --manifest-path client/rust/Cargo.toml -p mind-gdext (clean)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T00:22:15Z",
+          "by": "hx-net3",
+          "text": "Verified headlessly: core setter moves PlayerComp.team + possessed unit; sim_host setter skips the editor gate and moves rules.default_team (placement/logic read it); MindNet adopts on relay_member.team change. Java twin still pending."
+        }
+      ]
     },
     "PAR-0601": {
       "title": "GAPS #35 residual: only Call.kick has a host producer; menus/camera/sound/effect/music/trace/label call sites missing",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "cargo test -p mind-stdb --lib calls::producer_tests; cargo test -p mind-headless --lib server"
             }
           }
         ]
@@ -31662,19 +31763,40 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0601"
+              "cmd": "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib calls::producer_tests"
             }
           }
         ]
       },
-      "claimed_by": "hx-net2",
-      "claimed_at": "2026-11-06T23:54:32Z",
+      "claimed_by": "hx-net3",
+      "claimed_at": "2026-11-07T00:15:44Z",
       "severity": "P2",
       "source": "PAR-0576 residual",
       "gap": "PAR-0576 landed the transport (module match_call/publish_call/my_match_calls + mind-stdb calls::CallStream + MindNet drain into CallBridge) and one producer: the player-list kick action publishes Call.kick. The other 22 CallPacketKind kinds (infoMessage, menu/followUpMenu/hideFollowUpMenu, menuBuilder*, setCameraPosition, sound/soundAt, effect/effectReliable, playMusic, traceInfo, label/labelReliable overloads, removeWorldLabel) still have no host call site, so server-side actions do not emit them. The producers for menus/camera/sound/effect/music/labels live in gx/ui and the mind-headless host server paths (outside hx-net2 ownership), plus possibly a generic MindNet #[func] taking a kind ordinal + body.",
-      "fix": "Not fixed in this pass. Transport is tested end-to-end at the row level (runs/PAR-0576/headless-fix.md); only call sites are missing."
+      "fix": "Added ProducedCall (client/rust/mind-stdb/src/calls.rs): packet+module-kind+target envelope with constructors for every host-triggerable Call kind (infoMessage broadcast/targeted, kick/kickReason, traceInfo, setCameraPosition, playMusic, sound/soundAt, effect/effectReliable, label/labelReliable, removeWorldLabel, menu/followUpMenu/hideFollowUpMenu) plus packet_kind inverse mapping and tests. Wired producers: headless NetHost::publish/info_message (game-over next-map, ServerControl.java:116), Admins::kick and kick_all now publish Call.kick/Call.kickReason (NetServer.java:453-520); MindNet.player_action(trace) publishes Call.traceInfo from the roster (NetServer.java:941). Remaining Java sites documented with file:line in calls.rs module docs: menu/menuBuilder producers are gx/ui, camera/sound/effect/music come from mc/logic (LExecutor.java:2278), label removal from mc/world (WorldLabelComp.java:128/135), whitelist infoMessage is module-side (relay/methods.rs:124).",
+      "evidence": [
+        "cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb --lib (106 passed, incl. calls::producer_tests: 17 constructors round-trip through the frame decoder; module/client kind inverse map)",
+        "cargo test --manifest-path client/rust/Cargo.toml -p mind-headless --lib server (74 passed)",
+        "cargo check --manifest-path client/rust/Cargo.toml -p mind-gdext (clean)"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T00:22:25Z",
+          "by": "hx-net3",
+          "text": "Producer transport closed for the host paths that exist in the port: infoMessage (game over), kick/kickReason (dedicated kick + kick-all) and traceInfo (admin trace). Menu/camera/sound/effect/music/label producers remain owned by gx/ui, mc/logic and mc/world (documented with Java file:line in mind-stdb/src/calls.rs)."
+        }
+      ]
+    },
+    "PAR-0602": {
+      "title": "Accelerator launch cutscene: sim lightning/coreLandDust and drawLaunch ascent unported",
+      "status": "seeded",
+      "claimed_by": "hx-accelerator",
+      "claimed_at": "2026-11-07T00:14:09Z",
+      "severity": "P2",
+      "gap": "PAR-0296 residual after the draw/glow pass landed: AcceleratorBuild.beginLaunch spawns 20 Lightning bolts (damage 40, lightningOffset 24, length 5-25) and 13 coreLandDust rings every 2 ticks (Accelerator.java:364-387); updateLaunch rolls an extra bolt per tick after the charge (:423-429); drawLaunch draws the ascending core with thrusters/clouds and the white fade image (:440-556,343-354). The port emits coreLaunchConstruct/launchAccelerator FX + acceleratorLaunch/Charge/Construct sounds and the charge rings, but not the lightning/dust/ascending-core sequence. Hook: MindCampaign::pump_accelerator_launch (gx/campaign.rs) should call the new mind_core::world::blocks::campaign::accelerator::LaunchSequence + render::accelerator::launch_lightning helpers (sim-side combat::lightning::create) at the charge tick and schedule the dust rings; the drawLaunch/cloud/fade half lives in the host render path.",
+      "source": "PAR-0296 note; docs/L06-sim-campaign-residuals_summary.md T7"
     }
   },
   "recipes": {

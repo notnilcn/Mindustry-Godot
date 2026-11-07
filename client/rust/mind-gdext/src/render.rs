@@ -42,6 +42,7 @@ use crate::render::floor::{
 use crate::sim_host::MindSimHost;
 use crate::wiring;
 
+mod accelerator;
 mod atlas_bind;
 mod block_extras;
 mod blocks;
@@ -941,6 +942,35 @@ impl MindWorldRenderer {
         // Pad pod/shadow/corner lights above the block meshes (H03 T13).
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
             self.spawn_pods_node(block_band, pods::PodMode::PadStatic, "PadsStatic", 1);
+        }
+        // Interplanetary Accelerator draw (`AcceleratorBuild.draw`,
+        // Accelerator.java:140-236): resting arrows, launch-core construction
+        // and the heat burst at `Layer.block`, above the block sprites and the
+        // `world/draw/*` extras.
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
+            let mut node = accelerator::AcceleratorRenderer::new_alloc();
+            node.set_name("AcceleratorBody");
+            node.set_z_index(3);
+            node.bind_mut().set_mode(accelerator::AcceleratorMode::Body);
+            if let Some(camera) = self.camera.clone() {
+                node.bind_mut().set_camera(camera);
+            }
+            // code-instantiated: one accelerator body pass; the node count is
+            // fixed by the pipeline, not by content.
+            block_band.clone().add_child(&node);
+        }
+        // Charging rings at `Layer.effect` (`drawLaunchGlobalZ`,
+        // Accelerator.java:462-490).
+        if let Some(effect_band) = self.band_node_at(BandKey::base(Layer::Effect)) {
+            let mut node = accelerator::AcceleratorRenderer::new_alloc();
+            node.set_name("AcceleratorEffects");
+            node.bind_mut()
+                .set_mode(accelerator::AcceleratorMode::Effects);
+            if let Some(camera) = self.camera.clone() {
+                node.bind_mut().set_camera(camera);
+            }
+            // code-instantiated: the charge-ring half of the same pass.
+            effect_band.clone().add_child(&node);
         }
         // `world/draw/*` extras over live buildings at `Layer.block`
         // (`BlockRenderer` + `execute_extras`; H03 T8): one normal node plus

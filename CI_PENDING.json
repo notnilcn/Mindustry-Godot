@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T23:25:02Z",
+  "updated": "2026-11-07T00:00:40Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1466,6 +1466,133 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib server; ... -p mind-gdext --lib render; ... -p mind-gdext --lib audio",
       "expected": "74 + 67 + 15 pass; smokes PASS",
       "risk": "registry swap only next world load; UTC autosave stamps; sim_host API; omura now spawns flares; shader FileAccess",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-000040",
+      "created_at": "2026-11-07T00:00:40Z",
+      "agent": "hx-goldens",
+      "branch": "main",
+      "head": "25721387",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-headless",
+      "summary": "Goldens: world_gen/ui campaign reconciliation + harness UnitRuntime (PAR-0597)",
+      "files": [
+        "client/rust/mind-headless/src/logic_scenarios.rs",
+        "client/rust/mind-headless/src/units_scenarios.rs",
+        "client/rust/mind-core/tests/golden/world_gen_simplex.checksum",
+        "client/rust/mind-core/tests/golden/world_gen_erekir.checksum",
+        "client/rust/mind-core/tests/golden/world_gen_serpulo.checksum",
+        "client/rust/mind-core/tests/golden/world_gen_tantros.checksum",
+        "client/rust/mind-core/tests/golden/world_gen_asteroid.checksum",
+        "client/rust/mind-core/tests/goldens/ui/campaign.json",
+        "parity/golden_manifest.json"
+      ],
+      "gates": [
+        "cargo-test",
+        "parity-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib; tools/parity.sh --check",
+      "expected": "144 passed; parity PASS goldens 115",
+      "risk": "golden data only; world_gen checksums not read by tests",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-000040-2",
+      "created_at": "2026-11-07T00:00:40Z",
+      "agent": "hx-mod3",
+      "branch": "main",
+      "head": "25721387",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src",
+      "summary": "Mod JSON block fields + draw descs + tiled/wobble (PAR-0588/0589/0590)",
+      "files": [
+        "client/rust/mind-core/src/mods/json/mod.rs",
+        "client/rust/mind-core/src/render/draw_desc.rs",
+        "client/rust/mind-core/src/render/tiled.rs",
+        "client/rust/mind-core/src/render/layers.rs",
+        "client/rust/mind-gdext/src/render/floor.rs",
+        "client/rust/mind-gdext/src/render/blocks.rs",
+        "client/rust/mind-gdext/src/render/turret.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods; ... render::",
+      "expected": "mods 164, render 224, tiled 6",
+      "risk": "DrawDesc reshape; turret parts; chunk-seam tiled approximation",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-000040-3",
+      "created_at": "2026-11-07T00:00:40Z",
+      "agent": "hx-wave-l",
+      "branch": "main",
+      "head": "25721387",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src,client/rust/mind-gdext/src/ui",
+      "summary": "Placement visuals geometry + BurstDrill/resize + chat/toasts/database (PAR-0592/0565/0466/0593/0594/0595)",
+      "files": [
+        "client/rust/mind-core/src/input/placement.rs",
+        "client/rust/mind-core/src/fx/inline.rs",
+        "client/rust/mind-core/src/editor/grid.rs",
+        "client/rust/mind-core/src/world/behavior/production.rs",
+        "client/rust/mind-gdext/src/ui/fragments/chat.rs",
+        "client/rust/mind-gdext/src/ui/fragments/toasts.rs",
+        "client/rust/mind-gdext/src/ui/kit/rows.rs",
+        "client/rust/mind-gdext/src/ui/ui_host.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "ui-widgets-check"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement; ... burst; ... resize; ... -p mind-gdext --lib ui::fragments::chat",
+      "expected": "placement 41, burst 7, inline 8, resize 10, chat 8, toasts 6, rows 5",
+      "risk": "draw hooks for placement rects pending; EffectSpec.rotation; editor configs None live",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-000040-4",
+      "created_at": "2026-11-07T00:00:40Z",
+      "agent": "hx-wave-l",
+      "branch": "main",
+      "head": "25721387",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-core/src,server/spacetimedb,client/rust/mind-stdb",
+      "summary": "Platform service/perf/GPU/update + STDB teams/calls (PAR-0596/0598/0599/0545/0576)",
+      "files": [
+        "client/rust/mind-core/src/service.rs",
+        "client/rust/mind-core/src/platform/perf.rs",
+        "client/rust/mind-core/src/platform/gpu.rs",
+        "client/rust/mind-core/src/platform/update.rs",
+        "client/rust/mind-gdext/src/platform/mod.rs",
+        "server/spacetimedb/src/relay/teams.rs",
+        "server/spacetimedb/src/relay/player_state.rs",
+        "server/spacetimedb/src/relay/calls.rs",
+        "client/rust/mind-stdb/src/calls.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "stdb-bindings"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service; ... platform; cargo test --manifest-path server/spacetimedb/Cargo.toml --lib",
+      "expected": "service 17, platform 46, module 109, mind-stdb 95",
+      "risk": "STDB schema additions; bindings pin 2.10.1 vs ambient 2.13 shim; movement clamps",
       "status": "pending"
     }
   ]

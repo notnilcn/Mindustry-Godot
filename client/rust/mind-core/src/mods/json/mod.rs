@@ -2182,8 +2182,12 @@ impl<'a> ContentJsonParser<'a> {
     /// Parses one `abilities` entry (`Ability{}`) into an [`AbilitySpec`]
     /// (plan 20 M2b; `PatcherTests.unitAbilities{,Array}`).
     /// `ContentParser` ability entry. `None` marks a recognized-but-unsupported
-    /// class (`ArmorPlateAbility`, `EmptyDataAbility`), which warns and is left
-    /// out of the unit instead of failing the content.
+    /// class (`EmptyDataAbility`), which warns and is left out of the unit
+    /// instead of failing the content.
+    ///
+    /// Every runtime-modelled [`AbilityKind`] resolves here, including the
+    /// mod-only `ArmorPlateAbility`/`MoveLightningAbility`/`UnitSpawnAbility`
+    /// (`ContentParser.java:355-360` reads any `Ability` subclass by field).
     pub fn parse_ability(
         &mut self,
         file: &str,
@@ -2200,10 +2204,10 @@ impl<'a> ContentJsonParser<'a> {
                     .parse_ability_fields(file, registry, object, kind)
                     .map(Some);
             }
-            // `ArmorPlateAbility` (armor plates, `ArmorPlateAbility.java`) and
-            // `EmptyDataAbility` (a data holder base) have no port runtime yet:
-            // recognized aliases warn instead of failing the unit.
-            if matches!(tag, "ArmorPlateAbility" | "EmptyDataAbility") {
+            // `EmptyDataAbility` (the type-IO placeholder, `EmptyDataAbility.java`)
+            // has no JSON-side runtime: a recognized alias warns instead of
+            // failing the unit (`ContentParser.java:355-360` would register it).
+            if tag == "EmptyDataAbility" {
                 self.warn(
                     file,
                     format!("ability `{tag}` is unsupported in the port; ignored"),
@@ -2272,6 +2276,59 @@ impl<'a> ContentJsonParser<'a> {
             if let Some(value) = field_bool(object, field) {
                 *target = value;
             }
+        }
+        // Mod-only kinds (PAR-0587 / `GAPS #61`): these classes declare fields
+        // the union above names differently, so read them per class exactly as
+        // `ContentParser.readFields` does (`ContentParser.java:355-360` — JSON
+        // keys are the Java field names).
+        match kind {
+            AbilityKind::ArmorPlate => {
+                // `ArmorPlateAbility.healthMultiplier = 0.2f`
+                // (`ArmorPlateAbility.java:30`); added to
+                // `Unit.healthMultiplier` while shooting.
+                if let Some(value) = field_f32(object, "healthMultiplier") {
+                    spec.health_multiplier = value;
+                }
+            }
+            AbilityKind::MoveLightning => {
+                // `MoveLightningAbility` fields (`MoveLightningAbility.java:12-25`):
+                // `damage` is the union's `amount`, `y` the spawn offset.
+                if let Some(value) = field_f32(object, "damage") {
+                    spec.amount = value;
+                }
+                if let Some(value) = field_i32(object, "length") {
+                    spec.length = value;
+                }
+                if let Some(value) = field_f32(object, "chance") {
+                    spec.chance = value;
+                }
+                if let Some(value) = field_f32(object, "y") {
+                    spec.spawn_offset = value;
+                }
+                if let Some(value) = field_f32(object, "minSpeed") {
+                    spec.min_speed = value;
+                }
+                if let Some(value) = field_f32(object, "maxSpeed") {
+                    spec.max_speed = value;
+                }
+                if let Some(value) = field_bool(object, "alternate") {
+                    spec.alternate = value;
+                }
+            }
+            AbilityKind::UnitSpawn => {
+                // `UnitSpawnAbility` fields (`UnitSpawnAbility.java:13-20`);
+                // `unit` is resolved by the shared reference block below.
+                if let Some(value) = field_f32(object, "spawnTime") {
+                    spec.spawn_time = value;
+                }
+                if let Some(value) = field_f32(object, "spawnX") {
+                    spec.spawn_x = value;
+                }
+                if let Some(value) = field_f32(object, "spawnY") {
+                    spec.spawn_y = value;
+                }
+            }
+            _ => {}
         }
         if let Some(color) = object.get("color").and_then(parse_color) {
             spec.color = Some(color);
@@ -3602,7 +3659,11 @@ impl<'a> ContentJsonParser<'a> {
                     .get("color")
                     .and_then(parse_color)
                     .unwrap_or(crate::content::Rgba::WHITE);
-                EffectSpec::wrap(child, color, 0.0)
+                // `WrapEffect.rotation` (degrees) replaces the caller's rotation
+                // when the child is created (`WrapEffect.java:18,43-46`);
+                // `init()` copies the child lifetime (`:29-32`).
+                let rotation = field_f32(object, "rotation").unwrap_or(0.0);
+                EffectSpec::wrap_rotated(child, color, rotation)
             }
             "ParticleEffect" => {
                 let mut effect = EffectSpec::particle();
@@ -4248,6 +4309,10 @@ pub fn resolve_ability_kind(tag: &str) -> Option<AbilityKind> {
         "RegenAbility" => AbilityKind::Regen,
         "LiquidExplodeAbility" => AbilityKind::LiquidExplode,
         "LiquidRegenAbility" => AbilityKind::LiquidRegen,
+        // Mod-only classes with port runtime/draw (`GAPS #61`, PAR-0366).
+        "ArmorPlateAbility" => AbilityKind::ArmorPlate,
+        "MoveLightningAbility" => AbilityKind::MoveLightning,
+        "UnitSpawnAbility" => AbilityKind::UnitSpawn,
         _ => return None,
     })
 }
@@ -5290,7 +5355,10 @@ mod tests {
             "{error}"
         );
 
-        // An unsupported ability warns and is left out of the unit.
+        // Ability classes: `ArmorPlateAbility` maps to a runtime kind
+        // (PAR-0587) and keeps its class-field default where the JSON omits
+        // `healthMultiplier`; the unknown `health` key is ignored upstream
+        // (`ignoreUnknownFields = true`) and must not drop the ability.
         let (parser, result) = parse(
             &mut reg,
             ContentType::Unit,
@@ -5299,14 +5367,143 @@ mod tests {
         );
         assert!(result.is_ok(), "{result:?}");
         let unit = reg.unit_by_name("mods-test-armor-mech").expect("unit");
-        assert_eq!(unit.abilities.len(), 1, "the supported ability parses");
+        assert_eq!(unit.abilities.len(), 2, "both abilities parse");
+        assert_eq!(unit.abilities[0].kind, AbilityKind::ArmorPlate);
+        assert_eq!(
+            unit.abilities[0].health_multiplier, 0.2,
+            "`ArmorPlateAbility.healthMultiplier` class default"
+        );
         assert!(
-            parser
+            !parser
                 .warnings
                 .iter()
                 .any(|warning| warning.message.contains("ArmorPlateAbility")),
-            "{:?}",
+            "mapped ability must not warn: {:?}",
             parser.warnings
+        );
+    }
+
+    /// PAR-0587: `ContentParser` reads any `Ability` subclass by its Java field
+    /// names (`ContentParser.java:355-360`). The three mod-only kinds the port
+    /// simulates/draws (`ArmorPlateAbility`, `MoveLightningAbility`,
+    /// `UnitSpawnAbility`) carry those names onto [`AbilitySpec`].
+    #[test]
+    fn mod_ability_kinds_parse_their_java_fields() {
+        let mut reg = registry();
+        let (parser, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "ability-mech",
+            r#"{"name":"Ability Mech","type":"mech","health":400,
+                "abilities":[
+                  {"type":"ArmorPlateAbility","healthMultiplier":0.35},
+                  {"type":"MoveLightningAbility","damage":42,"length":9,"chance":0.5,
+                   "y":-3.5,"minSpeed":0.4,"maxSpeed":1.6,"alternate":false},
+                  {"type":"UnitSpawnAbility","unit":"dagger","spawnTime":120,
+                   "spawnX":1.5,"spawnY":-2.5}
+                ]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert!(
+            !parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("ability")),
+            "no ability warning: {:?}",
+            parser.warnings
+        );
+        let unit = reg.unit_by_name("mods-ability-mech").expect("unit");
+        assert_eq!(unit.abilities.len(), 3);
+
+        let armor = &unit.abilities[0];
+        assert_eq!(armor.kind, AbilityKind::ArmorPlate);
+        assert_eq!(armor.health_multiplier, 0.35, "healthMultiplier");
+
+        let lightning = &unit.abilities[1];
+        assert_eq!(lightning.kind, AbilityKind::MoveLightning);
+        assert_eq!(lightning.amount, 42.0, "damage feeds the union `amount`");
+        assert_eq!(lightning.length, 9);
+        assert_eq!(lightning.chance, 0.5);
+        assert_eq!(lightning.spawn_offset, -3.5, "y feeds the spawn offset");
+        assert_eq!(lightning.y, -3.5, "the shared `y` field keeps the value");
+        assert_eq!(lightning.min_speed, 0.4);
+        assert_eq!(lightning.max_speed, 1.6);
+        assert!(!lightning.alternate);
+
+        let spawn = &unit.abilities[2];
+        assert_eq!(spawn.kind, AbilityKind::UnitSpawn);
+        assert_eq!(spawn.unit, Some("dagger"), "unit reference resolved");
+        assert_eq!(spawn.spawn_time, 120.0, "spawnTime");
+        assert_eq!(spawn.spawn_x, 1.5, "spawnX");
+        assert_eq!(spawn.spawn_y, -2.5, "spawnY");
+    }
+
+    /// PAR-0587: an ability object that omits fields keeps the Java class-field
+    /// initializers (`ArmorPlateAbility.java:30`, `MoveLightningAbility.java:12-25`,
+    /// `UnitSpawnAbility.java:19`) instead of the union defaults.
+    #[test]
+    fn mod_ability_kinds_keep_java_class_defaults() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "ability-defaults",
+            r#"{"name":"Ability Defaults","type":"mech","abilities":[
+                {"type":"ArmorPlateAbility"},
+                {"type":"MoveLightningAbility"},
+                {"type":"UnitSpawnAbility","unit":"dagger"}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-ability-defaults").expect("unit");
+        assert_eq!(unit.abilities.len(), 3);
+        let armor = &unit.abilities[0];
+        assert_eq!(armor.kind, AbilityKind::ArmorPlate);
+        assert_eq!(armor.health_multiplier, 0.2);
+        let lightning = &unit.abilities[1];
+        assert_eq!(lightning.kind, AbilityKind::MoveLightning);
+        assert_eq!(lightning.amount, 35.0);
+        assert_eq!(lightning.length, 12);
+        assert_eq!(lightning.chance, 0.15);
+        assert_eq!(lightning.spawn_offset, 0.0);
+        assert_eq!(lightning.min_speed, 0.8);
+        assert_eq!(lightning.max_speed, 1.2);
+        assert!(lightning.alternate);
+        let spawn = &unit.abilities[2];
+        assert_eq!(spawn.kind, AbilityKind::UnitSpawn);
+        assert_eq!(spawn.spawn_time, 60.0);
+        assert_eq!((spawn.spawn_x, spawn.spawn_y), (0.0, 0.0));
+    }
+
+    /// PAR-0587: `WrapEffect.rotation` (degrees) is a plain `float` field read by
+    /// `ContentParser` (`WrapEffect.java:18`); the wrapper creates its child at
+    /// that rotation (`:43-46`) while `init()` copies the child lifetime
+    /// (`:29-32`).
+    #[test]
+    fn wrap_effect_rotation_parses() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "wrap-mech",
+            r#"{"name":"Wrap Mech","type":"mech",
+                "deathExplosionEffect":{"type":"WrapEffect","effect":"smoke",
+                                        "color":"ff0000","rotation":40}}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-wrap-mech").expect("unit");
+        let EffectRef::Inline(wrap) = &unit.death_explosion_effect else {
+            panic!(
+                "deathExplosionEffect not inline: {:?}",
+                unit.death_explosion_effect
+            );
+        };
+        assert_eq!(wrap.kind, InlineEffectKind::WrapEffect);
+        assert_eq!(wrap.rotation, 40.0);
+        assert_eq!(wrap.color, Rgba::from_hex("ff0000"));
+        assert_eq!(
+            wrap.lifetime,
+            effect_by_name("smoke").expect("smoke").meta().lifetime,
+            "`WrapEffect.init()` copies the child lifetime"
         );
     }
 

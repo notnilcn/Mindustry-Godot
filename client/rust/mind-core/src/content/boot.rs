@@ -642,14 +642,21 @@ mod tests {
             bullet.kind,
             crate::content::registries::bullets::BulletKind::Empty
         );
+        // PAR-0587: `ArmorPlateAbility` now maps to `AbilityKind::ArmorPlate`
+        // (the class's `healthMultiplier` default applies), so the fixture
+        // unit's two declared abilities both land on the loaded type.
         assert_eq!(
             unit.abilities.len(),
-            1,
-            "ArmorPlateAbility warns and skips; got {:?}",
+            2,
+            "RegenAbility + ArmorPlateAbility; got {:?}",
             unit.abilities
                 .iter()
                 .map(|ability| ability.kind.name())
                 .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            unit.abilities[1].kind,
+            crate::content::registries::units::ability::AbilityKind::ArmorPlate
         );
     }
 

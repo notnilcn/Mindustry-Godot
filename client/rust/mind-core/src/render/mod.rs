@@ -11,6 +11,7 @@
 //! `mind-gdext::render`.
 
 pub mod ability_draw;
+pub mod accelerator;
 pub mod autotile;
 pub mod bands;
 pub mod block_cache;

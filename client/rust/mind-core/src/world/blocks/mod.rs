@@ -7,6 +7,7 @@
 //! the [`storage`] family.
 
 pub mod autotiler;
+pub mod campaign;
 pub mod defense;
 pub mod distribution;
 pub mod heat;
