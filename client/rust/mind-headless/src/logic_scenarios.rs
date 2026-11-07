@@ -1114,6 +1114,21 @@ fn world_processor_rig(
     assert!(harness.place(4, 4, processor, 0, true));
     let pe = harness.build_at(4, 4).context("processor entity")?;
     assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    // Java world processors always run in a live `World` with `Groups.unit`, so
+    // the privileged `bullet`/`spawn` instructions resolve their unit types and
+    // create entities. The bare `BuildHarness` has no live unit runtime and
+    // `SpawnBulletI`'s source switch (`LExecutor.java:1682-1703`) reads the
+    // unit's weapon table from `UnitRuntime` (c150184e): without it the `bullet`
+    // instruction no-ops and `logic_privileged_world` loses its event row.
+    // Install the runtime here, like the `logic/world.rs` unit tests.
+    let runtime = mind_core::sim::unit_runtime::UnitRuntime::new(
+        harness.content.clone(),
+        &harness.grid,
+        &harness.world,
+        0,
+        false,
+    );
+    harness.world.insert_non_send(runtime);
     Ok((harness, pe))
 }
 

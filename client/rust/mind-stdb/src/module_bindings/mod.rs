@@ -54,6 +54,7 @@ pub mod authority_mode_type;
 pub mod break_block_type;
 pub mod building_control_select_type;
 pub mod bullet_type;
+pub mod call_packet_kind_type;
 pub mod campaign_stat_type;
 pub mod campaign_stats_table;
 pub mod campaign_table;
@@ -90,6 +91,7 @@ pub mod local_player_table;
 pub mod logic_client_data_type;
 pub mod logic_sync_type;
 pub mod maintenance_schedule_type;
+pub mod match_call_type;
 pub mod match_chat_state_type;
 pub mod match_chat_table;
 pub mod match_chat_type;
@@ -113,6 +115,8 @@ pub mod match_snapshot_type;
 pub mod match_state_table;
 pub mod match_state_type;
 pub mod match_status_type;
+pub mod match_team_table;
+pub mod match_team_type;
 pub mod match_ui_event_table;
 pub mod match_ui_event_type;
 pub mod match_vote_type;
@@ -125,6 +129,7 @@ pub mod my_campaign_stats_table;
 pub mod my_campaign_unlocks_table;
 pub mod my_campaigns_table;
 pub mod my_kick_table;
+pub mod my_match_calls_table;
 pub mod my_match_chat_table;
 pub mod my_match_checksums_table;
 pub mod my_match_commands_table;
@@ -160,8 +165,10 @@ pub mod player_trace_type;
 pub mod player_type;
 pub mod protocol_info_table;
 pub mod protocol_info_type;
+pub mod publish_call_reducer;
 pub mod publish_checksum_reducer;
 pub mod publish_match_state_reducer;
+pub mod publish_match_teams_reducer;
 pub mod publish_snapshot_reducer;
 pub mod publish_ui_event_reducer;
 pub mod relay_config_table;
@@ -195,6 +202,7 @@ pub mod set_username_reducer;
 pub mod snapshot_kind_type;
 pub mod snapshot_rate_type;
 pub mod start_match_reducer;
+pub mod team_assignment_type;
 pub mod text_input_result_type;
 pub mod ui_event_kind_type;
 pub mod unit_command_queue_type;
@@ -258,6 +266,7 @@ pub use authority_mode_type::AuthorityMode;
 pub use break_block_type::BreakBlock;
 pub use building_control_select_type::BuildingControlSelect;
 pub use bullet_type::Bullet;
+pub use call_packet_kind_type::CallPacketKind;
 pub use campaign_stat_type::CampaignStat;
 pub use campaign_stats_table::*;
 pub use campaign_table::*;
@@ -294,6 +303,7 @@ pub use local_player_table::*;
 pub use logic_client_data_type::LogicClientData;
 pub use logic_sync_type::LogicSync;
 pub use maintenance_schedule_type::MaintenanceSchedule;
+pub use match_call_type::MatchCall;
 pub use match_chat_state_type::MatchChatState;
 pub use match_chat_table::*;
 pub use match_chat_type::MatchChat;
@@ -317,6 +327,8 @@ pub use match_snapshot_type::MatchSnapshot;
 pub use match_state_table::*;
 pub use match_state_type::MatchState;
 pub use match_status_type::MatchStatus;
+pub use match_team_table::*;
+pub use match_team_type::MatchTeam;
 pub use match_ui_event_table::*;
 pub use match_ui_event_type::MatchUiEvent;
 pub use match_vote_type::MatchVote;
@@ -329,6 +341,7 @@ pub use my_campaign_stats_table::*;
 pub use my_campaign_unlocks_table::*;
 pub use my_campaigns_table::*;
 pub use my_kick_table::*;
+pub use my_match_calls_table::*;
 pub use my_match_chat_table::*;
 pub use my_match_checksums_table::*;
 pub use my_match_commands_table::*;
@@ -364,8 +377,10 @@ pub use player_trace_type::PlayerTrace;
 pub use player_type::Player;
 pub use protocol_info_table::*;
 pub use protocol_info_type::ProtocolInfo;
+pub use publish_call_reducer::publish_call;
 pub use publish_checksum_reducer::publish_checksum;
 pub use publish_match_state_reducer::publish_match_state;
+pub use publish_match_teams_reducer::publish_match_teams;
 pub use publish_snapshot_reducer::publish_snapshot;
 pub use publish_ui_event_reducer::publish_ui_event;
 pub use relay_config_table::*;
@@ -399,6 +414,7 @@ pub use set_username_reducer::set_username;
 pub use snapshot_kind_type::SnapshotKind;
 pub use snapshot_rate_type::SnapshotRate;
 pub use start_match_reducer::start_match;
+pub use team_assignment_type::TeamAssignment;
 pub use text_input_result_type::TextInputResult;
 pub use ui_event_kind_type::UiEventKind;
 pub use unit_command_queue_type::UnitCommandQueue;
@@ -556,6 +572,12 @@ pub enum Reducer {
     LeaveMatch {
         match_id: u64,
     },
+    PublishCall {
+        match_id: u64,
+        kind: CallPacketKind,
+        target: Option<__sdk::Identity>,
+        payload: Vec<u8>,
+    },
     PublishChecksum {
         match_id: u64,
         command_id: u64,
@@ -573,6 +595,10 @@ pub enum Reducer {
         game_over: bool,
         sim_tick: u64,
         last_command_id: u64,
+    },
+    PublishMatchTeams {
+        match_id: u64,
+        teams: Vec<TeamAssignment>,
     },
     PublishSnapshot {
         match_id: u64,
@@ -704,8 +730,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::ImportSchematic { .. } => "import_schematic",
             Reducer::JoinMatch { .. } => "join_match",
             Reducer::LeaveMatch { .. } => "leave_match",
+            Reducer::PublishCall { .. } => "publish_call",
             Reducer::PublishChecksum { .. } => "publish_checksum",
             Reducer::PublishMatchState { .. } => "publish_match_state",
+            Reducer::PublishMatchTeams { .. } => "publish_match_teams",
             Reducer::PublishSnapshot { .. } => "publish_snapshot",
             Reducer::PublishUiEvent { .. } => "publish_ui_event",
             Reducer::ReportPlanSnapshot { .. } => "report_plan_snapshot",
@@ -963,6 +991,17 @@ impl __sdk::Reducer for Reducer {
                     match_id: match_id.clone(),
                 })
             }
+            Reducer::PublishCall {
+                match_id,
+                kind,
+                target,
+                payload,
+            } => __sats::bsatn::to_vec(&publish_call_reducer::PublishCallArgs {
+                match_id: match_id.clone(),
+                kind: kind.clone(),
+                target: target.clone(),
+                payload: payload.clone(),
+            }),
             Reducer::PublishChecksum {
                 match_id,
                 command_id,
@@ -997,6 +1036,12 @@ impl __sdk::Reducer for Reducer {
                 sim_tick: sim_tick.clone(),
                 last_command_id: last_command_id.clone(),
             }),
+            Reducer::PublishMatchTeams { match_id, teams } => {
+                __sats::bsatn::to_vec(&publish_match_teams_reducer::PublishMatchTeamsArgs {
+                    match_id: match_id.clone(),
+                    teams: teams.clone(),
+                })
+            }
             Reducer::PublishSnapshot {
                 match_id,
                 kind,
@@ -1199,6 +1244,7 @@ pub struct DbUpdate {
     match_player_state: __sdk::TableUpdate<MatchPlayerState>,
     match_snapshot: __sdk::TableUpdate<MatchSnapshot>,
     match_state: __sdk::TableUpdate<MatchState>,
+    match_team: __sdk::TableUpdate<MatchTeam>,
     match_ui_event: __sdk::TableUpdate<MatchUiEvent>,
     my_admin_actions: __sdk::TableUpdate<AdminActionLog>,
     my_campaign_sectors: __sdk::TableUpdate<SectorInfo>,
@@ -1207,6 +1253,7 @@ pub struct DbUpdate {
     my_campaigns: __sdk::TableUpdate<Campaign>,
     my_kick: __sdk::TableUpdate<MatchKick>,
     my_match: __sdk::TableUpdate<RelayMatch>,
+    my_match_calls: __sdk::TableUpdate<MatchCall>,
     my_match_chat: __sdk::TableUpdate<MatchChat>,
     my_match_checksums: __sdk::TableUpdate<MatchChecksum>,
     my_match_commands: __sdk::TableUpdate<MatchCommand>,
@@ -1325,6 +1372,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "match_state" => db_update
                     .match_state
                     .append(match_state_table::parse_table_update(table_update)?),
+                "match_team" => db_update
+                    .match_team
+                    .append(match_team_table::parse_table_update(table_update)?),
                 "match_ui_event" => db_update
                     .match_ui_event
                     .append(match_ui_event_table::parse_table_update(table_update)?),
@@ -1349,6 +1399,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "my_match" => db_update
                     .my_match
                     .append(my_match_table::parse_table_update(table_update)?),
+                "my_match_calls" => db_update
+                    .my_match_calls
+                    .append(my_match_calls_table::parse_table_update(table_update)?),
                 "my_match_chat" => db_update
                     .my_match_chat
                     .append(my_match_chat_table::parse_table_update(table_update)?),
@@ -1507,6 +1560,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.match_state = cache
             .apply_diff_to_table::<MatchState>("match_state", &self.match_state)
             .with_updates_by_pk(|row| &row.state_id);
+        diff.match_team = cache
+            .apply_diff_to_table::<MatchTeam>("match_team", &self.match_team)
+            .with_updates_by_pk(|row| &row.team_row_id);
         diff.match_ui_event = cache
             .apply_diff_to_table::<MatchUiEvent>("match_ui_event", &self.match_ui_event)
             .with_updates_by_pk(|row| &row.event_id);
@@ -1585,6 +1641,8 @@ impl __sdk::DbUpdate for DbUpdate {
             cache.apply_diff_to_table::<Campaign>("my_campaigns", &self.my_campaigns);
         diff.my_kick = cache.apply_diff_to_table::<MatchKick>("my_kick", &self.my_kick);
         diff.my_match = cache.apply_diff_to_table::<RelayMatch>("my_match", &self.my_match);
+        diff.my_match_calls =
+            cache.apply_diff_to_table::<MatchCall>("my_match_calls", &self.my_match_calls);
         diff.my_match_chat =
             cache.apply_diff_to_table::<MatchChat>("my_match_chat", &self.my_match_chat);
         diff.my_match_checksums = cache
@@ -1715,6 +1773,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "match_state" => db_update
                     .match_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_team" => db_update
+                    .match_team
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "match_ui_event" => db_update
                     .match_ui_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1738,6 +1799,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match" => db_update
                     .my_match
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_calls" => db_update
+                    .my_match_calls
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match_chat" => db_update
                     .my_match_chat
@@ -1920,6 +1984,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "match_state" => db_update
                     .match_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_team" => db_update
+                    .match_team
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "match_ui_event" => db_update
                     .match_ui_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1943,6 +2010,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match" => db_update
                     .my_match
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_calls" => db_update
+                    .my_match_calls
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match_chat" => db_update
                     .my_match_chat
@@ -2073,6 +2143,7 @@ pub struct AppliedDiff<'r> {
     match_player_state: __sdk::TableAppliedDiff<'r, MatchPlayerState>,
     match_snapshot: __sdk::TableAppliedDiff<'r, MatchSnapshot>,
     match_state: __sdk::TableAppliedDiff<'r, MatchState>,
+    match_team: __sdk::TableAppliedDiff<'r, MatchTeam>,
     match_ui_event: __sdk::TableAppliedDiff<'r, MatchUiEvent>,
     my_admin_actions: __sdk::TableAppliedDiff<'r, AdminActionLog>,
     my_campaign_sectors: __sdk::TableAppliedDiff<'r, SectorInfo>,
@@ -2081,6 +2152,7 @@ pub struct AppliedDiff<'r> {
     my_campaigns: __sdk::TableAppliedDiff<'r, Campaign>,
     my_kick: __sdk::TableAppliedDiff<'r, MatchKick>,
     my_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    my_match_calls: __sdk::TableAppliedDiff<'r, MatchCall>,
     my_match_chat: __sdk::TableAppliedDiff<'r, MatchChat>,
     my_match_checksums: __sdk::TableAppliedDiff<'r, MatchChecksum>,
     my_match_commands: __sdk::TableAppliedDiff<'r, MatchCommand>,
@@ -2222,6 +2294,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<MatchState>("match_state", &self.match_state, event);
+        callbacks.invoke_table_row_callbacks::<MatchTeam>("match_team", &self.match_team, event);
         callbacks.invoke_table_row_callbacks::<MatchUiEvent>(
             "match_ui_event",
             &self.match_ui_event,
@@ -2250,6 +2323,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<Campaign>("my_campaigns", &self.my_campaigns, event);
         callbacks.invoke_table_row_callbacks::<MatchKick>("my_kick", &self.my_kick, event);
         callbacks.invoke_table_row_callbacks::<RelayMatch>("my_match", &self.my_match, event);
+        callbacks.invoke_table_row_callbacks::<MatchCall>(
+            "my_match_calls",
+            &self.my_match_calls,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchChat>(
             "my_match_chat",
             &self.my_match_chat,
@@ -3050,6 +3128,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         match_player_state_table::register_table(client_cache);
         match_snapshot_table::register_table(client_cache);
         match_state_table::register_table(client_cache);
+        match_team_table::register_table(client_cache);
         match_ui_event_table::register_table(client_cache);
         my_admin_actions_table::register_table(client_cache);
         my_campaign_sectors_table::register_table(client_cache);
@@ -3058,6 +3137,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         my_campaigns_table::register_table(client_cache);
         my_kick_table::register_table(client_cache);
         my_match_table::register_table(client_cache);
+        my_match_calls_table::register_table(client_cache);
         my_match_chat_table::register_table(client_cache);
         my_match_checksums_table::register_table(client_cache);
         my_match_commands_table::register_table(client_cache);
@@ -3116,6 +3196,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "match_player_state",
         "match_snapshot",
         "match_state",
+        "match_team",
         "match_ui_event",
         "my_admin_actions",
         "my_campaign_sectors",
@@ -3124,6 +3205,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "my_campaigns",
         "my_kick",
         "my_match",
+        "my_match_calls",
         "my_match_chat",
         "my_match_checksums",
         "my_match_commands",

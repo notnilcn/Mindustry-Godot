@@ -182,13 +182,25 @@ pub struct BurstDrillDef {
     pub inverted_time: f32,
     /// `BurstDrill.drillMultiplier`.
     pub drill_multiplier: f32,
+    /// `BurstDrill.shake` (`BurstDrill.java:15`, default 2): the burst's
+    /// `Effect.shake(shake, shake, this)` intensity.
+    pub shake: f32,
+    /// `BurstDrill.drillEffect` (`BurstDrill.java:26` constructor default
+    /// `Fx.shockwave`): the effect played at the burst. The two vanilla drills
+    /// replace it with a `MultiEffect(...)` (`Blocks.java:3095,3121-3124`).
+    pub drill_effect: crate::content::registries::fx_meta::EffectRef,
+    /// `BurstDrill.drillEffectRnd` (`BurstDrill.java:26` constructor
+    /// `drillEffectRnd = 0f`, overriding `Drill.drillEffectRnd = -1`): the
+    /// `Mathf.range(...)` x/y offset radius.
+    pub drill_effect_rnd: f32,
 }
 
 impl Default for BurstDrillDef {
     fn default() -> Self {
         // `BurstDrill.java:32-54` constructor: it "does not drill in the
         // traditional sense", so `hardnessDrillMultiplier = 0`; `invertedTime`
-        // keeps the `BurstDrill.java:26` field initializer 200.
+        // keeps the `BurstDrill.java:26` field initializer 200; `shake = 2`
+        // (`:15`), `drillEffect = Fx.shockwave` + `drillEffectRnd = 0f` (`:26`).
         Self {
             drill: DrillDef {
                 hardness_drill_multiplier: 0.0,
@@ -197,6 +209,11 @@ impl Default for BurstDrillDef {
             burst_time: 0.0,
             inverted_time: 200.0,
             drill_multiplier: 1.0,
+            shake: 2.0,
+            drill_effect: crate::content::registries::fx_meta::EffectRef::Named(
+                crate::content::EffectId::SHOCKWAVE,
+            ),
+            drill_effect_rnd: 0.0,
         }
     }
 }
@@ -1049,13 +1066,21 @@ impl BlockKindData {
             BlockKind::BurstDrill => {
                 // `BurstDrill`'s constructor overrides the drill defaults
                 // (`hardnessDrillMultiplier = 0`, `BurstDrill.java:35-44`);
-                // `invertedTime` keeps its own field initializer.
+                // `invertedTime` keeps its own field initializer. `shake` /
+                // `drillEffect` default to the class values (`:15,26`) and the
+                // two vanilla drills are patched by `apply_vanilla_knobs`.
                 let defaults = BurstDrillDef::default();
                 BlockKindData::BurstDrill(BurstDrillDef {
                     drill: drill_from_def(def, defaults.drill.clone()),
                     burst_time: defaults.burst_time,
                     inverted_time: def.inverted_time.unwrap_or(defaults.inverted_time),
                     drill_multiplier: defaults.drill_multiplier,
+                    shake: def.burst_shake.unwrap_or(defaults.shake),
+                    drill_effect: def
+                        .burst_drill_effect
+                        .clone()
+                        .unwrap_or(defaults.drill_effect),
+                    drill_effect_rnd: defaults.drill_effect_rnd,
                 })
             }
             BlockKind::BeamDrill => {
@@ -1433,6 +1458,19 @@ impl BlockKindData {
                     def.burst_time = 60.0 * 5.0;
                     // `BurstDrill.invertedTime` default 200 (BurstDrill.java:27).
                     def.inverted_time = 200.0;
+                    // `Blocks.java:3095-3096`: `drillEffect = new
+                    // MultiEffect(Fx.mineImpact, Fx.drillSteam,
+                    // Fx.mineImpactWave.wrap(Pal.redLight, 40f)); shake = 4f`.
+                    def.shake = 4.0;
+                    def.drill_effect = crate::fx::inline::multi(vec![
+                        crate::fx::inline::named(crate::content::EffectId::MINE_IMPACT),
+                        crate::fx::inline::named(crate::content::EffectId::DRILL_STEAM),
+                        crate::fx::inline::wrap(
+                            crate::fx::inline::named(crate::content::EffectId::MINE_IMPACT_WAVE),
+                            crate::content::registries::pal::RED_LIGHT,
+                            40.0,
+                        ),
+                    ]);
                 }
                 // `Blocks.java:3103`: liquidBoostIntensity 1.75 (burst warmup
                 // stays the `BurstDrill.java:92,101` literal 0.01).
@@ -1448,6 +1486,29 @@ impl BlockKindData {
                     def.drill.drill_multipliers = vec![(item("beryllium"), 2.0)];
                     def.drill_multiplier = 1.0;
                     def.inverted_time = 200.0;
+                    // `Blocks.java:3121-3125`: `drillEffect = new MultiEffect(
+                    // Fx.mineImpact, Fx.drillSteam,
+                    // Fx.dynamicSpikes.wrap(Liquids.hydrogen.color, 30f),
+                    // Fx.mineImpactWave.wrap(Liquids.hydrogen.color, 45f));
+                    // shake = 4f`.
+                    let hydrogen = content
+                        .liquid_by_name("hydrogen")
+                        .map_or(crate::content::Rgba::from_rgba8888(0x9eabf7ff), |l| l.color);
+                    def.shake = 4.0;
+                    def.drill_effect = crate::fx::inline::multi(vec![
+                        crate::fx::inline::named(crate::content::EffectId::MINE_IMPACT),
+                        crate::fx::inline::named(crate::content::EffectId::DRILL_STEAM),
+                        crate::fx::inline::wrap(
+                            crate::fx::inline::named(crate::content::EffectId::DYNAMIC_SPIKES),
+                            hydrogen,
+                            30.0,
+                        ),
+                        crate::fx::inline::wrap(
+                            crate::fx::inline::named(crate::content::EffectId::MINE_IMPACT_WAVE),
+                            hydrogen,
+                            45.0,
+                        ),
+                    ]);
                 }
             }
             "plasma-bore" => {
@@ -2237,6 +2298,80 @@ mod tests {
             }
             other => panic!("expected Separator, got {other:?}"),
         }
+    }
+
+    /// PAR-0565 (`Blocks.java:3095-3096,3121-3125`): both vanilla burst drills
+    /// override `BurstDrill`'s class defaults — `shake = 4` and a
+    /// `MultiEffect(...)` drill effect (impact: red-light mine wave at 40°;
+    /// eruption: hydrogen-tinted spikes at 30° plus a hydrogen-tinted wave at
+    /// 45°).
+    #[test]
+    fn vanilla_burst_drills_override_shake_and_drill_effect() {
+        use crate::content::EffectId;
+        use crate::content::registries::fx_meta::{EffectRef, InlineEffectKind};
+        use crate::fx::inline;
+
+        let content = test_registry();
+        let burst = |name: &str| {
+            let def = content
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("{name}"));
+            let mut kind = BlockKindData::from_def(def);
+            kind.apply_vanilla_knobs(&content, name);
+            match kind {
+                BlockKindData::BurstDrill(def) => def,
+                other => panic!("expected BurstDrill, got {other:?}"),
+            }
+        };
+
+        // Class defaults (`BurstDrill.java:15,26`): shake 2, shockwave, rnd 0.
+        let defaults = BurstDrillDef::default();
+        assert_eq!(defaults.shake, 2.0);
+        assert_eq!(defaults.drill_effect, EffectRef::Named(EffectId::SHOCKWAVE));
+        assert_eq!(defaults.drill_effect_rnd, 0.0);
+
+        let impact = burst("impact-drill");
+        assert_eq!(impact.shake, 4.0);
+        assert_eq!(impact.drill_effect_rnd, 0.0);
+        let children = match &impact.drill_effect {
+            EffectRef::Inline(spec) => {
+                assert_eq!(spec.kind, InlineEffectKind::MultiEffect);
+                spec.children.clone()
+            }
+            other => panic!("impact-drill drillEffect is a MultiEffect, got {other:?}"),
+        };
+        assert_eq!(
+            children,
+            vec![
+                inline::named(EffectId::MINE_IMPACT),
+                inline::named(EffectId::DRILL_STEAM),
+                inline::wrap(
+                    inline::named(EffectId::MINE_IMPACT_WAVE),
+                    crate::content::registries::pal::RED_LIGHT,
+                    40.0,
+                ),
+            ]
+        );
+
+        let hydrogen = content.liquid_by_name("hydrogen").expect("hydrogen").color;
+        let eruption = burst("eruption-drill");
+        assert_eq!(eruption.shake, 4.0);
+        let children = match &eruption.drill_effect {
+            EffectRef::Inline(spec) => {
+                assert_eq!(spec.kind, InlineEffectKind::MultiEffect);
+                spec.children.clone()
+            }
+            other => panic!("eruption-drill drillEffect is a MultiEffect, got {other:?}"),
+        };
+        assert_eq!(
+            children,
+            vec![
+                inline::named(EffectId::MINE_IMPACT),
+                inline::named(EffectId::DRILL_STEAM),
+                inline::wrap(inline::named(EffectId::DYNAMIC_SPIKES), hydrogen, 30.0),
+                inline::wrap(inline::named(EffectId::MINE_IMPACT_WAVE), hydrogen, 45.0),
+            ]
+        );
     }
 
     /// GAPS #56 follow-up: `TiledFloor`/`TiledWall`/`WobbleProp` carry their

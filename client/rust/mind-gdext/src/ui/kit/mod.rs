@@ -22,6 +22,8 @@ pub mod cell;
 pub mod icons;
 pub mod layout;
 pub mod margins;
+pub mod roster;
+pub mod rows;
 pub mod scroll;
 pub mod styles;
 pub mod table;

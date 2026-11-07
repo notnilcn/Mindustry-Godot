@@ -134,3 +134,81 @@ pub fn install() {
         }));
     });
 }
+
+/// `DesktopLauncher.handleCrash`'s primary GPU-failure notice (window creation).
+pub const GPU_WINDOW_MESSAGE: &str =
+    "A graphics initialization error has occured! Try to update your graphics drivers:\n";
+
+/// `DesktopLauncher.handleCrash`'s secondary notice (missing OpenGL features),
+/// including the `Full message:` prefix the caller interpolates after it.
+pub const GPU_FEATURES_MESSAGE: &str = "Your graphics card does not support the right OpenGL features.\nTry to update your graphics drivers. If this doesn't work, your computer may not support Mindustry.\n\nFull message: ";
+
+/// Whether a crash cause chain is a graphics-initialization failure
+/// (`DesktopLauncher.handleCrash`'s `badGPU` classification).
+///
+/// Checks the same five substrings, including the case-insensitive
+/// `"pixel format"` test.
+pub fn is_bad_gpu_error(causes: &str) -> bool {
+    causes.contains("Couldn't create window")
+        || causes.contains("OpenGL 2.0 or higher")
+        || causes.to_lowercase().contains("pixel format")
+        || causes.contains("GLEW")
+        || causes.contains("unsupported combination of formats")
+}
+
+/// Builds the crash-dialog text for a graphics failure
+/// (`DesktopLauncher.handleCrash`), or `None` for a non-GPU crash.
+///
+/// `causes` is Arc `Strings.getCauses(e)` and `final_message` is
+/// `Strings.getFinalMessage(e)`; the panic path has only a formatted string, so
+/// both are injected.
+pub fn bad_gpu_message(causes: &str, final_message: &str) -> Option<String> {
+    if !is_bad_gpu_error(causes) {
+        return None;
+    }
+    if causes.contains("Couldn't create window") {
+        Some(format!("{GPU_WINDOW_MESSAGE}{final_message}"))
+    } else {
+        Some(format!("{GPU_FEATURES_MESSAGE}{final_message}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_creation_failure_uses_the_primary_notice() {
+        let message = bad_gpu_message(
+            "arc.backend.sdl.SdlException: Couldn't create window: No available video device",
+            "No available video device",
+        )
+        .unwrap();
+        assert_eq!(
+            message,
+            format!("{GPU_WINDOW_MESSAGE}No available video device")
+        );
+    }
+
+    #[test]
+    fn missing_gl_features_use_the_secondary_notice() {
+        for causes in [
+            "Your GPU does not support OpenGL 2.0 or higher",
+            "GLX: Failed to choose a pixel format", // upstream lower-cases this one
+            "PIXEL FORMAT unsupported",
+            "GLEW could not be initialized",
+            "unsupported combination of formats",
+        ] {
+            let message = bad_gpu_message(causes, "details").unwrap();
+            assert_eq!(message, format!("{GPU_FEATURES_MESSAGE}details"));
+        }
+    }
+
+    #[test]
+    fn ordinary_crashes_have_no_gpu_notice() {
+        assert!(!is_bad_gpu_error(
+            "java.lang.NullPointerException at mindustry.core.Logic.update"
+        ));
+        assert_eq!(bad_gpu_message("index out of bounds", "boom"), None);
+    }
+}

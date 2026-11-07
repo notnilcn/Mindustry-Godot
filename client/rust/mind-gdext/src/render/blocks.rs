@@ -30,7 +30,7 @@ use crate::sim_host::MindSimHost;
 use super::atlas_bind::{RegionResolver, ResolvedRegion};
 
 use super::shaders::ShaderRegistry;
-use super::units::{UnitQuad, build_unit_mesh};
+use super::units::{UnitQuad, WarpQuad, build_unit_mesh, build_warp_quad_mesh};
 
 /// `Pal.accent` (construct-site tint, `Draw.color(Pal.accent, ...)`).
 const ACCENT: u32 = 0xffd3_7fff;
@@ -93,6 +93,8 @@ pub struct BlockRenderer {
     resolver: RegionResolver,
     /// Pooled per-page nodes (index → node); reused across rebuilds.
     nodes: Vec<Gd<MeshInstance2D>>,
+    /// Pooled per-page nodes for vertex-warped `WobbleProp` quads.
+    wobble_nodes: Vec<Gd<MeshInstance2D>>,
     /// Pooled construct-site nodes (index → node); reused across rebuilds.
     construct_nodes: Vec<Gd<MeshInstance2D>>,
     last_key: Option<CameraKey>,
@@ -159,6 +161,7 @@ impl BlockRenderer {
             construct_shader: shaders.get("blockbuild"),
             resolver: RegionResolver::new(assets),
             nodes: Vec::new(),
+            wobble_nodes: Vec::new(),
             construct_nodes: Vec::new(),
             last_key: None,
             last_revision: i64::MIN,
@@ -236,6 +239,10 @@ impl BlockRenderer {
         }
 
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
+        // `WobbleProp` quads carry per-vertex positions, so they get their own
+        // mesh pool (`build_warp_quad_mesh`).
+        let mut wobble_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)> =
+            BTreeMap::new();
         // Belt items are collected separately and appended to their page after
         // every block quad is in place, so a later belt can never cover an item
         // drawn earlier: `Conveyor.draw` runs its item loop at
@@ -530,6 +537,31 @@ impl BlockRenderer {
                 };
                 match resolved {
                     Some((region, uv)) => {
+                        // `WobbleProp.drawBase` (`WobbleProp.java:15-21`): the
+                        // prop quad is drawn through `Draw.rectv` with a
+                        // per-vertex sin warp (and therefore rebuilt every
+                        // frame while visible).
+                        if def.kind == BlockKind::WobbleProp {
+                            let wobble = mind_core::render::tiled::Wobble {
+                                wscl: def.wobble_scale.unwrap_or(25.0),
+                                wmag: def.wobble_magnitude.unwrap_or(0.4),
+                                wtscl: def.wobble_time_scale.unwrap_or(1.0),
+                                wmag2: def.wobble_magnitude2.unwrap_or(1.0),
+                            };
+                            let corners = wobble.quad(anchor_x, anchor_y, w, w, tick as f32);
+                            wobble_groups
+                                .entry(region.page)
+                                .or_insert((region.texture.clone(), Vec::new()))
+                                .1
+                                .push(WarpQuad {
+                                    corners,
+                                    uv,
+                                    color: 0xffff_ffff,
+                                });
+                            dynamic += 1;
+                            animating = true;
+                            continue;
+                        }
                         push(&region, uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
                         // `Wall.WallBuild.draw` (`Wall.java:146-161`): while
                         // `hit >= 0.001`, a white (`flashColor`) additive
@@ -714,6 +746,7 @@ impl BlockRenderer {
         }
 
         self.apply_groups(groups);
+        self.apply_wobble_groups(wobble_groups);
         self.apply_construct_sites(sites);
         // I02 T4: the additive wall-flash overlay (a solid white quad per
         // flashing wall, no texture: the vertex colour carries it).
@@ -823,6 +856,43 @@ impl BlockRenderer {
             node.set_visible(true);
         }
         for node in self.construct_nodes.iter_mut().skip(sites.len()) {
+            node.set_visible(false);
+        }
+    }
+
+    /// Assigns the vertex-warped `WobbleProp` page meshes to their pooled
+    /// nodes, hiding spares (same pattern as [`Self::apply_groups`]).
+    fn apply_wobble_groups(
+        &mut self,
+        groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)>,
+    ) {
+        let mut index = 0usize;
+        for (_page, (texture, quads)) in groups {
+            if quads.is_empty() {
+                continue;
+            }
+            let Some(mesh) = build_warp_quad_mesh(&quads) else {
+                continue;
+            };
+            let node = if index < self.wobble_nodes.len() {
+                self.wobble_nodes[index].clone()
+            } else {
+                let node = MeshInstance2D::new_alloc();
+                // code-instantiated: one pooled node per atlas page; count is
+                // page-driven (plan 16 §6.6).
+                self.band_node.clone().add_child(&node);
+                self.wobble_nodes.push(node.clone());
+                node
+            };
+            let mut node = node;
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            if let Some(texture) = texture {
+                node.set_texture(&texture);
+            }
+            node.set_visible(true);
+            index += 1;
+        }
+        for node in self.wobble_nodes.iter_mut().skip(index) {
             node.set_visible(false);
         }
     }

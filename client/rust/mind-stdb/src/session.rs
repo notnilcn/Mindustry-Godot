@@ -189,6 +189,13 @@ impl MatchSession {
         self.resync_count
     }
 
+    /// Local identity once the connector connected (`None` before/offline).
+    ///
+    /// GAPS #33: the player list / relay team lookup keys rows by this identity.
+    pub fn local_identity(&self) -> Option<Identity> {
+        self.local_identity
+    }
+
     /// Records the local identity (after `ConnectorEvent::Connected`).
     pub fn set_local_identity(&mut self, identity: Identity) {
         self.local_identity = Some(identity);

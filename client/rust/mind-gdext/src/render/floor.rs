@@ -35,6 +35,7 @@ use mind_core::render::floor_main;
 use mind_core::render::layer::CacheLayerId;
 use mind_core::render::list::{block_cache_layer, floor_cache_layer, is_accessible};
 use mind_core::render::scan::CameraView;
+use mind_core::render::tiled;
 use mind_core::world::{Tile, WorldGrid};
 
 use crate::assets::MindAssets;
@@ -114,6 +115,14 @@ pub(crate) struct PendingQuad {
     /// layer and the resolver picks the variant + cell from the sprite-derived
     /// `tilingSize` (`Floor.drawMain:265-269`; `Floor.load:131-146`).
     pub tiling: Option<(i32, i32, i32)>,
+    /// `Some((size, variant, cell_x, cell_y))`: a `TiledFloor` packed square
+    /// (`TiledFloor.drawMain:110-119`) — the resolver probes
+    /// `<name>-<size>-<variant>` (then `<name>-<size>`) and crops the cell.
+    /// `region` then holds the block **name** (the atlas prefix).
+    pub tiled: Option<(i32, i32, i32, i32)>,
+    /// The block's own `region`, the `TiledFloor.load` 1x1 fallback when no
+    /// packed sprite exists.
+    pub tiled_base: Option<String>,
 }
 
 /// A tile-sized edge cell from a `<blendGroup>-edge` region (`Floor.edge`).
@@ -140,6 +149,8 @@ fn edge_quad(
         v_flip: true,
         crop: Some((3, 3, edge.col, edge.row)),
         tiling: None,
+        tiled: None,
+        tiled_base: None,
     }
 }
 
@@ -270,6 +281,56 @@ impl RegionAtlas {
         (page, texture, crop_uv(uv, cols, cols, col, row))
     }
 
+    /// Whether the atlas carries `name` (no `error` fallback).
+    fn has_region(&self, name: &str) -> bool {
+        let Some(assets) = self.assets.clone() else {
+            return false;
+        };
+        let assets = assets.bind();
+        !assets.region_geometry(GString::from(name)).is_empty()
+    }
+
+    /// `TiledFloor`/`TiledWall` packed-square draw (`TiledFloor.drawMain:105-119`,
+    /// `TiledFloor.load:39-48`).
+    ///
+    /// `load` probes `<name>-<size>-<variant>`, then `<name>-<size>`; when both
+    /// miss it splits the plain block region as a 1×1 (`actualSize = 1`). The
+    /// drawn cell is `regions[cx][size - 1 - cy]` of the `size`×`size` split.
+    pub(crate) fn resolve_tiled(
+        &mut self,
+        name: &str,
+        base: &str,
+        size: i32,
+        variant: i32,
+        cell_x: i32,
+        cell_y: i32,
+    ) -> (i32, Option<Gd<Texture2D>>, [f32; 4]) {
+        let size = size.max(1);
+        let detailed = tiled::region_name(name, size, variant.max(0));
+        let coarse = tiled::fallback_region_name(name, size);
+        let crop = Some((
+            size.clamp(1, u8::MAX as i32) as u8,
+            size.clamp(1, u8::MAX as i32) as u8,
+            cell_x.clamp(0, size - 1) as u8,
+            cell_y.clamp(0, size - 1) as u8,
+        ));
+        let (target, crop) = if self.has_region(&detailed) {
+            (detailed, crop)
+        } else if self.has_region(&coarse) {
+            (coarse, crop)
+        } else {
+            // `actualSize = 1; base = region;` — the unsplit 1x1 sprite.
+            (base.to_owned(), None)
+        };
+        let resolved = self.resolve(&target);
+        let (page, texture, uv) = resolved_uv(&resolved);
+        let uv = match crop {
+            Some((cols, rows, col, row)) => crop_uv(uv, cols, rows, col, row),
+            None => uv,
+        };
+        (page, texture, uv)
+    }
+
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
         let assets = self.assets.clone()?;
         let assets = assets.bind();
@@ -309,6 +370,119 @@ impl RegionAtlas {
             u1: (slice[0] + slice[2]) as f32 / width,
             v1: (slice[1] + slice[3]) as f32 / height,
         })
+    }
+}
+
+/// Which tile slot a packed `TiledFloor`/`TiledWall` square lives on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum TiledLayer {
+    /// `tile.floor` (`TiledFloor.floorChanged`).
+    Floor,
+    /// `tile.overlay` (`TiledFloor` used as an overlay).
+    Overlay,
+    /// `tile.block` (`TiledWall`, `TiledWall.java:56`).
+    Block,
+}
+
+/// Packed tiling states for one chunk bake (`TiledFloor.TiledState` /
+/// `TiledWall.TiledState`).
+///
+/// Upstream stores the transient scan state in the world's tile state slots;
+/// the port keeps it local to the bake and keys it by `(block, layer)` so a
+/// tile whose floor and overlay are both tiled floors cannot shadow itself
+/// (upstream shares one slot there — a genuine Java bug the port does not
+/// need to reproduce).
+pub(crate) struct TiledStates {
+    /// Chunk bounds in tiles (inclusive-exclusive).
+    chunk: (i32, i32, i32, i32),
+    /// `world.floorChanges` at bake time (`TiledState.changes`).
+    changes: i32,
+    /// `(block, layer)` -> tile -> packed state.
+    maps: HashMap<(BlockId, TiledLayer), HashMap<(i32, i32), u64>>,
+}
+
+impl TiledStates {
+    /// A state set for the chunk at `(cx, cy)` in the current change epoch.
+    pub(crate) fn new(cx: i32, cy: i32, changes: i32) -> Self {
+        Self {
+            chunk: (
+                cx * CHUNK_SIZE,
+                cy * CHUNK_SIZE,
+                (cx + 1) * CHUNK_SIZE,
+                (cy + 1) * CHUNK_SIZE,
+            ),
+            changes,
+            maps: HashMap::new(),
+        }
+    }
+
+    /// The drawn block id on `layer` for one tile.
+    fn drawn_id(tile: &Tile, layer: TiledLayer) -> BlockId {
+        match layer {
+            TiledLayer::Floor => tile.floor,
+            TiledLayer::Overlay => tile.overlay,
+            TiledLayer::Block => tile.block,
+        }
+    }
+
+    /// The packed state for `(x, y)`, scanning the window on first use.
+    pub(crate) fn state(
+        &mut self,
+        world: &WorldGrid,
+        tile: &Tile,
+        def: &BlockDef,
+        layer: TiledLayer,
+        x: i32,
+        y: i32,
+    ) -> Option<u64> {
+        let id = Self::drawn_id(tile, layer);
+        let key = (id, layer);
+        if !self.maps.contains_key(&key) {
+            let (cx0, cy0, cx1, cy1) = self.chunk;
+            // Roots that can cover a chunk tile sit at most `max_size - 1`
+            // tiles up-left; scan a wider margin so the greedy pack order
+            // matches the global row-major pass around the seams.
+            let margin = def.max_size.max(1) * 2;
+            let x0 = (cx0 - margin).max(0);
+            let y0 = (cy0 - margin).max(0);
+            let x1 = (cx1 + margin).min(world.width());
+            let y1 = (cy1 + margin).min(world.height());
+            let changes = self.changes;
+            let max_size = def.max_size.max(1);
+            let mut states: HashMap<(i32, i32), u64> = HashMap::new();
+            let same = |states: &HashMap<(i32, i32), u64>, nx: i32, ny: i32| -> bool {
+                let Some(other) = tile_at(world, nx, ny) else {
+                    return false;
+                };
+                if Self::drawn_id(other, layer) != id {
+                    return false;
+                }
+                // `TiledState.changes(state(other)) == changes` shrinks the
+                // square: a neighbour already scanned in this epoch blocks it.
+                states
+                    .get(&(nx, ny))
+                    .is_none_or(|state| tiled::tiled_state_changes(*state) != changes)
+            };
+            for ty in y0..y1 {
+                for tx in x0..x1 {
+                    if states.contains_key(&(tx, ty)) {
+                        continue;
+                    }
+                    let Some(other) = tile_at(world, tx, ty) else {
+                        continue;
+                    };
+                    if Self::drawn_id(other, layer) != id {
+                        continue;
+                    }
+                    tiled::ensure_state(&mut states, tx, ty, max_size, changes, same);
+                }
+            }
+            self.maps.insert(key, states);
+        }
+        self.maps
+            .get(&key)
+            .and_then(|map| map.get(&(x, y)))
+            .copied()
     }
 }
 
@@ -455,6 +629,8 @@ impl FloorRenderer {
     fn build_layer(&mut self, cx: i32, cy: i32, layer: CacheLayerId) -> Vec<Gd<MeshInstance2D>> {
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
         let host = self.host.clone();
+        let changes = host.clone().bind().grid().floor_changes;
+        let mut tiled = TiledStates::new(cx, cy, changes);
         {
             let host = host.bind();
             let world = host.grid();
@@ -465,7 +641,9 @@ impl FloorRenderer {
                     }
                     let tile = world.tile(tx, ty);
                     let quads = match host.content_registry() {
-                        Some(content) => tile_quads(world, content, tile, layer),
+                        Some(content) => {
+                            tile_quads_with(world, content, tile, layer, Some(&mut tiled))
+                        }
                         None => SmallVec::new(),
                     };
                     // Collect first; region resolution (a `&mut self.atlas`
@@ -473,11 +651,26 @@ impl FloorRenderer {
                     for quad in quads {
                         // Tiling layers resolve their region and crop from the
                         // sprite-derived `tilingSize` (`resolve_tiling`).
-                        let (page, texture, uv) = match quad.tiling {
-                            Some((variants, tqx, tqy)) => {
+                        let (page, texture, uv) = match (quad.tiled, quad.tiling) {
+                            (Some((square, variant, cell_x, cell_y)), _) => {
+                                // `TiledFloor` packed square: `region` holds the
+                                // block name (the atlas prefix,
+                                // `TiledFloor.load:40`) and `tiled_base` the
+                                // block's own region (the 1x1 fallback).
+                                let base = quad.tiled_base.as_deref().unwrap_or(&quad.region);
+                                self.atlas.resolve_tiled(
+                                    &quad.region,
+                                    base,
+                                    square,
+                                    variant,
+                                    cell_x,
+                                    cell_y,
+                                )
+                            }
+                            (None, Some((variants, tqx, tqy))) => {
                                 self.atlas.resolve_tiling(&quad.region, variants, tqx, tqy)
                             }
-                            None => {
+                            (None, None) => {
                                 let resolved = if quad.variant {
                                     self.atlas.resolve_variant(&quad.region, tx, ty)
                                 } else {
@@ -599,6 +792,19 @@ pub(crate) fn tile_quads(
     tile: &Tile,
     layer: CacheLayerId,
 ) -> SmallVec<[PendingQuad; 4]> {
+    tile_quads_with(world, content, tile, layer, None)
+}
+
+/// [`tile_quads`] with the chunk bake's packed `TiledFloor` states (`None` =
+/// no scan; tiled floors fall back to the plain variant, which is what the
+/// menu/editor one-shot paths draw).
+pub(crate) fn tile_quads_with(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    tile: &Tile,
+    layer: CacheLayerId,
+    mut tiled: Option<&mut TiledStates>,
+) -> SmallVec<[PendingQuad; 4]> {
     let mut out = SmallVec::new();
     let size = TILESIZE as f32;
     // Java world convention: tile (x, y)'s centre is `(x * tilesize, y * tilesize)`
@@ -611,7 +817,9 @@ pub(crate) fn tile_quads(
             return out;
         };
         if block_cache_layer(block) == CacheLayerId::Walls {
-            out.push(PendingQuad {
+            // `TiledWall.drawBase` (`TiledWall.java:105-119`): the block packs
+            // adjacent same-block walls exactly like `TiledFloor`.
+            let mut quad = PendingQuad {
                 region: block.region.clone(),
                 cx,
                 cy,
@@ -626,7 +834,34 @@ pub(crate) fn tile_quads(
                 v_flip: true,
                 crop: None,
                 tiling: None,
-            });
+                tiled: None,
+                tiled_base: None,
+            };
+            if block.kind == BlockKind::TiledWall
+                && let Some(states) = tiled.as_deref_mut()
+                && let Some(state) = states.state(
+                    world,
+                    tile,
+                    block,
+                    TiledLayer::Block,
+                    tile.x as i32,
+                    tile.y as i32,
+                )
+            {
+                let square = tiled::tiled_state_size(state).clamp(1, block.max_size.max(1));
+                let offset_x = tiled::tiled_state_x(state);
+                let offset_y = tiled::tiled_state_y(state);
+                let variant = tiled::variant(
+                    tile.x as i32 - offset_x,
+                    tile.y as i32 - offset_y,
+                    block.variants,
+                );
+                let (cell_x, cell_y) = tiled::cell(square, offset_x, offset_y);
+                quad.region = block.name.clone();
+                quad.tiled = Some((square, variant, cell_x, cell_y));
+                quad.tiled_base = Some(block.region.clone());
+            }
+            out.push(quad);
         }
         return out;
     }
@@ -641,7 +876,13 @@ pub(crate) fn tile_quads(
             .block(tile.block)
             .is_some_and(|block| block_cache_layer(block) == CacheLayerId::Walls);
         if accessible || !wall_layer {
-            out.extend(floor_draw_base_quads(world, content, tile, layer));
+            out.extend(floor_draw_base_quads_with(
+                world,
+                content,
+                tile,
+                layer,
+                tiled.as_deref_mut(),
+            ));
         }
     } else if floor_def.is_some_and(|floor| floor_cache_layer(floor) != layer)
         && layer != CacheLayerId::Walls
@@ -669,6 +910,17 @@ pub(crate) fn floor_draw_base_quads(
     tile: &Tile,
     layer: CacheLayerId,
 ) -> SmallVec<[PendingQuad; 4]> {
+    floor_draw_base_quads_with(world, content, tile, layer, None)
+}
+
+/// [`floor_draw_base_quads`] with the optional packed `TiledFloor` scan states.
+pub(crate) fn floor_draw_base_quads_with(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    tile: &Tile,
+    layer: CacheLayerId,
+    mut tiled: Option<&mut TiledStates>,
+) -> SmallVec<[PendingQuad; 4]> {
     let mut out = SmallVec::new();
     let size = TILESIZE as f32;
     let cx = tile.x as f32 * size;
@@ -686,7 +938,7 @@ pub(crate) fn floor_draw_base_quads(
 
     // `Floor.drawMain` (`Floor.java:264-292`): the tiling, autotile or plain
     // variant branch (J02 T2).
-    let main = main_quad(world, content, tile, floor, false);
+    let main = main_quad(world, content, tile, floor, false, tiled.as_deref_mut());
     out.push(main.clone());
 
     // `Floor.drawBase`: `drawEdges` when `drawEdgeIn` (`Floor.java:252`).
@@ -706,7 +958,14 @@ pub(crate) fn floor_draw_base_quads(
     {
         // The overlay's own `drawMain` (`Floor.drawOverlay` → `overlay.drawBase`,
         // `Floor.java:304-309`): its autotile same-check reads `tile.overlay`.
-        out.push(main_quad(world, content, tile, overlay, true));
+        out.push(main_quad(
+            world,
+            content,
+            tile,
+            overlay,
+            true,
+            tiled.as_deref_mut(),
+        ));
         // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
         // variant only; a plain floor used as an overlay runs the full
         // `Floor.drawBase` (its own edges; the overlay-of-overlay step
@@ -772,6 +1031,7 @@ fn main_quad(
     tile: &Tile,
     def: &BlockDef,
     is_overlay: bool,
+    tiled: Option<&mut TiledStates>,
 ) -> PendingQuad {
     let x = tile.x as i32;
     let y = tile.y as i32;
@@ -792,7 +1052,49 @@ fn main_quad(
         v_flip: true,
         crop,
         tiling,
+        tiled: None,
+        tiled_base: None,
     };
+    // `TiledFloor.drawMain` (`TiledFloor.java:105-119`): the tile's packed
+    // square selects `<name>-<size>-<variant>` and the split cell
+    // `[cx][size - 1 - cy]`. Without scan states (menu/editor one-shot paths)
+    // the plain variant branch below keeps drawing.
+    if def.kind == BlockKind::TiledFloor
+        && let Some(states) = tiled
+        && let Some(state) = states.state(
+            world,
+            tile,
+            def,
+            if is_overlay {
+                TiledLayer::Overlay
+            } else {
+                TiledLayer::Floor
+            },
+            x,
+            y,
+        )
+    {
+        let square = tiled::tiled_state_size(state).clamp(1, def.max_size.max(1));
+        let offset_x = tiled::tiled_state_x(state);
+        let offset_y = tiled::tiled_state_y(state);
+        // `variant(tile.x - cx, tile.y - cy, variants)` (`:114`).
+        let variant = tiled::variant(x - offset_x, y - offset_y, def.variants);
+        let (cell_x, cell_y) = tiled::cell(square, offset_x, offset_y);
+        return PendingQuad {
+            region: def.name.clone(),
+            cx,
+            cy,
+            w: size,
+            h: size,
+            color: 0xffff_ffff,
+            variant: false,
+            v_flip: true,
+            crop: None,
+            tiling: None,
+            tiled: Some((square, variant, cell_x, cell_y)),
+            tiled_base: Some(def.region.clone()),
+        };
+    }
     if def.tiling_variants > 0 {
         // `Floor.drawMain:265-269`: the variant is chosen per block of
         // `tilingSize` tiles and the drawn cell is `[x % tilingSize][tilingSize
@@ -849,6 +1151,8 @@ fn main_quad(
         v_flip: true,
         crop: None,
         tiling: None,
+        tiled: None,
+        tiled_base: None,
     }
 }
 
@@ -979,6 +1283,123 @@ mod tests {
                 world.tiles.get_mut(x, y).floor = floor;
             }
         }
+    }
+
+    /// `TiledFloor.drawMain` (`TiledFloor.java:105-119`): adjacent same-floor
+    /// tiles greedily pack into the largest square (`maxSize` capped), the
+    /// packed square's origin picks the variant and each tile carries its
+    /// `[cx][size - 1 - cy]` cell. Without scan states the plain variant branch
+    /// keeps drawing (menu/editor one-shot paths).
+    #[test]
+    fn tiled_floor_packs_a_square_and_selects_its_cell() {
+        let mut registry = test_registry();
+        let stone = block(&registry, "stone");
+        match registry.block_mut(stone) {
+            Some(def) => {
+                def.kind = BlockKind::TiledFloor;
+                def.max_size = 2;
+                def.variants = 1;
+            }
+            None => panic!("stone def"),
+        }
+        let mut world = WorldGrid::new(4, 4);
+        fill(&mut world, stone);
+        let changes = world.floor_changes;
+        let mut states = TiledStates::new(0, 0, changes);
+
+        // The origin scans the 2x2 square and draws its top-left cell.
+        let quads = tile_quads_with(
+            &world,
+            &registry,
+            world.tile(0, 0),
+            CacheLayerId::Normal,
+            Some(&mut states),
+        );
+        let base = match quads.first() {
+            Some(quad) => quad,
+            None => panic!("base quad"),
+        };
+        assert_eq!(base.region, "stone", "the block name prefixes the sprite");
+        assert_eq!(base.tiled, Some((2, 0, 0, 1)), "origin: cell (0, 2-1-0)");
+        assert_eq!(base.tiled_base.as_deref(), Some("stone"));
+        assert!(!base.variant);
+
+        // A member tile reuses the origin's square and picks its own cell.
+        let member = tile_quads_with(
+            &world,
+            &registry,
+            world.tile(1, 1),
+            CacheLayerId::Normal,
+            Some(&mut states),
+        );
+        let member = match member.first() {
+            Some(quad) => quad,
+            None => panic!("member quad"),
+        };
+        assert_eq!(member.tiled, Some((2, 0, 1, 0)), "member: cell (1, 2-1-1)");
+
+        // The next unassigned tile starts a new square to the right.
+        let right = tile_quads_with(
+            &world,
+            &registry,
+            world.tile(2, 0),
+            CacheLayerId::Normal,
+            Some(&mut states),
+        );
+        let right = match right.first() {
+            Some(quad) => quad,
+            None => panic!("right quad"),
+        };
+        assert_eq!(right.tiled, Some((2, 0, 0, 1)));
+
+        // No scan states: the plain per-tile variant branch (upstream's
+        // `sizedRegions[size][variant]` fallback path is only reachable with
+        // the world state slot the port keeps locally).
+        let plain = tile_quads(&world, &registry, world.tile(0, 0), CacheLayerId::Normal);
+        let plain = match plain.first() {
+            Some(quad) => quad,
+            None => panic!("plain quad"),
+        };
+        assert_eq!(plain.tiled, None);
+        assert!(plain.variant);
+    }
+
+    /// `TiledWall.drawBase` (`TiledWall.java:105-119`): the wall cache layer
+    /// packs the same squares over `tile.block`.
+    #[test]
+    fn tiled_wall_packs_over_the_block_slot() {
+        let mut registry = test_registry();
+        let wall = block(&registry, "stone-wall");
+        match registry.block_mut(wall) {
+            Some(def) => {
+                def.kind = BlockKind::TiledWall;
+                def.max_size = 2;
+                def.variants = 1;
+            }
+            None => panic!("stone-wall def"),
+        }
+        let mut world = WorldGrid::new(4, 4);
+        for y in 0..world.height() {
+            for x in 0..world.width() {
+                world.tiles.get_mut(x, y).block = wall;
+            }
+        }
+        let changes = world.floor_changes;
+        let mut states = TiledStates::new(0, 0, changes);
+        let quads = tile_quads_with(
+            &world,
+            &registry,
+            world.tile(1, 0),
+            CacheLayerId::Walls,
+            Some(&mut states),
+        );
+        let base = match quads.first() {
+            Some(quad) => quad,
+            None => panic!("wall quad"),
+        };
+        assert_eq!(base.region, "stone-wall");
+        assert_eq!(base.tiled, Some((2, 0, 1, 1)), "cell (1, 2-1-0)");
+        assert_eq!(base.w, TILESIZE as f32);
     }
 
     /// `Floor.drawMain`'s tiling branch (`Floor.java:265-269`): the variant is

@@ -175,8 +175,14 @@ impl INode2D for BlockExtras {
                 {
                     continue;
                 }
+                // GAPS #57 follow-up: a parsed `DrawTurret`/`DrawWeapon`
+                // drawer's parts are drawn by the turret/weapon pass
+                // (`render/turret.rs`), not by this block-layer extras node.
+                if mind_core::render::draw_desc::has_turret_drawer(&def.drawer) {
+                    continue;
+                }
                 // GAPS #57: parsed drawers convert to a descriptor chain too.
-                let chain = mind_core::render::draw_desc::chain_for(def);
+                let chain = mind_core::render::draw_desc::chain_for_with(def, content);
                 let Some(state) = host.block_draw_state(tile.x, tile.y) else {
                     continue;
                 };

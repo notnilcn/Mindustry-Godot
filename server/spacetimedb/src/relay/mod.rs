@@ -3,6 +3,7 @@
 //! Command relay foundation (plan 01 §3.7/§3.8): matches, membership and the
 //! append-only ordered command log.
 
+pub mod calls;
 pub mod checksum;
 pub mod events;
 pub mod methods;
@@ -13,5 +14,6 @@ pub mod rules_merge;
 pub mod snapshot;
 pub mod sweep;
 pub mod tables;
+pub mod teams;
 pub mod ui_events;
 pub mod views;

@@ -265,6 +265,7 @@ impl IControl for MindUiRoot {
     fn process(&mut self, delta: f64) {
         self.drain_logic_messages();
         self.drain_save_failures();
+        self.drain_event_toasts();
         self.refresh_join_loading();
         self.tick_mod_init_failure();
         self.tick_uiscale(delta);
@@ -1689,6 +1690,40 @@ impl MindUiRoot {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// `MindUi.take_event_toasts`: the `EventType` toasts distilled from the
+    /// relay's `my_match_events` rows (join/leave/kick/ban, world/game
+    /// lifecycle, config). Each one enters the HUD slot queue through
+    /// [`Self::on_toast`] (`HudFragment.scheduleToast`), so a burst of events
+    /// spaces out over the 3.5 s slots instead of stacking.
+    fn drain_event_toasts(&mut self) {
+        let Some(mut ui) = kit::ui() else {
+            return;
+        };
+        if !ui.has_method("take_event_toasts") {
+            return;
+        }
+        let Ok(rows) = ui.call("take_event_toasts", &[]).try_to::<VarArray>() else {
+            return;
+        };
+        for row in rows.iter_shared() {
+            let Ok(row) = row.try_to::<VarDictionary>() else {
+                continue;
+            };
+            let text = row
+                .get("text")
+                .and_then(|value| value.try_to::<GString>().ok())
+                .unwrap_or_default();
+            if text.is_empty() {
+                continue;
+            }
+            let icon = row
+                .get("icon")
+                .and_then(|value| value.try_to::<GString>().ok())
+                .unwrap_or_else(|| GString::from("ok"));
+            self.on_toast(text, icon);
         }
     }
 

@@ -50,6 +50,7 @@ pub mod shaders;
 pub mod shadow;
 pub mod snapshot;
 pub mod tile_bitmask;
+pub mod tiled;
 pub mod trail;
 pub mod unit_draw;
 

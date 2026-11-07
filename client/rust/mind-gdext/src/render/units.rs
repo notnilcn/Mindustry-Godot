@@ -76,6 +76,41 @@ pub(crate) struct UnitQuad {
     pub(crate) color: u32,
 }
 
+/// One vertex-warped quad (`WobbleProp.drawBase`'s `Draw.rectv` callback,
+/// `WobbleProp.java:17-20`): four **world-space** corners displaced by the
+/// wobble sin terms. Used by the dynamic block pass for `WobbleProp`.
+#[derive(Clone, Copy)]
+pub(crate) struct WarpQuad {
+    /// Corners in `Draw.rectv` order: bottom-left, bottom-right, top-right,
+    /// top-left.
+    pub(crate) corners: [[f32; 2]; 4],
+    pub(crate) uv: [f32; 4],
+    pub(crate) color: u32,
+}
+
+/// Builds one triangle mesh out of [`WarpQuad`]s (the y-flip camera UV mapping
+/// matches [`build_unit_mesh`]: bottom-left `(u0, v1)` … top-left `(u0, v0)`).
+pub(crate) fn build_warp_quad_mesh(quads: &[WarpQuad]) -> Option<Gd<ArrayMesh>> {
+    if !super::atlas_bind::has_mesh_quads(quads) {
+        return None;
+    }
+    let mut tool = SurfaceTool::new_gd();
+    tool.begin(PrimitiveType::TRIANGLES);
+    for quad in quads {
+        let color = color_from(quad.color);
+        let [u0, v0, u1, v1] = quad.uv;
+        let uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)];
+        for index in [0usize, 1, 2, 0, 2, 3] {
+            let [x, y] = quad.corners[index];
+            let (u, v) = uvs[index];
+            tool.set_color(color);
+            tool.set_uv(Vector2::new(u, v));
+            tool.add_vertex(Vector3::new(x, y, 0.0));
+        }
+    }
+    tool.commit()
+}
+
 /// One unit quad plus its Java sprite-batch z. Quads are stably sorted by
 /// `z` before the bucket mesh is built, so `Weapon.layerOffset` and the
 /// payload/leg offsets land on the same side of the body as upstream while

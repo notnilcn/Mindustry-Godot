@@ -107,6 +107,77 @@ impl ClientPlan {
     }
 }
 
+/// `BuildPlan.pointConfig` (`BuildPlan.java:88-99`): applies `transform` to
+/// every point a config carries and returns the transformed copy.
+///
+/// Only the point kinds are handled here (`Point2` and the packed `Point2[]`);
+/// `None` means the config is not a point kind, so `Block.pointConfig`'s
+/// per-class hook (`Block.java:930`) would be needed — the only upstream
+/// override (`LogicBlock.pointConfig`, `LogicBlock.java:192-224`) round-trips a
+/// `byte[]` and, because `LogicBlock.ignoreResizeConfig = true`, never moves a
+/// link (`MapEditor.java:342-345`), so the resize path is unaffected.
+pub fn point_config(
+    config: &ConfigValue,
+    transform: impl Fn(i32, i32) -> (i32, i32),
+) -> Option<ConfigValue> {
+    use crate::io::typeio::{pack_point2, unpack_point2_x, unpack_point2_y};
+    match config {
+        ConfigValue::Point2(x, y) => {
+            let (nx, ny) = transform(*x, *y);
+            Some(ConfigValue::Point2(nx, ny))
+        }
+        ConfigValue::Point2Array(points) => {
+            let mut out = points.clone();
+            for packed in out.iter_mut() {
+                let (nx, ny) = transform(unpack_point2_x(*packed), unpack_point2_y(*packed));
+                *packed = pack_point2(nx, ny);
+            }
+            Some(ConfigValue::Point2Array(out))
+        }
+        _ => None,
+    }
+}
+
+/// `MapEditor.resize`'s config half (`MapEditor.java:340-352`): the tiles move
+/// by `-(offsetX, offsetY)` (`offsetX = (width() - width) / 2 - shiftX`), and
+/// every center build's config is transformed the same way —
+/// `BuildPlan.pointConfig(tile.block(), config, p -> { if
+/// (!tile.build.block.ignoreResizeConfig){ p.sub(offsetX, offsetY); } })` —
+/// then re-applied with `tile.build.configureAny(out)` when `out != config`.
+///
+/// Returns the config to re-apply. The point kinds are always returned (Java
+/// copies them before running the transform, so the reference test is true even
+/// for `ignoreResizeConfig` blocks); the caller must still re-configure those,
+/// because blocks like `ItemBridge` recompute their absolute link from the
+/// relative config plus the *new* tile position
+/// (`ItemBridge.java:67`, `configured`). `ignore_resize_config` blocks keep the
+/// raw points (`p.sub` is skipped) — that is what keeps relative links aligned
+/// with the moved tile.
+pub fn resize_config(
+    config: &ConfigValue,
+    offset_x: i32,
+    offset_y: i32,
+    ignore_resize_config: bool,
+) -> Option<ConfigValue> {
+    point_config(config, |x, y| {
+        if ignore_resize_config {
+            (x, y)
+        } else {
+            (x - offset_x, y - offset_y)
+        }
+    })
+}
+
+/// `tile.build.block.ignoreResizeConfig` (`MapEditor.java:343`) resolved from
+/// content: `Block.ignoreResizeConfig` is a class-constructor flag
+/// (`Block.java:264-265`), see
+/// [`crate::content::registries::blocks::kind_ignores_resize_config`].
+pub fn ignores_resize_config(content: &crate::content::ContentRegistry, block: BlockId) -> bool {
+    content
+        .block(block)
+        .is_some_and(|def| def.ignore_resize_config)
+}
+
 /// Insertion-ordered plan set (`Arc QuadTree`, iteration-order contract only).
 #[derive(Debug, Clone, Default)]
 pub struct PlanTree {
@@ -370,6 +441,97 @@ impl PreviewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `MapEditor.java:340-352` + `BuildPlan.pointConfig`: the resize shift
+    /// moves every point of a `Point2`/`Point2[]` config by
+    /// `-(offsetX, offsetY)`, while `ignoreResizeConfig` blocks keep their raw
+    /// points (the value is still re-applied because Java copies the config
+    /// before transforming it).
+    #[test]
+    fn resize_shifts_point_configs() {
+        use crate::io::typeio::pack_point2;
+
+        // 8x8 -> 6x6 with shift(-1,-1): offset = (8-6)/2 - (-1) = 2, so old
+        // (3,3) lands on new (1,1) and its config point follows the tile.
+        let offset = 2;
+        let point = ConfigValue::Point2(3, 3);
+        assert_eq!(
+            resize_config(&point, offset, offset, false),
+            Some(ConfigValue::Point2(1, 1))
+        );
+        assert_eq!(
+            resize_config(&point, offset, offset, true),
+            Some(ConfigValue::Point2(3, 3)),
+            "ignoreResizeConfig keeps the raw points"
+        );
+
+        let points =
+            ConfigValue::Point2Array(smallvec::smallvec![pack_point2(3, 3), pack_point2(-1, 4)]);
+        assert_eq!(
+            resize_config(&points, offset, offset, false),
+            Some(ConfigValue::Point2Array(smallvec::smallvec![
+                pack_point2(1, 1),
+                pack_point2(-3, 2)
+            ]))
+        );
+        assert_eq!(
+            resize_config(&points, offset, offset, true),
+            Some(points.clone())
+        );
+
+        // Non-point configs have no transform to apply (Java's base
+        // `Block.pointConfig` returns the same reference).
+        assert_eq!(
+            resize_config(&ConfigValue::Number(1.0), offset, offset, false),
+            None
+        );
+        assert_eq!(
+            resize_config(&ConfigValue::None, offset, offset, false),
+            None
+        );
+        assert_eq!(
+            resize_config(
+                &ConfigValue::Bytes(smallvec::smallvec![1u8, 2]),
+                offset,
+                offset,
+                false,
+            ),
+            None
+        );
+        // `point_config` is the raw seamed form.
+        assert_eq!(
+            point_config(&point, |x, y| (x + 1, y + 2)),
+            Some(ConfigValue::Point2(4, 5))
+        );
+    }
+
+    /// `Block.ignoreResizeConfig` (`Block.java:264-265`): true for the logic
+    /// processors, item bridges and power nodes; false for their non-inheriting
+    /// cousins.
+    #[test]
+    fn content_resolves_ignore_resize_config() {
+        let content = crate::content::test_support::test_registry();
+        for name in [
+            "micro-processor",
+            "phase-conveyor",
+            "bridge-conveyor",
+            "bridge-conduit",
+            "power-node",
+            "beam-link",
+        ] {
+            let id = content.block_id(name).unwrap_or_else(|| panic!("{name}"));
+            assert!(ignores_resize_config(&content, id), "{name}");
+        }
+        for name in [
+            "mechanical-drill",
+            "impulse-pump",
+            "beam-node",
+            "logic-display",
+        ] {
+            let id = content.block_id(name).unwrap_or_else(|| panic!("{name}"));
+            assert!(!ignores_resize_config(&content, id), "{name}");
+        }
+    }
 
     #[test]
     fn overlapping_plan_replaced() {

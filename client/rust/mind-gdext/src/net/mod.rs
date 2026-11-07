@@ -24,17 +24,20 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_stdb::binder::TableBinder;
+use mind_stdb::call_packet::CallPacket;
+use mind_stdb::calls::CallStream;
 use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport};
 use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
     AllAdminsTableAccessor, AllBansTableAccessor, AllMatchesTableAccessor, AllPlayersTableAccessor,
-    AllWhitelistTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode,
+    AllWhitelistTableAccessor, BreakBlock, CallPacketKind, ChatKind, CommandKind, Custom, Gamemode,
     MatchPlayerState, MatchStatus, MemberRole, MyAdminActionsTableAccessor, MyKickTableAccessor,
-    MyMatchChecksumsTableAccessor, MyMatchEventsTableAccessor, MyMatchMembersTableAccessor,
-    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotChunksTableAccessor,
-    MyMatchSnapshotRequestsTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
-    MyMatchTableAccessor, MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch,
-    SnapshotKind, Visibility,
+    MyMatchCallsTableAccessor, MyMatchChecksumsTableAccessor, MyMatchEventsTableAccessor,
+    MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
+    MyMatchSnapshotChunksTableAccessor, MyMatchSnapshotRequestsTableAccessor,
+    MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor,
+    MyMatchesTableAccessor, MyTracesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind,
+    Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
@@ -227,6 +230,11 @@ pub struct MindNet {
     events: EventBus,
     /// `my_match_events` binder (Game wave).
     events_binder: Option<TableBinder<MyMatchEventsTableAccessor>>,
+    /// `my_match_calls` rows → frames (GAPS #35 / PAR-0576); the binder half of
+    /// the call channel. Every new row is pushed into [`Self::calls`].
+    call_rows: CallStream,
+    /// `my_match_calls` binder (Game wave).
+    call_rows_binder: Option<TableBinder<MyMatchCallsTableAccessor>>,
     /// Server→client `@Remote` call channel (GAPS #35).
     calls: CallBridge,
     /// Applied calls not yet read by the UI/view owners (`server_calls_json`).
@@ -295,6 +303,8 @@ impl INode for MindNet {
             traces_binder: None,
             events: EventBus::new(),
             events_binder: None,
+            call_rows: CallStream::new(),
+            call_rows_binder: None,
             calls: CallBridge::new(),
             pending_calls: Vec::new(),
             kicked: None,
@@ -330,12 +340,14 @@ impl INode for MindNet {
                         self.session.on_disconnected();
                         self.roster.clear();
                         self.events.clear();
+                        self.call_rows.clear();
                         self.calls.clear();
                     }
                     ConnectorEvent::Resync => {
                         self.session.on_resync();
                         self.roster.clear();
                         self.events.clear();
+                        self.call_rows.clear();
                         self.calls.clear();
                     }
                     _ => {}
@@ -346,6 +358,7 @@ impl INode for MindNet {
             self.drain_members_rows();
             self.drain_roster();
             self.drain_server_events();
+            self.drain_server_calls();
             self.drain_state_rows();
             self.drain_public_matches();
             self.drain_player_states();
@@ -455,6 +468,8 @@ impl MindNet {
         self.traces_binder = Some(connector.bind::<MyTracesTableAccessor>("my_traces"));
         // `EventType` bus rows (GAPS #37): typed payloads arrive in `detail`.
         self.events_binder = Some(connector.bind::<MyMatchEventsTableAccessor>("my_match_events"));
+        // Server→client `@Remote` calls (GAPS #35 / PAR-0576).
+        self.call_rows_binder = Some(connector.bind::<MyMatchCallsTableAccessor>("my_match_calls"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -929,6 +944,84 @@ impl MindNet {
     #[func]
     pub fn players_json(&self) -> GString {
         GString::from(self.roster.players_json().to_string().as_str())
+    }
+
+    /// Relay-assigned team for the local player (`relay_member.team`,
+    /// GAPS #33 / PAR-0545), or `-1` when unassigned/offline.
+    ///
+    /// This is the client-apply seam for the module-side PvP balancer: the
+    /// host publishes team liveness through [`Self::publish_team_data`], the
+    /// module assigns a team on join/start and every peer reads it here (and
+    /// through [`Self::players_json`]). Applying the value to the local sim is
+    /// a residual: `MindSimHost::set_player_team` is editor-gated today.
+    #[func]
+    pub fn my_team(&self) -> i64 {
+        let Some(identity) = self.session.local_identity() else {
+            return -1;
+        };
+        self.members
+            .get(&identity.to_hex().to_string())
+            .and_then(|member| member.team)
+            .map(i64::from)
+            .unwrap_or(-1)
+    }
+
+    /// Host/admin: publishes the match's team liveness for the module-side PvP
+    /// balancer (GAPS #33). `teams_json` is
+    /// `[{"team":1,"active":true,"protect_cores":true,"wave_team":false}]`;
+    /// the host derives it from its world (`state.teams`) and republishes when
+    /// a core appears/disappears.
+    #[func]
+    pub fn publish_team_data(&mut self, teams_json: GString) -> bool {
+        let Some(match_id) = self.session.match_id() else {
+            log::warn!("publish_team_data: no match joined");
+            return false;
+        };
+        let parsed: Vec<serde_json::Value> = match serde_json::from_str(&teams_json.to_string()) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                log::warn!("publish_team_data: bad JSON ({error})");
+                return false;
+            }
+        };
+        let mut teams = Vec::with_capacity(parsed.len());
+        for value in parsed {
+            let Some(team) = value.get("team").and_then(serde_json::Value::as_u64) else {
+                log::warn!("publish_team_data: entry without `team`: {value}");
+                return false;
+            };
+            let Some(team) = u8::try_from(team).ok().filter(|team| *team < 8) else {
+                log::warn!("publish_team_data: team id {team} out of range");
+                return false;
+            };
+            teams.push(mind_stdb::module_bindings::TeamAssignment {
+                team,
+                active: value
+                    .get("active")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                protect_cores: value
+                    .get("protect_cores")
+                    .or_else(|| value.get("protectCores"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+                wave_team: value
+                    .get("wave_team")
+                    .or_else(|| value.get("waveTeam"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            });
+        }
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        match connector.publish_match_teams(match_id, teams) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("publish_team_data failed: {error}");
+                false
+            }
+        }
     }
 
     /// Connected player count (player-list header).
@@ -1696,8 +1789,27 @@ impl MindNet {
             log::warn!("player_action: no connector (single-player)");
             return false;
         };
+        let kick_reason = match &action {
+            PlayerAction::Kick { reason } => Some(reason.clone()),
+            _ => None,
+        };
         match action.apply(connector, match_id, identity) {
-            Ok(()) => true,
+            Ok(()) => {
+                // GAPS #35: Java's `adminRequest(kick)` sends
+                // `Call.kick(other.con, reason)`; publish the same call so the
+                // target's client shows the localized kick, not just `my_kick`.
+                if let Some(reason) = kick_reason {
+                    self.publish_call_packet(
+                        match_id,
+                        CallPacketKind::Kick,
+                        Some(identity),
+                        &CallPacket::Kick {
+                            reason: Some(reason),
+                        },
+                    );
+                }
+                true
+            }
             Err(error) => {
                 log::warn!("player_action {} failed: {error}", action.reducer());
                 false
@@ -1770,6 +1882,57 @@ impl MindNet {
         };
         for change in changes {
             self.events.apply(change);
+        }
+    }
+
+    /// Applies every pending `my_match_calls` row (GAPS #35 / PAR-0576).
+    ///
+    /// Each row becomes a `[kind][body]` frame pushed into the same
+    /// [`CallBridge`] `MindNet.push_call_frame` feeds, so decoding, rejection
+    /// accounting and the net-layer effects (kick/leave, camera, music,
+    /// infoMessage) are shared by both entry points. [`CallStream`] dedupes by
+    /// `call_id`, so a reconnect replay never re-applies a call.
+    fn drain_server_calls(&mut self) {
+        let Some(changes) = self.call_rows_binder.as_ref().map(|binder| binder.drain()) else {
+            return;
+        };
+        for change in changes {
+            self.call_rows.apply(change);
+        }
+        for (call_id, frame) in self.call_rows.drain_new() {
+            if !self.calls.push_frame(&frame) {
+                log::warn!(
+                    "MindNet: rejected published call {call_id}: {}",
+                    self.calls.rejects_json()
+                );
+            }
+        }
+    }
+
+    /// Publishes one server→client call through the module (host/admin,
+    /// GAPS #35 / PAR-0576): Java `adminRequest(kick)` ends with
+    /// `Call.kick(other.con, ...)`, so the relay's kick path publishes the
+    /// matching `Kick` frame for the target.
+    fn publish_call_packet(
+        &mut self,
+        match_id: u64,
+        kind: CallPacketKind,
+        target: Option<mind_stdb::Identity>,
+        packet: &CallPacket,
+    ) -> bool {
+        let Ok(payload) = packet.encode_body() else {
+            log::warn!("publish_call_packet: cannot encode {packet:?}");
+            return false;
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        match connector.publish_call(match_id, kind, target, payload) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("publish_call failed: {error}");
+                false
+            }
         }
     }
 

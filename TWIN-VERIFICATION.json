@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-06T23:24:09Z",
+  "updated": "2026-11-06T23:55:00Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -13995,6 +13995,11 @@
           "at": "2026-11-06T16:08:18Z",
           "by": "hx-bindings",
           "text": "Client consumed the chat ABI added by this item (hx-bindings, worktree Mindustry-Godot-p1b): new mind_stdb::ChatLog binds my_match_chat and filters ChatKind::Admin + private MatchChat.target rows for the viewer; new mind_stdb::EventBus maps my_match_events EventKind rows onto the upstream EventType names (GAPS #37 bus source); roster trace now merges my_traces answers (admin_request_trace, PlayerAction::RequestTrace); Connector/admin reducers + subscription waves updated (my_match_chat already subscribed; added my_match_events/my_traces/my_admin_actions/all_admins/all_bans/all_whitelist). Status left verified (client consumption note only; no new server evidence)."
+        },
+        {
+          "at": "2026-11-06T23:34:23Z",
+          "by": "hx-chatui",
+          "text": "Client UI remainder landed (hx-chatui, worktree Mindustry-Godot-session2): PAR-0593. gx/ui now binds mind-stdb ChatLine/ChatLog: MindUi ChatFeed + chat_poll/chat_apply_rows_json/chat_rows_json/chat_set_viewer, chat_send forwards to MindNet.send_chat; MindChatFragment renders the my_match_chat rows with team/all/admin tabs and the ChatFormatter colours. PAR-0121 status unchanged (verified)."
         }
       ],
       "claimed_by": "hx-stdb",
@@ -14206,6 +14211,11 @@
           "at": "2026-11-06T16:08:18Z",
           "by": "hx-bindings",
           "text": "Client half landed (hx-bindings, worktree Mindustry-Godot-p1b): client/rust/mind-stdb/src/module_bindings regenerated with the pinned spacetime 2.10.1 CLI from the merged module (ChatKind::Admin, MatchChat.target, ChatFilter.match_id, 22 AdminActionKind variants, my_match_events/my_traces/all_action_filters/all_player_info, ServerConfig +9 knobs, 7 new admin_* reducers). New mind_stdb::ChatLog applies the module's chat_visible predicate (Admin only for admins, private target only for the target, Team only for the same team) and re-filters retained lines when the viewer's admin flag/team changes; Connector gained admin_add_match_chat_filter/admin_remove_match_chat_filter plus the action-filter, name-ban and request-trace calls; Game wave now subscribes my_match_events/my_traces and the previously unsubscribed my_admin_actions, and Lobby now subscribes all_admins/all_bans/all_whitelist. Status left verified; client evidence: cargo test -p mind-stdb --lib -> 65 passed."
+        },
+        {
+          "at": "2026-11-06T23:34:23Z",
+          "by": "hx-chatui",
+          "text": "Client UI half of the per-match visibility predicate landed (hx-chatui): PAR-0593 re-filters retained rows with ChatLine::visible_to for the known viewer (identity/team/admin) and trusts the module view when the roster carries no local identity (roster D2), so an admin revoke or team switch drops stale rows immediately. PAR-0125 status unchanged (verified)."
         }
       ],
       "claimed_by": "hx-stdb",
@@ -17711,13 +17721,21 @@
     },
     "PAR-0466": {
       "title": "Editor resize does not shift relative build configs (Java BuildPlan.pointConfig p.sub(offsetX, offsetY), ignoreResizeConfig blocks excluded)",
-      "status": "fixing",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "Java twin pending; upstream MapEditor.java:310-352 + BuildPlan.java:88-99 + LogicBlock.java:58/ItemBridge.java:61/PowerNode.java:45"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib -- resize"
             }
           }
         ]
@@ -17725,9 +17743,9 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0466"
+              "cmd": "cargo test -p mind-core --lib -- resize"
             }
           }
         ]
@@ -17735,10 +17753,23 @@
       "area": "editor/map-data",
       "java": "core/src/mindustry/editor/MapEditor.java:332-352,core/src/mindustry/entities/units/BuildPlan.java:88-110,core/src/mindustry/world/blocks/logic/LogicBlock.java:58",
       "rust": "client/rust/mind-core/src/editor/grid.rs:360-410,client/rust/mind-core/src/editor/lifecycle.rs:119-136",
-      "evidence": "Java MapEditor.resize captures each center build's config before re-assigning x/y, then after reassignment runs 'Object out = BuildPlan.pointConfig(tile.block(), config, p -> { if(!tile.build.block.ignoreResizeConfig){ p.sub(offsetX, offsetY); } });' and re-applies it with 'tile.build.configureAny(out)' (MapEditor.java:340-352). Blocks that store relative points (ItemBridge links, LogicBlock positions, logic displays etc.) are therefore translated with the content; blocks with ignoreResizeConfig=true keep their raw config. The Rust editor resize (grid.rs::resize_shift + editor/lifecycle.rs:119-136, comment 'Plan 07 owns live building configs (BuildPlan::point_config); M1 shifts the center builds (block/team/rotation)') reattaches only block/team/rotation and never shifts any config, so after a resize all relative configs point at their pre-resize offsets and links/displays become wrong or stale. PAR-0464 fixed only the tile-centring half of the same Java function; this config half is not covered by any open item (dedupe checked).",
+      "evidence": [
+        "cargo test -p mind-core --lib -- resize (10 passed, incl. editor::grid::tests::resize_shifts_relative_point_configs and input::plan::tests::resize_shifts_point_configs)",
+        "cargo test -p mind-core --lib (3102 passed, 4 ignored)",
+        "cargo check -p mind-gdext (clean)",
+        "cargo fmt --all --check (clean)"
+      ],
       "acceptance": "cargo test -p mind-core editor::resize: place an ItemBridge (or a logic block) with a relative config at (3,3), resize 8x8->6x6 shift(-1,-1), assert the config's stored point moved with the tile by the same offset (Java: p.sub(offsetX, offsetY) = -2,-2 there) and that an ignoreResizeConfig block's config is unchanged.",
-      "claimed_by": "p1-orch",
-      "claimed_at": "2026-11-03T14:26:18Z"
+      "claimed_by": "hx-smallfix",
+      "claimed_at": "2026-11-06T23:27:26Z",
+      "fix": "editor::grid::WorldEditorGrid::resize_shift now captures every center build config before the tile remap (MapEditor.java:334-340) and re-applies BuildPlan.pointConfig semantics after the build is reattached: new input::plan::{point_config, resize_config, ignores_resize_config} shift every Point2/Point2[] by -(offsetX,offsetY) unless the block sets ignoreResizeConfig (MapEditor.java:342-345). New BlockDef.ignore_resize_config + content::registries::blocks::kind_ignores_resize_config set it for LogicBlock/ItemBridge/BufferedItemBridge/LiquidBridge/PowerNode/LongPowerNode (LogicBlock.java:58, ItemBridge.java:61, PowerNode.java:45), matching the upstream constructors. Residual: the live editor host (EditorWorldHooks; mind-gdext editor comment \"the editor ECS holds no behavior table\") spawns stateless buildings, so read_config returns None there and the shift is a no-op until editor builds carry behavior state; the new grid test drives the stateful path with a hook that spawns full building state.",
+      "notes": [
+        {
+          "at": "2026-11-06T23:27:36Z",
+          "by": "hx-smallfix",
+          "text": "Headless fix: resize now shifts relative point configs with the content (BuildPlan.pointConfig, p.sub(offsetX,offsetY)) and skips blocks with ignoreResizeConfig, which covers item bridges, power nodes and logic processors. Test: mass-driver Point2(3,3) 8x8->6x6 shift(-1,-1) becomes Point2(1,1); phase-conveyor Point2(-2,0) keeps its raw points. Residual: EditorWorldHooks spawns stateless editor buildings, so configs are None in the live editor until plan 07 state lands."
+        }
+      ]
     },
     "PAR-0467": {
       "title": "Block emitLight light sources are a fixed 60 px white circle: Java per-block lightRadius/lightColor dropped (impact reactor 115, differential generator 195, landing pad 90 #eab678)",
@@ -29082,18 +29113,16 @@
     },
     "PAR-0545": {
       "title": "GAPS #33: NetServer gaps — PvP assignTeam, clientSnapshot movement validation, chat commands (/help /sync /votekick /vote), admin chat channel, fixName/checkColor",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
             }
           }
-        ]
-      },
-      "action": {
+        ],
         "godot": [
           {
             "tool": "note",
@@ -29103,15 +29132,27 @@
           }
         ]
       },
-      "claimed_by": "hx-net",
-      "claimed_at": "2026-11-06T15:06:39Z",
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-net2",
+      "claimed_at": "2026-11-06T23:54:23Z",
       "severity": "P1",
       "gap": "HEAD f11557ea: NetServer has no assignTeam/chat-command/fixName equivalents. Evidence: (1) assignTeam — no call site anywhere; this pass added the data-path algorithm mind_stdb::Roster::assign_team (tested: mind-stdb roster::tests::assign_team_balances_pvp) but the join path lives in server/spacetimedb/src/relay and still needs to call it (outside hx-net). (2) clientSnapshot-style movement validation — server/spacetimedb/src/relay/player_state.rs only checks seq/finite floats/rate (GAPS #33); no clientsnapshot distance/tile rewind. (3) chat commands /help /sync /votekick /vote — no ChatCommandHandler: grep -rn votekick client/rust server/spacetimedb -> only client/rust/mind-headless/src/server/config.rs:108 (an enableVotekick description). (4) admin chat channel — ChatKind is generated as All/Team/System only (client/rust/mind-stdb/src/module_bindings/chat_kind_type.rs), so an admin channel needs a schema change in server/spacetimedb. (5) fixName/checkColor — not ported (upstream NetServer.java:1261-1305); kickAll is now implemented as NetHost::kick_all (this pass) and mailed to the server game-over path.",
       "source": "GAPS.md#33",
       "evidence": [
-        "cargo test -p mind-stdb --lib roster -> 5 passed",
-        "grep -rn votekick client/rust server/spacetimedb -> only config description",
-        "sed ChatKind -> All/Team/System"
+        "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib -> 109 passed, 0 failed",
+        "relay::teams 6 passed (balance/wave team/no candidate/validation/determinism/non-PvP)",
+        "relay::player_state 9 passed (finite guard, seq, velocity clamp, displacement clamp, 1.5s cap, bounds ignore, first report)",
+        "identity::methods::tests::fix_name_and_check_color_follow_net_server passed",
+        "runs/PAR-0545/module-tests.log, runs/PAR-0545/headless-fix.md"
       ],
       "notes": [
         {
@@ -29123,8 +29164,14 @@
           "at": "2026-11-06T22:52:35Z",
           "by": "hx-server2",
           "text": "GAPS #33 server command half landed in mind-headless/src/server (PAR-0585): chat command parser/dispatch (help/t/a/votekick/vote/sync) with Java replies, fixName/checkColor, kick_all on stop/exit, and config -> module server_config push for enable_votekick/interactRate*/antiSpam/whitelist/autoPause. Remaining PAR-0545 sub-items (PvP assignTeam call site in server/spacetimedb relay, clientSnapshot movement validation) are untouched; module-side Admin ChatKind + send_chat dispatch were already present."
+        },
+        {
+          "at": "2026-11-06T23:54:23Z",
+          "by": "hx-net2",
+          "text": "Verified headlessly: module cargo test --lib 109 passed (relay::teams 6, relay::player_state 9, identity fix_name test); bindings regenerated with the pinned 2.10.1 CLI and drift-clean; mind-gdext cargo check clean. No Java leg run. Residual: the local sim does not yet adopt the relay-assigned team because MindSimHost::set_player_team is editor-gated."
         }
-      ]
+      ],
+      "fix": "Module half of GAPS #33 landed: (1) PvP assignTeam — relay/teams.rs adds the public match_team table + publish_match_teams reducer (host/admin publishes TeamData liveness: active, protect_cores, wave_team) and a pure assign_team port of NetServer.assigner (NetServer.java:50-71: fewest connected members, skip wave team/inactive/derelict, lower team id breaks ties), called from join_match (non-PvP stays None so the client world default team applies) and start_match (assign_missing_teams back-fills lobby members). Client seam: mind-stdb Connector::publish_match_teams, MindNet.publish_team_data(json), MindNet.my_team(); relay_member.team already feeds players_json/SenderOrigin. (2) clientSnapshot-style movement validation — relay/player_state.rs clamp_player_movement ports NetServer.clientSnapshot (NetServer.java:591-746): velocity limited to MAX_PLAYER_SPEED=20 units/tick, per-report displacement limited to min(elapsed,1500ms)/1000*60*speed*1.2, positions outside the map rectangle + 64px margin are ignored/rejected (Java rewinds to the authoritative position; the relay has none). (3) admin chat channel was already present at HEAD (ChatKind::Admin + /a dispatch + chat_visible admin gate; client mind-stdb::chat::is_admin_channel) — verified, not changed. (4) fixName/checkColor ported to identity/methods.rs (NetServer.java:976-1029, v146) and applied in set_username and the relay join path (player_username)."
     },
     "PAR-0546": {
       "title": "GAPS #35: server→client @Remote calls have no channel and there is no KickReason enum",
@@ -29252,6 +29299,11 @@
           "at": "2026-11-06T22:03:48Z",
           "by": "hx-protocol",
           "text": "Verified headlessly: codec + round-trip/malformed tests pass in mind-stdb; gdext cargo check clean. No Java leg run (brief forbids running Java) — twin verification pending."
+        },
+        {
+          "at": "2026-11-06T23:34:23Z",
+          "by": "hx-chatui",
+          "text": "Client toast remainder landed (hx-chatui): PAR-0594. ui/fragments/toasts.rs maps my_match_events rows to their upstream EventType names (mind_stdb::events::event_type_name) and MindUiRoot drains them into the HudFragment toast slot queue; PlayerChat/plumbing kinds never toast. PAR-0548 status/claim unchanged (hx-net owns the core EventType class expansion)."
         }
       ],
       "fix": "EventType taxonomy + relay payload codec landed: mind-stdb/src/event_type.rs declares all 89 upstream classes (Unit*/Player*/Config/Deposit/CoreChange/Research/Unlock/BuildSelect/BulletDestroy/...), each as a serde struct variant named exactly like the Java class with the wire projection of its fields; EventType::encode/decode is the {\"type\":\"<Class>\",...} JSON envelope used as MatchEvent.detail. events.rs maps every EventKind to the taxonomy (module-only kinds excepted, MODULE_ONLY_EVENT_KINDS), and ServerEvent::typed/class_name/has_payload + EventBus::typed_after/typed_event decode typed rows while plain-text details keep the kind mapping. MindNet now binds my_match_events into the EventBus and exposes match_events_json/match_event_types_json. Fire sites in the client sim and the module-side typed publication are filed as a residual PAR."
@@ -30014,13 +30066,21 @@
     },
     "PAR-0565": {
       "title": "GAPS #54 closing work: BurstDrill per-block shake/drillEffect overrides (impact-drill, eruption-drill)",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "Java twin pending; upstream BurstDrill.java:15,26,113-118 + Blocks.java:3095-3096,3121-3125"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib -- burst"
             }
           }
         ]
@@ -30028,24 +30088,32 @@
       "action": {
         "godot": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "text": "see runs/PAR-0565"
+              "cmd": "cargo test -p mind-core --lib -- burst"
             }
           }
         ]
       },
-      "claimed_by": "hx-audio2",
-      "claimed_at": "2026-11-06T16:02:43Z",
+      "claimed_by": "hx-smallfix",
+      "claimed_at": "2026-11-06T23:27:26Z",
       "severity": "P2",
       "source": "GAPS.md#54",
       "gap": "HEAD 01d18ac6 + hx-audio2 wiring: the BurstDrill burst cues (client/rust/mind-core/src/world/behavior/production.rs `emit_burst_cues`) use the BurstDrill class defaults `shake = 2` and `drillEffect = Fx.shockwave` (`BurstDrill.java:15,26,42`). Both vanilla blocks override them: impact-drill `shake = 4`, `drillEffect = MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.mineImpactWave.wrap(Pal.redLight, 40f))` (`Blocks.java:3089-3104`); eruption-drill `shake = 4`, `drillEffect = MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.dynamicSpikes.wrap(Liquids.hydrogen.color, 30f), Fx.mineImpactWave.wrap(Liquids.hydrogen.color, 45f))` (`Blocks.java:3112-3124`). `BurstDrillDef` (client/rust/mind-core/src/world/block_kind_data.rs:170-196) has no shake/drillEffect/drillEffectRnd fields, and `mc/fx` has no MultiEffect spawn path, so both blocks currently play the class-default single shockwave. Fix needs: add the fields to BurstDrillDef + the impact-drill/eruption-drill presets, read them in `emit_burst_cues`, and represent MultiEffect (files outside hx-audio2 ownership).",
       "evidence": [
-        "sed BurstDrill.java:15,26,42 -> shake=2, drillEffect=Fx.shockwave defaults",
-        "sed Blocks.java:3089-3104,3112-3124 -> impact/eruption shake=4 + MultiEffect overrides",
-        "sed mc/world/block_kind_data.rs:170-196 -> BurstDrillDef has no shake/drill_effect fields",
-        "grep -rn MultiEffect client/rust -> no spawn path",
-        "hx-audio2 BurstDrill cue wiring: cargo test -p mind-core --lib -- burst_drill (2 passed)"
+        "cargo test -p mind-core --lib -- burst (7 passed)",
+        "cargo test -p mind-core --lib -- inline (8 passed)",
+        "cargo test -p mind-core --lib (3102 passed, 4 ignored)",
+        "cargo check -p mind-gdext (clean)",
+        "cargo fmt --all --check (clean)"
+      ],
+      "fix": "BurstDrillDef gains shake/drill_effect/drill_effect_rnd (class defaults 2 / Fx.shockwave / 0; BurstDrill.java:15,26); BlockSpec/BlockDef gain append-only burst_shake/burst_drill_effect; fx_meta::EffectSpec gains WrapEffect.rotation; new mind-core fx::inline flattens EffectRef::Inline MultiEffect/WrapEffect into named Fx spawns with MultiEffect.create/WrapEffect.create semantics (+ jitter for drillEffectRnd); block_kind_data::apply_vanilla_knobs installs impact-drill shake=4 + MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.mineImpactWave.wrap(Pal.redLight,40)) (Blocks.java:3095-3096) and eruption-drill shake=4 + MultiEffect(Fx.mineImpact, Fx.drillSteam, Fx.dynamicSpikes.wrap(hydrogen,30), Fx.mineImpactWave.wrap(hydrogen,45)) (Blocks.java:3121-3125); world/behavior/production.rs emit_burst_cues plays burst.shake and fx::inline::play(burst.drill_effect) at the building centre. Packet named world/blocks/production.rs; the burst cue path is world/behavior/production.rs (generated content/registries/blocks/production.rs untouched; vanilla overlay lives in apply_vanilla_knobs).",
+      "notes": [
+        {
+          "at": "2026-11-06T23:27:31Z",
+          "by": "hx-smallfix",
+          "text": "Headless fix: BurstDrill shake/drillEffect are data now (BurstDrillDef), vanilla impact/eruption drills install shake=4 + their Java MultiEffect, and fx::inline expands inline Multi/Wrap specs to named Fx spawns at the burst. Tests: burst_drill_burst_fires_sound_and_view_cues (shake 4, mineImpact/drillSteam item-tinted, mineImpactWave red-light rot 40), vanilla_burst_drills_override_shake_and_drill_effect, fx::inline (5), mind-core full lib 3102 passed."
+        }
       ]
     },
     "PAR-0566": {
@@ -30544,18 +30612,16 @@
     },
     "PAR-0576": {
       "title": "GAPS #35 residual: server relay cannot publish call frames (nothing feeds MindNet.push_call_frame)",
-      "status": "mismatch",
+      "status": "verified",
       "fork": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "text": "see referenced Java source"
+              "text": "headless fix pass; Java twin pending (no Java leg run)"
             }
           }
-        ]
-      },
-      "action": {
+        ],
         "godot": [
           {
             "tool": "note",
@@ -30565,11 +30631,36 @@
           }
         ]
       },
-      "claimed_by": "hx-protocol",
-      "claimed_at": "2026-11-06T22:03:58Z",
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-stdb --lib calls"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-net2",
+      "claimed_at": "2026-11-06T23:54:23Z",
       "severity": "P1",
       "gap": "PAR-0546 landed the client half (mind-stdb typeio.rs KickReason + call_packet.rs 23 CallKind variants with CallChannel dispatch; mind-gdext net/call.rs CallBridge + MindNet.push_call_frame/server_calls_json/call_channel_json). Still missing, outside hx-protocol file ownership: (1) server/spacetimedb has no call-frame table/reducer/kind, so a host cannot publish infoMessage/menu/camera/sound/music/trace/label/kick calls; (2) nothing calls MindNet.push_call_frame — the relay binder/dispatch must be added where the module table lands (server relay owner + gx/net consumer). Client codec+channel are tested and ready; the server-owned schema change is the blocker.",
-      "source": "PAR-0546 residual"
+      "source": "PAR-0546 residual",
+      "fix": "Server→client @Remote call publication landed. Module relay/calls.rs: CallPacketKind (all 23 Call.* kinds, append-only ABI, targeted() for kick/kickReason/traceInfo), private match_call table (call_id/match_id/sender/kind/target/payload/sent_at; payload is the *CallPacket.write body without the kind byte), publish_call reducer (host/admin, member+non-ended match, 64 KiB cap, target must be a member, kick/traceInfo require a target), my_match_calls member view (broadcast + targeted), CALL_RETENTION_SECS=120 pruned by tick_maintenance. Client: mind-stdb/src/calls.rs maps module CallPacketKind to call_packet::CallKind exhaustively, builds [kind][body] frames via the new CallPacket::encode_body, and keeps a bounded CallStream (dedupe by call_id, watermark replay, 512-row tail); my_match_calls joins the Game subscription wave and Connector::publish_call publishes bodies. mind-gdext MindNet binds my_match_calls, drains rows every frame into the existing CallBridge (push_call_frame: decode/reject tail/kick-leave/camera/music/infoMessage) and publishes Call.kick on the player-list kick action (Java adminRequest(kick) parity).",
+      "evidence": [
+        "cargo test --manifest-path server/spacetimedb/Cargo.toml --lib -> 109 passed (relay::calls 3)",
+        "cargo test -p mind-stdb --lib -> 95 passed (calls 8: kind mapping, row decode, kick forms, malformed, stream order/dedupe/watermark/retention)",
+        "cargo check -p mind-gdext -> clean",
+        "pinned 2.10.1 bindings regenerate diff empty (0 lines) — runs/PAR-0576/bindings-drift-2.10.1.diff",
+        "runs/PAR-0576/mind-stdb-tests.log, runs/PAR-0576/gdext-check.log, runs/PAR-0576/headless-fix.md"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:54:24Z",
+          "by": "hx-net2",
+          "text": "Verified headlessly: module call publication (match_call/publish_call/my_match_calls) with retention and unit tests; mind-stdb CallStream decode tests (8) and mind-gdext drain into CallBridge; bindings regenerated with the pinned 2.10.1 CLI and drift-clean; cargo check clean. Note: bash server/build.sh --check resolves the ambient ~/.local/bin/spacetime (2.13.0) because the script prepends $HOME/.local/bin, so the pinned-CLI check was run directly."
+        }
+      ]
     },
     "PAR-0577": {
       "title": "GAPS #37 residual: EventType taxonomy exists but client-sim fire sites and module typed publication are missing",
@@ -31059,6 +31150,13 @@
         "cargo test -p mind-core --lib mods (164 passed)",
         "cargo test -p mind-core --lib mods::json::tests::block_ (7 passed)",
         "cargo check -p mind-gdext"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:34:51Z",
+          "by": "hx-mod3",
+          "text": "Mod JSON now feeds every BlockDef family field; four parser-group tests."
+        }
       ]
     },
     "PAR-0589": {
@@ -31091,10 +31189,11 @@
       "source": "GAPS.md#57",
       "fix": "mc/render/draw_desc.rs + gx/render: DrawDesc::Region carries DrawRegion.name (overrides block.name+suffix when set); new DrawDesc::Turret{base_prefix,parts}/Weapon{parts} carry the parsed DrawPart tree (turret_drawer_parts/has_turret_drawer walk DrawMulti), the live turret renderer (gx/render/turret.rs) replaces its hand-ported vanilla parts with the mod JSON parts (turretShading forced like DrawTurret.load) and gx/render/block_extras.rs skips those blocks so the turret pass owns them; DrawDesc::LiquidOutputs now holds Vec<(String,i8)> and chain_for_with(def, content) resolves output_liquids + liquid_output_directions (missing direction = -1, DrawLiquidOutputs.java:20-21); DrawArc/DrawParticle/DrawSoftShadow alias to the DrawArcSmelt/DrawParticles/DrawSoftParticles bodies; per-class alpha defaults (ArcSmelt 0.68, CrucibleFlame 0.5, Particles/SoftParticles 0.5) apply via class_alpha, and the Particles/SoftParticles bodies now honour the alpha field. ArcSmelt/CrucibleFlame x/y offsets and CrucibleFlame rotateScl are applied. Tests: draw_region_name_override_wins, turret_and_weapon_drawers_carry_parts, content_backed_drawer_fields_convert, class_alpha_defaults_apply.",
       "evidence": [
-        "cargo test -p mind-core --lib render:: (222 passed)",
-        "cargo test -p mind-core --lib render::draw_desc (20 passed)",
+        "cargo test -p mind-core --lib render:: (224 passed)",
+        "cargo test -p mind-core --lib render::draw_desc (22 passed)",
         "cargo test -p mind-gdext --lib render (66 passed)",
         "cargo check -p mind-gdext",
+        "cargo fmt --all -- --check",
         "headless boot tools/run-cpu-intensive-task.sh --godot --headless --path client --quit (exit 0)"
       ],
       "notes": [
@@ -31338,28 +31437,32 @@
     "PAR-0596": {
       "title": "GAPS #69 practical half: complete platform-neutral GameService surface (aliases, leaderboard seam, link/file guards, export/import)",
       "status": "verified",
-      "fork": [
-        {
-          "tool": "note",
-          "params": {
-            "text": "headless fix pass; Java twin pending (Steam parts out of scope)"
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending (Steam parts out of scope)"
+            }
           }
-        }
-      ],
-      "action": [
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service"
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext"
+            }
           }
-        },
-        {
-          "tool": "shell",
-          "params": {
-            "cmd": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext"
-          }
-        }
-      ],
+        ]
+      },
       "claimed_by": "session4-platform",
       "claimed_at": "2026-11-06T23:24:05Z",
       "severity": "P2",
@@ -31367,7 +31470,7 @@
       "source": "GAPS.md#69",
       "fix": "mind-core/src/service.rs: added default GameService methods (submit_score seam; delete_achievement/has_achievement aliases forwarding to clear_achievement/is_achieved so LocalGameService keeps its real local behavior; guarded open_link/open_file via is_safe_external_link/is_openable_file; logged export_data/import_data no-ops), LINK_SCHEMES + the two guards, and NullService completeness/guard tests. MindPlatform open_link/open_file host probes reuse the same guards.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service -> 16 passed, 0 failed (2026-11-07)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service -> 17 passed, 0 failed (2026-11-07 09:37 AEST)",
         "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
       ],
       "notes": [
@@ -31377,6 +31480,201 @@
           "text": "Non-Steam half only. NullService is now a complete GameService: unsafe links/files are refused+logged, achievement aliases forward to the primary methods, export/import are logged no-ops, submitScore is a documented Steam/Play-Games forward seam. LocalGameService inherits the aliases unchanged. Steam remains PAR-0591 (GAPS #69 stays open)."
         }
       ]
+    },
+    "PAR-0597": {
+      "title": "Golden triage after the fix waves: world_gen checksums stale since F30, ui campaign stale since 643169f6, logic/units harnesses missing the live unit runtime",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless golden triage; Java twin run pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-goldens",
+      "claimed_at": "2026-11-06T23:34:00Z",
+      "severity": "P2",
+      "gap": "At 179144d7 cargo test -p mind-headless --lib failed 3/144. (1) logic_scenarios::privileged_scenario_goldens: logic_privileged_world checksum 0c8a0ad0d728420c vs 90f42f956b9be89b because c150184e SpawnBulletI resolves the bullet from UnitRuntime (LExecutor.java:1682-1703) and the bare BuildHarness rig never installed one, so the bullet instruction no-oped and lost its event row. (2) ui_scenarios::ui_goldens_match: mind-core/tests/goldens/ui/campaign.json stale since 643169f6 (SectorView PlanetDialog globe fields + implicit Research objectives, PAR-0497). (3) units_scenarios::committed_goldens_match: units_factory_output expected a direct unit spawn, but PAR-0518 makes UnitFactory emit a carried UnitPayload whose dump gates need UnitRuntime (UnitPayload.java:100-144). Independently all five client/rust/mind-core/tests/golden/world_gen_*.checksum files were stale since F30 and parity/golden_manifest.json pinned the stale bytes; mapgen reported erekir/tantros moving again with trimDark (PAR-0510).",
+      "fix": "mind-headless harness + golden data only, no gameplay change. Installed the live UnitRuntime (same fixture as the mind-core behavior tests) in logic_scenarios::world_processor_rig and units_scenarios::factory_output; regenerated mind-core/tests/goldens/ui/campaign.json with mind-headless ui campaign --dump; rewrote the five world_gen checksum files from the in-source values, cross-checked by both world gen and the mind-core generation checksum tests; added attributed reasons and re-recorded all six manifest sha256 with tools/regen_goldens.sh --record. units_factory_output golden and the logic_privileged_world hard-coded checksum are unchanged (the harness fixes restore them).",
+      "evidence": [
+        "cargo test -p mind-headless --lib: 144 passed, 0 failed (pre-fix 141 passed / 3 failed at 179144d7)",
+        "world gen harness output == in-source constants: simplex 07e2c98b533790cc, asteroid 49d193e3e88a2aeb, erekir 6863f0a306c44873, serpulo e92c6cda741240dc, tantros fc23d73c0e7c2ee4; cargo test -p mind-core --lib generation_checksum: 5 passed",
+        "world_gen golden checksum old->new: asteroid 463dbb70d52f29a4 -> 49d193e3e88a2aeb, erekir daf8a3e078b79de7 -> 6863f0a306c44873, serpulo 55fcac31fc269e11 -> e92c6cda741240dc, simplex bc1c505dc6481a14 -> 07e2c98b533790cc, tantros 7762880fe0716320 -> fc23d73c0e7c2ee4",
+        "world_gen golden sha256 old->new: asteroid 4572c30d.. -> fc716a80.., erekir 4328e9cc.. -> 0025fa6b.., serpulo bf8908be.. -> 767952aa.., simplex 719332ee.. -> 3deaf6c9.., tantros 3c9b168b.. -> 4b5432c5..",
+        "ui campaign golden sha256 1cec2fdf.. -> be050077..; content checksum db3aff19ca782bec -> bac3f353b7b009bc",
+        "logic_privileged_world 0c8a0ad0d728420c (blank rig) -> 90f42f956b9be89b (committed golden); units_factory_output pass=false/units_after=0 -> pass=true/units_after=1 with the committed golden unchanged",
+        "tools/parity.sh --check PASS; tools/parity.sh --suite smoke PASS; tools/parity.sh --bench PASS; cargo check -p mind-gdext ok; cargo fmt --all --check clean"
+      ],
+      "source": "packet hx-goldens golden/parity triage",
+      "notes": [
+        {
+          "at": "2026-11-06T23:34:00Z",
+          "by": "hx-goldens",
+          "text": "Reconciled world_gen asteroid/erekir/serpulo/simplex/tantros checksum files to the in-source Rust values (harness world gen == mind-core generation tests), regenerated the stale ui campaign golden, and fixed the two headless harnesses (logic rig + units factory) to install the live UnitRuntime; cargo test -p mind-headless --lib is 144/144, parity --check/smoke/bench PASS, cargo check -p mind-gdext ok. No gameplay or mc/gx source edited."
+        }
+      ]
+    },
+    "PAR-0598": {
+      "title": "GAPS #70: PerfCounter port (windowed frame/phase timings) + MindPlatform perf probe",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform"
+            }
+          }
+        ]
+      },
+      "claimed_by": "session4-platform",
+      "claimed_at": "2026-11-06T23:41:26Z",
+      "severity": "P2",
+      "gap": "GAPS.md#70: PerfCounter.java had no Rust port. The debug overlay in gx/ui/fragments/performance.rs read Godot monitors directly, so there was no windowed/refresh-throttled frame- and phase-timing seam and no way to attribute the frame budget like ClientLauncher.update does (update minus displayed counters -> other).",
+      "source": "GAPS.md#70",
+      "fix": "mind-core/src/platform/perf.rs: PerfCounter state machine over math::WindowedMean(120) with the 100 ms value refresh (add/begin/end/end_subtract/check_update/begin_part/end_part/finish_parts/value_ms/latest_value_ns/raw_value_ms/raw_value_ns), PerfCounterKind::ALL/DISPLAYED in upstream order, PerfCounters::finish_frame (ClientLauncher.update other-aggregation) and an injected PerfClock. mind-gdext MindPlatform::process samples the frame delta into the frame counter and get_perf_stats() reports fps/process/physics/navigation/memory plus all 14 raw counters.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed, 0 failed (perf suite included, 2026-11-07)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:41:26Z",
+          "by": "session4-platform",
+          "text": "PerfCounter is now a host-neutral core seam with a manual-clock test suite; the Godot host samples frame-to-frame deltas in _process and exposes the counters through get_perf_stats(). Ping stays owned by MindNet/HUD (net layer) and is not duplicated here."
+        }
+      ]
+    },
+    "PAR-0599": {
+      "title": "GAPS #70: IntelGpuCheck/NvGpuInfo probe seams, offline BeControl update-check, DesktopLauncher GPU crash notice",
+      "status": "verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin pending"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib platform::"
+            }
+          }
+        ]
+      },
+      "claimed_by": "session4-platform",
+      "claimed_at": "2026-11-06T23:41:32Z",
+      "severity": "P2",
+      "gap": "GAPS.md#70: IntelGpuCheck (was_intel_gpu marker for the next launch) and NvGpuInfo (GL_NVX_gpu_memory_info VRAM) had no Rust port; BeControl.checkUpdate existed only as always-false stubs; DesktopLauncher.handleCrashs badGPU classification/messages were missing from the crash seam. No host probe exposed any of these.",
+      "source": "GAPS.md#70",
+      "fix": "mind-core/src/platform/gpu.rs: IntelGpuCheck marker init/was_intel with the process cache and Windows gating; NvGpuInfo over an injected GlQueries returning Option/None when GL_NVX_gpu_memory_info is absent. mind-core/src/platform/update.rs: BeControl.active gate, release JSON parse + asset selection, newBuild > Version.build, UpdateStatus (updateAvailable/updateBuild/updateUrl), read_build_info for an on-disk version.properties. mind-gdext platform: boot records the GPU vendor marker (read previous first), get_gpu_info(), get_update_status(), dev_check_update_json(); platform/crash.rs gpu bad-error classification + exact upstream notices.",
+      "evidence": [
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed (gpu/update suites included, 2026-11-07)",
+        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib platform:: -> 5 passed (crash/update host tests)",
+        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-06T23:41:32Z",
+          "by": "session4-platform",
+          "text": "BeControl's network poll/download/self-replace remains deliberately stubbed (P22-3), so the client still reports available=false and the not-available notice; only the host-neutral disposition/parse/compare seam is live. Godot exposes no GL pname query, so NvGpuInfo reports unsupported/None on this host instead of a fabricated VRAM value. async_work/physics.rs was checked and is not a dead stub (real PhysicsSnapshot/shard contract), so it was left untouched."
+        }
+      ]
+    },
+    "PAR-0600": {
+      "title": "GAPS #33 residual: client sim never adopts the relay-assigned PvP team",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0600"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-net2",
+      "claimed_at": "2026-11-06T23:54:32Z",
+      "severity": "P2",
+      "source": "PAR-0545 residual",
+      "gap": "PAR-0545 landed the module-side PvP balancer (match_team/publish_match_teams + assign_team on join/start) and the client read seam (MindNet.my_team/publish_team_data, relay_member.team in players_json/SenderOrigin). But the local sim's player team is never updated: MindSimHost::set_player_team (client/rust/mind-gdext/src/sim_host.rs) returns false unless rules.editor, so a relay-assigned team changes the roster and other players' command team resolution while the local player keeps its world default (rules.defaultTeam/possessed unit team). Needs a sim-owner non-editor setter (PlayerComp.team semantics) plus a net/ call site when the own relay_member row's team changes.",
+      "fix": "Not fixed in this pass (sim_host.rs is outside the hx-net2 file ownership). Suggested: add MindSimHost::set_player_team_from_relay(team) that skips the editor gate, moves the possessed unit's TeamComp, sim.set_player_team and the rules default team; call it from MindNet::drain_members_rows when the local member's team changes."
+    },
+    "PAR-0601": {
+      "title": "GAPS #35 residual: only Call.kick has a host producer; menus/camera/sound/effect/music/trace/label call sites missing",
+      "status": "mismatch",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0601"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-net2",
+      "claimed_at": "2026-11-06T23:54:32Z",
+      "severity": "P2",
+      "source": "PAR-0576 residual",
+      "gap": "PAR-0576 landed the transport (module match_call/publish_call/my_match_calls + mind-stdb calls::CallStream + MindNet drain into CallBridge) and one producer: the player-list kick action publishes Call.kick. The other 22 CallPacketKind kinds (infoMessage, menu/followUpMenu/hideFollowUpMenu, menuBuilder*, setCameraPosition, sound/soundAt, effect/effectReliable, playMusic, traceInfo, label/labelReliable overloads, removeWorldLabel) still have no host call site, so server-side actions do not emit them. The producers for menus/camera/sound/effect/music/labels live in gx/ui and the mind-headless host server paths (outside hx-net2 ownership), plus possibly a generic MindNet #[func] taking a kind ordinal + body.",
+      "fix": "Not fixed in this pass. Transport is tested end-to-end at the row level (runs/PAR-0576/headless-fix.md); only call sites are missing."
     }
   },
   "recipes": {

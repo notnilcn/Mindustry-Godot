@@ -892,6 +892,26 @@ fn cargo_pickup_deliver() -> Result<ScenarioOutput> {
     Ok(ScenarioOutput { report, dump })
 }
 
+/// Installs the live `UnitRuntime` over the harness world.
+///
+/// The port's `UnitFactory` now builds a *carried* `UnitPayload` like Java
+/// (`UnitFactory.java:424-444`, PAR-0518) instead of spawning the unit directly;
+/// `UnitPayload.dump` is gated on the live runtime (`Units.canCreate`, terrain
+/// solidity and the grounded-overlap scan, `UnitPayload.java:100-144`), which
+/// `unit_payload_can_dump` reads. A bare [`UnitHarness`] has no runtime, so the
+/// finished payload would stay carried forever — install the same fixture the
+/// `mind-core` behavior tests use.
+fn install_live_unit_runtime(harness: &mut UnitHarness) {
+    let runtime = mind_core::sim::unit_runtime::UnitRuntime::new(
+        harness.build.content.clone(),
+        &harness.build.grid,
+        &harness.build.world,
+        0,
+        false,
+    );
+    harness.build.world.insert_non_send(runtime);
+}
+
 /// `units_factory_output`: a placed `ground-factory` is fed items and produces a
 /// dagger through `BuildingBehavior::update_tile` under `update_buildings`
 /// (plan 11 §7b M7).
@@ -939,6 +959,9 @@ fn factory_output() -> Result<ScenarioOutput> {
     {
         power.status = 1.0;
     }
+    // The finished payload needs the live runtime to pass `moveOutPayload`'s
+    // dump gates and become a grounded unit.
+    install_live_unit_runtime(&mut harness);
     let count_units = |world: &bevy_ecs::world::World| {
         world
             .iter_entities()

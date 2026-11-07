@@ -455,8 +455,19 @@ impl CallPacket {
 
     /// Encodes `[kind][body]`.
     pub fn encode(&self) -> Result<Vec<u8>, CallError> {
+        let mut frame = Vec::with_capacity(1 + 64);
+        frame.push(self.kind().ordinal());
+        frame.extend_from_slice(&self.encode_body()?);
+        Ok(frame)
+    }
+
+    /// Encodes just the `*CallPacket.write(...)` body (GAPS #35 / PAR-0576).
+    ///
+    /// This is the value the module stores in `match_call.payload`: the kind
+    /// byte is the transport envelope, added by [`Self::encode`] / the client
+    /// row binder (`crate::calls::frame_for_row`).
+    pub fn encode_body(&self) -> Result<Vec<u8>, CallError> {
         let mut writer = TypeIoWriter::new();
-        writer.ub(self.kind().ordinal());
         match self {
             Self::InfoMessage { message } => typeio::write_string(&mut writer, message.as_deref())?,
             Self::Menu {

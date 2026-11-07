@@ -22,7 +22,7 @@
 use crate::config::TILESIZE;
 use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
 use crate::content::registries::units::parts::DrawPartSpec;
-use crate::content::{BlockDef, Rgba};
+use crate::content::{BlockDef, ContentRegistry, Rgba};
 use crate::math::ArcRand;
 use crate::render::commands::{Blend, DrawCmd, FillKind, LineKind, ShapeKind};
 use crate::render::ids::{RegionId, RegionIdTable};
@@ -239,6 +239,9 @@ pub enum DrawDesc {
     Region {
         /// Region suffix.
         suffix: &'static str,
+        /// `DrawRegion.name` (`DrawRegion.load:79`): an explicit region name
+        /// that overrides `block.name + suffix`.
+        name: Option<&'static str>,
         /// `DrawRegion.rotateSpeed`.
         rotate_speed: f32,
         /// `DrawRegion.rotation`.
@@ -417,6 +420,9 @@ pub enum DrawDesc {
         color: u32,
         /// `DrawParticles.sides`.
         sides: i32,
+        /// `DrawParticles.alpha` (class default `0.5`,
+        /// `DrawParticles.java:13`).
+        alpha: f32,
         /// `DrawParticles.particles`.
         particles: i32,
         /// `DrawParticles.particleLife`.
@@ -440,6 +446,9 @@ pub enum DrawDesc {
         color: u32,
         /// `DrawSoftParticles.color2`.
         color2: u32,
+        /// `DrawSoftParticles.alpha` (class default `0.5`,
+        /// `DrawSoftParticles.java:15`).
+        alpha: f32,
         /// `DrawSoftParticles.particles`.
         particles: i32,
         /// `DrawSoftParticles.particleLife`.
@@ -568,6 +577,10 @@ pub enum DrawDesc {
         particle_stroke: f32,
         /// `DrawArcSmelt.particleLen`.
         particle_len: f32,
+        /// `DrawArcSmelt.x`.
+        x: f32,
+        /// `DrawArcSmelt.y`.
+        y: f32,
     },
     /// `DrawCrucibleFlame` (`Additive`).
     CrucibleFlame {
@@ -597,6 +610,10 @@ pub enum DrawDesc {
         particle_size: f32,
         /// `DrawCrucibleFlame.fadeMargin`.
         fade_margin: f32,
+        /// `DrawCrucibleFlame.x`.
+        x: f32,
+        /// `DrawCrucibleFlame.y`.
+        y: f32,
     },
     /// `DrawCultivator`.
     Cultivator {
@@ -682,8 +699,11 @@ pub enum DrawDesc {
     /// (`-1` = none), `<block>-<liquid>-output1|2` (L06 T5).
     LiquidOutputs {
         /// `(liquid name, liquidOutputDirections[i])` per output, in
-        /// `outputLiquids` order.
-        outputs: &'static [(&'static str, i8)],
+        /// `outputLiquids` order. The names come from the block's content
+        /// `output_liquids` (`GenericCrafter.outputLiquids`), which
+        /// [`chain_for`] resolves through the content registry; a bare
+        /// `from_drawer` leaves the list empty.
+        outputs: Vec<(String, i8)>,
     },
     /// `DrawPumpLiquid` (GAPS #57): the `-liquid` region filled from the pump's
     /// drop amount (`DrawPumpLiquid.java:9-23`); the suffix is always `-liquid`
@@ -694,6 +714,23 @@ pub enum DrawDesc {
     /// the plan-17 `DrawPart` compiler.
     BlockParts {
         /// `DrawBlockParts.parts`.
+        parts: Vec<DrawPartSpec>,
+    },
+    /// `DrawTurret` (GAPS #57 follow-up): the live turret renderer owns the
+    /// real pass (`mind-gdext::render::turret`); this descriptor carries the
+    /// parsed part tree so the headless layer oracle and the turret renderer
+    /// share one conversion. The base sprite stays in the block pass.
+    Turret {
+        /// `DrawTurret.basePrefix`.
+        base_prefix: &'static str,
+        /// `DrawTurret.parts` (+ `ammoParts` fallback handled live).
+        parts: Vec<DrawPartSpec>,
+    },
+    /// `DrawWeapon`: the unit/block weapon part tree (`DrawWeapon` alias; no
+    /// upstream `world/draw` class — the closest body is the turret part
+    /// pass).
+    Weapon {
+        /// The weapon's `DrawPart` tree.
         parts: Vec<DrawPartSpec>,
     },
     /// `DrawMulti`.
@@ -798,6 +835,7 @@ pub fn execute(
         }
         DrawDesc::Region {
             suffix,
+            name: region_name,
             rotate_speed,
             rotation,
             building_rotate,
@@ -807,7 +845,13 @@ pub fn execute(
             y,
             ..
         } => {
-            let r = region(name, suffix, ids);
+            // `DrawRegion.load` (`DrawRegion.java:79`):
+            // `atlas.find(name != null ? name : block.name + suffix)` — an
+            // explicit `name` replaces the whole `block.name + suffix` string.
+            let r = match region_name {
+                Some(region_name) => ids.intern_str(region_name),
+                None => region(name, suffix, ids),
+            };
             let z = if *layer > 0.0 { *layer } else { state.layer };
             let rot = state.total_progress * rotate_speed
                 + rotation
@@ -1192,6 +1236,7 @@ pub fn execute(
         DrawDesc::Particles {
             color,
             sides,
+            alpha,
             particles,
             particle_life,
             particle_rad,
@@ -1204,7 +1249,8 @@ pub fn execute(
             if state.warmup <= 0.0 {
                 return;
             }
-            let a = 0.5 * state.warmup;
+            // `DrawParticles.draw` (`:24`): `a = alpha * build.warmup()`.
+            let a = alpha * state.warmup;
             let base = state.time / particle_life;
             let mut rng = ArcRand::new(state.id as u64);
             for _ in 0..*particles {
@@ -1246,6 +1292,7 @@ pub fn execute(
         DrawDesc::SoftParticles {
             color,
             color2,
+            alpha,
             particles,
             particle_life,
             particle_rad,
@@ -1256,7 +1303,8 @@ pub fn execute(
             if state.warmup <= 0.0 {
                 return;
             }
-            let a = 0.5 * state.warmup;
+            // `DrawSoftParticles.draw` (`:27`): `a = alpha * build.warmup()`.
+            let a = alpha * state.warmup;
             let base = state.time / particle_life;
             let mut rng = ArcRand::new(state.id as u64);
             for _ in 0..*particles {
@@ -1495,25 +1543,30 @@ pub fn execute(
             particle_rad,
             particle_stroke,
             particle_len,
+            x,
+            y,
         } => {
             if state.warmup <= 0.0 {
                 return;
             }
+            // `DrawArcSmelt.draw` (`:19-40`): every primitive is offset by
+            // `x`/`y` (`build.x + x`).
+            let (fx, fy) = (state.x + x, state.y + y);
             let si = absin(state.time, *flame_radius_scl, *flame_radius_mag);
             let a = alpha * state.warmup;
             out.push(DescDraw::circle(
                 state.layer,
                 Blend::Additive,
-                state.x,
-                state.y,
+                fx,
+                fy,
                 flame_rad + si,
                 with_alpha(*mid_color, a),
             ));
             out.push(DescDraw::circle_line(
                 state.layer,
                 Blend::Additive,
-                state.x,
-                state.y,
+                fx,
+                fy,
                 (flame_rad + circle_space + si) * state.warmup,
                 circle_stroke * state.warmup,
                 with_alpha(*flame_color, a),
@@ -1530,10 +1583,10 @@ pub fn execute(
                 out.push(DescDraw::line(
                     state.layer,
                     Blend::Additive,
-                    state.x + dx,
-                    state.y + dy,
-                    state.x + dx + ex,
-                    state.y + dy + ey,
+                    fx + dx,
+                    fy + dy,
+                    fx + dx + ex,
+                    fy + dy + ey,
                     particle_stroke * state.warmup,
                     with_alpha(*flame_color, a),
                 ));
@@ -1553,25 +1606,30 @@ pub fn execute(
             particle_rad,
             particle_size,
             fade_margin,
+            x,
+            y,
         } => {
             if state.warmup <= 0.0 {
                 return;
             }
+            // `DrawCrucibleFlame.draw` (`:21-49`): every primitive is offset by
+            // `x`/`y` (`build.x + x`).
+            let (fx, fy) = (state.x + x, state.y + y);
             let si = absin(state.time, *flame_radius_scl, *flame_radius_mag);
             let a = alpha * state.warmup;
             out.push(DescDraw::circle(
                 state.layer,
                 Blend::Additive,
-                state.x,
-                state.y,
+                fx,
+                fy,
                 flame_rad + si,
                 with_alpha(*mid_color, a),
             ));
             out.push(DescDraw::circle_line(
                 state.layer,
                 Blend::Additive,
-                state.x,
-                state.y,
+                fx,
+                fy,
                 (flame_rad + circle_space + si) * state.warmup,
                 circle_stroke * state.warmup,
                 with_alpha(*flame_color, a),
@@ -1581,15 +1639,15 @@ pub fn execute(
             for _ in 0..*particles {
                 let fin = (rng.next_float() + base) % 1.0;
                 let fout = 1.0 - fin;
-                let angle = rng.next_float() * 360.0;
+                let angle = rng.next_float() * 360.0 + (state.time / 1.5) % 360.0;
                 let len = particle_rad * fout.powf(1.5);
                 let (dx, dy) = trns(angle, len);
                 let alpha_p = a * (1.0 - curve(fin, 1.0 - fade_margin, 1.0));
                 out.push(DescDraw::circle(
                     state.layer,
                     Blend::Additive,
-                    state.x + dx,
-                    state.y + dy,
+                    fx + dx,
+                    fy + dy,
                     particle_size * fin * state.warmup,
                     with_alpha(*flame_color, alpha_p),
                 ));
@@ -1848,42 +1906,99 @@ pub fn execute(
             }
             // `DrawBlockParts.draw` (`DrawBlockParts.java:39-51`): params from
             // `build.warmup()` and `1 - progress`, then every part in order.
-            let mut params = crate::fx::parts::params::PartParams::default();
-            params.set(
-                state.warmup,
-                1.0 - state.progress,
-                1.0 - state.progress,
-                0.0,
-                0.0,
-                0.0,
-                state.x,
-                state.y,
+            emit_part_tree(parts, state, name, ids, out, state.layer, state.rotdeg);
+        }
+        // `DrawTurret` (`DrawTurret.java:73-120`) is drawn by the live turret
+        // renderer; this headless body emits the parsed part tree at
+        // `Layer.turret` (the base/shadow/head/liquid/top stay with the turret
+        // pass and the block sprite pass).
+        DrawDesc::Turret { parts, .. } => {
+            if parts.is_empty() {
+                return;
+            }
+            emit_part_tree(
+                parts,
+                state,
+                name,
+                ids,
+                out,
+                Layer::Turret.z(),
                 state.rotdeg,
             );
-            let lookup = crate::fx::parts::draw::AllRegions::new(32.0);
-            let mut program = crate::render::draw::DrawProgram::new();
-            crate::fx::parts::draw::draw_named_parts(
-                &mut program,
-                parts,
-                &params,
-                &lookup,
-                state.time,
-                name,
-            );
-            for prim in &program.prims {
-                if let Some(cmd) = draw_cmd_for_prim(prim, ids) {
-                    out.push(DescDraw {
-                        z: prim.z,
-                        blend: to_blend(prim.blend),
-                        cmd,
-                    });
-                }
+        }
+        // `DrawWeapon`: the unit/block weapon part tree, drawn by the same
+        // part compiler at the turret band.
+        DrawDesc::Weapon { parts } => {
+            if parts.is_empty() {
+                return;
             }
+            emit_part_tree(
+                parts,
+                state,
+                name,
+                ids,
+                out,
+                Layer::Turret.z(),
+                state.rotdeg,
+            );
         }
         DrawDesc::Multi(list) => {
             for d in list {
                 execute(d, name, state, ids, out);
             }
+        }
+    }
+}
+
+/// Runs one `DrawPart` tree through the plan-17 compiler and maps its
+/// primitives onto the block command buffer at `base_z`.
+///
+/// `DrawPart.params` is set exactly like `DrawBlockParts.draw`
+/// (`DrawBlockParts.java:39-51`) / `DrawTurret.draw`
+/// (`DrawTurret.java:104-110`): the per-building view state the port has
+/// (`DrawState`) fills warmup/progress/position; heat/recoil/charge are zero
+/// because they are live turret/weapon state the headless view does not carry.
+fn emit_part_tree(
+    parts: &[DrawPartSpec],
+    state: &DrawState,
+    name: &str,
+    ids: &mut RegionIdTable,
+    out: &mut Vec<DescDraw>,
+    base_z: f32,
+    rotation: f32,
+) {
+    let mut params = crate::fx::parts::params::PartParams::default();
+    params.set(
+        state.warmup,
+        1.0 - state.progress,
+        1.0 - state.progress,
+        0.0,
+        0.0,
+        0.0,
+        state.x,
+        state.y,
+        rotation,
+    );
+    let lookup = crate::fx::parts::draw::AllRegions::new(32.0);
+    let mut program = crate::render::draw::DrawProgram::new();
+    crate::fx::parts::draw::draw_named_parts(
+        &mut program,
+        parts,
+        &params,
+        &lookup,
+        state.time,
+        name,
+    );
+    // `PartEmit::new` starts at `Layer::Effect`; rebase every primitive onto
+    // the band this descriptor draws in.
+    let delta = base_z - Layer::Effect.z();
+    for prim in &program.prims {
+        if let Some(cmd) = draw_cmd_for_prim(prim, ids) {
+            out.push(DescDraw {
+                z: prim.z + delta,
+                blend: to_blend(prim.blend),
+                cmd,
+            });
         }
     }
 }
@@ -2089,7 +2204,15 @@ pub fn execute_extras(
     out: &mut Vec<DescDraw>,
 ) {
     match desc {
-        DrawDesc::Default | DrawDesc::Region { suffix: "", .. } => {}
+        // An empty-suffix `DrawRegion` is the base sprite the sprite oracle
+        // already emitted; an explicit `DrawRegion.name` is a second region
+        // and must still draw.
+        DrawDesc::Default
+        | DrawDesc::Region {
+            suffix: "",
+            name: None,
+            ..
+        } => {}
         DrawDesc::Multi(list) => {
             for d in list {
                 execute_extras(d, name, state, ids, out);
@@ -2195,6 +2318,7 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
             DrawDesc::Default,
             DrawDesc::Region {
                 suffix: "-rotator",
+                name: None,
                 rotate_speed: 2.0,
                 rotation: 0.0,
                 spin: true,
@@ -2212,6 +2336,7 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
             warmup_region(),
             DrawDesc::Region {
                 suffix: "-turbine",
+                name: None,
                 rotate_speed: 2.0,
                 rotation: 0.0,
                 spin: false,
@@ -2223,6 +2348,7 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
             },
             DrawDesc::Region {
                 suffix: "-turbine",
+                name: None,
                 rotate_speed: -2.0,
                 rotation: 45.0,
                 spin: false,
@@ -2284,7 +2410,10 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
             },
             DrawDesc::Default,
             DrawDesc::LiquidOutputs {
-                outputs: &[("ozone", 1), ("hydrogen", 3)],
+                // `GenericCrafter.outputLiquids` + `liquidOutputDirections`
+                // (`Blocks.java:1396-1397`). The content table also carries
+                // these; the hand-written chain mirrors upstream.
+                outputs: vec![(String::from("ozone"), 1), (String::from("hydrogen"), 3)],
             },
             DrawDesc::GlowRegion {
                 suffix: "-glow",
@@ -2305,6 +2434,7 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
 fn region_desc(suffix: &'static str) -> DrawDesc {
     DrawDesc::Region {
         suffix,
+        name: None,
         rotate_speed: 0.0,
         rotation: 0.0,
         spin: false,
@@ -2411,10 +2541,14 @@ fn hex(hex: &str) -> u32 {
 ///
 /// `DrawerSpec` captures the JSON-overridable drawer fields; every field the
 /// parsed record does not carry keeps the Java class field initializer
-/// (`world/draw/*.java`), cited in the arms. Turret/weapon drawers are owned by
-/// the turret renderer and map to [`DrawDesc::Default`]; `DrawRegion.name` (an
-/// explicit region override) and `DrawTurret.basePrefix`/`DrawLiquidRegion`'s
-/// `drawLiquid` selection have no descriptor slot and fall back to the suffix /
+/// (`world/draw/*.java`), cited in the arms. `DrawRegion.name` overrides the
+/// block region name, `DrawTurret`/`DrawWeapon` carry their parsed part tree to
+/// the turret renderer ([`DrawDesc::Turret`]/[`DrawDesc::Weapon`]) and
+/// `DrawArc`/`DrawParticle`/`DrawSoftShadow` are class aliases for the closest
+/// ported body (`DrawArcSmelt`/`DrawParticles`/`DrawSoftParticles`; no upstream
+/// `world/draw` class exists for those three names). `DrawLiquidOutputs`
+/// resolves its outputs from the block content in [`chain_for`];
+/// `DrawLiquidRegion`'s `drawLiquid` selection still falls back to the
 /// current-liquid color.
 pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
     match spec.kind {
@@ -2422,6 +2556,7 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
         DrawerKind::Multi => DrawDesc::Multi(spec.children.iter().map(from_drawer).collect()),
         DrawerKind::Region | DrawerKind::RegionSpin => DrawDesc::Region {
             suffix: intern(&spec.suffix),
+            name: spec.name.as_deref().map(intern),
             rotate_speed: spec.rotate_speed,
             rotation: spec.rotation,
             spin: spec.spin_sprite || spec.kind == DrawerKind::RegionSpin,
@@ -2540,12 +2675,13 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             flame_radius_in_mag: 1.0,
         },
         // `DrawParticles.java:11-20`.
-        DrawerKind::Particles => DrawDesc::Particles {
+        DrawerKind::Particles | DrawerKind::Particle => DrawDesc::Particles {
             color: spec
                 .color
                 .map(drawer_color)
                 .unwrap_or_else(|| hex("f2d585")),
             sides: 12,
+            alpha: class_alpha(spec.alpha, 0.5),
             particles: 30,
             particle_life: 70.0,
             particle_rad: 7.0,
@@ -2556,9 +2692,10 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             poly: false,
         },
         // `DrawSoftParticles.java:15-20`.
-        DrawerKind::SoftParticles => DrawDesc::SoftParticles {
+        DrawerKind::SoftParticles | DrawerKind::SoftShadow => DrawDesc::SoftParticles {
             color: hex("e3ae6f"),
             color2: hex("d04d46"),
+            alpha: class_alpha(spec.alpha, 0.5),
             particles: 30,
             particle_life: 70.0,
             particle_rad: 7.0,
@@ -2617,8 +2754,8 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             radius: 3.0,
             fill: false,
         },
-        // `DrawArcSmelt.java:10-15`.
-        DrawerKind::ArcSmelt => DrawDesc::ArcSmelt {
+        // `DrawArcSmelt.java:10-15`; `DrawArc` is the mod class alias.
+        DrawerKind::ArcSmelt | DrawerKind::Arc => DrawDesc::ArcSmelt {
             flame_color: spec
                 .flame_color
                 .or(spec.color)
@@ -2630,12 +2767,15 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             flame_radius_scl: 3.0,
             flame_radius_mag: 0.3,
             circle_stroke: 1.5,
-            alpha: spec.alpha,
+            // `DrawArcSmelt.alpha = 0.68f` (`DrawArcSmelt.java:13`).
+            alpha: class_alpha(spec.alpha, 0.68),
             particles: 25,
             particle_life: 40.0,
             particle_rad: 7.0,
             particle_stroke: 1.1,
             particle_len: 3.0,
+            x: spec.x,
+            y: spec.y,
         },
         // `DrawCrucibleFlame.java:11-15`.
         DrawerKind::CrucibleFlame => DrawDesc::CrucibleFlame {
@@ -2650,12 +2790,16 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             flame_radius_scl: 10.0,
             flame_radius_mag: 0.6,
             circle_stroke: 1.5,
-            alpha: spec.alpha,
+            // `DrawCrucibleFlame.alpha = 0.5f`
+            // (`DrawCrucibleFlame.java:14`).
+            alpha: class_alpha(spec.alpha, 0.5),
             particles: 30,
             particle_life: 70.0,
             particle_rad: 7.0,
             particle_size: 3.0,
             fade_margin: 0.4,
+            x: spec.x,
+            y: spec.y,
         },
         // `DrawCultivator.java:12-18`.
         DrawerKind::Cultivator => DrawDesc::Cultivator {
@@ -2717,22 +2861,39 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
             radius: 12.0,
         },
         // `DrawLiquidOutputs` regions are derived from the block's
-        // `outputLiquids` (content data, not the drawer spec): the descriptor
-        // emits nothing until the parser carries the outputs (GAPS #56 note).
-        DrawerKind::LiquidOutputs => DrawDesc::LiquidOutputs { outputs: &[] },
+        // `outputLiquids` (content data, not the drawer spec): a bare
+        // conversion leaves the list empty, [`chain_for`] fills it.
+        DrawerKind::LiquidOutputs => DrawDesc::LiquidOutputs {
+            outputs: Vec::new(),
+        },
         DrawerKind::PumpLiquid => DrawDesc::PumpLiquid,
         DrawerKind::BlockParts => DrawDesc::BlockParts {
             parts: spec.parts.clone(),
         },
-        // Turret/weapon drawers are executed by the turret renderer (parts +
-        // ammo parts), and `DrawArc`/`DrawParticle`/`DrawSoftShadow` have no
-        // headless body yet: fall back to the base sprite only.
-        DrawerKind::Turret
-        | DrawerKind::Weapon
-        | DrawerKind::Arc
-        | DrawerKind::Particle
-        | DrawerKind::SoftShadow => DrawDesc::Default,
+        // The live turret renderer owns the pass (`mind-gdext::render::turret`
+        // executes `fx::parts::turret` with this part tree); the descriptor
+        // carries the parsed data so the headless layer oracle sees it too.
+        DrawerKind::Turret => DrawDesc::Turret {
+            base_prefix: intern(&spec.base_prefix),
+            parts: spec.parts.clone(),
+        },
+        // `DrawWeapon` has no upstream `world/draw` class; its parts are drawn
+        // by the same turret/weapon part pass.
+        DrawerKind::Weapon => DrawDesc::Weapon {
+            parts: spec.parts.clone(),
+        },
     }
+}
+
+/// The Java class-default alpha for the drawers whose bodies multiply alpha
+/// (`DrawArcSmelt.java:13`, `DrawCrucibleFlame.java:14`,
+/// `DrawParticles.java:13`, `DrawSoftParticles.java:15`).
+///
+/// `DrawerSpec::for_kind` carries one generic `alpha = 1.0`, so a spec still at
+/// that sentinel keeps the class initializer — the same convention the
+/// `BlurSpin`/`MultiWeave` pulse defaults below use.
+fn class_alpha(alpha: f32, class_default: f32) -> f32 {
+    if alpha == 1.0 { class_default } else { alpha }
 }
 
 /// The `Block.draw` chain for a content block (GAPS #57).
@@ -2741,6 +2902,29 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
 /// [`DrawDesc`]); otherwise the hand-written vanilla table
 /// ([`vanilla_chain`]) applies; a block with neither draws its base sprite
 /// ([`DrawDesc::Default`], upstream `Block`'s default `DrawDefault`).
+/// The parsed `DrawTurret`/`DrawWeapon` part tree inside a drawer spec (the
+/// drawer itself or any `DrawMulti` child), if any.
+///
+/// The live turret renderer consumes this (`mind-gdext::render::turret`) so a
+/// mod's JSON parts replace the hand-ported vanilla part table.
+pub fn turret_drawer_parts(spec: &DrawerSpec) -> Option<&[DrawPartSpec]> {
+    if matches!(spec.kind, DrawerKind::Turret | DrawerKind::Weapon) {
+        return Some(spec.parts.as_slice());
+    }
+    for child in &spec.children {
+        if let Some(parts) = turret_drawer_parts(child) {
+            return Some(parts);
+        }
+    }
+    None
+}
+
+/// Whether a drawer tree contains a `DrawTurret`/`DrawWeapon` (the pass that
+/// owns those blocks' drawing).
+pub fn has_turret_drawer(spec: &DrawerSpec) -> bool {
+    turret_drawer_parts(spec).is_some()
+}
+
 /// Whether a block has an explicit draw chain (a parsed drawer or the
 /// hand-written vanilla table) rather than the bare `DrawDefault` fallback.
 pub fn has_explicit_chain(def: &BlockDef) -> bool {
@@ -2749,11 +2933,60 @@ pub fn has_explicit_chain(def: &BlockDef) -> bool {
         || vanilla_chain(&def.name).is_some()
 }
 
+/// Resolves every [`DrawDesc::LiquidOutputs`] in `chain` against the block's
+/// content `output_liquids`/`liquid_output_directions`
+/// (`GenericCrafter.java:23-35`), matching `DrawLiquidOutputs.load`: region
+/// `<block>-<liquid>-outputN` per output and `side = directions[i]` (or `-1`
+/// when the direction array is shorter, `DrawLiquidOutputs.java:20-21`).
+fn fill_liquid_outputs(chain: &mut [DrawDesc], def: &BlockDef, content: &ContentRegistry) {
+    // Vanilla base content keeps the per-class numbers in
+    // `world::block_kind_data` (`BlockDef.output_liquids` stays empty), so an
+    // empty content vector keeps whatever the hand-written chain carries
+    // (`vanilla_chain("electrolyzer")`); a mod block sets the field and wins.
+    if def.output_liquids.is_empty() {
+        return;
+    }
+    for desc in chain {
+        match desc {
+            DrawDesc::LiquidOutputs { outputs } => {
+                *outputs = def
+                    .output_liquids
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, (liquid, _))| {
+                        let side = def
+                            .liquid_output_directions
+                            .get(index)
+                            .copied()
+                            .unwrap_or(-1);
+                        content
+                            .liquid(*liquid)
+                            .map(|liquid| (liquid.name.clone(), side))
+                    })
+                    .collect();
+            }
+            DrawDesc::Multi(list) => fill_liquid_outputs(list, def, content),
+            _ => {}
+        }
+    }
+}
+
+/// [`chain_for`] with the block's own draw chain only (no content lookup): the
+/// `DrawLiquidOutputs` outputs stay empty. Used by callers without a registry
+/// (tests, `render::layers` fixtures).
 pub fn chain_for(def: &BlockDef) -> Vec<DrawDesc> {
     if def.drawer.kind != DrawerKind::Default || !def.drawer.children.is_empty() {
         return vec![from_drawer(&def.drawer)];
     }
     vanilla_chain(&def.name).unwrap_or_else(|| vec![DrawDesc::Default])
+}
+
+/// The `Block.draw` chain for a content block (GAPS #57), resolving the
+/// content-backed drawer fields ([`fill_liquid_outputs`]).
+pub fn chain_for_with(def: &BlockDef, content: &ContentRegistry) -> Vec<DrawDesc> {
+    let mut chain = chain_for(def);
+    fill_liquid_outputs(&mut chain, def, content);
+    chain
 }
 
 #[cfg(test)]
@@ -2791,6 +3024,7 @@ mod tests {
         execute(
             &DrawDesc::Region {
                 suffix: "-bottom",
+                name: None,
                 rotate_speed: 0.0,
                 rotation: 0.0,
                 spin: false,
@@ -2934,7 +3168,11 @@ mod tests {
             let state = DrawState::new(64.0, 64.0, rotation, 3);
             execute(
                 &DrawDesc::LiquidOutputs {
-                    outputs: &[("ozone", 1), ("hydrogen", 3), ("water", -1)],
+                    outputs: vec![
+                        (String::from("ozone"), 1),
+                        (String::from("hydrogen"), 3),
+                        (String::from("water"), -1),
+                    ],
                 },
                 "electrolyzer",
                 &state,
@@ -3048,6 +3286,7 @@ mod tests {
         use super::split_chain_at_default;
         let bottom = DrawDesc::Region {
             suffix: "-bottom",
+            name: None,
             rotate_speed: 0.0,
             rotation: 0.0,
             spin: false,
@@ -3059,6 +3298,7 @@ mod tests {
         };
         let top = DrawDesc::Region {
             suffix: "-top",
+            name: None,
             rotate_speed: 0.0,
             rotation: 0.0,
             spin: false,
@@ -3146,6 +3386,7 @@ mod tests {
             chain_for(&parsed),
             vec![DrawDesc::Region {
                 suffix: "-custom",
+                name: None,
                 rotate_speed: 0.0,
                 rotation: 0.0,
                 spin: false,
@@ -3258,5 +3499,265 @@ mod tests {
             let mut out = Vec::new();
             execute(&desc, "probe", &state(), &mut ids, &mut out);
         }
+    }
+
+    /// GAPS #57 follow-up: `DrawRegion.name` (`DrawRegion.java:79`) overrides
+    /// `block.name + suffix`.
+    #[test]
+    fn draw_region_name_override_wins() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+        let mut spec = DrawerSpec::for_kind(DrawerKind::Region);
+        spec.suffix = String::from("-top");
+        spec.name = Some(String::from("shared-region"));
+        let desc = from_drawer(&spec);
+        let DrawDesc::Region { name, .. } = desc else {
+            panic!("expected DrawRegion");
+        };
+        assert_eq!(name, Some("shared-region"));
+
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        execute(
+            &DrawDesc::Region {
+                suffix: "-top",
+                name: Some("shared-region"),
+                rotate_speed: 0.0,
+                rotation: 0.0,
+                spin: false,
+                building_rotate: false,
+                layer: -1.0,
+                color: None,
+                x: 0.0,
+                y: 0.0,
+            },
+            "mod-block",
+            &state(),
+            &mut ids,
+            &mut out,
+        );
+        let DrawCmd::Sprite { region, .. } = out[0].cmd else {
+            panic!("expected sprite");
+        };
+        assert_eq!(ids.name(region), Some("shared-region"));
+    }
+
+    /// GAPS #57 follow-up: `execute_extras` skips only the *base* region
+    /// (`DrawDefault` or an unnamed empty-suffix `DrawRegion`); an explicit
+    /// `DrawRegion.name` is an extra region and still draws.
+    #[test]
+    fn execute_extras_keeps_a_named_base_region() {
+        let named = DrawDesc::Region {
+            suffix: "",
+            name: Some("shared-region"),
+            rotate_speed: 0.0,
+            rotation: 0.0,
+            spin: false,
+            building_rotate: false,
+            layer: -1.0,
+            color: None,
+            x: 0.0,
+            y: 0.0,
+        };
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        execute_extras(&named, "mod-block", &state(), &mut ids, &mut out);
+        assert_eq!(out.len(), 1, "named empty-suffix region draws");
+
+        let base = DrawDesc::Region {
+            suffix: "",
+            name: None,
+            rotate_speed: 0.0,
+            rotation: 0.0,
+            spin: false,
+            building_rotate: false,
+            layer: -1.0,
+            color: None,
+            x: 0.0,
+            y: 0.0,
+        };
+        out.clear();
+        execute_extras(&base, "mod-block", &state(), &mut ids, &mut out);
+        assert!(out.is_empty(), "the base region is not duplicated");
+    }
+
+    /// GAPS #57 follow-up: `chain_for_with` keeps the hand-written vanilla
+    /// electrolyzer outputs (base content does not populate
+    /// `BlockDef.output_liquids`) and only resolves a mod block's own fields.
+    #[test]
+    fn chain_for_with_keeps_vanilla_outputs_without_content_fields() {
+        use crate::content::test_support::test_registry;
+        let content = test_registry();
+        let def = content
+            .block_id("electrolyzer")
+            .and_then(|id| content.block(id))
+            .expect("electrolyzer")
+            .clone();
+        let chain = chain_for_with(&def, &content);
+        let outputs = chain
+            .iter()
+            .find_map(|desc| match desc {
+                DrawDesc::LiquidOutputs { outputs } => Some(outputs.clone()),
+                _ => None,
+            })
+            .expect("electrolyzer has a DrawLiquidOutputs");
+        assert_eq!(
+            outputs,
+            vec![(String::from("ozone"), 1), (String::from("hydrogen"), 3)],
+            "vanilla content table preserved"
+        );
+    }
+
+    /// GAPS #57 follow-up: `DrawTurret`/`DrawWeapon` carry their parsed
+    /// `DrawPart` tree; the turret pass consumes it via
+    /// [`turret_drawer_parts`], the headless body emits the parts at
+    /// `Layer.turret` and the block-layer extras pass skips them.
+    #[test]
+    fn turret_and_weapon_drawers_carry_parts() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+        use crate::content::registries::units::parts::DrawPartKind;
+
+        let mut turret = DrawerSpec::for_kind(DrawerKind::Turret);
+        turret.parts.push(DrawPartSpec::region("-barrel"));
+        turret.base_prefix = String::from("reinforced-");
+        let desc = from_drawer(&turret);
+        let DrawDesc::Turret { base_prefix, parts } = &desc else {
+            panic!("expected DrawTurret");
+        };
+        assert_eq!(*base_prefix, "reinforced-");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].kind, DrawPartKind::RegionPart);
+        assert_eq!(
+            turret_drawer_parts(&turret).map(<[DrawPartSpec]>::len),
+            Some(1)
+        );
+        assert!(has_turret_drawer(&turret));
+
+        // A `DrawMulti[Default, DrawTurret]` drawer is found recursively.
+        let mut multi = DrawerSpec::for_kind(DrawerKind::Multi);
+        multi.children = vec![DrawerSpec::for_kind(DrawerKind::Default), turret.clone()];
+        assert!(has_turret_drawer(&multi));
+        assert!(!has_turret_drawer(&DrawerSpec::for_kind(DrawerKind::Flame)));
+
+        // The headless body emits the part tree at the turret band.
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut s = state();
+        s.warmup = 1.0;
+        s.progress = 0.5;
+        execute(&desc, "mod-turret", &s, &mut ids, &mut out);
+        assert!(!out.is_empty(), "turret parts emitted no primitives");
+        assert!(
+            out.iter().all(|draw| draw.z >= Layer::Turret.z() - 1.0),
+            "turret parts must draw at the turret band: {:?}",
+            out.iter().map(|draw| draw.z).collect::<Vec<_>>()
+        );
+
+        let mut weapon = DrawerSpec::for_kind(DrawerKind::Weapon);
+        weapon.parts.push(DrawPartSpec::shape());
+        let desc = from_drawer(&weapon);
+        assert!(matches!(desc, DrawDesc::Weapon { ref parts } if parts.len() == 1));
+        out.clear();
+        execute(&desc, "mod-weapon", &s, &mut ids, &mut out);
+        assert!(!out.is_empty());
+    }
+
+    /// GAPS #57 follow-up: `DrawLiquidOutputs` resolves the block's
+    /// `outputLiquids`/`liquidOutputDirections` content fields
+    /// (`DrawLiquidOutputs.java:16-26`), and `DrawArc`/`DrawParticle`/
+    /// `DrawSoftShadow` map to the closest ported bodies instead of
+    /// `DrawDefault`.
+    #[test]
+    fn content_backed_drawer_fields_convert() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+        use crate::content::test_support::test_registry;
+
+        let content = test_registry();
+        let mut def = content
+            .block_id("electrolyzer")
+            .and_then(|id| content.block(id))
+            .expect("electrolyzer")
+            .clone();
+        let water = content.liquid_id("water").expect("water");
+        let cryofluid = content.liquid_id("cryofluid").expect("cryofluid");
+        def.output_liquids = vec![(water, 0.1), (cryofluid, 0.2)];
+        def.liquid_output_directions = vec![1];
+        def.drawer = DrawerSpec::for_kind(DrawerKind::LiquidOutputs);
+        let chain = chain_for_with(&def, &content);
+        let DrawDesc::LiquidOutputs { outputs } = &chain[0] else {
+            panic!("expected DrawLiquidOutputs, got {:?}", chain[0]);
+        };
+        assert_eq!(
+            outputs,
+            &vec![(String::from("water"), 1), (String::from("cryofluid"), -1)],
+            "a missing direction entry falls back to -1"
+        );
+
+        // The alias classes convert to a real body, not `DrawDefault`.
+        assert!(matches!(
+            from_drawer(&DrawerSpec::for_kind(DrawerKind::Arc)),
+            DrawDesc::ArcSmelt { .. }
+        ));
+        assert!(matches!(
+            from_drawer(&DrawerSpec::for_kind(DrawerKind::Particle)),
+            DrawDesc::Particles { .. }
+        ));
+        assert!(matches!(
+            from_drawer(&DrawerSpec::for_kind(DrawerKind::SoftShadow)),
+            DrawDesc::SoftParticles { .. }
+        ));
+    }
+
+    /// GAPS #57 follow-up: the Java class-default alphas
+    /// (`DrawArcSmelt.java:13`, `DrawCrucibleFlame.java:14`,
+    /// `DrawParticles.java:13`, `DrawSoftParticles.java:15`) survive the
+    /// conversion, and `DrawParticles` scales its particle alpha by it.
+    #[test]
+    fn class_alpha_defaults_apply() {
+        use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
+
+        let arc = from_drawer(&DrawerSpec::for_kind(DrawerKind::ArcSmelt));
+        let DrawDesc::ArcSmelt { alpha, x, y, .. } = arc else {
+            panic!("expected DrawArcSmelt");
+        };
+        assert!((alpha - 0.68).abs() < 1e-6, "DrawArcSmelt.alpha");
+        assert_eq!((x, y), (0.0, 0.0));
+
+        let crucible = from_drawer(&DrawerSpec::for_kind(DrawerKind::CrucibleFlame));
+        let DrawDesc::CrucibleFlame { alpha, .. } = crucible else {
+            panic!("expected DrawCrucibleFlame");
+        };
+        assert!((alpha - 0.5).abs() < 1e-6, "DrawCrucibleFlame.alpha");
+
+        let particles = from_drawer(&DrawerSpec::for_kind(DrawerKind::Particles));
+        let DrawDesc::Particles { alpha, color, .. } = particles else {
+            panic!("expected DrawParticles");
+        };
+        assert!((alpha - 0.5).abs() < 1e-6, "DrawParticles.alpha");
+        assert_eq!(color, hex("f2d585"));
+
+        // The alpha reaches the emitted particle tint.
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut s = state();
+        s.warmup = 1.0;
+        execute(&particles, "mod-fx", &s, &mut ids, &mut out);
+        assert!(!out.is_empty());
+        let DrawCmd::Fill { color, .. } = out[0].cmd else {
+            panic!("expected circle fill");
+        };
+        let emitted = Rgba::from_rgba8888(color);
+        assert!(
+            (emitted.a - 0.5).abs() < 2.0 / 255.0,
+            "particle alpha: {}",
+            emitted.a
+        );
+
+        // An explicit JSON alpha wins over the class default.
+        let mut spec = DrawerSpec::for_kind(DrawerKind::ArcSmelt);
+        spec.alpha = 0.25;
+        let DrawDesc::ArcSmelt { alpha, .. } = from_drawer(&spec) else {
+            panic!("expected DrawArcSmelt");
+        };
+        assert!((alpha - 0.25).abs() < 1e-6);
     }
 }

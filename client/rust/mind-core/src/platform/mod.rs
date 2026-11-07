@@ -12,14 +12,23 @@ pub mod args;
 pub mod assoc;
 pub mod caps;
 pub mod file_import;
+pub mod gpu;
 pub mod hooks;
+pub mod perf;
+pub mod update;
 pub mod uri;
 
 use std::path::{Path, PathBuf};
 
 pub use args::{LaunchArgs, data_root, parse as parse_launch_args};
 pub use caps::{PerformanceTier, PlatformCaps, PlatformKind};
+pub use gpu::{GlQueries, IntelGpuCheck, NvGpuInfo, NvGpuMemory};
 pub use hooks::{ClientHooks, ClientHooksHandle, NoopClientHooks};
+pub use perf::{PerfClock, PerfCounter, PerfCounterKind, PerfCounters};
+pub use update::{
+    ReleaseError, ReleaseInfo, UpdateStatus, is_bleeding_edge, is_update_available, parse_release,
+    read_build_info,
+};
 
 /// Log severity (mirrors Arc `Log.LogLevel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

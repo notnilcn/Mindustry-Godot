@@ -385,35 +385,50 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_asteroid.checksum",
       "owner_plan": "06",
-      "sha256": "4572c30dc0b74f116fc4fc04e5a474cea6bd2d570740561b700069eacc51997c"
+      "sha256": "fc716a8005f66e850fa3824c0ec4f93570fe9f0d26493770fc51fcfee3d43c4a",
+      "reasons": [
+        "2026-11-07 hx-goldens golden triage (stale since F30, 463dbb70d52f29a4): 38dc36f1 (L02 T1, Floor.decoration, Blocks.java:705-822) -> b89c2922ab3d44d5; 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 + unsigned shifts, javap arc.util.noise.Simplex) -> 49d193e3e88a2aeb. Re-recorded with `mind-headless world gen --planet asteroid --seed 7 --width 128 --height 128`; matches `mind-core maps::planet::asteroid::tests::asteroid_generation_checksum`."
+      ]
     },
     {
       "id": "harness_world_gen_erekir",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_erekir.checksum",
       "owner_plan": "06",
-      "sha256": "4328e9cc685a7f756dbe4299f39466e40115228c3a185f6a270870fff097c432"
+      "sha256": "0025fa6b9ab98591cb6efda6a5b3a1793d36912fa7031091bac5958b4a24e2ee",
+      "reasons": [
+        "2026-11-07 hx-goldens golden triage (stale since F30, daf8a3e078b79de7): 38dc36f1 (L02 T1) -> 7e34db8a547d410e; 341d9f74 (L06 T6.0) -> 56a0d8a4ad4d4a1d; GAPS #28/PAR-0510 trimDark now reads World.getDarkness' borderDarkness (ErekirPlanetGenerator.java:306) -> 6863f0a306c44873. Re-recorded with `mind-headless world gen --planet erekir --seed 7 --width 128 --height 128`; matches `mind-core maps::planet::erekir::tests::erekir_generation_checksum`."
+      ]
     },
     {
       "id": "harness_world_gen_serpulo",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_serpulo.checksum",
       "owner_plan": "06",
-      "sha256": "bf8908beb10b4d511b36b22ce5f5f9b24e2a030f8cba11f7be7b44b58f946c0a"
+      "sha256": "767952aa4e7396f69c219d82724d348373b3c925539edcb14de8cc44b822baa2",
+      "reasons": [
+        "2026-11-07 hx-goldens golden triage (stale since F30, 55fcac31fc269e11): 38dc36f1 (L02 T1) -> b7fbf45c33093127; 341d9f74 (L06 T6.0) -> e92c6cda741240dc. Re-recorded with `mind-headless world gen --planet serpulo --seed 42 --width 128 --height 128`; matches `mind-core maps::planet::serpulo::tests::serpulo_generation_checksum`."
+      ]
     },
     {
       "id": "harness_world_gen_simplex",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_simplex.checksum",
       "owner_plan": "06",
-      "sha256": "719332ee31155ed6e6a97acf796e326df7d1bd5e7cab29db18ef555e91acf8e7"
+      "sha256": "3deaf6c9667fc9bafad3a9312cad0078e23d8a423c1964a75161de7608330385",
+      "reasons": [
+        "2026-11-07 hx-goldens golden triage (stale since F30, bc1c505dc6481a14): 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 + unsigned shifts, javap arc.util.noise.Simplex) -> 07e2c98b533790cc. Re-recorded with `mind-headless world gen --generator simplex --seed 7 --width 128 --height 128`; matches `mind-core maps::generators::simplex::tests::simplex_generation_checksum`."
+      ]
     },
     {
       "id": "harness_world_gen_tantros",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_tantros.checksum",
       "owner_plan": "06",
-      "sha256": "3c9b168b263393a3165148ace4f8ebff0066ec9f8cf72c0d8d995d7826301034"
+      "sha256": "4b5432c5bd5ff7431acf51a164ae81447d405bbed8849053426aebaef424c999",
+      "reasons": [
+        "2026-11-07 hx-goldens golden triage (stale since F30, 7762880fe0716320): 341d9f74 (L06 T6.0) -> e53960b4602d5ec2; GAPS #28/PAR-0510 (trimDark reads World.getDarkness' border term, TantrosPlanetGenerator.java:66-78) -> fc23d73c0e7c2ee4. Re-recorded with `mind-headless world gen --planet tantros --seed 11 --width 64 --height 64`; matches `mind-core maps::planet::tantros::tests::tantros_generation_checksum`."
+      ]
     },
     {
       "id": "mod_classmap",
@@ -520,9 +535,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "1cec2fdf892a8a0ff3e0c1c1b15a12bc38864c7b3a21c25fcb0f83c6f6d6d5e3",
+      "sha256": "be05007732abf7f9b068ad868710966e1d6a9a5c0f990139c67623fb0bf4f904",
       "reasons": [
-        "2026-10-18 L06 batched regen (L08 T1 protocol): checksum 26350bc2d719ed88 (341d9f74) -> a5a580c133ca632a at b73b95a0 (L06 T6.1: PlanetView.allow_campaign_rules, Planet.java:139/221, hashed in the full CampaignViews) -> db3aff19ca782bec at eeedfbb1 (L06 T7.1: SectorView.accelerator_selectable = PlanetDialog.canSelect in planetLaunch mode, PlanetDialog.java:414-435; the dump's sample sector gains the field). Scratch-worktree ui campaign dumps at each boundary; unchanged eeedfbb1..HEAD."
+        "2026-10-18 L06 batched regen (L08 T1 protocol): checksum 26350bc2d719ed88 (341d9f74) -> a5a580c133ca632a at b73b95a0 (L06 T6.1: PlanetView.allow_campaign_rules, Planet.java:139/221, hashed in the full CampaignViews) -> db3aff19ca782bec at eeedfbb1 (L06 T7.1: SectorView.accelerator_selectable = PlanetDialog.canSelect in planetLaunch mode, PlanetDialog.java:414-435; the dump's sample sector gains the field). Scratch-worktree ui campaign dumps at each boundary; unchanged eeedfbb1..HEAD.",
+        "2026-11-07 hx-goldens golden triage (stale since 643169f6, sha256 1cec2fdf892a8a0ff3e0c1c1b15a12bc38864c7b3a21c25fcb0f83c6f6d6d5e3; content checksum db3aff19ca782bec): SectorView gained the PlanetDialog globe fields hover_lock/hover_allowed/being_played/shield_arc/attack_sources/export_destination/any_exports (69fda3ec, 504c9c81, 43f454da; PlanetDialog.java:965/481-486/519-531/536-542) and tech nodes gained the implicit `Research` objectives (PAR-0497/camp-tech, TechTree.java:129-136, Block.java:1298-1317). Regenerated with `mind-headless ui campaign --dump client/rust/mind-core/tests/goldens/ui/campaign.json` -> sha256 be05007732abf7f9b068ad868710966e1d6a9a5c0f990139c67623fb0bf4f904, content checksum bac3f353b7b009bc."
       ]
     },
     {

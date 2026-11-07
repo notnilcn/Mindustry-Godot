@@ -10,6 +10,7 @@
 
 use spacetimedb::{ReducerContext, ScheduleAt, Table, TimeDuration, reducer, table};
 
+use super::calls::match_call;
 use super::checksum::match_checksum;
 use super::events::match_event;
 use super::plans::{match_plan_chunk, match_plan_state};
@@ -29,9 +30,9 @@ use crate::chat::vote::{delete_match_votes, expire_votes, sweep_votes};
 use crate::chat::{chat_rate, match_chat, match_chat_state};
 use crate::identity::tables::player_session;
 use crate::main::global::{
-    CHECKSUM_RETENTION_SECS, IDLE_ROW_TTL_SECS, MATCH_EVENT_RETENTION_SECS, MEMBER_GRACE_SECS,
-    PLAN_GROUP_TIMEOUT_SECS, PLAYER_SESSION_TTL_SECS, PLAYER_TRACE_RETENTION_SECS,
-    SWEEP_INTERVAL_SECS, UI_EVENT_RETENTION_SECS,
+    CALL_RETENTION_SECS, CHECKSUM_RETENTION_SECS, IDLE_ROW_TTL_SECS, MATCH_EVENT_RETENTION_SECS,
+    MEMBER_GRACE_SECS, PLAN_GROUP_TIMEOUT_SECS, PLAYER_SESSION_TTL_SECS,
+    PLAYER_TRACE_RETENTION_SECS, SWEEP_INTERVAL_SECS, UI_EVENT_RETENTION_SECS,
 };
 use crate::mods::match_mod;
 
@@ -80,6 +81,7 @@ pub fn tick_maintenance(
     expire_votes(ctx);
     sweep_votes(ctx, now_micros);
     sweep_match_events(ctx, now_micros);
+    sweep_calls(ctx, now_micros);
     sweep_checksums(ctx, now_micros);
     sweep_snapshots(ctx);
     sweep_plan_groups(ctx, now_micros);
@@ -407,6 +409,16 @@ fn sweep_match_events(ctx: &ReducerContext, now_micros: i64) {
     for event in ctx.db.match_event().iter().collect::<Vec<_>>() {
         if now_micros.saturating_sub(event.at.to_micros_since_unix_epoch()) > ttl_micros {
             ctx.db.match_event().event_id().delete(event.event_id);
+        }
+    }
+}
+
+/// Drops published server calls past [`CALL_RETENTION_SECS`] (GAPS #35).
+fn sweep_calls(ctx: &ReducerContext, now_micros: i64) {
+    let ttl_micros = i64::try_from(CALL_RETENTION_SECS).unwrap_or(i64::MAX) * 1_000_000;
+    for call in ctx.db.match_call().iter().collect::<Vec<_>>() {
+        if now_micros.saturating_sub(call.sent_at.to_micros_since_unix_epoch()) > ttl_micros {
+            ctx.db.match_call().call_id().delete(call.call_id);
         }
     }
 }

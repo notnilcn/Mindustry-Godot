@@ -193,7 +193,9 @@ pub fn build_layers(
             // GAPS #57: a parsed drawer (mod/JSON block) converts to the
             // descriptor chain; vanilla blocks keep the hand-written table.
             let explicit = crate::render::draw_desc::has_explicit_chain(def);
-            let chain = crate::render::draw_desc::chain_for(def);
+            // GAPS #57 follow-up: the content-backed drawer fields
+            // (`DrawLiquidOutputs` -> `outputLiquids`) resolve here.
+            let chain = crate::render::draw_desc::chain_for_with(def, content);
             if explicit {
                 descriptors += 1;
             }

@@ -24,7 +24,7 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 | `identity/` | `tables.rs` (`player`, `player_session`, `player_profile`, `client_settings`), `methods.rs` validators, `reducers.rs` (`set_username`, `create_profile`, `update_client_settings`), `views.rs` (`local_player`, `all_players`, ...). |
 | `main/` | `global.rs` tunables, `seeds.rs` code seeds, `content_seed.rs` generated `VANILLA_CONTENT`, `lifecycle.rs` (`init`/`client_connected`/`client_disconnected`), `audit.rs` server-only `audit_log` + `audit`, `tables.rs` (`protocol_info`, `relay_config`, `AuditKind`). |
 | `mods/mod.rs` | `match_mod`, `content_catalog`; `check_mods` and `content_name_allowed`. |
-| `relay/` | Match directory/membership, the private `match_command` log, rate/session state, rules, plan snapshots, checksums, snapshots, UI events, published `match_event` server events, LWW player state and the maintenance sweep; every relay reducer and view. |
+| `relay/` | Match directory/membership, the private `match_command` log, rate/session state, rules, plan snapshots, checksums, snapshots, UI events, published `match_event` server events, server→client `@Remote` call rows (`calls.rs`), PvP team liveness/assignment (`teams.rs`), LWW player state and the maintenance sweep; every relay reducer and view. |
 | `Cargo.toml` | `cdylib` crate `mindustry_godot`, its own workspace, pinned to `spacetimedb = "=2.10.1"`. |
 
 ## Responsibilities
@@ -55,6 +55,16 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
   `admin_action_log` and an `audit_log` line. Bans are identity-only (no IP/subnet
   bans); name bans are case-insensitive regexes enforced on create/join, and a
   kick cooldown blocks rejoin until `player_info.last_kicked_at`.
+- **Server→client calls (GAPS #35).** `relay/calls.rs` publishes one private
+  `match_call` row per `@Remote` call the host/admin sends (`publish_call`:
+  kind, optional target, the `*CallPacket.write` body); `my_match_calls`
+  exposes broadcast + targeted rows and the client binder turns each row into a
+  `[kind][body]` frame (`mind-stdb::calls`). Rows are pruned by
+  `CALL_RETENTION_SECS`.
+- **PvP teams (GAPS #33).** `relay/teams.rs` stores the host-published team
+  liveness (`match_team`, `publish_match_teams`) and balances joiners/starters
+  over the connected-member counts (`NetServer.assigner`); non-PvP members stay
+  unassigned so the client's world default team applies.
 - **Events.** `relay/events.rs` publishes one `match_event` row per
   server-observable event (match lifecycle, join/leave/kick, chat, votes,
   config/name-ban/admin changes, `/sync`); `my_match_events` is the client
@@ -94,7 +104,7 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
 
 ## Invariants
 
-- **Server-only tables** (no `public`): `audit_log`, `relay_member`,
+- **Server-only tables** (no `public`): `audit_log`, `match_call`, `relay_member`,
   `match_command`, `command_rate`, `sender_command_state`, `match_kick`,
   `match_snapshot_request`, `match_snapshot_chunk`, `snapshot_rate`,
   `checksum_rate`, `match_player_state_rate`, `chat_rate`, `match_chat_state`,
@@ -106,7 +116,8 @@ bindings are owned by `server/AGENTS.md`; client binders and subscription waves 
   other match views (`my_matches`, `my_match_members`, `my_match_state`,
   `my_match_commands`, `my_match_chat`, `my_match_checksums`,
   `my_match_snapshots`, `my_match_snapshot_requests`, `my_match_ui_events`,
-  `my_match_player_states`, `my_match_plans`, `my_match_events`) resolve the
+  `my_match_player_states`, `my_match_plans`, `my_match_events`,
+  `my_match_calls`) resolve the
   caller's active match through `relay_member` and never expose another match's
   rows. Admin views (`am_i_admin`, `all_bans`, `all_whitelist`, `all_admins`,
   `all_chat_filters`, `all_action_filters`, `all_player_info`, `my_traces`,
@@ -126,7 +137,7 @@ spacetime describe mindustry --server local --json   # tables/reducers/views
 
 The `#[cfg(test)]` suites (`admin`, `chat`, `mods`, `campaign`, `identity`,
 `main`, `relay`) are pure and **do** run: `cargo test --lib` links the crate as a
-test harness on the host target (verified 2026-11-06, 94 tests). The
+test harness on the host target (verified 2026-11-07, 109 tests). The
 `cdylib`-only note in older revisions was stale. Reducer behaviour is exercised
 end-to-end by publishing to a local `spacetime start` node and calling reducers
 (see `runs/PAR-0121/`).

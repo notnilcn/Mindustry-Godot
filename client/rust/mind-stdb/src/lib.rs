@@ -18,6 +18,7 @@
 
 pub mod binder;
 pub mod call_packet;
+pub mod calls;
 pub mod chat;
 pub mod checksum;
 pub mod command_ring;
@@ -44,6 +45,9 @@ pub mod waves;
 pub use binder::{BinderOptions, RowChange, TableBinder};
 pub use call_packet::{
     CALL_QUEUE_LIMIT, CallChannel, CallError, CallHandler, CallKind, CallPacket, CallReject,
+};
+pub use calls::{
+    CALL_ROW_LIMIT, CallStream, call_kind as call_packet_kind, decode_row, frame_for_row,
 };
 pub use chat::{
     CHAT_HISTORY_LIMIT, ChatLine, ChatLog, is_admin_channel, kind_name as chat_kind_name,

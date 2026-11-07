@@ -7,6 +7,11 @@
 //! normalization, conveyor A* (node limit 1000), span-node spacing, the bridge
 //! placement DP and `ChainedBuilding` upgrade walking. The world is read through
 //! the [`PlacementWorld`] trait so this stays Godot-free and testable (I1).
+//!
+//! It also owns the Godot-free half of the `Layer.plans` selection visuals
+//! (GAPS #47): [`selection_world_rect`], [`overlap_check`],
+//! [`rebuild_selection_tiles`] and the other-player plan alphas
+//! (`InputHandler.java:1499-1516,1724-1752,1761-1806,1392-1440`).
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -697,6 +702,254 @@ pub fn normalize_draw_area(
     }
 }
 
+// ---- Selection/preview overlay geometry (GAPS #47) ----
+//
+// `InputHandler.drawSelection`/`drawRebuildSelection`/`drawOverlapCheck`
+// (`InputHandler.java:1499-1516,1724-1752,1761-1806`) and
+// `drawOtherBuildPlans` (`InputHandler.java:1392-1440`) compute world-space
+// rects, dashes and alphas before drawing at `Layer.plans`. The overlay pass
+// (`mind-gdext/src/render/plans.rs`) owns the draw calls; the Godot-free half
+// lives here so the geometry stays unit-tested.
+
+/// `Vars.maxSchematicSize` (`Vars.java:188-189`): the schematic-copy drag clamp
+/// the F-selection rect uses (`DesktopInput.java:135-143`).
+pub const MAX_SCHEMATIC_SIZE: i32 = 64;
+
+/// An ARC `Rect`-shaped world rectangle `(x, y, width, height)`, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WorldRect {
+    /// Left edge.
+    pub x: f32,
+    /// Bottom edge (world `+y` is up).
+    pub y: f32,
+    /// Width.
+    pub w: f32,
+    /// Height.
+    pub h: f32,
+}
+
+impl WorldRect {
+    /// ARC `Rect.overlaps`: strict edges, so touching rects do not overlap.
+    pub fn overlaps(self, other: Self) -> bool {
+        self.x < other.x + other.w
+            && self.x + self.w > other.x
+            && self.y < other.y + other.h
+            && self.y + self.h > other.y
+    }
+
+    /// ARC `Rect.contains`: half-open on the far edges.
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+}
+
+/// `Block.bounds(x, y, rect)` (`Block.java:1023-1025`): the footprint rect
+/// centred on `(x, y) * tilesize + offset`.
+pub fn block_world_rect(x: i32, y: i32, size: i32, offset: f32) -> WorldRect {
+    let unit = TILESIZE as f32;
+    let span = size.max(1) as f32 * unit;
+    WorldRect {
+        x: x as f32 * unit + offset - span / 2.0,
+        y: y as f32 * unit + offset - span / 2.0,
+        w: span,
+        h: span,
+    }
+}
+
+/// `BuildPlan.bounds(rect)` (`BuildPlan.java:125-131`): a breaking plan uses the
+/// empty offscreen rect so it never overlaps a selection.
+pub fn plan_world_rect(x: i32, y: i32, size: i32, offset: f32, breaking: bool) -> WorldRect {
+    if breaking {
+        WorldRect {
+            x: -100.0,
+            y: -100.0,
+            w: 0.0,
+            h: 0.0,
+        }
+    } else {
+        block_world_rect(x, y, size, offset)
+    }
+}
+
+/// `Placement.normalizeDrawArea(Blocks.air, .., snap=false, scaling=1f)` for
+/// `InputHandler.drawSelection` (`InputHandler.java:1761-1768`): the schematic
+/// copy rect (`max_length = MAX_SCHEMATIC_SIZE`) and the rebuild-select rect
+/// (`max_length = 0`, unbounded, `InputHandler.java:1725`).
+pub fn selection_world_rect(from: TilePos, to: TilePos, max_length: i32) -> WorldRect {
+    let result = normalize_draw_area(
+        1,
+        0.0,
+        from.x() as i32,
+        from.y() as i32,
+        to.x() as i32,
+        to.y() as i32,
+        false,
+        max_length,
+        1.0,
+    );
+    WorldRect {
+        x: result.x,
+        y: result.y,
+        w: result.x2 - result.x,
+        h: result.y2 - result.y,
+    }
+}
+
+/// `drawSelection`'s size label (`InputHandler.java:1780-1806`):
+/// `"{width}x{height} ({area})"` with `(int)(rect / tilesize)` dimensions.
+pub fn selection_label(rect: WorldRect) -> String {
+    let unit = TILESIZE as f32;
+    let width = (rect.w / unit) as i32;
+    let height = (rect.h / unit) as i32;
+    format!("{width}x{height} ({})", width * height)
+}
+
+/// Which held-key selection rectangle `DesktopInput.drawTop`
+/// (`DesktopInput.java:130-145`) draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionShow {
+    /// Nothing: breaking mode, keyboard focus, or no selection key held.
+    None,
+    /// F held: `drawSelection(.., Vars.maxSchematicSize)` in `Pal.accent`.
+    Schematic,
+    /// B held: `drawRebuildSelection(..)` in `Pal.sapBullet`.
+    Rebuild,
+}
+
+/// `DesktopInput.drawTop` gate (`DesktopInput.java:133-145`): the schematic rect
+/// needs a latched `schemX/schemY` and `!Core.scene.hasKeyboard()`, and the
+/// rebuild rect only draws when the schematic key is not held.
+pub fn selection_show(
+    latched: bool,
+    schematic_held: bool,
+    rebuild_held: bool,
+    breaking: bool,
+    keyboard_focus: bool,
+) -> SelectionShow {
+    if breaking || keyboard_focus {
+        return SelectionShow::None;
+    }
+    if schematic_held && latched {
+        SelectionShow::Schematic
+    } else if rebuild_held {
+        SelectionShow::Rebuild
+    } else {
+        SelectionShow::None
+    }
+}
+
+/// `InputHandler.drawOverlapCheck` warning geometry
+/// (`InputHandler.java:1499-1516`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverlapCheck {
+    /// Line start: the cursor block's edge facing the blocker.
+    pub from: (f32, f32),
+    /// Line end: the blocker's edge facing the cursor block.
+    pub to: (f32, f32),
+    /// `Drawf.dashLineDst` segment count (`dst / tilesize * 1.6`).
+    pub segments: i32,
+}
+
+/// `if(!valid && state.rules.placeRangeCheck)` plus `blocker.wasVisible`
+/// (`InputHandler.java:1500-1502`): the two gates around the warning.
+pub fn should_draw_overlap_check(
+    valid: bool,
+    place_range_check: bool,
+    blocker_visible: bool,
+) -> bool {
+    !valid && place_range_check && blocker_visible
+}
+
+/// `InputHandler.drawOverlapCheck` (`InputHandler.java:1499-1516`): the dashed
+/// line from the cursor block's edge to the enemy blocker's edge.
+///
+/// The blocker is `Build.getEnemyOverlap` (`world::build::get_enemy_overlap`,
+/// `Build.java:275-277`); `blocker_center` is its world position.
+pub fn overlap_check(
+    cursor_x: i32,
+    cursor_y: i32,
+    block_size: i32,
+    block_offset: f32,
+    blocker_center: (f32, f32),
+    blocker_size: i32,
+) -> OverlapCheck {
+    let unit = TILESIZE as f32;
+    let px = cursor_x as f32 * unit + block_offset;
+    let py = cursor_y as f32 * unit + block_offset;
+    // `Tmp.v1.set(cursorX, cursorY).scl(tilesize).add(block.offset)
+    //  .sub(blocker).scl(-1f).nor();`
+    let (mut dx, mut dy) = (blocker_center.0 - px, blocker_center.1 - py);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len != 0.0 {
+        dx /= len;
+        dy /= len;
+    }
+    let half = block_size.max(1) as f32 * unit / 2.0;
+    let blocker_half = blocker_size.max(1) as f32 * unit / 2.0;
+    let from = (px + dx * half, py + dy * half);
+    let to = (
+        blocker_center.0 - dx * blocker_half,
+        blocker_center.1 - dy * blocker_half,
+    );
+    let span = (to.0 - from.0).hypot(to.1 - from.1);
+    OverlapCheck {
+        from,
+        to,
+        segments: (span / unit * 1.6) as i32,
+    }
+}
+
+/// `InputHandler.drawRebuildSelection` tile half
+/// (`InputHandler.java:1742-1752`): the deduped derelicts inside the clamped
+/// area that `canRepairDerelict` accepts.
+///
+/// `origin_at` mirrors `world.tileBuilding(x, y)` (the building's origin tile
+/// for a multiblock, `None` for an empty tile); `can_repair` is
+/// `canRepairDerelict` evaluated at that origin.
+pub fn rebuild_selection_tiles(
+    area: NormalizeResult,
+    mut origin_at: impl FnMut(i32, i32) -> Option<(i32, i32)>,
+    mut can_repair: impl FnMut(i32, i32) -> bool,
+) -> Vec<(i32, i32)> {
+    let mut seen: HashSet<(i32, i32)> = HashSet::new();
+    let mut out = Vec::new();
+    for x in area.x..=area.x2 {
+        for y in area.y..=area.y2 {
+            let Some(origin) = origin_at(x, y) else {
+                continue;
+            };
+            if !seen.insert(origin) {
+                continue;
+            }
+            if can_repair(origin.0, origin.1) {
+                out.push(origin);
+            }
+        }
+    }
+    out
+}
+
+/// `InputHandler.drawOtherBuildPlans` (`InputHandler.java:1408-1440`): a
+/// preview plan draws when its block exists, it is not finished, and it is not
+/// the plan its owner is actively building.
+pub fn other_plan_drawable(has_block: bool, done: bool, actively_building_this: bool) -> bool {
+    has_block && !done && !actively_building_this
+}
+
+/// `Block.drawOtherPlayerPlan` alpha (`Block.java:854-862`,
+/// `InputHandler.java:1432,1436`): 0.7 while the cursor hovers the plan, else
+/// 0.25.
+pub fn other_plan_alpha(overlapping: bool) -> f32 {
+    if overlapping { 0.7 } else { 0.25 }
+}
+
+/// `Mathf.lerpDelta(plan.animScale, 1f, 0.2f)` (`InputHandler.java:1432`):
+/// frame-rate-scaled lerp toward 1 (`delta_frames` is 1 at 60 fps).
+pub fn plan_anim_scale_step(current: f32, delta_frames: f32) -> f32 {
+    let alpha = (0.2 * delta_frames).clamp(0.0, 1.0);
+    current + (1.0 - current) * alpha
+}
+
 /// `ItemBridgePlacer`: sets both blocks and the relative `Point2` config.
 #[derive(Debug, Clone, Copy)]
 pub struct RelativeBridgePlacer {
@@ -1107,6 +1360,267 @@ mod tests {
         let before = plans.clone();
         calculate_bridges(&world, &mut plans, &placer, false, |_| false);
         assert_eq!(plans, before);
+    }
+
+    #[test]
+    fn world_rect_matches_block_bounds() {
+        // `Block.bounds` (`Block.java:1023-1025`): size * tilesize centred on
+        // `x * tilesize + offset`.
+        let single = block_world_rect(4, 6, 1, 0.0);
+        assert_eq!(
+            single,
+            WorldRect {
+                x: 4.0 * 8.0 - 4.0,
+                y: 6.0 * 8.0 - 4.0,
+                w: 8.0,
+                h: 8.0,
+            }
+        );
+        // `Block.offset = ((size + 1) % 2) * tilesize / 2` (`Block.java:774`):
+        // even sizes centre on `x * 8 + 4`, odd sizes on `x * 8`.
+        let even = block_world_rect(4, 6, 2, 4.0);
+        assert_eq!(
+            even,
+            WorldRect {
+                x: 4.0 * 8.0 + 4.0 - 8.0,
+                y: 6.0 * 8.0 + 4.0 - 8.0,
+                w: 16.0,
+                h: 16.0,
+            }
+        );
+        let odd = block_world_rect(4, 6, 3, 0.0);
+        assert_eq!(
+            odd,
+            WorldRect {
+                x: 4.0 * 8.0 - 12.0,
+                y: 6.0 * 8.0 - 12.0,
+                w: 24.0,
+                h: 24.0,
+            }
+        );
+    }
+
+    #[test]
+    fn world_rect_overlap_is_strict_and_contains_is_half_open() {
+        // ARC `Rect.overlaps` / `Rect.contains`.
+        let a = WorldRect {
+            x: 0.0,
+            y: 0.0,
+            w: 8.0,
+            h: 8.0,
+        };
+        let touching = WorldRect {
+            x: 8.0,
+            y: 0.0,
+            w: 8.0,
+            h: 8.0,
+        };
+        assert!(!a.overlaps(touching), "edge contact must not overlap");
+        assert!(!touching.overlaps(a));
+        let overlapping = WorldRect {
+            x: 7.5,
+            y: 0.0,
+            w: 8.0,
+            h: 8.0,
+        };
+        assert!(a.overlaps(overlapping));
+        assert!(a.contains(0.0, 0.0));
+        assert!(a.contains(7.99, 7.99));
+        assert!(!a.contains(8.0, 4.0));
+        assert!(!a.contains(4.0, 8.0));
+    }
+
+    #[test]
+    fn plan_bounds_breaking_is_empty() {
+        // `BuildPlan.bounds` (`BuildPlan.java:125-131`).
+        assert_eq!(
+            plan_world_rect(1, 2, 2, 4.0, true),
+            WorldRect {
+                x: -100.0,
+                y: -100.0,
+                w: 0.0,
+                h: 0.0,
+            }
+        );
+        assert_eq!(
+            plan_world_rect(1, 2, 2, 4.0, false),
+            block_world_rect(1, 2, 2, 4.0)
+        );
+        // A breaking plan never highlights inside a selection rect.
+        assert!(!plan_world_rect(1, 2, 2, 4.0, true).overlaps(block_world_rect(1, 2, 2, 4.0)));
+    }
+
+    #[test]
+    fn selection_rect_matches_normalize_draw_area() {
+        // `Placement.normalizeDrawArea(Blocks.air, .., snap=false, scaling=1)`:
+        // a size-1 zero-offset block pads the tile rect by 4 px per side.
+        let rect = selection_world_rect(TilePos::new(5, 5), TilePos::new(5, 5), MAX_SCHEMATIC_SIZE);
+        assert_eq!(
+            rect,
+            WorldRect {
+                x: 36.0,
+                y: 36.0,
+                w: 8.0,
+                h: 8.0,
+            }
+        );
+        // `Vars.maxSchematicSize` clamps each axis to 64 tiles of delta.
+        let clamped =
+            selection_world_rect(TilePos::new(0, 0), TilePos::new(70, 10), MAX_SCHEMATIC_SIZE);
+        assert_eq!(clamped.x, -4.0);
+        assert_eq!(clamped.w, 64.0 * 8.0 + 8.0);
+        assert_eq!(clamped.h, 10.0 * 8.0 + 8.0);
+        // maxLength 0 = unbounded (the rebuild-select rect).
+        let unbounded = selection_world_rect(TilePos::new(0, 0), TilePos::new(70, 10), 0);
+        assert_eq!(unbounded.w, 70.0 * 8.0 + 8.0);
+        assert_eq!(unbounded.h, 10.0 * 8.0 + 8.0);
+        // Reversed and inverted drags normalize to the same rectangle.
+        let reversed = selection_world_rect(TilePos::new(5, 5), TilePos::new(0, 0), 0);
+        assert_eq!(
+            reversed,
+            selection_world_rect(TilePos::new(0, 0), TilePos::new(5, 5), 0)
+        );
+        // The size label divides the padded draw rect by the tile size.
+        assert_eq!(selection_label(rect), "1x1 (1)");
+        assert_eq!(
+            selection_label(selection_world_rect(
+                TilePos::new(0, 0),
+                TilePos::new(4, 3),
+                0
+            )),
+            "5x4 (20)"
+        );
+    }
+
+    #[test]
+    fn selection_show_gate_matches_draw_top() {
+        // `DesktopInput.drawTop` (`DesktopInput.java:133-145`).
+        assert_eq!(
+            selection_show(true, true, false, false, false),
+            SelectionShow::Schematic
+        );
+        // F wins over B; B draws when F is released (`!keyDown(schematicSelect)`
+        // guard only clears the latch, the rect follows the held key).
+        assert_eq!(
+            selection_show(true, true, true, false, false),
+            SelectionShow::Schematic
+        );
+        assert_eq!(
+            selection_show(true, false, true, false, false),
+            SelectionShow::Rebuild
+        );
+        // The F rect needs a latched start tile; breaking mode and keyboard
+        // focus suppress both rects.
+        assert_eq!(
+            selection_show(false, true, false, false, false),
+            SelectionShow::None
+        );
+        assert_eq!(
+            selection_show(true, true, false, true, false),
+            SelectionShow::None
+        );
+        assert_eq!(
+            selection_show(true, true, true, false, true),
+            SelectionShow::None
+        );
+        assert_eq!(
+            selection_show(true, false, false, false, false),
+            SelectionShow::None
+        );
+    }
+
+    #[test]
+    fn overlap_check_line_points_at_blocker_edges() {
+        // `InputHandler.drawOverlapCheck` (`IH:1499-1516`): from the cursor
+        // block's facing edge to the blocker's facing edge.
+        let check = overlap_check(10, 10, 1, 0.0, (100.0, 80.0), 1);
+        assert_eq!(check.from, (84.0, 80.0));
+        assert_eq!(check.to, (96.0, 80.0));
+        assert_eq!(check.segments, 2); // int(12 / 8 * 1.6)
+        // Diagonal direction is normalized (`Tmp.v1.nor()`).
+        let diag = overlap_check(10, 10, 1, 0.0, (110.0, 120.0), 2);
+        assert!((diag.from.0 - 82.4).abs() < 1e-4);
+        assert!((diag.from.1 - 83.2).abs() < 1e-4);
+        assert!((diag.to.0 - 105.2).abs() < 1e-4);
+        assert!((diag.to.1 - 113.6).abs() < 1e-4);
+        assert_eq!(diag.segments, 7); // int(38 / 8 * 1.6)
+        // Zero distance leaves the zero vector (Arc `nor` is len-safe).
+        let same = overlap_check(10, 10, 1, 0.0, (80.0, 80.0), 1);
+        assert_eq!(same.from, (80.0, 80.0));
+        assert_eq!(same.to, (80.0, 80.0));
+        assert_eq!(same.segments, 0);
+        // Even-size blocks offset their centre (`Block.offset`).
+        let offset = overlap_check(10, 10, 2, 4.0, (104.0, 84.0), 2);
+        assert_eq!(offset.from, (92.0, 84.0));
+        assert_eq!(offset.to, (96.0, 84.0));
+    }
+
+    #[test]
+    fn overlap_check_gates_match_java() {
+        // `if(!valid && state.rules.placeRangeCheck)` + `blocker.wasVisible`.
+        assert!(should_draw_overlap_check(false, true, true));
+        assert!(!should_draw_overlap_check(true, true, true));
+        assert!(!should_draw_overlap_check(false, false, true));
+        assert!(!should_draw_overlap_check(false, true, false));
+    }
+
+    #[test]
+    fn rebuild_selection_dedupes_multiblocks() {
+        // `InputHandler.drawRebuildSelection` (`IH:1742-1752`): iterate the
+        // area, `tileBuilding` -> origin, dedupe by `tile.pos()`,
+        // `canRepairDerelict`.
+        let area = normalize_area(0, 0, 3, 1, 0, false, 0);
+        // A 2x2 derelict whose origin is (1, 0).
+        let origin_at = |x: i32, y: i32| {
+            if (1..=2).contains(&x) && (0..=1).contains(&y) {
+                Some((1, 0))
+            } else {
+                None
+            }
+        };
+        let tiles = rebuild_selection_tiles(area, origin_at, |x, y| (x, y) == (1, 0));
+        assert_eq!(tiles, vec![(1, 0)]);
+        // The repair predicate filters derelicts that cannot be rebuilt.
+        let filtered = rebuild_selection_tiles(area, origin_at, |_, _| false);
+        assert!(filtered.is_empty());
+        // Empty tiles are skipped entirely.
+        let none = rebuild_selection_tiles(area, |_, _| None, |_, _| true);
+        assert!(none.is_empty());
+        // Two separate 1x1 derelicts both highlight, in x-major order.
+        let two = rebuild_selection_tiles(
+            normalize_area(0, 0, 2, 0, 0, false, 0),
+            |x, _| Some((x, 0)),
+            |_, _| true,
+        );
+        assert_eq!(two, vec![(0, 0), (1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn other_player_plan_alpha_and_anim_scale() {
+        // `Block.drawOtherPlayerPlan` (`Block.java:854-862`).
+        assert_eq!(other_plan_alpha(false), 0.25);
+        assert_eq!(other_plan_alpha(true), 0.7);
+        // `Mathf.lerpDelta(animScale, 1f, 0.2f)` at 60 fps.
+        assert!((plan_anim_scale_step(0.0, 1.0) - 0.2).abs() < 1e-6);
+        assert!((plan_anim_scale_step(0.5, 1.0) - 0.6).abs() < 1e-6);
+        assert!((plan_anim_scale_step(0.5, 0.0) - 0.5).abs() < 1e-6);
+        assert!((plan_anim_scale_step(0.0, 100.0) - 1.0).abs() < 1e-6);
+        // `InputHandler.drawOtherBuildPlans` plan filter (`IH:1408-1437`).
+        assert!(other_plan_drawable(true, false, false));
+        assert!(!other_plan_drawable(false, false, false));
+        assert!(!other_plan_drawable(true, true, false));
+        assert!(!other_plan_drawable(true, false, true));
+    }
+
+    #[test]
+    fn team_plan_highlight_uses_block_bounds() {
+        // `drawBreakSelection`/`drawRebuildSelection` plan loops compare
+        // `block.bounds(plan.x, plan.y)` against the draw rect.
+        let selection = selection_world_rect(TilePos::new(2, 2), TilePos::new(4, 4), 0);
+        assert!(plan_world_rect(2, 2, 1, 0.0, false).overlaps(selection));
+        assert!(plan_world_rect(4, 4, 3, 4.0, false).overlaps(selection));
+        assert!(!plan_world_rect(9, 9, 1, 0.0, false).overlaps(selection));
+        assert!(!plan_world_rect(2, 2, 1, 0.0, true).overlaps(selection));
     }
 
     #[test]

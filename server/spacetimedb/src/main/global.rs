@@ -246,6 +246,31 @@ pub const PLAYER_TRACE_RETENTION_SECS: u64 = 24 * 3600;
 /// Match-event retention (plan §6.8: 5 min, same as UI events).
 pub const MATCH_EVENT_RETENTION_SECS: u64 = 5 * 60;
 
+/// Server→client call payload cap (GAPS #35; the `*CallPacket.write` body).
+pub const MAX_CALL_PAYLOAD_BYTES: usize = 64 * 1024;
+
+/// Published `@Remote` call retention (GAPS #35; a call is applied on arrival,
+/// so a short window is enough for a reconnecting client to replay the tail).
+pub const CALL_RETENTION_SECS: u64 = 2 * 60;
+
+/// `Team.all` upper bound for published team liveness (GAPS #33; Arc v146 has
+/// seven teams, the buffer allows one more).
+pub const MAX_TEAMS: usize = 8;
+
+/// Relay movement ceiling in world units per 60 Hz tick (GAPS #33).
+///
+/// The module has no unit types, so `NetServer.clientSnapshot`'s
+/// `unit.speed()` is replaced by this generous ceiling: every vanilla unit
+/// moves well below it (the fastest units are ≈ 6 units/tick).
+pub const MAX_PLAYER_SPEED: f32 = 20.0;
+
+/// Java `Team.derelict` id (never assignable).
+pub const TEAM_DERELICT: u8 = 0;
+
+/// Margin added around the map rectangle for player-state positions (world
+/// units, `Vars.tilesize = 8`); units legitimately overhang the map border.
+pub const PLAYER_POSITION_MARGIN_PX: f32 = 64.0;
+
 /// Closed vote/ballot retention (plan §6.8: 10 min).
 pub const VOTE_RETENTION_SECS: u64 = 10 * 60;
 

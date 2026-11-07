@@ -33,6 +33,92 @@ pub fn validate_username(username: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Java `Colors`-aware name sanitizer (`NetServer.fixName`,
+/// `NetServer.java:976-999`, v146).
+///
+/// Trims, removes tabs/newlines, strips transparent (`alpha < 1`) colour tags
+/// and truncates at [`MAX_USERNAME_LEN`] UTF-8 bytes. GAPS #33/PAR-0545: the
+/// host sanitizes every join name, so a SpacetimeDB module (which owns the
+/// authoritative `player.username` every peer reads) must apply the same rule.
+pub fn fix_name(name: &str) -> String {
+    let mut name: Vec<char> = name
+        .trim()
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\t')
+        .collect();
+    if name.len() == 1 && (name[0] == '[' || name[0] == ']') {
+        return String::new();
+    }
+    let mut index = 0;
+    while index < name.len() {
+        if name[index] == '['
+            && index + 1 < name.len()
+            && name[index + 1] != '['
+            && (index == 0 || name[index - 1] != '[')
+        {
+            let tail: String = name[index..].iter().collect();
+            let prefix: String = name[..index].iter().collect();
+            let checked = check_color(&tail);
+            name = format!("{prefix}{checked}").chars().collect();
+        }
+        index += 1;
+    }
+    let mut out = String::new();
+    for c in name {
+        if out.len() >= MAX_USERNAME_LEN {
+            break;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `NetServer.checkColor` (`NetServer.java:1000-1029`): if `str` starts a
+/// colour tag whose colour is transparent (`alpha < 1`), return the text after
+/// the tag; otherwise return `str` unchanged.
+pub fn check_color(str: &str) -> &str {
+    let bytes = str.as_bytes();
+    let mut index = 1;
+    while index < bytes.len() {
+        if bytes[index] == b']' {
+            let color = &str[1..index];
+            if let Some(alpha) = color_alpha(color) {
+                if alpha < 255 {
+                    return &str[index + 1..];
+                }
+            } else {
+                // `Color.valueOf` threw for a non-hex name: keep the tag.
+                return str;
+            }
+        }
+        index += 1;
+    }
+    str
+}
+
+/// Alpha of a colour tag body (`Colors.get(...)` names or `Color.valueOf` hex).
+///
+/// `None` means `Color.valueOf` would throw (unknown non-hex token). Every
+/// named Arc colour except `clear` is opaque, so only the transparent cases
+/// (`clear`, 8-digit hex with alpha < 0xff) change the returned name.
+fn color_alpha(color: &str) -> Option<u8> {
+    if color.eq_ignore_ascii_case("clear") {
+        return Some(0);
+    }
+    let hex = color.strip_prefix('#').unwrap_or(color);
+    if hex.len() != 6 && hex.len() != 8 {
+        return None;
+    }
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    if hex.len() == 8 {
+        u8::from_str_radix(&hex[6..8], 16).ok()
+    } else {
+        Some(255)
+    }
+}
+
 /// Validates a profile name (same rules as usernames).
 pub fn validate_profile_name(name: &str) -> Result<(), String> {
     let len = name.chars().count();
@@ -119,6 +205,30 @@ mod tests {
         assert!(validate_ui_scale(1.0).is_ok());
         assert!(validate_ui_scale(0.1).is_err());
         assert!(validate_ui_scale(f32::INFINITY).is_err());
+    }
+
+    #[test]
+    fn fix_name_and_check_color_follow_net_server() {
+        assert_eq!(fix_name("  Bob  "), "Bob");
+        assert_eq!(fix_name("A\nB\tC"), "ABC");
+        assert_eq!(fix_name("["), "");
+        assert_eq!(fix_name("]"), "");
+        assert_eq!(fix_name("A[clear]B"), "AB");
+        assert_eq!(fix_name("A[#00000000]B"), "AB");
+        assert_eq!(fix_name("A[CLEAR]B"), "AB");
+        assert_eq!(fix_name("[red]Bob"), "[red]Bob");
+        assert_eq!(fix_name("[#ff0000]Bob"), "[#ff0000]Bob");
+        assert_eq!(fix_name("[[red]Bob"), "[[red]Bob");
+        assert_eq!(check_color("[clear]tail"), "tail");
+        assert_eq!(check_color("[#000000ff]tail"), "[#000000ff]tail");
+        assert_eq!(check_color("[notacolor]tail"), "[notacolor]tail");
+        // Java truncates at `maxNameLength` UTF-8 bytes (Vars.java:113).
+        assert_eq!(
+            fix_name(&"a".repeat(MAX_USERNAME_LEN + 5)).len(),
+            MAX_USERNAME_LEN
+        );
+        assert_eq!(fix_name("[clear]"), "");
+        assert!(validate_username(&fix_name("[clear]")).is_err());
     }
 
     #[test]

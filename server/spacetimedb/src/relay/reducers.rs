@@ -273,13 +273,18 @@ pub fn join_match(
     };
     validate_join(&gate)?;
 
+    // GAPS #33: PvP team balancing (`NetServer.assigner`, NetServer.java:50-71).
+    // The host publishes the team liveness; non-PvP stays unassigned so the
+    // client's world default team applies.
+    let team =
+        crate::relay::teams::assigned_team_for_join(ctx, match_id, row.mode == Gamemode::Pvp);
     ctx.db.relay_member().insert(RelayMember {
         member_id: 0,
         match_id,
         identity: ctx.sender(),
         joined_at: now,
         role,
-        team: None,
+        team,
         connected: true,
         ready: false,
         last_seen_at: now,
@@ -421,6 +426,9 @@ pub fn start_match(ctx: &ReducerContext, match_id: u64, force: bool) -> Result<(
             return Err(format!("{not_ready} member(s) are not ready"));
         }
     }
+    // Java assigns teams on connect; relay hosts publish team liveness in the
+    // lobby, so fill any member that joined before the data landed.
+    crate::relay::teams::assign_missing_teams(ctx, match_id, row.mode);
     ctx.db.relay_match().match_id().update(RelayMatch {
         status: MatchStatus::Running,
         started_at: Some(ctx.timestamp),
@@ -706,7 +714,9 @@ fn player_username(ctx: &ReducerContext) -> String {
         .player()
         .identity()
         .find(ctx.sender())
-        .map(|row| row.username)
+        // GAPS #33/PAR-0545: the join path applies `NetServer.fixName` too; a
+        // row written before this landed may still hold an unsanitized name.
+        .map(|row| crate::identity::methods::fix_name(&row.username))
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "<unknown>".to_string())
 }

@@ -1050,6 +1050,141 @@ impl<'a> ContentJsonParser<'a> {
                     .push((Box::leak(resolved.into_boxed_str()), value as f32));
             }
         }
+        // ---- production family fields (GAPS #56 follow-up) ----
+        //
+        // The per-class content fields the production building classes read
+        // (`GenericCrafter.java:22-37`, `Separator.java:20`, `Drill.java:26-42`,
+        // `BeamDrill.java:38-40`, `BurstDrill.java:26`, `Pump.java:20`,
+        // `SolidPump.java:22-26`, `Fracker.java:8`, `WallCrafter.java:30-46`,
+        // `AttributeCrafter.java:17-31`). They are reflective field reads
+        // upstream (`ContentParser` reads every public field), so a value the
+        // JSON does not set keeps the class initializer.
+        if let Some(value) = object.get("outputItems") {
+            spec.output_items = self.parse_stacks(registry, file, value)?;
+        }
+        if spec.output_items.is_empty()
+            && let Some(value) = object.get("outputItem")
+        {
+            // `GenericCrafter.init` (`:125-126`): the single form writes the
+            // array when the array is null.
+            spec.output_items =
+                self.parse_stacks(registry, file, &Value::Array(vec![value.clone()]))?;
+        }
+        if let Some(value) = object.get("outputLiquids") {
+            spec.output_liquids = self.parse_liquid_stacks(registry, file, value)?;
+        }
+        if spec.output_liquids.is_empty()
+            && let Some(value) = object.get("outputLiquid")
+        {
+            // `GenericCrafter.init` (`:129-130`): same single-form write-back.
+            spec.output_liquids =
+                self.parse_liquid_stacks(registry, file, &Value::Array(vec![value.clone()]))?;
+        }
+        // `GenericCrafter.liquidOutputDirections` (`:35`): an `int[]` of
+        // relative directions, `-1` = dump in every direction.
+        if let Some(directions) = object.get("liquidOutputDirections") {
+            let Value::Array(entries) = directions else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `liquidOutputDirections` must be an array"
+                )));
+            };
+            spec.liquid_output_directions = entries
+                .iter()
+                .filter_map(|entry| entry.as_i64().map(|value| value as i8))
+                .collect();
+        }
+        if let Some(results) = object.get("results") {
+            spec.separator_results = self.parse_stacks(registry, file, results)?;
+        }
+        for (field, target) in [
+            ("drillTime", &mut spec.drill_time),
+            (
+                "hardnessDrillMultiplier",
+                &mut spec.hardness_drill_multiplier,
+            ),
+            ("liquidBoostIntensity", &mut spec.liquid_boost_intensity),
+            ("warmupSpeed", &mut spec.warmup_speed),
+            ("invertedTime", &mut spec.inverted_time),
+            ("pumpAmount", &mut spec.pump_amount),
+            ("itemUseTime", &mut spec.item_use_time),
+            ("baseEfficiency", &mut spec.base_efficiency),
+            ("itemBoostIntensity", &mut spec.item_boost_intensity),
+            ("boostItemUseTime", &mut spec.boost_item_use_time),
+            ("boostScale", &mut spec.boost_scale),
+            ("minEfficiency", &mut spec.min_efficiency),
+            ("maxBoost", &mut spec.max_boost),
+            ("outputScale", &mut spec.output_scale),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("tier", &mut spec.drill_tier),
+            ("range", &mut spec.beam_range),
+            ("variants", &mut spec.variants),
+            ("maxSize", &mut spec.max_size),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("ignoreLiquidFullness", &mut spec.ignore_liquid_fullness),
+            ("scaleLiquidConsumption", &mut spec.scale_liquid_consumption),
+            ("displayEfficiency", &mut spec.display_efficiency),
+            ("displayScaledOutput", &mut spec.display_scaled_output),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = Some(value);
+            }
+        }
+        // `Drill.blockedItems` (`:42`) is an `ObjectSet<Item>`; the single
+        // `blockedItem` field (`:40`) folds into it like upstream.
+        if let Some(Value::Array(entries)) = object.get("blockedItems") {
+            spec.blocked_items = entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|name| Box::leak(name.to_owned().into_boxed_str()) as &'static str)
+                .collect();
+        }
+        if let Some(name) = object.get("blockedItem").and_then(Value::as_str)
+            && !spec.blocked_items.contains(&name)
+        {
+            spec.blocked_items
+                .push(Box::leak(name.to_owned().into_boxed_str()));
+        }
+        // `SolidPump.result` (`:22`) — the pumped liquid (`Fracker` inherits).
+        if let Some(name) = object.get("result").and_then(Value::as_str) {
+            spec.pump_liquid = Some(Box::leak(name.to_owned().into_boxed_str()));
+        }
+        // `WallCrafter.output` (`:40`) — the mined item.
+        if let Some(name) = object.get("output").and_then(Value::as_str) {
+            spec.output_item = Some(Box::leak(name.to_owned().into_boxed_str()));
+        }
+        // `SolidPump.attribute`/`Fracker`/`WallCrafter`/`AttributeCrafter`
+        // (`Attribute` enum; the content field is its lowercase name,
+        // `AttributeCrafter.java:15`).
+        if let Some(name) = object.get("attribute").and_then(Value::as_str) {
+            if crate::world::attributes::attribute_from_name(name).is_none() {
+                self.warn(
+                    file,
+                    format!("unknown attribute `{name}`; the block keeps no boost attribute"),
+                );
+            }
+            spec.attribute = Some(Box::leak(name.to_owned().into_boxed_str()));
+        }
+        // ---- environment family fields (TiledFloor/TiledWall/WobbleProp) ----
+        for (field, target) in [
+            ("wscl", &mut spec.wobble_scale),
+            ("wmag", &mut spec.wobble_magnitude),
+            ("wtscl", &mut spec.wobble_time_scale),
+            ("wmag2", &mut spec.wobble_magnitude2),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
 
         let mut def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
@@ -5242,6 +5377,217 @@ mod tests {
             crate::content::registries::blocks::BlockGroup::Walls
         );
         assert_eq!(block.cache_layer, crate::render::layer::CacheLayerId::Walls);
+    }
+
+    /// GAPS #56 follow-up: the production-family content fields
+    /// (`GenericCrafter.java:22-37`, `Separator.java:20`) read from mod JSON —
+    /// item/liquid outputs, output directions, liquid fullness, results.
+    #[test]
+    fn block_crafter_output_fields_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-crafter",
+            r#"{"type":"GenericCrafter","size":3,"health":200,
+                "outputItems":[{"item":"copper","amount":2},{"item":"silicon","amount":3}],
+                "outputLiquids":[{"liquid":"water","amount":0.1},
+                                 {"liquid":"slag","amount":0.05}],
+                "liquidOutputDirections":[1,3],
+                "ignoreLiquidFullness":true,
+                "results":[{"item":"lead","amount":4}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-mod-crafter").expect("block");
+        let items: Vec<(&str, i32)> = block
+            .output_items
+            .iter()
+            .map(|stack| {
+                let item = reg.item(stack.item).expect("item");
+                (item.name.as_str(), stack.amount)
+            })
+            .collect();
+        assert_eq!(items, vec![("copper", 2), ("silicon", 3)]);
+        let liquids: Vec<(String, f32)> = block
+            .output_liquids
+            .iter()
+            .map(|(liquid, amount)| (reg.liquid(*liquid).expect("liquid").name.clone(), *amount))
+            .collect();
+        assert_eq!(liquids.len(), 2);
+        assert_eq!(liquids[0].0, "water");
+        assert!((liquids[0].1 - 0.1).abs() < 1e-6);
+        assert_eq!(liquids[1].0, "slag");
+        assert_eq!(block.liquid_output_directions, vec![1, 3]);
+        assert!(block.ignore_liquid_fullness);
+        assert_eq!(block.separator_results.len(), 1);
+        assert_eq!(block.separator_results[0].amount, 4);
+
+        // `GenericCrafter.init` single-form write-back (`:125-130`).
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-single",
+            r#"{"type":"GenericCrafter","size":2,
+                "outputItem":{"item":"lead","amount":5},
+                "outputLiquid":{"liquid":"oil","amount":0.25}}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let single = reg.block_by_name("mods-mod-single").expect("block");
+        assert_eq!(single.output_items.len(), 1);
+        assert_eq!(single.output_items[0].amount, 5);
+        assert_eq!(single.output_liquids.len(), 1);
+        assert!((single.output_liquids[0].1 - 0.25).abs() < 1e-6);
+
+        // A non-array `liquidOutputDirections` is a parse error.
+        let (_, bad) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-bad-directions",
+            r#"{"type":"GenericCrafter","size":2,"liquidOutputDirections":1}"#,
+        );
+        let error = bad.expect_err("directions must be an array");
+        assert!(error.message.contains("liquidOutputDirections"), "{error}");
+    }
+
+    /// GAPS #56 follow-up: the drill family fields (`Drill.java:26-42`,
+    /// `BeamDrill.java:38-40`, `BurstDrill.java:26`) read from mod JSON.
+    #[test]
+    fn block_drill_fields_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-drill",
+            r#"{"type":"Drill","size":2,"health":240,
+                "drillTime":123,"tier":5,"hardnessDrillMultiplier":0.5,
+                "blockedItems":["copper","lead"],"blockedItem":"sand",
+                "drillMultipliers":{"copper":2.5,"titanium":1.25},
+                "liquidBoostIntensity":1.25,"warmupSpeed":0.02,
+                "invertedTime":180,"range":7}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-mod-drill").expect("block");
+        assert_eq!(block.drill_time, Some(123.0));
+        assert_eq!(block.drill_tier, Some(5));
+        assert_eq!(block.hardness_drill_multiplier, Some(0.5));
+        let blocked: Vec<&str> = block
+            .blocked_items
+            .iter()
+            .map(|id| reg.item(*id).expect("item").name.as_str())
+            .collect();
+        assert_eq!(blocked, vec!["copper", "lead", "sand"]);
+        let multipliers: Vec<(&str, f32)> = block
+            .drill_multipliers
+            .iter()
+            .map(|(item, value)| (reg.item(*item).expect("item").name.as_str(), *value))
+            .collect();
+        assert_eq!(multipliers.len(), 2);
+        assert!(
+            multipliers
+                .iter()
+                .any(|(name, value)| *name == "copper" && *value == 2.5)
+        );
+        assert_eq!(block.liquid_boost_intensity, Some(1.25));
+        assert_eq!(block.warmup_speed, Some(0.02));
+        assert_eq!(block.inverted_time, Some(180.0));
+        assert_eq!(block.beam_range, Some(7));
+    }
+
+    /// GAPS #56 follow-up: pump / wall-crafter / attribute-crafter fields
+    /// (`Pump.java:20`, `SolidPump.java:22-26`, `Fracker.java:8`,
+    /// `WallCrafter.java:30-46`, `AttributeCrafter.java:17-31`).
+    #[test]
+    fn block_pump_and_attribute_fields_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-pump",
+            r#"{"type":"SolidPump","size":2,"health":200,
+                "pumpAmount":0.4,"itemUseTime":80,"result":"cryofluid",
+                "attribute":"spores","baseEfficiency":0.5,
+                "output":"titanium","itemBoostIntensity":1.25,
+                "boostItemUseTime":90,"boostScale":0.75,"minEfficiency":0.1,
+                "maxBoost":2.5,"outputScale":0.5,
+                "scaleLiquidConsumption":true,"displayEfficiency":false,
+                "displayScaledOutput":true}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-mod-pump").expect("block");
+        assert_eq!(block.pump_amount, Some(0.4));
+        assert_eq!(block.item_use_time, Some(80.0));
+        assert_eq!(
+            block
+                .pump_liquid
+                .and_then(|id| reg.liquid(id))
+                .map(|liquid| liquid.name.as_str()),
+            Some("cryofluid")
+        );
+        assert_eq!(block.attribute.as_deref(), Some("spores"));
+        assert_eq!(block.base_efficiency, Some(0.5));
+        assert_eq!(
+            block
+                .output_item
+                .and_then(|id| reg.item(id))
+                .map(|item| item.name.as_str()),
+            Some("titanium")
+        );
+        assert_eq!(block.item_boost_intensity, Some(1.25));
+        assert_eq!(block.boost_item_use_time, Some(90.0));
+        assert_eq!(block.boost_scale, Some(0.75));
+        assert_eq!(block.min_efficiency, Some(0.1));
+        assert_eq!(block.max_boost, Some(2.5));
+        assert_eq!(block.output_scale, Some(0.5));
+        assert_eq!(block.scale_liquid_consumption, Some(true));
+        assert_eq!(block.display_efficiency, Some(false));
+        assert_eq!(block.display_scaled_output, Some(true));
+
+        // `Attribute` is an enum upstream: an unknown name warns.
+        let (parser, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-bad-attribute",
+            r#"{"type":"AttributeCrafter","size":2,"attribute":"nope"}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert!(
+            parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("unknown attribute")),
+            "{:?}",
+            parser.warnings
+        );
+    }
+
+    /// GAPS #56 follow-up: the environment family fields (`Block.variants`,
+    /// `TiledFloor.java:17/21`, `TiledWall.java:16`, `WobbleProp.java:9`).
+    #[test]
+    fn block_environment_family_fields_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-tiled",
+            r#"{"type":"TiledFloor","variants":4,"maxSize":5}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let tiled = reg.block_by_name("mods-mod-tiled").expect("tiled floor");
+        assert_eq!(tiled.variants, 4);
+        assert_eq!(tiled.max_size, 5);
+
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "mod-wobble",
+            r#"{"type":"WobbleProp","wscl":30,"wmag":0.25,"wtscl":2,"wmag2":0.5}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let wobble = reg.block_by_name("mods-mod-wobble").expect("wobble prop");
+        assert_eq!(wobble.wobble_scale, Some(30.0));
+        assert_eq!(wobble.wobble_magnitude, Some(0.25));
+        assert_eq!(wobble.wobble_time_scale, Some(2.0));
+        assert_eq!(wobble.wobble_magnitude2, Some(0.5));
     }
 
     /// #59: the extended `UnitType` field surface (stats, sounds, effects,

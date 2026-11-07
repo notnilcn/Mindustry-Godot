@@ -23,7 +23,8 @@ owned by [`server/AGENTS.md`](../../../server/AGENTS.md).
 | `src/binder.rs` | `TableBinder<A>`, `BinderOptions`, `RowChange<T>`, live callback registration. |
 | `src/relay.rs` | `CommandStream` ordered `my_match_commands` delivery, `OrderError`. |
 | `src/typeio.rs` | Network-only `TypeIO` codecs (GAPS #36): unit/building/tile/pos-entity/entity refs, unit controllers, `KickReason`, `TraceInfo`, `MenuResult`, `MarkerControl`, `UiBuilder` trees, `String[][]`, `AdminAction`, plus the `TypeIoWriter`/`TypeIoReader` wire primitives and caps. |
-| `src/call_packet.rs` | Server→client `@Remote` call packets (GAPS #35): `CallKind`/`CallPacket` `[kind][body]` encode/decode, `KickReason`, and the bounded `CallChannel` + `CallHandler` dispatch queue with a rejection tail. |
+| `src/call_packet.rs` | Server→client `@Remote` call packets (GAPS #35): `CallKind`/`CallPacket` `[kind][body]` encode/decode (`encode_body` for the module's `match_call.payload`), `KickReason`, and the bounded `CallChannel` + `CallHandler` dispatch queue with a rejection tail. |
+| `src/calls.rs` | `my_match_calls` transport (PAR-0576): module `CallPacketKind` → `CallKind` mapping, `frame_for_row`/`decode_row`, and the ordered `CallStream` mirror (dedupe by `call_id`, watermark replay, bounded tail) that `MindNet` drains into `push_call_frame`. |
 | `src/event_type.rs` | The 89 upstream `EventType` classes (GAPS #37) plus the `{"type":"<Class>", ...}` JSON payload envelope (`EventType::encode`/`decode`). |
 | `src/protocol.rs` | `PROTOCOL_VERSION`, `CLIENT_BUILD`, `check_protocol`, `ProtocolError`. |
 | `src/checksum.rs` | `ChecksumMonitor`, `ChecksumReport`, `compare_at_command_id`, `host_canonical_correction`, `scope_bits`. |

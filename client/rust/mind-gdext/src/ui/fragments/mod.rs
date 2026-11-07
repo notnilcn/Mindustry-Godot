@@ -17,3 +17,4 @@ pub mod performance;
 pub mod placement;
 pub mod plan_config;
 pub mod player_list;
+pub mod toasts;

@@ -338,16 +338,19 @@ impl EditorGrid for WorldEditorGrid<'_> {
         shift_y: i32,
     ) {
         // Capture every multiblock center build *before* remapping `x/y`
-        // (`MapEditor.resize` captures configs first; plan 07 owns live config,
-        // so this preserves the block/team/rotation placement).
-        let mut builds: Vec<(TilePos, BlockId, u8, u8)> = Vec::new();
+        // (`MapEditor.resize` captures the configs first, `MapEditor.java:334-340`:
+        // "configs can be relative to block position (tileX/tileY) before those
+        // are reassigned").
+        let mut builds: Vec<(TilePos, BlockId, u8, u8, crate::world::config::ConfigValue)> =
+            Vec::new();
         for index in 0..self.grid.tiles.len() {
             let tile = self.grid.tiles.geti(index);
             if let Some(entity) = tile.build
                 && let Some(comp) = self.ecs.get::<BuildingComp>(entity)
                 && comp.pos == TilePos::new(tile.x, tile.y)
             {
-                builds.push((comp.pos, comp.block, comp.team.0, comp.rot));
+                let config = crate::world::config::read_config(&*self.ecs, entity);
+                builds.push((comp.pos, comp.block, comp.team.0, comp.rot, config));
             }
         }
 
@@ -386,22 +389,43 @@ impl EditorGrid for WorldEditorGrid<'_> {
         self.grid.clear_buildings();
 
         // Reattach the shifted center builds; the ECS host spawns the entities.
-        for (pos, block, team, rot) in builds {
+        for (pos, block, team, rot, config) in builds {
             let nx = pos.x() as i32 - offset_x;
             let ny = pos.y() as i32 - offset_y;
             if !self.grid.tiles.in_bounds(nx, ny) {
                 continue;
             }
-            let mut log = WorldEventLog::default();
-            let mut ctx = WorldCtx {
-                grid: self.grid,
-                content: self.content,
-                ecs: self.ecs,
-                hooks: self.hooks,
-                render: self.render,
-                log: &mut log,
+            {
+                let mut log = WorldEventLog::default();
+                let mut ctx = WorldCtx {
+                    grid: self.grid,
+                    content: self.content,
+                    ecs: self.ecs,
+                    hooks: self.hooks,
+                    render: self.render,
+                    log: &mut log,
+                };
+                ctx.set_block(nx as i16, ny as i16, block, team, rot);
+            }
+            // `MapEditor.java:340-352`: `BuildPlan.pointConfig(tile.block(),
+            // config, p -> { if(!tile.build.block.ignoreResizeConfig){
+            // p.sub(offsetX, offsetY); } })`, re-applied with
+            // `tile.build.configureAny(out)`. Blocks with relative point configs
+            // (item bridges) recompute their absolute link from the *new* tile
+            // position, so the plan moves with the content.
+            let ignore = self
+                .content
+                .block(block)
+                .is_some_and(|def| def.ignore_resize_config);
+            let Some(shifted) =
+                crate::input::plan::resize_config(&config, offset_x, offset_y, ignore)
+            else {
+                continue;
             };
-            ctx.set_block(nx as i16, ny as i16, block, team, rot);
+            let Some(entity) = self.grid.tiles.get(nx, ny).build else {
+                continue;
+            };
+            crate::world::config::configure(self.ecs, entity, None, shifted);
         }
     }
 }
@@ -484,5 +508,113 @@ mod tests {
 
         drop(log);
         assert!(editor_grid.take_sink().is_some());
+    }
+
+    /// Spawns behavior-backed building entities like the real host
+    /// (`WorldHooks.new_building`).
+    #[derive(Default)]
+    struct SpawnHooks;
+
+    impl WorldHooks for SpawnHooks {
+        fn new_building(
+            &self,
+            world: &mut World,
+            request: crate::world::NewBuilding,
+        ) -> Option<bevy_ecs::entity::Entity> {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SEQ: AtomicU64 = AtomicU64::new(1);
+            let inst = world
+                .get_resource::<crate::world::block::BlockTable>()?
+                .instance(request.block)?;
+            let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+            let tile = TilePos::new(request.x, request.y);
+            // Full building state (`Block.newBuilding().create(tile)`) plus the
+            // editor's `BuildingComp` marker.
+            let entity = inst.spawn(world, seq, tile, request.team, request.rot, 0, 0);
+            world.entity_mut(entity).insert(crate::ecs::BuildingComp {
+                pos: tile,
+                block: request.block,
+                team: crate::ecs::TeamId(request.team),
+                rot: request.rot,
+            });
+            Some(entity)
+        }
+    }
+
+    /// `MapEditor.java:340-352` (PAR-0466): a resize captures each center
+    /// build's config, moves the tiles by `-(offsetX, offsetY)` and re-applies
+    /// `BuildPlan.pointConfig(tile.block(), config, p -> { if
+    /// (!tile.build.block.ignoreResizeConfig){ p.sub(offsetX, offsetY); } })`
+    /// with `tile.build.configureAny(out)`.
+    ///
+    /// `mass-driver` (`MassDriver.java:57`: relative `Point2` config, no
+    /// `ignoreResizeConfig`) is shifted with its tile, while `phase-conveyor`
+    /// (`ItemBridge.java:61,67`: `ignoreResizeConfig = true`, relative
+    /// `Point2`) keeps the raw points — the link follows the tile instead.
+    #[test]
+    fn resize_shifts_relative_point_configs() {
+        use crate::world::block::BlockTable;
+        use crate::world::config::{ConfigValue, configure, read_config};
+
+        let content = crate::content::test_support::test_registry();
+        let mut grid = WorldGrid::new(8, 8);
+        let mut ecs = World::new();
+        ecs.insert_resource(BlockTable::build_default(&content).expect("block table"));
+        let hooks = SpawnHooks;
+        let render = NoopRenderHooks;
+
+        let mass_driver = content.block_id("mass-driver").expect("mass-driver");
+        let phase_conveyor = content.block_id("phase-conveyor").expect("phase-conveyor");
+
+        {
+            let mut editor_grid =
+                WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+            editor_grid.set_block(3, 3, mass_driver, 1, 0);
+            editor_grid.set_block(5, 3, phase_conveyor, 1, 0);
+            let mass = editor_grid.grid.tiles.get(3, 3).build.expect("mass driver");
+            configure(&mut *editor_grid.ecs, mass, None, ConfigValue::Point2(3, 3));
+            let bridge = editor_grid.grid.tiles.get(5, 3).build.expect("bridge");
+            configure(
+                &mut *editor_grid.ecs,
+                bridge,
+                None,
+                ConfigValue::Point2(-2, 0),
+            );
+            assert_eq!(
+                read_config(&*editor_grid.ecs, mass),
+                ConfigValue::Point2(3, 3)
+            );
+            assert_eq!(
+                read_config(&*editor_grid.ecs, bridge),
+                ConfigValue::Point2(-2, 0)
+            );
+        }
+
+        // 8x8 -> 6x6 with shift(-1,-1): offset = (8-6)/2 - (-1) = 2, so old
+        // (3,3) lands on new (1,1) and old (5,3) on new (3,1).
+        {
+            let mut editor_grid =
+                WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+            editor_grid.resize_shift(&content, 6, 6, -1, -1);
+        }
+
+        assert_eq!(grid.tiles.get(1, 1).block, mass_driver, "mass driver moved");
+        assert_eq!(
+            grid.tiles.get(3, 1).block,
+            phase_conveyor,
+            "phase conveyor moved"
+        );
+        let mass = grid.tiles.get(1, 1).build.expect("mass driver reattached");
+        assert_eq!(
+            read_config(&ecs, mass),
+            ConfigValue::Point2(1, 1),
+            "the relative point moved with the tile by -(offsetX, offsetY)"
+        );
+        let bridge = grid.tiles.get(3, 1).build.expect("bridge reattached");
+        assert_eq!(
+            read_config(&ecs, bridge),
+            ConfigValue::Point2(-2, 0),
+            "ignoreResizeConfig keeps the raw points"
+        );
     }
 }

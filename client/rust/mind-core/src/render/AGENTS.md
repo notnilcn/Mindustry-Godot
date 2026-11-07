@@ -24,6 +24,7 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Crate-wide
 | `scan.rs` | Visible-set scan: `CameraView`, `ChunkSet`, `process_blocks`, `visible_blocks`, `visible_cached_blocks`, `floor_layers_in_view`. |
 | `floor_cache.rs` | `FloorChunkGrid` dirty/used-layer/epoch bookkeeping; `CHUNK_SIZE`, `CHUNK_UNITS`, `chunk_aabb`. |
 | `floor_main.rs`, `floor_edges.rs`, `tile_bitmask.rs` | Floor autotiling: 8-neighbor bits/region names, ordered edge sprites (`EdgeQuad`) and the 256→47 `VALUES` table. |
+| `tiled.rs` | `TiledFloor`/`TiledWall` packed-square state/scan (`TiledState`, greedy `scan_size`, variant/cell) and the `WobbleProp` per-vertex wobble math. |
 | `block_cache.rs` | `BuildingCacheGrid` per-chunk/per-layer dirty/epoch state; `recache_wall_tiles`, `update_shadow_tiles`. |
 | `block_sprite.rs`, `block_status.rs` | Placed-block sprite chain/cracks/cached bakes (`block_region_candidates`, `cached_bake_sprites`) and the F6 `status_corner` marker. |
 | `hooks.rs` | `RenderInvalidation` implements `world::hooks::RenderHooks` over both grids and the minimap pixel queue. |
@@ -72,7 +73,8 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Crate-wide
 ## Rules
 
 - Keep render data and math here; anything that touches Godot (`CanvasItem`, meshes, shaders,
-  textures) belongs in `mind-gdext::render`.
+  textures) belongs in `mind-gdext::render`. `tiled.rs` is pure logic: `mind-gdext::render::floor`
+  owns the packed-state chunk map and `mind-gdext::render::blocks` the warped mesh.
 - Keep iteration, sort and hash order exactly as the goldens expect; equal-`z` queue commands keep
   emission order, and region interning and band numbering are ABI.
 - New data here must be derivable from sim state each frame and add no checksum fields.

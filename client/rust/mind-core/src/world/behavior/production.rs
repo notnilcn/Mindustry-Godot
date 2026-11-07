@@ -684,7 +684,7 @@ impl DrillBehavior {
             // port's `Building.was_visible` is maintained by the fog pass
             // (`sim/fog.rs`) and never set in fog-off play, so the cues stay
             // sink-gated instead (see [`emit_burst_cues`]).
-            emit_burst_cues(world, e, item);
+            emit_burst_cues(world, e, item, burst);
         }
     }
 }
@@ -694,15 +694,16 @@ impl DrillBehavior {
 const BURST_DRILL_SOUND_VOLUME: f32 = 0.6;
 /// `drillSound.at(x, y, 1f + Mathf.range(drillSoundPitchRand))`.
 const BURST_DRILL_PITCH_RAND: f32 = 0.1;
-/// `BurstDrill.shake` class default (`BurstDrill.java:15`);
-/// `Effect.shake(shake, shake, this)`.
-const BURST_DRILL_SHAKE: f32 = 2.0;
 
 /// `BurstDrillBuild.updateTile` view cues (`BurstDrill.java:113-118`):
 /// `Effect.shake(shake, shake, this)`, `drillSound.at(...)`, then
-/// `drillEffect.at(x, y, dominantItem.color)` with the class defaults
-/// `drillEffect = Fx.shockwave` and `drillEffectRnd = 0`
-/// (`BurstDrill.java:26,42`).
+/// `drillEffect.at(x + range(drillEffectRnd), y + range(drillEffectRnd),
+/// dominantItem.color)`. `shake`/`drillEffect`/`drillEffectRnd` are
+/// [`BurstDrillDef`](crate::world::block_kind_data::BurstDrillDef) fields
+/// (class defaults 2 / `Fx.shockwave` / 0, `BurstDrill.java:15,26`), patched
+/// per block by `apply_vanilla_knobs` (`Blocks.java:3095-3096,3121-3125`).
+/// Inline composites (`MultiEffect(...)`) are flattened by
+/// [`crate::fx::inline::play`], so the sink only ever sees named `Fx` ids.
 ///
 /// Deviations:
 /// - Java wraps the three cues in `if(wasVisible)`; the port's
@@ -711,11 +712,12 @@ const BURST_DRILL_SHAKE: f32 = 2.0;
 ///   already headless-safe (no `AudioSinkRes`/`UnitRuntime`), so the cues are
 ///   unconditional. See `StorageBlock.incinerateEffect` for the same
 ///   divergence.
-/// - The two vanilla BurstDrills override `shake = 4` and
-///   `drillEffect = MultiEffect(...)` (`Blocks.java:3089-3104` impact-drill,
-///   `:3112-3124` eruption-drill); `BurstDrillDef` carries neither field yet, so
-///   every BurstDrill uses the class defaults (closing work filed separately).
-fn emit_burst_cues(world: &mut World, e: Entity, item: ItemId) {
+fn emit_burst_cues(
+    world: &mut World,
+    e: Entity,
+    item: ItemId,
+    burst: &crate::world::block_kind_data::BurstDrillDef,
+) {
     let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) else {
         return;
     };
@@ -743,14 +745,9 @@ fn emit_burst_cues(world: &mut World, e: Entity, item: ItemId) {
     let Some((fx, color)) = view else {
         return;
     };
-    fx.shake(BURST_DRILL_SHAKE);
-    fx.effect(
-        &crate::content::registries::fx_meta::EffectRef::Named(crate::content::EffectId::SHOCKWAVE),
-        x,
-        y,
-        0.0,
-        color,
-    );
+    let (dx, dy) = crate::fx::inline::jitter(world, burst.drill_effect_rnd);
+    fx.shake(burst.shake);
+    crate::fx::inline::play(fx.as_ref(), &burst.drill_effect, x + dx, y + dy, 0.0, color);
 }
 
 impl BuildingBehavior for DrillBehavior {
@@ -2161,15 +2158,18 @@ mod tests {
         (world, content, entity, inst, drill_time, log, bus)
     }
 
-    /// `BurstDrill.java:113-118`: a burst plays `drillImpact` at the building
-    /// centre (volume 0.6, `pitch = 1 + range(0.1)`), shakes `2` and emits
-    /// `Fx.shockwave` tinted with the dominant item colour (the class defaults;
-    /// the vanilla `shake = 4` / `MultiEffect` overrides are a documented
-    /// deviation in [`emit_burst_cues`]).
+    /// `BurstDrill.java:113-118` for `impact-drill` (`Blocks.java:3095-3096`):
+    /// a burst plays `drillImpact` at the building centre (volume 0.6,
+    /// `pitch = 1 + range(0.1)`), shakes `4` and plays the `MultiEffect(Fx.mineImpact,
+    /// Fx.drillSteam, Fx.mineImpactWave.wrap(Pal.redLight, 40f))` — the two plain
+    /// children tinted with the dominant item colour, the wrapped one with
+    /// `Pal.redLight` at rotation 40.
     #[test]
     fn burst_drill_burst_fires_sound_and_view_cues() {
         use crate::audio::{AudioEvent, SoundId};
         use crate::content::EffectId;
+        use crate::content::registries::fx_meta::EffectRef;
+        use crate::content::registries::pal;
         use crate::fx::FxEvent;
 
         let (mut world, content, entity, inst, drill_time, log, bus) = burst_rig();
@@ -2203,20 +2203,39 @@ mod tests {
         assert!(
             fx.iter().any(|event| matches!(
                 event,
-                FxEvent::Shake { intensity, .. } if (*intensity - 2.0).abs() < 1.0e-6
+                FxEvent::Shake { intensity, .. } if (*intensity - 4.0).abs() < 1.0e-6
             )),
-            "Effect.shake(2, 2) missing: {fx:?}"
+            "Effect.shake(4, 4) missing: {fx:?}"
+        );
+        let effect = |id: EffectId, tint: crate::content::Rgba, rotation: f32| {
+            fx.iter().any(|event| {
+                matches!(
+                    event,
+                    FxEvent::Effect {
+                        effect: EffectRef::Named(actual),
+                        x: ex,
+                        y: ey,
+                        rotation: erot,
+                        color: etint,
+                    } if *actual == id
+                        && *ex == cx
+                        && *ey == cy
+                        && (*erot - rotation).abs() < 1.0e-6
+                        && *etint == tint
+                )
+            })
+        };
+        assert!(
+            effect(EffectId::MINE_IMPACT, color, 0.0),
+            "Fx.mineImpact tinted by the item missing: {fx:?}"
         );
         assert!(
-            fx.iter().any(|event| matches!(
-                event,
-                FxEvent::Effect {
-                    effect: crate::content::registries::fx_meta::EffectRef::Named(id),
-                    color: tint,
-                    ..
-                } if *id == EffectId::SHOCKWAVE && *tint == color
-            )),
-            "Fx.shockwave with the item tint missing: {fx:?}"
+            effect(EffectId::DRILL_STEAM, color, 0.0),
+            "Fx.drillSteam tinted by the item missing: {fx:?}"
+        );
+        assert!(
+            effect(EffectId::MINE_IMPACT_WAVE, pal::RED_LIGHT, 40.0),
+            "Fx.mineImpactWave.wrap(Pal.redLight, 40f) missing: {fx:?}"
         );
     }
 

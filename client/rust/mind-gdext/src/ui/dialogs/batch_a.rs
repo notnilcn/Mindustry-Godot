@@ -2662,6 +2662,17 @@ const DATABASE_SCARLET: Color = Color::from_rgba(1.0, 52.0 / 255.0, 28.0 / 255.0
 /// Meta key recording the connected `size_changed` rebuild hook.
 const DATABASE_RESIZE_META: &str = "mind_database_resize_bound";
 
+/// Port-only Database tab over `Achievement` (GAPS #68 UI half). Upstream has
+/// no achievement dialog (Steam's overlay showed them), so there is no Java
+/// label to port; the rail uses a star glyph and the tooltip names the table.
+const DATABASE_ACHIEVEMENTS_TAB: &str = "achievements";
+/// Port-only Database tab over `SStat` (GAPS #68 UI half).
+const DATABASE_STATISTICS_TAB: &str = "statistics";
+/// Glyph for the achievements tab (`Fonts.icon` star).
+const DATABASE_ACHIEVEMENTS_ICON: &str = "star";
+/// Glyph for the statistics tab (`Fonts.icon` chart-bar).
+const DATABASE_STATISTICS_ICON: &str = "chart-bar";
+
 /// Rebuild handles shared with the search/tab/resize callbacks.
 #[derive(Default)]
 struct DatabaseState {
@@ -2670,6 +2681,8 @@ struct DatabaseState {
     search: Option<Gd<LineEdit>>,
     view: VarDictionary,
     tab: String,
+    /// Port-only tabs (`achievements`/`statistics`) with a non-empty row set.
+    special: Vec<String>,
 }
 
 /// `@database` — search field, planet tabs and the
@@ -2828,19 +2841,25 @@ fn database_empty_view() -> VarDictionary {
 
 /// Reads the live database model from `MindCampaign` and repaints the rail and
 /// the grid.
+///
+/// The two port-only tabs (`achievements`/`statistics`, GAPS #68 UI half) are
+/// appended when their row set is non-empty: a profile whose settings store
+/// cannot be read shows no empty tab, and no rows are ever invented.
 fn database_load_view(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>) {
     let mut view = dialog.campaign_json("database_json", &[]);
     if view.is_empty() {
         view = database_empty_view();
     }
     let mut tab = state.borrow().tab.clone();
+    let special = database_special_tabs(dialog);
     let tabs = dict_array(&view, "tabs");
+    let mut names: Vec<String> = tabs
+        .iter_shared()
+        .filter_map(|value| value.try_to::<VarDictionary>().ok())
+        .map(|row| dict_text(&row, "name"))
+        .collect();
+    names.extend(special.iter().cloned());
     if !tabs.is_empty() {
-        let names: Vec<String> = tabs
-            .iter_shared()
-            .filter_map(|value| value.try_to::<VarDictionary>().ok())
-            .map(|row| dict_text(&row, "name"))
-            .collect();
         // `DatabaseDialog.shown`: in a campaign the active tab follows the
         // played planet (`state.getPlanet()`) when the tab list has it.
         let mut current_planet = String::new();
@@ -2866,20 +2885,77 @@ fn database_load_view(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>
         let mut st = state.borrow_mut();
         st.view = view;
         st.tab = tab;
+        st.special = special;
     }
     let node = dialog.to_gd();
     database_build_tabs(&node, state);
     database_rebuild(dialog, state);
 }
 
+/// The port-only tabs with rows: `achievements`/`statistics` (GAPS #68 UI
+/// half), in tab order.
+fn database_special_tabs(dialog: &MindDialog) -> Vec<String> {
+    let mut tabs = Vec::new();
+    for (kind, label) in [
+        (DATABASE_ACHIEVEMENTS_TAB, DATABASE_ACHIEVEMENTS_TAB),
+        (DATABASE_STATISTICS_TAB, DATABASE_STATISTICS_TAB),
+    ] {
+        if database_table_rows(dialog, label) > 0 {
+            tabs.push(kind.to_string());
+        }
+    }
+    if !tabs.is_empty() {
+        log::info!("[ui] database tables: {}", tabs.join(", "));
+    }
+    tabs
+}
+
+/// The row JSON of a port-only tab from `MindUi.database_rows_json(kind)`.
+///
+/// Guarded twice: the `MindUi` autoload may be absent (unit hosts) and the
+/// method is new (older .so), so a missing seam answers `[]` — the tab then
+/// stays hidden rather than rendering fabricated entries.
+fn database_table_rows_json(dialog: &MindDialog, kind: &str) -> String {
+    let _ = dialog;
+    let Some(mut ui) = kit::ui() else {
+        return String::from("[]");
+    };
+    if !ui.has_method("database_rows_json") {
+        return String::from("[]");
+    }
+    ui.call("database_rows_json", &[GString::from(kind).to_variant()])
+        .try_to::<GString>()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Parsed achievement rows for the tab.
+fn database_achievement_rows(dialog: &MindDialog) -> Vec<kit::rows::AchievementRow> {
+    kit::rows::parse_achievements(&database_table_rows_json(dialog, DATABASE_ACHIEVEMENTS_TAB))
+}
+
+/// Parsed statistics rows for the tab.
+fn database_stat_rows(dialog: &MindDialog) -> Vec<kit::rows::StatRow> {
+    kit::rows::parse_stats(&database_table_rows_json(dialog, DATABASE_STATISTICS_TAB))
+}
+
+/// Rows of a port-only tab (used for the tab-presence check).
+fn database_table_rows(dialog: &MindDialog, kind: &str) -> usize {
+    match kind {
+        DATABASE_ACHIEVEMENTS_TAB => database_achievement_rows(dialog).len(),
+        DATABASE_STATISTICS_TAB => database_stat_rows(dialog).len(),
+        _ => 0,
+    }
+}
+
 /// `_build_tabs`: one 50 px icon toggle per planet tab.
 fn database_build_tabs(dialog: &Gd<MindDialog>, state: &Rc<RefCell<DatabaseState>>) {
-    let (mut tabs_node, view, tab) = {
+    let (mut tabs_node, view, tab, special) = {
         let st = state.borrow();
         let Some(tabs) = st.tabs.clone() else {
             return;
         };
-        (tabs, st.view.clone(), st.tab.clone())
+        (tabs, st.view.clone(), st.tab.clone(), st.special.clone())
     };
     if !tabs_node.is_instance_valid() {
         return;
@@ -2890,11 +2966,27 @@ fn database_build_tabs(dialog: &Gd<MindDialog>, state: &Rc<RefCell<DatabaseState
         child.queue_free();
     }
     let group = ButtonGroup::new_gd();
-    let rows = dict_array(&view, "tabs");
-    for tab_value in rows.iter_shared() {
-        let Ok(tab_row) = tab_value.try_to::<VarDictionary>() else {
-            continue;
+    let mut rows: Vec<VarDictionary> = dict_array(&view, "tabs")
+        .iter_shared()
+        .filter_map(|value| value.try_to::<VarDictionary>().ok())
+        .collect();
+    // Port-only tabs over the achievement/stat tables (GAPS #68 UI half): the
+    // rail is data-driven, so they join it as synthetic rows with a glyph and
+    // the table name as their tooltip (upstream has no labels for these).
+    for name in &special {
+        let icon = if name == DATABASE_ACHIEVEMENTS_TAB {
+            DATABASE_ACHIEVEMENTS_ICON
+        } else {
+            DATABASE_STATISTICS_ICON
         };
+        let mut row = VarDictionary::new();
+        row.set("name", &GString::from(name.as_str()));
+        row.set("localized", &GString::from(name.as_str()));
+        row.set("icon", &GString::from(icon));
+        row.set("is_all", &false.to_variant());
+        rows.push(row);
+    }
+    for tab_row in rows {
         let tab_name = dict_text(&tab_row, "name");
         let is_all = dict_bool(&tab_row, "is_all");
         let label = database_tab_label(&tab_row, is_all);
@@ -2994,6 +3086,11 @@ fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>)
     }
     // `cols = clamp((graphics.getWidth() - Scl.scl(30)) / Scl.scl(32 + 12), 1, 22)`.
     let columns = (((viewport_width(dialog) - 30.0) / 44.0) as i32).clamp(1, 22);
+    // Port-only tables (GAPS #68 UI half): they replace the content grid.
+    if tab == DATABASE_ACHIEVEMENTS_TAB || tab == DATABASE_STATISTICS_TAB {
+        database_rebuild_tables(dialog, &mut grid, &tab, &query);
+        return;
+    }
     let mut has_result = false;
     for category_value in dict_array(&view, "categories").iter_shared() {
         let Ok(category) = category_value.try_to::<VarDictionary>() else {
@@ -3079,6 +3176,121 @@ fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>)
     if !has_result {
         grid.add_child(&factory::label(&kit::t("@none.found").to_string()));
     }
+}
+
+/// The achievements/statistics table body (port-only Database tabs).
+///
+/// Achievements render `icon name progress` rows (unlocked `accent`, locked
+/// `Pal.gray`; the progress column is `3/10` or `unlocked`), statistics render
+/// `name value` rows. Both honour the search query and the accent rule the
+/// content categories use (`DatabaseDialog.rebuild`'s header treatment).
+fn database_rebuild_tables(
+    dialog: &MindDialog,
+    grid: &mut Gd<VBoxContainer>,
+    tab: &str,
+    query: &str,
+) {
+    let (header, mut lines, completion) = if tab == DATABASE_ACHIEVEMENTS_TAB {
+        let rows = database_achievement_rows(dialog);
+        let completion = kit::rows::completion(&rows);
+        let lines: Vec<TableLine> = rows
+            .into_iter()
+            .filter(|row| query.is_empty() || row.name.to_lowercase().contains(query))
+            .map(|row| TableLine {
+                icon: if row.unlocked { "ok" } else { "cancel" },
+                color: if row.unlocked {
+                    styles::ACCENT
+                } else {
+                    DATABASE_PAL_GRAY
+                },
+                name: row.name.clone(),
+                value: kit::rows::progress_text(&row),
+                accent: kit::rows::row_color(&row) == "accent",
+            })
+            .collect();
+        (DATABASE_ACHIEVEMENTS_TAB, lines, Some(completion))
+    } else {
+        let rows = database_stat_rows(dialog);
+        let lines: Vec<TableLine> = rows
+            .into_iter()
+            .filter(|row| query.is_empty() || row.name.to_lowercase().contains(query))
+            .map(|row| TableLine {
+                icon: "",
+                color: Color::WHITE,
+                name: row.name.clone(),
+                value: kit::rows::stat_value_text(&row),
+                accent: false,
+            })
+            .collect();
+        (DATABASE_STATISTICS_TAB, lines, None)
+    };
+    if lines.is_empty() {
+        grid.add_child(&factory::label(&kit::t("@none.found").to_string()));
+        return;
+    }
+    // Category header + the 3 px accent rule (`all.image().height(3)`).
+    let mut title = header.to_string();
+    if let Some((unlocked, total)) = completion {
+        title = format!("{header}  {unlocked}/{total}");
+    }
+    let label = factory::label(&title);
+    {
+        let mut control: Gd<Control> = label.clone().upcast();
+        control.set_modulate(styles::ACCENT);
+    }
+    grid.add_child(&label);
+    grid.add_child(&database_padded(
+        database_divider(styles::ACCENT),
+        0,
+        5,
+        DATABASE_ARC_BAR_SQUEEZE,
+        5,
+    ));
+    // code-instantiated: one row per table entry, rebuilt on every refresh.
+    let mut list = VBoxContainer::new_alloc();
+    list.add_theme_constant_override("separation", 4);
+    for line in lines.drain(..) {
+        // code-instantiated: `icon name ... value` row.
+        let mut row = HBoxContainer::new_alloc();
+        row.add_theme_constant_override("separation", 8);
+        if !line.icon.is_empty() {
+            let mut glyph = factory::glyph_label(line.icon, 24, line.color);
+            glyph.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+            row.add_child(&glyph);
+        }
+        let name = factory::label(&line.name);
+        {
+            let mut control: Gd<Control> = name.clone().upcast();
+            control.set_modulate(line.color);
+            control.set_h_size_flags(SizeFlags::EXPAND_FILL);
+        }
+        row.add_child(&name);
+        let value_label = factory::label(&line.value);
+        {
+            let mut control: Gd<Control> = value_label.clone().upcast();
+            control.set_modulate(if line.accent {
+                styles::ACCENT
+            } else {
+                DATABASE_PAL_GRAY
+            });
+        }
+        {
+            let mut rich: Gd<RichTextLabel> = value_label.clone().upcast();
+            rich.set_horizontal_alignment(HorizontalAlignment::RIGHT);
+        }
+        row.add_child(&value_label);
+        list.add_child(&row);
+    }
+    grid.add_child(&database_padded(list, 8, 4, 8, 12));
+}
+
+/// One rendered row of a port-only table.
+struct TableLine {
+    icon: &'static str,
+    color: Color,
+    name: String,
+    value: String,
+    accent: bool,
 }
 
 /// Non-empty tag rows for the active tab and search query.

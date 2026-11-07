@@ -25,6 +25,8 @@ use mind_core::game::tech_tree::SettingsUnlockStore;
 use mind_core::io::{FileSystem, NativeFs, Paths, SettingValue, SettingsStore};
 use mind_core::ui::settings::{self, SettingKind};
 
+use crate::ui::fragments::chat::ChatFeed;
+
 /// Path to the sim owner that the pause governor drives.
 const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
 
@@ -66,6 +68,10 @@ pub struct MindUi {
     /// Lazily loaded bundle for facade error text ([`Self::show_error_key`]);
     /// the same reader the campaign facade uses (`Core.bundle`).
     bundle: Option<mind_core::assets::bundle::Bundle>,
+    /// Chat rows mirrored from `my_match_chat` (PAR-0121/0125 client remainder).
+    chat: ChatFeed,
+    /// Event rows mirrored from `my_match_events` (GAPS #37 client toasts).
+    event_toasts: crate::ui::fragments::toasts::EventToasts,
 }
 
 #[godot_api]
@@ -94,6 +100,8 @@ impl INode for MindUi {
             pause_depth: 0,
             was_paused: false,
             bundle: None,
+            chat: ChatFeed::new(),
+            event_toasts: crate::ui::fragments::toasts::EventToasts::new(),
         }
     }
 
@@ -575,18 +583,267 @@ impl MindUi {
         self.block_catalog_cache = None;
     }
 
-    /// Validates and forwards a chat message; returns false when the fragment's
-    /// guard rejected it. Transport is plan 21 (no server behaviour here).
+    /// Validates and forwards a chat message over the relay (`NetClient.sendChatMessage`).
+    ///
+    /// The fragment passes the field text as upstream does — the mode prefix is
+    /// part of it (`/t`, `/a`), and the module's `send_chat` reducer dispatches
+    /// commands before the plain-channel path. Returns false when there is no
+    /// relay or the reducer was not sent: single player has no chat upstream
+    /// either (`Call.sendChatMessage` requires `net.active()`), so the shell
+    /// never fakes a send.
     #[func]
     pub fn chat_send(&mut self, text: GString, mode: GString) -> bool {
         let message = text.to_string();
         if message.trim().is_empty() {
             return false;
         }
+        let sent = self
+            .net_call("send_chat", &[GString::from(message.as_str()).to_variant()])
+            .and_then(|accepted| accepted.try_to::<bool>().ok())
+            .unwrap_or(false);
+        if !sent {
+            log::info!("[ui] chat_send: no relay accepted `{message}`");
+            return false;
+        }
         let _ = self
             .base_mut()
             .emit_signal("chat_message", &[message.to_variant(), mode.to_variant()]);
         true
+    }
+
+    /// Whether a relay session exists (`net.active()`); false without `MindNet`
+    /// (menu/tool scenes, single player).
+    #[func]
+    pub fn net_active(&self) -> bool {
+        let Some(state) = self
+            .net_call("session_state", &[])
+            .and_then(|value| value.try_to::<GString>().ok())
+        else {
+            return false;
+        };
+        state != "offline"
+    }
+
+    /// Applies `my_match_chat` rows (a JSON array of `mind_stdb::ChatLine`
+    /// JSON, or one row object). Returns the retained row count.
+    ///
+    /// This is the push half of the chat seam: the net facade can forward each
+    /// bound row here, or leave [`Self::chat_poll`] to pull it from
+    /// `MindNet.chat_json()`.
+    #[func]
+    pub fn chat_apply_rows_json(&mut self, rows: GString) -> i64 {
+        self.chat.apply_json(&rows.to_string()) as i64
+    }
+
+    /// Pulls chat rows from the live `MindNet.chat_json()` when the facade
+    /// exposes it (guarded; absent on every non-net scene), then returns the
+    /// feed revision.
+    #[func]
+    pub fn chat_poll(&mut self) -> i64 {
+        self.refresh_chat_viewer();
+        if let Some(rows) = self
+            .net_call("chat_json", &[])
+            .and_then(|value| value.try_to::<GString>().ok())
+        {
+            let rows = rows.to_string();
+            if !rows.is_empty() && rows != "[]" {
+                self.chat.apply_json(&rows);
+            }
+        }
+        self.chat.revision() as i64
+    }
+
+    /// Mirrors the retained chat rows as JSON (chronological order).
+    ///
+    /// Empty while no relay is connected — the shell never invents messages.
+    #[func]
+    pub fn chat_rows_json(&self) -> GString {
+        GString::from(self.chat.to_json().to_string().as_str())
+    }
+
+    /// Monotonic chat-feed revision (the fragment re-reads only when it moves).
+    #[func]
+    pub fn chat_revision(&self) -> i64 {
+        self.chat.revision() as i64
+    }
+
+    /// Retained chat row count.
+    #[func]
+    pub fn chat_len(&self) -> i64 {
+        self.chat.len() as i64
+    }
+
+    /// Sets the local viewer used to re-filter retained chat rows
+    /// (`ChatLog::set_viewer` semantics; `team` is `-1` when unassigned).
+    #[func]
+    pub fn chat_set_viewer(&mut self, identity: GString, team: i64, admin: bool) {
+        let identity = identity.to_string();
+        let identity = (!identity.is_empty()).then_some(identity.as_str());
+        self.chat
+            .set_viewer(identity, u8::try_from(team).ok(), admin);
+    }
+
+    /// Drops every retained chat row (disconnect, `/sync`).
+    #[func]
+    pub fn chat_clear(&mut self) {
+        self.chat.clear();
+    }
+
+    /// Refreshes the chat viewer from the net facade: the admin flag
+    /// (`MindNet.local_admin`), the local identity
+    /// (`MindNet.local_identity_hex`, when exposed) and its team from the
+    /// roster rows (`player_list_json`).
+    fn refresh_chat_viewer(&mut self) {
+        let admin = self
+            .net_call("local_admin", &[])
+            .and_then(|value| value.try_to::<bool>().ok())
+            .unwrap_or(false);
+        let identity = self
+            .net_call("local_identity_hex", &[])
+            .and_then(|value| value.try_to::<GString>().ok())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let identity = (!identity.is_empty()).then_some(identity);
+        let team = identity.as_deref().and_then(|identity| {
+            let rows = self.player_list_json();
+            let names = crate::ui::kit::roster::roster_names(&rows.to_string());
+            let index = crate::ui::kit::roster::roster_index(&names);
+            crate::ui::kit::roster::find(&index, identity).and_then(|row| row.team)
+        });
+        self.chat.set_viewer(identity.as_deref(), team, admin);
+    }
+
+    /// Applies `my_match_events` rows (a JSON array of
+    /// `mind_stdb::ServerEvent` JSON). Queues the mapped `EventType` toasts.
+    #[func]
+    pub fn push_events_json(&mut self, rows: GString) -> i64 {
+        let names = self.roster_names();
+        self.event_toasts.apply_json(&rows.to_string(), &names) as i64
+    }
+
+    /// Drains new `my_match_events` rows into `EventType` toasts and returns
+    /// them (`[{text, icon}]`) for the HUD slot queue.
+    ///
+    /// Rows come from `MindNet.events_json()` when the net facade exposes the
+    /// `EventBus` projection (guarded; absent on menu/tool scenes), or from
+    /// [`Self::push_events_json`]; the watermark means a resync replay never
+    /// re-toasts. The `PlayerChat` kind never toasts (the chat overlay owns it).
+    #[func]
+    pub fn take_event_toasts(&mut self) -> Array<VarDictionary> {
+        let names = self.roster_names();
+        if let Some(rows) = self
+            .net_call("events_json", &[])
+            .and_then(|value| value.try_to::<GString>().ok())
+        {
+            let rows = rows.to_string();
+            if !rows.is_empty() && rows != "[]" {
+                self.event_toasts.apply_json(&rows, &names);
+            }
+        }
+        let mut out = Array::<VarDictionary>::new();
+        for toast in self.event_toasts.take() {
+            let mut row = VarDictionary::new();
+            row.set("text", &GString::from(toast.text.as_str()));
+            row.set("icon", &GString::from(toast.icon));
+            out.push(&row);
+        }
+        out
+    }
+
+    /// Last consumed event id (the replay watermark; `-1` when none).
+    #[func]
+    pub fn event_toast_watermark(&self) -> i64 {
+        self.event_toasts
+            .watermark()
+            .map(|id| id as i64)
+            .unwrap_or(-1)
+    }
+
+    /// Drops the queued `EventType` toasts and the replay watermark
+    /// (disconnect/resync: the relay cache re-sends its retention window).
+    #[func]
+    pub fn clear_event_toasts(&mut self) {
+        let dropped = self.event_toasts.pending();
+        self.event_toasts.clear();
+        if dropped > 0 {
+            log::info!("[ui] dropped {dropped} queued event toast(s)");
+        }
+    }
+
+    /// Roster names keyed by identity (`player_list_json` → `roster` rows).
+    fn roster_names(
+        &self,
+    ) -> std::collections::HashMap<String, crate::ui::kit::roster::RosterName> {
+        let rows = self.player_list_json();
+        let names = crate::ui::kit::roster::roster_names(&rows.to_string());
+        crate::ui::kit::roster::roster_index(&names)
+    }
+
+    /// Achievement/statistics rows for the Database tabs (GAPS #68 UI half).
+    ///
+    /// `kind` is `"achievements"` or `"statistics"`. Sources, in order:
+    ///
+    /// 1. `MindCampaign.database_rows_json(kind)` — the live gdext query API
+    ///    (guarded with `has_method`; absent until the campaign facade exposes
+    ///    it, GAPS #68 gdext plumbing);
+    /// 2. the `achievements`/`statistics` arrays of the `MindCampaign.
+    ///    database_json()` model (the same live service, when it folds the
+    ///    tables into the database view);
+    /// 3. the persisted settings store read through
+    ///    [`mind_core::game::service::LocalGameService`]
+    ///    (`achievement-<name>`/`achievement-stat-<name>` keys) — real saved
+    ///    state, empty (all locked/zero) before the first save.
+    ///
+    /// The rows are `[]` for any other kind, and `[]` when the settings hub has
+    /// no store yet: the dialog never fabricates rows.
+    #[func]
+    pub fn database_rows_json(&self, kind: GString) -> GString {
+        let kind = kind.to_string();
+        if let Some(mut campaign) = self.base().get_node_or_null(CAMPAIGN_PATH)
+            && campaign.has_method("database_rows_json")
+        {
+            let rows = campaign
+                .call(
+                    "database_rows_json",
+                    &[GString::from(kind.as_str()).to_variant()],
+                )
+                .try_to::<GString>()
+                .unwrap_or_default();
+            if !rows.is_empty() && rows != "[]" {
+                return rows;
+            }
+        }
+        if let Some(rows) = self.campaign_database_section(&kind) {
+            return rows;
+        }
+        let rows = crate::settings_hub::with_settings(|store| {
+            let mut service = mind_core::game::service::LocalGameService::new();
+            service.load(&SettingsUnlockStore::new(store));
+            crate::ui::kit::rows::rows_for_kind(&service, &kind)
+        });
+        match rows {
+            Some(rows) => json_string(&serde_json::Value::Array(rows)),
+            None => GString::from("[]"),
+        }
+    }
+
+    /// The `achievements`/`statistics` array of `MindCampaign.database_json()`
+    /// as a JSON array (`None` when the facade or the section is absent).
+    fn campaign_database_section(&self, kind: &str) -> Option<GString> {
+        if !matches!(kind, "achievements" | "statistics") {
+            return None;
+        }
+        let mut campaign = self.base().get_node_or_null(CAMPAIGN_PATH)?;
+        if !campaign.has_method("database_json") {
+            return None;
+        }
+        let text = campaign
+            .call("database_json", &[])
+            .try_to::<GString>()
+            .unwrap_or_default();
+        let value = serde_json::from_str::<serde_json::Value>(&text.to_string()).ok()?;
+        let rows = value.get(kind)?.as_array()?;
+        (!rows.is_empty()).then(|| json_string(&serde_json::Value::Array(rows.clone())))
     }
 
     /// Forwards a player-list row action to the relay (`MindNet.player_action`):

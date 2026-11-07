@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-06T22:53:17Z",
+  "updated": "2026-11-06T23:25:02Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1433,6 +1433,39 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib; ... -p mind-core --lib input; ... -p mind-gdext --lib campaign",
       "expected": "stdb 89; input 161; campaign service/planet tests; full lib",
       "risk": "stale bindings header (CLI 2.13 vs 2.10.1); render/light.rs fmt blank line fixed; pre-existing ui FFI test failures",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261106-232502",
+      "created_at": "2026-11-06T23:25:02Z",
+      "agent": "hx-wave-k",
+      "branch": "main",
+      "head": "fdff6324",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-headless/src/server,client/rust/mind-gdext/src/render",
+      "summary": "Dedicated host mod content/autosave/commands + ability draws (GAPS #32/#33/#36, PAR-0583..0585/0366)",
+      "files": [
+        "client/rust/mind-headless/src/server/host.rs",
+        "client/rust/mind-headless/src/server/mod.rs",
+        "client/rust/mind-headless/src/server/autosave.rs",
+        "client/rust/mind-headless/src/server/commands.rs",
+        "client/rust/mind-headless/src/server/net_host.rs",
+        "client/rust/mind-core/src/render/ability_draw.rs",
+        "client/rust/mind-gdext/src/render/unit_abilities.rs",
+        "client/rust/mind-gdext/src/render/units.rs",
+        "client/rust/mind-core/src/content/registries/units/standard.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib server; ... -p mind-gdext --lib render; ... -p mind-gdext --lib audio",
+      "expected": "74 + 67 + 15 pass; smokes PASS",
+      "risk": "registry swap only next world load; UTC autosave stamps; sim_host API; omura now spawns flares; shader FileAccess",
       "status": "pending"
     }
   ]

@@ -178,7 +178,23 @@ impl INode2D for TurretRenderer {
                 {
                     continue;
                 }
-                if let Some(input) = host_ref.turret_draw_input(tile.x, tile.y) {
+                if let Some(mut input) = host_ref.turret_draw_input(tile.x, tile.y) {
+                    // GAPS #57 follow-up: a parsed `DrawTurret`/`DrawWeapon`
+                    // drawer supplies its own `parts` tree from mod JSON
+                    // (`DrawTurret.parts`, `DrawTurret.java:19`); the
+                    // hand-ported vanilla table only covers the built-in
+                    // turrets. `DrawTurret.load` marks every part
+                    // `turretShading` (`:154-157`), so the parsed tree is
+                    // normalized the same way.
+                    if let Some(parts) =
+                        mind_core::render::draw_desc::turret_drawer_parts(&def.drawer)
+                    {
+                        let mut parts = parts.to_vec();
+                        for part in &mut parts {
+                            part.turret_shading = true;
+                        }
+                        input.parts = parts;
+                    }
                     inputs.push(input);
                 }
             }

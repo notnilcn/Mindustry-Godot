@@ -47,6 +47,7 @@ pub const GAME_TABLES: &[&str] = &[
     "my_match_ui_events",
     "my_match_chat",
     "my_match_events",
+    "my_match_calls",
     "my_traces",
     "my_match_checksums",
     "my_match_snapshots",

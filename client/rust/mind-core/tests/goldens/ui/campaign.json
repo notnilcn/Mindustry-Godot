@@ -173,7 +173,14 @@
     "objectives_locked": false,
     "objectives": [],
     "vulnerable": false,
-    "threat_color": "ffffffff"
+    "threat_color": "ffffffff",
+    "hover_lock": "locked",
+    "hover_allowed": true,
+    "being_played": false,
+    "shield_arc": null,
+    "attack_sources": [],
+    "export_destination": null,
+    "any_exports": false
   },
   "sample_research": {
     "index": 0,
@@ -205,7 +212,10 @@
         0
       ]
     ],
-    "objectives": [],
+    "objectives": [
+      "Research(ContentRef { type_: Item, id: 0 })",
+      "Research(ContentRef { type_: Item, id: 1 })"
+    ],
     "children": 7
   },
   "complete": {
@@ -217,5 +227,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "db3aff19ca782bec"
+  "checksum": "bac3f353b7b009bc"
 }

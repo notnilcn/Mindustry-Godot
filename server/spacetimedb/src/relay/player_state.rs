@@ -13,7 +13,8 @@ use spacetimedb::{Identity, ReducerContext, SpacetimeType, Table, Timestamp, red
 use super::methods::{is_finite, require_match, require_member, window_expired};
 use super::tables::{MatchStatus, match_state};
 use crate::main::global::{
-    DEFAULT_PLAYER_STATE_PER_SECOND, DEFAULT_RATE_WINDOW_MS, MAX_SELECTED_BLOCK_LEN,
+    DEFAULT_PLAYER_STATE_PER_SECOND, DEFAULT_RATE_WINDOW_MS, MAX_PLAYER_SPEED,
+    MAX_SELECTED_BLOCK_LEN, PLAYER_POSITION_MARGIN_PX,
 };
 
 /// The `NetClient.sync()` clientSnapshot payload (plan §6.1). Product struct so
@@ -208,6 +209,33 @@ fn report_player_state_impl(
             report.seq, previous.seq
         ));
     }
+    // GAPS #33: `NetServer.clientSnapshot` movement guard
+    // (`NetServer.java:591-746`): clamp the reported velocity to the unit speed
+    // and the position to what the unit could have moved since the last report;
+    // a position outside the map is ignored (Java corrects it server-side, the
+    // relay has no authoritative position to correct to).
+    let previous = existing.as_ref();
+    let elapsed_ms = previous
+        .map(|state| {
+            let previous_micros = state.updated_at.to_micros_since_unix_epoch();
+            u64::try_from(
+                ctx.timestamp
+                    .to_micros_since_unix_epoch()
+                    .saturating_sub(previous_micros),
+            )
+            .unwrap_or(u64::MAX)
+                / 1_000
+        })
+        .unwrap_or(0);
+    let (x, y, vx, vy) = clamp_player_movement(
+        &report,
+        previous,
+        &MovementLimits {
+            width_px: row.map_width_tiles as f32 * TILE_SIZE_PX,
+            height_px: row.map_height_tiles as f32 * TILE_SIZE_PX,
+            elapsed_ms,
+        },
+    )?;
     let next = MatchPlayerState {
         state_id: existing.as_ref().map(|state| state.state_id).unwrap_or(0),
         match_id,
@@ -215,10 +243,10 @@ fn report_player_state_impl(
         seq: report.seq,
         unit_id: report.unit_id,
         dead: report.dead,
-        x: report.x,
-        y: report.y,
-        vx: report.vx,
-        vy: report.vy,
+        x,
+        y,
+        vx,
+        vy,
         pointer_x: report.pointer_x,
         pointer_y: report.pointer_y,
         rotation: report.rotation,
@@ -296,6 +324,73 @@ pub fn validate_player_report(
     Ok(())
 }
 
+/// World pixels per tile (`Vars.tilesize`).
+pub const TILE_SIZE_PX: f32 = 8.0;
+
+/// Java clamps the elapsed window to 1.5 s (`NetServer.java:684`).
+pub const MAX_MOVEMENT_ELAPSED_MS: u64 = 1_500;
+
+/// Upstream movement slack (`vector.limit(maxMove)` with `* 1.2`).
+pub const MOVEMENT_SLACK: f32 = 1.2;
+
+/// Inputs the relay movement guard needs (Java reads them from the live sim).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MovementLimits {
+    /// World width in pixels (`map_width_tiles * 8`).
+    pub width_px: f32,
+    /// World height in pixels (`map_height_tiles * 8`).
+    pub height_px: f32,
+    /// Milliseconds since the previous report (`0` when there is none).
+    pub elapsed_ms: u64,
+}
+
+/// `NetServer.clientSnapshot` movement guard (`NetServer.java:591-746`),
+/// relay edition: clamps velocity and per-report displacement and rejects a
+/// position outside the map rectangle.
+///
+/// Java reads `unit.speed()` from the live unit and limits the move to
+/// `elapsed / 1000 * 60 * speed * 1.2`; the module has no unit types, so
+/// [`MAX_PLAYER_SPEED`] is the ceiling. Unlike Java it cannot rewind the unit to
+/// an authoritative position, so an out-of-bounds report is rejected (ignored)
+/// instead of corrected.
+pub fn clamp_player_movement(
+    report: &PlayerStateReport,
+    previous: Option<&MatchPlayerState>,
+    limits: &MovementLimits,
+) -> Result<(f32, f32, f32, f32), String> {
+    let min_x = -PLAYER_POSITION_MARGIN_PX;
+    let max_x = limits.width_px + PLAYER_POSITION_MARGIN_PX;
+    let min_y = -PLAYER_POSITION_MARGIN_PX;
+    let max_y = limits.height_px + PLAYER_POSITION_MARGIN_PX;
+    if !(min_x..=max_x).contains(&report.x) || !(min_y..=max_y).contains(&report.y) {
+        return Err(format!(
+            "player position ({}, {}) is outside the map bounds [{min_x}, {max_x}]x[{min_y}, {max_y}]",
+            report.x, report.y
+        ));
+    }
+    // `unit.vel.set(xVelocity, yVelocity).limit(maxSpeed)`.
+    let (vx, vy) = clamp_length(report.vx, report.vy, MAX_PLAYER_SPEED);
+    let Some(previous) = previous else {
+        return Ok((report.x, report.y, vx, vy));
+    };
+    // `long elapsed = Math.min(Time.timeSinceMillis(...), 1500)`.
+    let elapsed = limits.elapsed_ms.min(MAX_MOVEMENT_ELAPSED_MS) as f32 / 1_000.0;
+    let max_move = elapsed * 60.0 * MAX_PLAYER_SPEED * MOVEMENT_SLACK;
+    // `vector.set(x, y).sub(unit); vector.limit(maxMove)`.
+    let (dx, dy) = clamp_length(report.x - previous.x, report.y - previous.y, max_move);
+    Ok((previous.x + dx, previous.y + dy, vx, vy))
+}
+
+/// Limits a 2-D vector to `max` length (Arc `Vector2.limit`).
+fn clamp_length(x: f32, y: f32, max: f32) -> (f32, f32) {
+    let length = x.hypot(y);
+    if length > max && length > 0.0 {
+        (x * max / length, y * max / length)
+    } else {
+        (x, y)
+    }
+}
+
 /// Whether a report `seq` may replace a stored one (strictly increasing).
 pub fn seq_supersedes(stored: Option<u32>, incoming: u32) -> bool {
     stored.map(|seq| incoming > seq).unwrap_or(true)
@@ -344,7 +439,7 @@ pub fn rate_limit_player_state(ctx: &ReducerContext) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn report() -> PlayerStateReport {
+    fn sample_report() -> PlayerStateReport {
         PlayerStateReport {
             seq: 1,
             unit_id: 7,
@@ -377,11 +472,11 @@ mod tests {
 
     #[test]
     fn finite_float_guard() {
-        assert!(validate_player_report(&report(), None).is_ok());
-        let mut bad = report();
+        assert!(validate_player_report(&sample_report(), None).is_ok());
+        let mut bad = sample_report();
         bad.x = f32::NAN;
         assert!(validate_player_report(&bad, None).is_err());
-        let mut bad = report();
+        let mut bad = sample_report();
         bad.shield = f32::INFINITY;
         assert!(validate_player_report(&bad, None).is_err());
     }
@@ -394,12 +489,137 @@ mod tests {
         assert!(!seq_supersedes(Some(3), 2));
     }
 
+    fn stored(seq: u32, x: f32, y: f32) -> MatchPlayerState {
+        MatchPlayerState {
+            state_id: 1,
+            match_id: 1,
+            identity: Identity::from_byte_array([9u8; 32]),
+            seq,
+            unit_id: 7,
+            dead: false,
+            x,
+            y,
+            vx: 0.0,
+            vy: 0.0,
+            pointer_x: 0.0,
+            pointer_y: 0.0,
+            rotation: 0.0,
+            base_rotation: 0.0,
+            mining_x: -1,
+            mining_y: -1,
+            boosting: false,
+            shooting: false,
+            chatting: false,
+            building: false,
+            selected_block: None,
+            selected_rotation: 0,
+            view_x: 0.0,
+            view_y: 0.0,
+            view_width: 1.0,
+            view_height: 1.0,
+            health: 1.0,
+            shield: 0.0,
+            team: 1,
+            updated_at: spacetimedb::Timestamp::from_micros_since_unix_epoch(0),
+        }
+    }
+
+    fn limits(elapsed_ms: u64) -> MovementLimits {
+        MovementLimits {
+            width_px: 800.0,
+            height_px: 800.0,
+            elapsed_ms,
+        }
+    }
+
+    #[test]
+    fn velocity_is_clamped_to_the_speed_ceiling() {
+        let mut report = sample_report();
+        report.vx = 1_000.0;
+        report.vy = 0.0;
+        let (_, _, vx, vy) = clamp_player_movement(&report, None, &limits(0)).unwrap();
+        assert!((vx - MAX_PLAYER_SPEED).abs() < 1e-4);
+        assert!(vy.abs() < 1e-4);
+        // Direction is preserved when the velocity is limited.
+        let mut report = sample_report();
+        report.vx = 300.0;
+        report.vy = 400.0;
+        let (_, _, vx, vy) = clamp_player_movement(&report, None, &limits(0)).unwrap();
+        assert!((vx.hypot(vy) - MAX_PLAYER_SPEED).abs() < 1e-3);
+        assert!((vx / vy - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn movement_is_limited_to_the_elapsed_window() {
+        let previous = stored(1, 100.0, 100.0);
+        let mut report = sample_report();
+        report.seq = 2;
+        report.x = 500.0;
+        report.y = 100.0;
+        let (x, y, _, _) = clamp_player_movement(&report, Some(&previous), &limits(40)).unwrap();
+        // 0.04 s * 60 tps * 20 units/tick * 1.2 = 57.6 px.
+        assert!((x - (100.0 + 0.04 * 60.0 * MAX_PLAYER_SPEED * MOVEMENT_SLACK)).abs() < 1e-3);
+        assert!((y - 100.0).abs() < 1e-4);
+        // A small legitimate move passes through unchanged.
+        let mut report = sample_report();
+        report.x = 104.0;
+        report.y = 103.0;
+        let (x, y, _, _) = clamp_player_movement(&report, Some(&previous), &limits(40)).unwrap();
+        assert!((x - 104.0).abs() < 1e-4);
+        assert!((y - 103.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn elapsed_is_capped_at_one_and_a_half_seconds() {
+        let previous = stored(1, 0.0, 0.0);
+        let mut report = sample_report();
+        report.seq = 2;
+        report.x = 99_000.0;
+        report.y = 0.0;
+        let (x, _, _, _) = clamp_player_movement(
+            &report,
+            Some(&previous),
+            &MovementLimits {
+                width_px: 100_000.0,
+                height_px: 100_000.0,
+                elapsed_ms: 60_000,
+            },
+        )
+        .unwrap();
+        let expected = 1.5 * 60.0 * MAX_PLAYER_SPEED * MOVEMENT_SLACK;
+        assert!((x - expected).abs() < 1e-2, "x = {x}, expected {expected}");
+    }
+
+    #[test]
+    fn out_of_bounds_positions_are_ignored() {
+        let mut report = sample_report();
+        report.x = 900.0; // > 800 px map + 64 px margin
+        assert!(clamp_player_movement(&report, None, &limits(0)).is_err());
+        let mut report = sample_report();
+        report.y = -100.0; // < -64 px margin
+        assert!(clamp_player_movement(&report, None, &limits(0)).is_err());
+        // The margin itself is allowed.
+        let mut report = sample_report();
+        report.x = -PLAYER_POSITION_MARGIN_PX;
+        assert!(clamp_player_movement(&report, None, &limits(0)).is_ok());
+    }
+
+    #[test]
+    fn first_report_is_not_displacement_clamped() {
+        let mut report = sample_report();
+        report.x = 700.0;
+        report.y = 700.0;
+        let (x, y, _, _) = clamp_player_movement(&report, None, &limits(0)).unwrap();
+        assert!((x - 700.0).abs() < 1e-4);
+        assert!((y - 700.0).abs() < 1e-4);
+    }
+
     #[test]
     fn caps_selected_block_and_rotation() {
-        let mut bad = report();
+        let mut bad = sample_report();
         bad.selected_rotation = 4;
         assert!(validate_player_report(&bad, None).is_err());
-        let mut bad = report();
+        let mut bad = sample_report();
         bad.selected_block = Some(String::new());
         assert!(validate_player_report(&bad, None).is_err());
     }

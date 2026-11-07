@@ -7,7 +7,7 @@
 use spacetimedb::{ReducerContext, Table, reducer};
 
 use super::methods::{
-    validate_keybinds_json, validate_language, validate_profile_name, validate_ui_scale,
+    fix_name, validate_keybinds_json, validate_language, validate_profile_name, validate_ui_scale,
     validate_username, validate_volume,
 };
 use super::tables::{
@@ -22,6 +22,10 @@ use crate::main::tables::AuditKind;
 /// can run; a missing row is a client bug and is rejected.
 #[reducer]
 pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String> {
+    // GAPS #33/PAR-0545: `NetServer.fixName` runs before a name is accepted
+    // (`NetServer.java:239`); the module stores the sanitized form so every
+    // peer reads exactly what the host would have broadcast.
+    let username = fix_name(&username);
     validate_username(&username)?;
     match ctx.db.player().identity().find(ctx.sender()) {
         Some(player) => {

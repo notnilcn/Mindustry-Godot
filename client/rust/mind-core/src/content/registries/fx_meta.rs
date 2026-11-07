@@ -2258,6 +2258,11 @@ pub struct EffectSpec {
     pub children: Vec<EffectRef>,
     /// `WrapEffect.color` (nullable upstream).
     pub color: Option<crate::content::color::Rgba>,
+    /// `WrapEffect.rotation` (degrees). `WrapEffect.create` creates the child
+    /// at this rotation instead of the caller's (`WrapEffect.java:18,43-46`);
+    /// appended with the `BurstDrill` drill effects
+    /// (`Fx.mineImpactWave.wrap(Pal.redLight, 40f)`, `Blocks.java:3094`).
+    pub rotation: f32,
     /// `ExplosionEffect.waveStroke`.
     pub wave_stroke: f32,
     /// `ExplosionEffect.waveColor` / `WaveEffect.colorFrom`.
@@ -2551,6 +2556,25 @@ impl EffectSpec {
             lifetime,
             children: vec![child],
             color: Some(color),
+            ..Self::default()
+        }
+    }
+
+    /// `new WrapEffect(child, color, rotation)` (`WrapEffect.java:33-37`): the
+    /// child is created at `rotation` with `color` (`:43-46`); `init()` copies
+    /// the child lifetime (`:29-32`).
+    pub fn wrap_rotated(
+        child: EffectRef,
+        color: crate::content::color::Rgba,
+        rotation: f32,
+    ) -> Self {
+        let lifetime = child.lifetime();
+        Self {
+            kind: InlineEffectKind::WrapEffect,
+            lifetime,
+            children: vec![child],
+            color: Some(color),
+            rotation,
             ..Self::default()
         }
     }

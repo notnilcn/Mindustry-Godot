@@ -26,9 +26,9 @@ use crate::binder::{self, BinderCore, BinderOptions, TableBinder};
 use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
-    ActionType, ChatKind, CommandKind, DbConnection, Gamemode, MemberRole, PlayerStateReport,
-    RemoteTables, SnapshotKind, SubscriptionHandle, UiEventKind, Visibility,
-    add_campaign_stat as _, admin_add_action_filter as _, admin_add_chat_filter as _,
+    ActionType, CallPacketKind, ChatKind, CommandKind, DbConnection, Gamemode, MemberRole,
+    PlayerStateReport, RemoteTables, SnapshotKind, SubscriptionHandle, TeamAssignment, UiEventKind,
+    Visibility, add_campaign_stat as _, admin_add_action_filter as _, admin_add_chat_filter as _,
     admin_add_match_chat_filter as _, admin_ban as _, admin_ban_name as _, admin_grant as _,
     admin_kick as _, admin_remove_action_filter as _, admin_remove_chat_filter as _,
     admin_remove_match_chat_filter as _, admin_request_trace as _, admin_run_wave as _,
@@ -47,12 +47,12 @@ use crate::module_bindings::{
     my_match_snapshot_requestsQueryTableAccess, my_match_snapshotsQueryTableAccess,
     my_match_stateQueryTableAccess, my_match_ui_eventsQueryTableAccess, my_matchQueryTableAccess,
     my_matchesQueryTableAccess, my_sender_command_stateQueryTableAccess, my_tracesQueryTableAccess,
-    protocol_infoQueryTableAccess, publish_checksum as _, publish_match_state as _,
-    publish_snapshot as _, publish_ui_event as _, relay_configQueryTableAccess,
-    report_plan_snapshot as _, report_player_state as _, request_snapshot as _,
-    save_schematic as _, save_sector_info as _, send_chat as _, send_match_command as _,
-    server_configQueryTableAccess, set_color as _, set_ready as _, set_unlock as _,
-    set_username as _, start_match as _,
+    protocol_infoQueryTableAccess, publish_call as _, publish_checksum as _,
+    publish_match_state as _, publish_match_teams as _, publish_snapshot as _,
+    publish_ui_event as _, relay_configQueryTableAccess, report_plan_snapshot as _,
+    report_player_state as _, request_snapshot as _, save_schematic as _, save_sector_info as _,
+    send_chat as _, send_match_command as _, server_configQueryTableAccess, set_color as _,
+    set_ready as _, set_unlock as _, set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -1022,6 +1022,35 @@ impl Connector {
             .map_err(send_error)
     }
 
+    /// Publishes one server→client `@Remote` call (GAPS #35 / PAR-0576).
+    ///
+    /// `payload` is the `*CallPacket.write(...)` body (kind byte excluded; see
+    /// [`crate::call_packet::CallPacket::encode_body`]). Host/admin only.
+    pub fn publish_call(
+        &mut self,
+        match_id: u64,
+        kind: CallPacketKind,
+        target: Option<Identity>,
+        payload: Vec<u8>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_call(match_id, kind, target, payload)
+            .map_err(send_error)
+    }
+
+    /// Replaces the match's host-published team liveness (GAPS #33).
+    pub fn publish_match_teams(
+        &mut self,
+        match_id: u64,
+        teams: Vec<TeamAssignment>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_match_teams(match_id, teams)
+            .map_err(send_error)
+    }
+
     /// Applies a host/admin remote tile op (admin or host).
     #[allow(clippy::too_many_arguments)]
     pub fn admin_tile_op(
@@ -1465,6 +1494,7 @@ mod tests {
             "my_match_ui_events",
             "my_match_chat",
             "my_match_events",
+            "my_match_calls",
             "my_traces",
             "my_match_checksums",
             "my_match_snapshots",

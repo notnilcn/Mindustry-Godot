@@ -1524,6 +1524,14 @@ pub struct BlockSpec {
     pub warmup_speed: Option<f32>,
     /// `BurstDrill.invertedTime` (`BurstDrill.java:26`, default 200).
     pub inverted_time: Option<f32>,
+    /// `BurstDrill.shake` (`BurstDrill.java:15`, default 2): the burst's
+    /// `Effect.shake` intensity (`Blocks.java:3096,3125` set 4 for both vanilla
+    /// burst drills).
+    pub burst_shake: Option<f32>,
+    /// `BurstDrill.drillEffect` (`BurstDrill.java:26`, default `Fx.shockwave`);
+    /// the vanilla drills install a `MultiEffect(...)` (`Blocks.java:3095,
+    /// 3121-3124`).
+    pub burst_drill_effect: Option<crate::content::registries::fx_meta::EffectRef>,
     /// `BeamDrill.range` (`BeamDrill.java:39`, default 5): drill reach in tiles.
     pub beam_range: Option<i32>,
     /// `Pump.pumpAmount` (`Pump.java:20`, default 0.2): per-tile liquid yield.
@@ -1723,6 +1731,8 @@ impl Default for BlockSpec {
             liquid_boost_intensity: None,
             warmup_speed: None,
             inverted_time: None,
+            burst_shake: None,
+            burst_drill_effect: None,
             beam_range: None,
             pump_amount: None,
             item_use_time: None,
@@ -2437,6 +2447,13 @@ pub struct BlockDef {
     /// `RemoveWall.java:19`, `RemoveOre.java:19`): skips the darkness gate and
     /// the solid-floor gate of `Build.validPlace` (`Build.java:229,257`).
     pub ignore_build_darkness: bool,
+    /// `Block.ignoreResizeConfig` (`Block.java:264-265`): `MapEditor.resize`
+    /// skips the `BuildPlan.pointConfig` shift for this block
+    /// (`MapEditor.java:342-345`). True for the classes whose constructor sets
+    /// it — `LogicBlock` (`LogicBlock.java:58`), `ItemBridge`
+    /// (`ItemBridge.java:61`) and `PowerNode` (`PowerNode.java:45`) — with
+    /// subclasses inheriting it (`kind_ignores_resize_config`).
+    pub ignore_resize_config: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
@@ -2735,6 +2752,10 @@ pub struct BlockDef {
     pub warmup_speed: Option<f32>,
     /// `BurstDrill.invertedTime`.
     pub inverted_time: Option<f32>,
+    /// `BurstDrill.shake`.
+    pub burst_shake: Option<f32>,
+    /// `BurstDrill.drillEffect` (a named `Fx` id or an inline `MultiEffect`).
+    pub burst_drill_effect: Option<crate::content::registries::fx_meta::EffectRef>,
     /// `BeamDrill.range`.
     pub beam_range: Option<i32>,
     /// `Pump.pumpAmount` (also `SolidPump`/`Fracker`).
@@ -2824,6 +2845,24 @@ pub fn is_overlay_floor_kind(kind: BlockKind) -> bool {
             | BlockKind::RemoveOre
             | BlockKind::CharacterOverlay
             | BlockKind::RuneOverlay
+    )
+}
+
+/// `Block.ignoreResizeConfig` (`Block.java:264-265`, default false) by class:
+/// the constructors that set it are `LogicBlock` (`LogicBlock.java:58`),
+/// `ItemBridge` (`ItemBridge.java:61`) and `PowerNode` (`PowerNode.java:45`).
+/// Subclasses inherit the flag (`BufferedItemBridge`/`LiquidBridge`,
+/// `LongPowerNode`), while `DirectionBridge`/`BeamNode` do not extend those
+/// classes and keep it false.
+pub fn kind_ignores_resize_config(kind: BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::LogicBlock
+            | BlockKind::ItemBridge
+            | BlockKind::BufferedItemBridge
+            | BlockKind::LiquidBridge
+            | BlockKind::PowerNode
+            | BlockKind::LongPowerNode
     )
 }
 
@@ -3083,6 +3122,7 @@ impl BlockDef {
             incinerate_non_buildable: spec.incinerate_non_buildable.unwrap_or(false),
             requires_core_zone: spec.requires_core_zone.unwrap_or(false),
             ignore_build_darkness: spec.ignore_build_darkness.unwrap_or(false),
+            ignore_resize_config: kind_ignores_resize_config(spec.kind),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             core_unit: spec.core_unit,
             flags: spec.flags,
@@ -3256,6 +3296,8 @@ impl BlockDef {
             liquid_boost_intensity: spec.liquid_boost_intensity,
             warmup_speed: spec.warmup_speed,
             inverted_time: spec.inverted_time,
+            burst_shake: spec.burst_shake,
+            burst_drill_effect: spec.burst_drill_effect,
             beam_range: spec.beam_range,
             pump_amount: spec.pump_amount,
             item_use_time: spec.item_use_time,
@@ -4487,6 +4529,12 @@ mod tests {
         spec.liquid_boost_intensity = Some(1.75);
         spec.warmup_speed = Some(0.01);
         spec.inverted_time = Some(140.0);
+        // `BurstDrill.java:15,26` (`Blocks.java:3095-3096`).
+        spec.burst_shake = Some(4.0);
+        spec.burst_drill_effect = Some(crate::fx::inline::multi_of(&[
+            crate::content::EffectId::MINE_IMPACT,
+            crate::content::EffectId::DRILL_STEAM,
+        ]));
         spec.beam_range = Some(7);
         spec.drill_multipliers = vec![("beryllium", 2.0)];
         // `Pump.java:20` / `SolidPump.java:22-26` / `Fracker.java:8` /
@@ -4539,6 +4587,15 @@ mod tests {
         assert_eq!(def.liquid_boost_intensity, Some(1.75));
         assert_eq!(def.warmup_speed, Some(0.01));
         assert_eq!(def.inverted_time, Some(140.0));
+        assert_eq!(def.burst_shake, Some(4.0));
+        assert_eq!(
+            def.burst_drill_effect,
+            Some(crate::fx::inline::multi_of(&[
+                crate::content::EffectId::MINE_IMPACT,
+                crate::content::EffectId::DRILL_STEAM,
+            ]))
+        );
+        assert!(!def.ignore_resize_config, "GenericCrafter does not set it");
         assert_eq!(def.beam_range, Some(7));
         assert_eq!(def.drill_multipliers, vec![(item("beryllium"), 2.0)]);
         assert_eq!(def.pump_amount, Some(0.25));
@@ -4582,6 +4639,8 @@ mod tests {
         assert_eq!(plain.drill_time, None);
         assert_eq!(plain.drill_tier, None);
         assert_eq!(plain.hardness_drill_multiplier, None);
+        assert_eq!(plain.burst_shake, None);
+        assert_eq!(plain.burst_drill_effect, None);
         assert!(plain.blocked_items.is_empty());
         assert_eq!(plain.pump_amount, None);
         assert_eq!(plain.item_use_time, None);
@@ -4668,5 +4727,72 @@ mod tests {
         assert_eq!(BlockKind::TiledFloor.ordinal(), 137);
         assert_eq!(BlockKind::TiledWall.ordinal(), 138);
         assert_eq!(BlockKind::WobbleProp.ordinal(), 139);
+    }
+
+    /// `Block.ignoreResizeConfig` (`Block.java:264-265`, `MapEditor.java:342-345`)
+    /// is set by three class constructors — `LogicBlock` (`LogicBlock.java:58`),
+    /// `ItemBridge` (`ItemBridge.java:61`) and `PowerNode` (`PowerNode.java:45`)
+    /// — with the subclasses inheriting it. The editor resize uses this to skip
+    /// the `BuildPlan.pointConfig` shift.
+    #[test]
+    fn ignore_resize_config_matches_the_java_constructors() {
+        for kind in [
+            BlockKind::LogicBlock,
+            BlockKind::ItemBridge,
+            BlockKind::BufferedItemBridge,
+            BlockKind::LiquidBridge,
+            BlockKind::PowerNode,
+            BlockKind::LongPowerNode,
+        ] {
+            assert!(kind_ignores_resize_config(kind), "{}", kind.name());
+        }
+        for kind in [
+            BlockKind::LogicDisplay,
+            BlockKind::TileableLogicDisplay,
+            BlockKind::MemoryBlock,
+            BlockKind::CanvasBlock,
+            BlockKind::DuctBridge,
+            BlockKind::DirectionLiquidBridge,
+            BlockKind::BeamNode,
+            BlockKind::Drill,
+        ] {
+            assert!(!kind_ignores_resize_config(kind), "{}", kind.name());
+        }
+
+        // The vanilla blocks resolve the flag through `BlockDef::from_spec`.
+        let registry = test_registry();
+        let flag = |name: &str| {
+            registry
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .ignore_resize_config
+        };
+        for name in [
+            "micro-processor",
+            "world-processor",
+            "phase-conveyor",
+            "bridge-conveyor",
+            "bridge-conduit",
+            "phase-conduit",
+            "power-node",
+            "power-node-large",
+            "surge-tower",
+            "beam-link",
+        ] {
+            assert!(flag(name), "{name}");
+        }
+        for name in [
+            "logic-display",
+            "large-logic-display",
+            "memory-cell",
+            "memory-bank",
+            "canvas",
+            "beam-node",
+            "beam-tower",
+            "duct-bridge",
+            "mechanical-drill",
+        ] {
+            assert!(!flag(name), "{name}");
+        }
     }
 }

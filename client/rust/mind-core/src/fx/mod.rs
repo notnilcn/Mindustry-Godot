@@ -20,6 +20,7 @@ pub mod data;
 pub mod decal;
 pub mod def;
 pub mod env_fx;
+pub mod inline;
 pub mod parts;
 pub mod pool;
 pub mod pool_spec;

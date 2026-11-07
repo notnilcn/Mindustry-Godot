@@ -23,12 +23,17 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use godot::classes::notify::NodeNotification;
-use godot::classes::{DisplayServer, INode, Node as GdNode, Os};
+use godot::classes::performance::Monitor;
+use godot::classes::{
+    DisplayServer, Engine, INode, Node as GdNode, Os, Performance, RenderingServer, Time,
+};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::io::fs::Paths;
 use mind_core::platform::caps::{PerformanceTier, PlatformCaps, PlatformKind};
+use mind_core::platform::gpu::{GlQueries, IntelGpuCheck, NvGpuInfo};
+use mind_core::platform::perf::{PerfClock, PerfCounterKind, PerfCounters};
 use mind_core::version::BuildInfo;
 
 use service::ServiceRegistry;
@@ -101,6 +106,60 @@ pub struct MindPlatform {
     caps: PlatformCaps,
     test_mobile: bool,
     services: ServiceRegistry,
+    /// Frame/phase counters (GAPS #70: `PerfCounter` port).
+    perf: PerfCounters,
+    /// Last `process` timestamp in ns (frame-delta sampling).
+    last_frame_ns: u64,
+    /// `IntelGpuCheck`: persisted vendor marker from/for the next launch.
+    intel: IntelGpuCheck,
+    /// `NvGpuInfo`: NVX VRAM probe (unsupported without a GL pname query).
+    nv: NvGpuInfo,
+    /// Cached `IntelGpuCheck.wasIntel()` answer for the diagnostics probe.
+    was_intel: bool,
+    /// Resolved data root (`desktop::data_root`), used by the GPU marker.
+    data_root: PathBuf,
+}
+
+/// `PerfClock` over the engine clock (`Time.nanos`/`Time.millis`/
+/// `Core.graphics.getFrameId`), for [`PerfCounters`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GodotClock;
+
+impl PerfClock for GodotClock {
+    fn nanos(&self) -> u64 {
+        Time::singleton().get_ticks_usec().saturating_mul(1_000)
+    }
+
+    fn millis(&self) -> u64 {
+        Time::singleton().get_ticks_msec()
+    }
+
+    fn frame_id(&self) -> u64 {
+        Engine::singleton().get_frames_drawn().max(0) as u64
+    }
+}
+
+/// [`GlQueries`] for the Godot host: no GL pname query is exposed, so the
+/// `NvGpuInfo` seam reports "unsupported" and every VRAM value is `None`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoGlQueries;
+
+impl GlQueries for NoGlQueries {
+    fn supports_extension(&self, _extension: &str) -> bool {
+        false
+    }
+
+    fn get_int(&self, _pname: i32) -> i32 {
+        0
+    }
+}
+
+/// `Os.isWindows`, read through the Godot OS singleton.
+fn is_windows_os() -> bool {
+    Os::singleton()
+        .get_name()
+        .to_string()
+        .eq_ignore_ascii_case("windows")
 }
 
 #[godot_api]
@@ -111,11 +170,32 @@ impl INode for MindPlatform {
             caps: PlatformCaps::desktop("en"),
             test_mobile: false,
             services: ServiceRegistry::default(),
+            perf: PerfCounters::new(),
+            last_frame_ns: 0,
+            intel: IntelGpuCheck::new(),
+            nv: NvGpuInfo::new(),
+            was_intel: false,
+            data_root: PathBuf::new(),
         }
     }
 
     fn ready(&mut self) {
+        // Frame-delta sampling for the `PerfCounter` probe (GAPS #70).
+        self.base_mut().set_process(true);
         self.bootstrap();
+    }
+
+    fn process(&mut self, _delta: f64) {
+        let clock = GodotClock;
+        let now = clock.nanos();
+        if self.last_frame_ns != 0 {
+            let frame_ns = now.saturating_sub(self.last_frame_ns);
+            self.perf
+                .get_mut(PerfCounterKind::Frame)
+                .add(frame_ns as i64, &clock);
+            self.perf.check_update(&clock);
+        }
+        self.last_frame_ns = now;
     }
 
     fn on_notification(&mut self, what: NodeNotification) {
@@ -158,7 +238,27 @@ impl MindPlatform {
         // (extension init already checked it for the game process).
         if !godot::classes::Engine::singleton().is_editor_hint() {
             note_launch(&root);
+
+            // GAPS #70 / `IntelGpuCheck`: read the previous launch's marker first
+            // (`DesktopLauncher.main` uses it to pick GL versions), then record
+            // this launch's vendor for the next start (`ClientLauncher.setup`).
+            let is_windows = is_windows_os();
+            self.was_intel = self.intel.was_intel(is_windows, &root);
+            let vendor = RenderingServer::singleton()
+                .get_video_adapter_vendor()
+                .to_string();
+            if vendor.is_empty() {
+                log::debug!("[platform] GPU vendor unavailable; keeping the Intel marker");
+            } else if let Err(error) = self.intel.init(&vendor, is_windows, &root) {
+                log::warn!("[platform] failed to record the GPU vendor marker: {error}");
+            }
+            if self.was_intel {
+                log::warn!(
+                    "[platform] Intel GPU detected on the previous launch (upstream issue #11041)"
+                );
+            }
         }
+        self.data_root = root.clone();
 
         log::info!(
             "[platform] MindPlatform ready: locale={} cores={} tier={:?} testMobile={} dataRoot={}",
@@ -274,5 +374,165 @@ impl MindPlatform {
         self.test_mobile = enabled;
         self.caps.test_mobile = enabled;
         true
+    }
+
+    /// Frame/phase timings (GAPS #70): the `PerfCounter` port's 14 counters +
+    /// the Godot `Performance` monitors the desktop overlay uses.
+    ///
+    /// `frameMs` is the 100 ms-throttled windowed mean of the frame delta
+    /// (`PerfCounter.valueMs`); `frameRawMs`/`frameLatestNs` are unthrottled.
+    #[func]
+    pub fn get_perf_stats(&mut self) -> VarDictionary {
+        let clock = GodotClock;
+        let performance = Performance::singleton();
+
+        let frame_ms = self.perf.get_mut(PerfCounterKind::Frame).value_ms(&clock);
+        let frame_raw_ms = self.perf.get(PerfCounterKind::Frame).raw_value_ms();
+        let frame_latest_ns = self.perf.get(PerfCounterKind::Frame).latest_value_ns();
+
+        let mut dict = VarDictionary::new();
+        dict.set("fps", Engine::singleton().get_frames_per_second());
+        dict.set(
+            "processMs",
+            performance.get_monitor(Monitor::TIME_PROCESS) * 1000.0,
+        );
+        dict.set(
+            "physicsMs",
+            performance.get_monitor(Monitor::TIME_PHYSICS_PROCESS) * 1000.0,
+        );
+        dict.set(
+            "navigationMs",
+            performance.get_monitor(Monitor::TIME_NAVIGATION_PROCESS) * 1000.0,
+        );
+        dict.set(
+            "memoryMb",
+            performance.get_monitor(Monitor::MEMORY_STATIC) / 1_048_576.0,
+        );
+        dict.set("frameMs", frame_ms);
+        dict.set("frameRawMs", frame_raw_ms);
+        dict.set("frameLatestNs", frame_latest_ns);
+
+        let mut counters = VarDictionary::new();
+        for (kind, ms) in self.perf.all_raw_ms() {
+            counters.set(kind.name(), ms);
+        }
+        dict.set("counters", &counters.to_variant());
+        dict
+    }
+
+    /// GPU probe (GAPS #70: `IntelGpuCheck` + `NvGpuInfo`).
+    ///
+    /// `wasIntel` is the previous launch's persisted marker (Windows only);
+    /// `nvMemorySupported` is false on this host because Godot exposes no GL
+    /// pname query, so `nvTotalKb`/`nvAvailableKb` are absent (their Rust seam
+    /// returns `None`) rather than a fabricated `0`.
+    #[func]
+    pub fn get_gpu_info(&mut self) -> VarDictionary {
+        let renderer = RenderingServer::singleton();
+        let is_windows = is_windows_os();
+
+        let mut dict = VarDictionary::new();
+        dict.set("vendor", renderer.get_video_adapter_vendor().to_string());
+        dict.set("name", renderer.get_video_adapter_name().to_string());
+        dict.set(
+            "apiVersion",
+            renderer.get_video_adapter_api_version().to_string(),
+        );
+        dict.set(
+            "apiType",
+            format!("{:?}", renderer.get_video_adapter_type()),
+        );
+        dict.set("isWindows", is_windows);
+        dict.set(
+            "wasIntel",
+            self.intel.was_intel(is_windows, &self.data_root),
+        );
+
+        let supported = self.nv.has_memory_info(&NoGlQueries);
+        dict.set("nvMemorySupported", supported);
+        if let Some(memory) = self.nv.memory_info(&NoGlQueries) {
+            dict.set("nvTotalKb", memory.total_kb as i64);
+            dict.set("nvAvailableKb", memory.available_kb as i64);
+        }
+        dict
+    }
+
+    /// Version/update disposition (GAPS #70): the embedded
+    /// `version.properties` build id plus `BeControl.active()` gating.
+    ///
+    /// The client never polls a feed, so `available` stays `false` and
+    /// `notice` is the P22-3 notice; `autoUpdateSupported` is `false`.
+    #[func]
+    pub fn get_update_status(&self) -> VarDictionary {
+        let info = BuildInfo::embedded();
+        let status = update::status();
+        let mut dict = VarDictionary::new();
+        dict.set("type", info.r#type.clone());
+        dict.set("modifier", info.modifier.clone());
+        dict.set("build", info.build as i64);
+        dict.set("revision", info.revision as i64);
+        dict.set("buildString", info.build_string());
+        dict.set("isSteam", info.is_steam);
+        dict.set("active", status.active);
+        dict.set("available", status.available);
+        dict.set("updateBuild", status.update_build as i64);
+        dict.set("updateUrl", status.update_url);
+        dict.set("autoUpdateSupported", update::auto_update_supported());
+        dict.set("notice", update::NOT_AVAILABLE);
+        dict
+    }
+
+    /// Debug hook: parses a captured release document offline against this
+    /// build's id (`BeControl.checkUpdate` without the network call).
+    #[func]
+    pub fn dev_check_update_json(&mut self, json: GString, headless: bool) -> VarDictionary {
+        let mut dict = VarDictionary::new();
+        match update::check_json(&json.to_string(), headless) {
+            Ok(status) => {
+                dict.set("ok", true);
+                dict.set("error", String::new());
+                dict.set("active", status.active);
+                dict.set("available", status.available);
+                dict.set("updateBuild", status.update_build as i64);
+                dict.set("updateUrl", status.update_url);
+            }
+            Err(error) => {
+                dict.set("ok", false);
+                dict.set("error", error.to_string());
+                dict.set("active", false);
+                dict.set("available", false);
+                dict.set("updateBuild", 0_i64);
+                dict.set("updateUrl", String::new());
+            }
+        }
+        dict
+    }
+
+    /// Opens an external link after the `GameService::open_link` scheme guard
+    /// (http/https/mindustry only; `file:`/`javascript:`/`data:` are refused).
+    #[func]
+    pub fn open_link(&mut self, url: GString) -> bool {
+        let url = url.to_string();
+        if !mind_core::service::is_safe_external_link(&url) {
+            log::warn!("[platform] refusing to open unsafe link: {url:?}");
+            return false;
+        }
+        uri::open_uri(&url)
+    }
+
+    /// Opens a local file after the `GameService::open_file` guard (the path
+    /// must be an existing regular file; directories and missing paths are
+    /// refused).
+    #[func]
+    pub fn open_file(&mut self, path: GString) -> bool {
+        let path = PathBuf::from(path.to_string());
+        if !mind_core::service::is_openable_file(&path) {
+            log::warn!(
+                "[platform] refusing to open missing/non-file path: {}",
+                path.display()
+            );
+            return false;
+        }
+        uri::open_uri(&path.to_string_lossy())
     }
 }

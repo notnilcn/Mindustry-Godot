@@ -8,6 +8,7 @@
 use spacetimedb::{ViewContext, view};
 
 // 2.10.1 view contexts use read-only accessor traits.
+use super::calls::{MatchCall, match_call__view};
 use super::checksum::{MatchChecksum, match_checksum__view};
 use super::events::{MatchEvent, match_event__view};
 use super::plans::{
@@ -233,6 +234,22 @@ fn my_match_events(ctx: &ViewContext) -> Vec<MatchEvent> {
         .match_event()
         .by_match_event()
         .filter(match_id)
+        .collect()
+}
+
+/// Server→client `@Remote` calls for the caller (broadcast or targeted;
+/// GAPS #35). The client binder decodes each row and feeds
+/// `MindNet.push_call_frame`.
+#[view(accessor = my_match_calls, public)]
+fn my_match_calls(ctx: &ViewContext) -> Vec<MatchCall> {
+    let Some(match_id) = active_match_id(ctx) else {
+        return Vec::new();
+    };
+    ctx.db
+        .match_call()
+        .by_call_match()
+        .filter(match_id)
+        .filter(|call| call.target.is_none() || call.target == Some(ctx.sender()))
         .collect()
 }
 
