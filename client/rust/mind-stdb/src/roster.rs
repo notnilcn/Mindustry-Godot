@@ -1118,7 +1118,8 @@ mod tests {
             .find(|row| row["id"] == identity(2).to_hex().to_string())
             .expect("Alice's row");
         assert_eq!(alice["reason"], "spam, appeal denied");
-        assert!(roster.is_banned(&identity(2).to_hex().to_string()));
+        let banned_identity = identity(2).to_hex().to_string();
+        assert!(roster.is_banned(&banned_identity));
         roster.apply_ban(RowChange::Delete(PlayerBan {
             ban_id: 2,
             identity: identity(5),

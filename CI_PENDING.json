@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-07T02:20:53Z",
+  "updated": "2026-11-07T02:33:56Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1694,6 +1694,34 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings",
       "expected": "exit 0; core lib 3207",
       "risk": "lint-only; test-module allow attrs per gdext convention",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261107-023356",
+      "created_at": "2026-11-07T02:33:56Z",
+      "agent": "hx-net4",
+      "branch": "main",
+      "head": "f1038028",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-stdb,client/rust/mind-gdext",
+      "summary": "Admin roster projections + identity actions + player-list Tab (PAR-0611/0608)",
+      "files": [
+        "client/rust/mind-stdb/src/roster.rs",
+        "client/rust/mind-gdext/src/net/mod.rs",
+        "client/rust/mind-gdext/src/ui/fragments/player_list.rs",
+        "client/rust/mind-gdext/src/input/desktop.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "dialog-sweep"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib; ... -p mind-gdext --lib player",
+      "expected": "109 + 25 pass; DIALOGCHECK failed=0",
+      "risk": "roster JSON keys; all_bans admin-gated; Tab/Escape ordering vs MindUiRoot",
       "status": "pending"
     }
   ]

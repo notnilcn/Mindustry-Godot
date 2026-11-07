@@ -1222,6 +1222,8 @@ fn relay_in_game() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     fn row(name: &str, team: Option<u8>, admin: bool, connected: bool) -> PlayerRow {

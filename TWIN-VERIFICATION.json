@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T02:30:03Z",
+  "updated": "2026-11-07T02:48:14Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -15665,6 +15665,11 @@
           "at": "2026-11-06T14:13:54Z",
           "by": "hx-logic",
           "text": "Verified headlessly: player-unit camera/ping/selection/colour/breaking senses and controlled-building camera read LogicPlayerView; non-player units keep 0/NaN/null. Host half (push camera/selection each frame via Sim::set_logic_player_view) is outside this packet."
+        },
+        {
+          "at": "2026-11-07T02:48:05Z",
+          "by": "hx-26",
+          "text": "Host half of #26 landed: sim_host now pushes LogicPlayerView each logic frame (camera world centre/size via MindCamera2D::logic_view_bounds, selected block/rotation from sim+MindInput, HUD ping marker pos/text) before advance_steps — see PAR-0612 (verified headless, 3 sim_host plumbing tests + cargo check + headless boot)."
         }
       ]
     },
@@ -27947,6 +27952,11 @@
           "at": "2026-11-06T13:43:47Z",
           "by": "hx-render",
           "text": "GAPS #53 sub-item: unit hitboxes implemented and unit-tested; the overlay is settings-gated (drawhitboxes) and needs an in-engine/Java twin capture to compare stroke widths."
+        },
+        {
+          "at": "2026-11-07T02:48:04Z",
+          "by": "hx-26",
+          "text": "Headless 2026-11-07 #53 remainder pass: fluidFrames + DrawLiquidTile tiled animation landed (PAR-0613, render::liquid_frames 6 tests); ColoredFloor/ColoredWall extraData tint landed (PAR-0614, floor_main 5 + gdext floor 10); Drawf dashLineDst/dashRect/dashSquare + flame/flameFront primitives landed (PAR-0615, drawf 19). MenuRenderer flyers were already at HEAD (render::menu flyers_are_finite_and_bounded + gx/ui/menu_flyers.rs) — no change needed. Still open: environment-prop draws (SeaBush/Tree/TallBlock/Cliff/Rune/Character/SteamVent need rotated/wobble baked quads or a prop pass; Cliff also needs the block_colors mapColor palette), fx NoiseLayer/ShaderBlit primitives (gx/fx.rs deferred), and the ScreenshotPlan consumption."
         }
       ]
     },
@@ -32408,7 +32418,14 @@
         "cargo test -p mind-core --lib: 3180 passed / 4 ignored",
         "cargo check -p mind-gdext: ok"
       ],
-      "source": "GAPS.md #68/#47; docs/L07-editor-logic-residuals.md T4; docs/L-round-twin-verification.md item 11"
+      "source": "GAPS.md #68/#47; docs/L07-editor-logic-residuals.md T4; docs/L-round-twin-verification.md item 11",
+      "notes": [
+        {
+          "at": "2026-11-07T02:48:05Z",
+          "by": "hx-26",
+          "text": "Follow-ups landed in PAR-0616: the space glyph no longer calls get_texture_image(-1) (texture-index guard), and '\\0' now draws a synthesised .notdef box instead of being rejected by glyph index 0 (display_context unit test added)."
+        }
+      ]
     },
     "PAR-0611": {
       "title": "Admin blocker: Bans/Admins dialogs render 'none' (player_list opens them with no roster context) and unban/unadmin cannot target an offline identity",
@@ -32480,6 +32497,229 @@
           "by": "hx-net4",
           "text": "Landing: roster keeps full subscription rows; Bans/Admins dialogs get {banned}/{admins} context from the new MindNet projections; identity-direct player_action makes offline-identity unban/unadmin work. Residual: lastIP is empty (relay schema has no client address, D2); the all_bans/all_admins views are admin-gated server-side, so a non-admin host still sees the empty state."
         }
+      ]
+    },
+    "PAR-0612": {
+      "title": "GAPS #26 host half: gdext never pushed LogicPlayerView (camera/ping/selection senses read 0/NaN/null)",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java/Godot in-engine twin (script-driven @cameraX/@ping counters) still pending"
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin leg not run in this pass"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-gdext --lib logic_view"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-26",
+      "claimed_at": "2026-11-07T02:47:24Z",
+      "severity": "P1",
+      "source": "GAPS.md#26",
+      "rust": "client/rust/mind-gdext/src/sim_host.rs, client/rust/mind-gdext/src/camera.rs",
+      "gap": "PAR-0218 landed LogicPlayerView in core, but no gdext caller ever invoked Sim::set_logic_player_view: cameraX/Y/Width/Height, selectedBlock/selectedRotation and pingX/Y/pingText senses returned the core defaults (0/NaN/null) in the running client even though the camera, input selection and HUD ping marker were live.",
+      "fix": "sim_host.rs now composes the LAccess player view each logic frame from the live host state (compose_logic_player_view, Godot-free and unit-tested) and calls Sim::set_logic_player_view before advance_steps: camera world centre/size from CameraState (new MindCamera2D::logic_view_bounds, Java NetClient.clientSnapshot upload of Core.camera.position/width/height), selected block from Sim::selected_block (AIR -> Java null) and selected rotation from MindInput.placement_view, and the HUD ping marker state (MindPingOverlay.ping_state -> PlayerComp.pingX/pingY/pingTime/pingText, gated on visible && time > 0, empty label -> null). Matches UnitComp.java:287-311 and InputHandler.java:286-302.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib logic_view => 3 passed (camera/selection/ping mapping, AIR->null, empty ping label)",
+        "cargo check -p mind-gdext => ok",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit => exit 0"
+      ]
+    },
+    "PAR-0613": {
+      "title": "GAPS #53: fluidFrames never rendered — DrawLiquidTile drew a static region fill instead of the 50 animated liquid/gas frames",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Godot visual twin (cryofluid-mixer animated liquid) pending. Source-crop vs scaled quads differ sub-texel at the padding border."
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin leg not run in this pass"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib render::liquid_frames"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-26",
+      "claimed_at": "2026-11-07T02:47:32Z",
+      "severity": "P2",
+      "source": "GAPS.md#53",
+      "rust": "client/rust/mind-core/src/render/liquid_frames.rs, client/rust/mind-core/src/render/draw_desc.rs, client/rust/mind-gdext/src/sim_host.rs",
+      "gap": "Renderer.fluidFrames[gas][Liquid.getAnimationFrame()] was never used: DrawDesc::LiquidTile shared the DrawLiquidRegion fill path (one vertical -liquid region quad), so liquid blocks (cryofluid-mixer/melter/separator/disassembler/cultivator/electrolyzer) had no animated fluid surface and no per-liquid phase/gas frame or padding truncation. Renderer.java:131-141, Liquid.java:106-108, LiquidBlock.java:39-77, DrawLiquidTile.java:26-30.",
+      "fix": "New mc/render/liquid_frames.rs ports Liquid.getAnimationFrame (50 frames, 230/190 tick scales, id*5 phase) and LiquidBlock.drawTiledFrames geometry (per-cell frame quads, padding truncation incl. Java squish math); atlas names are fluid-liquid-<i>/fluid-gas-<i>. DrawDesc::LiquidTile now carries the drawer liquid name + resolved LiquidFrame and execute() emits the tiled frame sprites with the liquid tint and Drawf.liquid alpha early-out. fill_liquid_tiles resolves drawer names via the content registry (cryofluid-mixer names water+cryofluid, electrolyzer water/pad 2, cultivator water per Blocks.java:1181/1374/2972). DrawState gained liquid_id/liquid_gas for the current-liquid fallback; sim_host fills them from LiquidModule + Liquid.gas.",
+      "evidence": [
+        "cargo test -p mind-core --lib render::liquid_frames => 6 passed (frame phase/scale, region naming, single/two-cell tiling, padding truncation, squish skip)",
+        "cargo test -p mind-core --lib render::draw_desc => 26 passed (tiled emission, resolved-liquid gas frame/tint, empty-tank early-out, chain_for_with water/cryofluid resolution)",
+        "cargo test -p mind-core --lib render:: => 259 passed",
+        "cargo test -p mind-gdext --lib render => 84 passed",
+        "cargo check -p mind-gdext => ok"
+      ]
+    },
+    "PAR-0614": {
+      "title": "GAPS #53: ColoredFloor/ColoredWall extraData tint never applied in the renderer",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; in-engine editor colour-picker twin pending. Smooth-blend autotile corner interpolation remains unported."
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin leg not run in this pass"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-gdext --lib render::floor"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-26",
+      "claimed_at": "2026-11-07T02:47:40Z",
+      "severity": "P2",
+      "source": "GAPS.md#53",
+      "rust": "client/rust/mind-core/src/render/floor_main.rs, client/rust/mind-gdext/src/render/floor.rs",
+      "gap": "ColoredFloor/ColoredWall store their colour in tile.extraData and Java tints the bake with Draw.color(extraData | 0xff); the port baked every colored floor/wall quad as 0xffffffff, so the palette colours never appeared in-world (ColoredFloor.java:71-74, ColoredWall.java:44-49).",
+      "fix": "floor_main.rs adds colored_tint (extraData | 0xff, alpha masked), is_colored_block and apply_colored_tint (RGB replace, quad alpha preserved so the liquid-overlay repeat keeps its alpha). floor.rs applies the tint to every base/edge/overlay quad of a ColoredFloor tile and to the static ColoredWall quad. The flagSmoothBlend corner-interpolation branch is documented as not ported (flat tint = Java non-smooth branch).",
+      "evidence": [
+        "cargo test -p mind-core --lib render::floor_main => 5 passed (tint mask, quad-alpha preservation, kind gating)",
+        "cargo test -p mind-gdext --lib render::floor => 10 passed (colored floor quads tinted, colored wall quad tinted, plain wall untouched)",
+        "cargo test -p mind-core --lib render:: => 259 passed",
+        "cargo check -p mind-gdext => ok"
+      ]
+    },
+    "PAR-0615": {
+      "title": "GAPS #53: Drawf dash helpers (dashLineDst/dashRect/dashSquare) and flame/flameFront primitives missing",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless math port only; no gdext consumer yet (Continuous* BulletDef metadata is outside this packet). Java visual twin pending."
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin leg not run in this pass"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-core --lib render::drawf"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-26",
+      "claimed_at": "2026-11-07T02:47:46Z",
+      "severity": "P2",
+      "source": "GAPS.md#53",
+      "rust": "client/rust/mind-core/src/render/drawf.rs",
+      "gap": "Only Drawf.dashCircle and Drawf.dashLine had ports; Drawf.flame, flameFront, dashLineDst, dashRect and dashSquare were absent (Drawf.java:69-115/219-268), which blocks the ContinuousLaser/ContinuousFlame bullet bodies and unit-assembler/regen-projector dashed ranges.",
+      "fix": "drawf.rs ports the remaining pure primitives with Java citations: dash_line_dst_divisions ((int)(dst/tilesize*1.6)), dash_line_divisions ((int)(max(|dx|,|dy|)/tilesize*2)), dash_rect_lines/dash_square_lines, round_step (Mathf.round(value, step)), flame_points (two half-arc sides split at pan, rotated point list) and flame_front_points (Java round(divisions,2)+1 and <= loop quirks). A gdext consumer still needs the Continuous* BulletDef fields (fadeTime/backLength/frontLength/strokeFrom/To/divisions/colors), which live in mc/content outside this packet.",
+      "evidence": [
+        "cargo test -p mind-core --lib render::drawf => 19 passed (dash divisions/rect/square, flameFront half-arc + rotation, flame pan split + Mathf.round)",
+        "cargo test -p mind-core --lib render:: => 259 passed",
+        "cargo check -p mind-gdext => ok"
+      ]
+    },
+    "PAR-0616": {
+      "title": "Logic display glyph follow-ups: space glyph spammed get_texture_image(-1) errors, .notdef box never drawn",
+      "status": "verified",
+      "fork": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; in-engine logic-display print with spaces and '\\0' pending. cap_height/ascent on Glyph remain populated but unused by placement (removing the fields needs mc/logic/display_raster.rs, outside this packet)."
+            }
+          }
+        ],
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "headless fix pass; Java twin leg not run in this pass"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cargo test -p mind-gdext --lib display_context"
+            }
+          }
+        ]
+      },
+      "claimed_by": "hx-26",
+      "claimed_at": "2026-11-07T02:47:58Z",
+      "severity": "P2",
+      "source": "PAR-0610 residual (logic display font)",
+      "rust": "client/rust/mind-gdext/src/display_context.rs",
+      "gap": "display_context::logic_glyph called FontFile.get_texture_image(0, size, texture_index) without checking texture_index: the synthesised space glyph has no atlas page (index -1), so every display frame containing a space logged a Godot error. '\\0' (the font's .notdef / missingGlyph box, in GLYPH_CHARS) has glyph index 0 which the code rejected (index <= 0), so Java's missing-glyph box never drew.",
+      "fix": "logic_glyph now returns None when get_glyph_texture_idx < 0 (space/blank glyphs skip silently like Java getGlyph == null) and returns a synthesised 5x7 hollow .notdef box for '\\0' (cap-height proportions, baseline y_offset, no Godot call so it cannot error). The new unit test pins the box shape and Glyph::print_center placement.",
+      "evidence": [
+        "cargo test -p mind-gdext --lib display_context => 1 passed (notdef box shape + print_center)",
+        "cargo check -p mind-gdext => ok",
+        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit => exit 0 (no get_texture_image errors)"
       ]
     }
   },
