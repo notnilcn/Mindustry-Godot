@@ -20,6 +20,10 @@ use godot::classes::{FileAccess, INode, Node, ProjectSettings, Texture2D, Time};
 use godot::obj::Base;
 use godot::prelude::*;
 
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
+use std::rc::Rc;
+
 use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::{GeneratorKind, PlanetDef};
 use mind_core::content::settings_store::UnlockStore;
@@ -28,6 +32,7 @@ use mind_core::content::{
     BlockId, ContentRef, ContentRegistry, ContentType, ItemId, LiquidId, MemoryBundle, PlanetId,
     SectorId,
 };
+use mind_core::event;
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::gamemode::Gamemode;
@@ -78,6 +83,191 @@ const OUTLINE_RAD: f32 = 1.17;
 /// Off-play-sector inventory rows of `ResearchDialog.rebuildItems`
 /// (`Vec<(sector, rows)>`).
 type SectorInventory = Vec<(SectorRef, Vec<(String, i32)>)>;
+
+/// One `EventType` row dispatched through the campaign bus
+/// (`core/src/mindustry/game/EventType.java`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FiredEvent {
+    /// Upstream `EventType` class name (`EventRow::class_name`).
+    pub class: &'static str,
+    /// Payload summary the recorder listener built (`"player 7"`,
+    /// `"serpulo:15"`, `"item 3"`, ...).
+    pub detail: String,
+}
+
+/// Bounded record of the rows dispatched through the campaign `Events` bus
+/// (PAR-0577 residual).
+///
+/// `Events` listeners are `FnMut(&T)` closures with no handle on the node, so
+/// the facade installs one recorder listener per class (the port's equivalent
+/// of `Control.java`'s `Events.on(...)` registrations); this log is the
+/// observable sink the MCP oracle reads (`take_fired_events`) and the unit
+/// tests assert on.
+#[derive(Debug, Default)]
+pub struct FiredEvents {
+    rows: VecDeque<FiredEvent>,
+    counts: BTreeMap<&'static str, u64>,
+}
+
+impl FiredEvents {
+    /// Empty log.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records one dispatched row, dropping the oldest past
+    /// `mind_core::event::EVENT_QUEUE_CAPACITY` (the host drains every frame;
+    /// the cap only guards a never-draining host).
+    pub fn record(&mut self, class: &'static str, detail: impl Into<String>) {
+        *self.counts.entry(class).or_insert(0) += 1;
+        while self.rows.len() >= event::EVENT_QUEUE_CAPACITY {
+            self.rows.pop_front();
+        }
+        self.rows.push_back(FiredEvent {
+            class,
+            detail: detail.into(),
+        });
+    }
+
+    /// Drains the retained rows (oldest first).
+    pub fn take(&mut self) -> Vec<FiredEvent> {
+        self.rows.drain(..).collect()
+    }
+
+    /// Retained row count.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether no row is retained.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Rows dispatched for `class` since the last [`Self::clear`].
+    pub fn count(&self, class: &str) -> u64 {
+        self.counts.get(class).copied().unwrap_or(0)
+    }
+
+    /// Rows dispatched since the last [`Self::clear`].
+    pub fn total(&self) -> u64 {
+        self.counts.values().sum()
+    }
+
+    /// Drops the retained rows and the counters (match reset).
+    pub fn clear(&mut self) {
+        self.rows.clear();
+        self.counts.clear();
+    }
+}
+
+/// Payload summary of one `EventContent` (`"item 3"`, `"liquid 1"`,
+/// `"unit 5"`).
+fn event_content_detail(content: event::EventContent) -> String {
+    match content {
+        event::EventContent::Item(id) => format!("item {id}"),
+        event::EventContent::Liquid(id) => format!("liquid {id}"),
+        event::EventContent::Unit(id) => format!("unit {id}"),
+    }
+}
+
+/// `EventContent` projection of a content reference, for the event kinds whose
+/// payload is content (`UnlockEvent`/`ResearchEvent`).
+///
+/// `EventContent` models item/liquid/unit only; block/status/sector content has
+/// no payload variant, so those rows cannot be published (`mind-core`
+/// residual: `event.rs` needs `Block(u16)`).
+fn event_content_of(content: ContentRef) -> Option<event::EventContent> {
+    match content.type_ {
+        ContentType::Item => Some(event::EventContent::Item(content.id)),
+        ContentType::Liquid => Some(event::EventContent::Liquid(content.id)),
+        ContentType::Unit => Some(event::EventContent::Unit(content.id)),
+        _ => None,
+    }
+}
+
+/// Registers the recorder listeners for every `EventType` class the host owns.
+///
+/// The outbox the play flows fill ([`mind_core::game::play::PlaySession`])
+/// carries the `GameEvent` flow rows plus `SimEvent::PlayEvent` (`Logic.play`);
+/// the remaining queued `SimEvent`s are dispatched by the sim's own bus
+/// (`Sim::flush_events`). Every upstream listener the port kept inline
+/// (capture bookkeeping, autosaves, unlock toasts) already runs in
+/// `pump_runtime`; the recorder makes the fired rows observable.
+fn install_event_listeners(events: &mut event::Events, log: &Rc<RefCell<FiredEvents>>) {
+    fn record(log: &Rc<RefCell<FiredEvents>>, class: &'static str, detail: String) {
+        if let Ok(mut log) = log.try_borrow_mut() {
+            log.record(class, detail);
+        }
+    }
+
+    macro_rules! recorder {
+        ($on:ident, $class:literal, |$e:ident| $detail:expr) => {{
+            let log = Rc::clone(log);
+            events.$on(move |$e| record(&log, $class, $detail));
+        }};
+    }
+
+    recorder!(on_play, "PlayEvent", |_e| String::new());
+    recorder!(on_world_load, "WorldLoadEvent", |_e| String::new());
+    recorder!(on_game_over, "GameOverEvent", |e| format!(
+        "winner {}",
+        e.winner
+    ));
+    recorder!(on_sector_capture, "SectorCaptureEvent", |e| format!(
+        "{}:{} initial={}",
+        e.planet.raw(),
+        e.sector,
+        e.initial
+    ));
+    recorder!(on_sector_launch, "SectorLaunchEvent", |e| format!(
+        "{}:{}",
+        e.planet.raw(),
+        e.sector
+    ));
+    recorder!(on_unlock, "UnlockEvent", |e| event_content_detail(
+        e.content
+    ));
+    recorder!(on_research, "ResearchEvent", |e| event_content_detail(
+        e.content
+    ));
+    recorder!(on_deposit, "DepositEvent", |e| format!(
+        "{},{} {} x{}",
+        e.x,
+        e.y,
+        event_content_detail(event::EventContent::Item(e.item)),
+        e.amount
+    ));
+    recorder!(on_build_select, "BuildSelectEvent", |e| format!(
+        "{},{} team {} breaking={}",
+        e.x, e.y, e.team, e.breaking
+    ));
+    recorder!(on_config, "ConfigEvent", |e| format!(
+        "{},{} player {:?}",
+        e.x, e.y, e.player
+    ));
+    recorder!(on_player_join, "PlayerJoin", |e| format!(
+        "player {}",
+        e.player
+    ));
+    recorder!(on_player_leave, "PlayerLeave", |e| format!(
+        "player {}",
+        e.player
+    ));
+}
+
+/// Dispatches drained [`event::EventRow`]s to the bus; returns the count.
+fn dispatch_event_rows(
+    events: &mut event::Events,
+    rows: impl IntoIterator<Item = event::EventRow>,
+) -> usize {
+    let mut count = 0;
+    for row in rows {
+        events.dispatch_row(row);
+        count += 1;
+    }
+    count
+}
 
 /// `MindCampaign` — campaign/sector/rules/tech/schematic facade for MCP + UI.
 #[derive(GodotClass)]
@@ -148,11 +338,24 @@ pub struct MindCampaign {
     /// one counter graph across sector switches, mirrored back from the
     /// runtime each pump and persisted on autosave/exit.
     service: ServiceTracker,
+    /// `EventType` bus (`core/src/mindustry/game/EventType.java` + Arc
+    /// `Events.fire/on`; PAR-0577 residual). `pump_runtime` drains the play
+    /// session's `EventRow` outbox into it, and the host-owned fire sites
+    /// (research completions, relay roster changes) dispatch directly.
+    events: event::Events,
+    /// Rows the bus dispatched, bounded by `EVENT_QUEUE_CAPACITY`
+    /// (`take_fired_events` drains it; tests read it directly).
+    fired_events: Rc<RefCell<FiredEvents>>,
 }
 
 #[godot_api]
 impl INode for MindCampaign {
     fn init(base: Base<Node>) -> Self {
+        // The bus and its recorder listeners are host state, not Godot-derived:
+        // `ready()` must not re-register them or every row would record twice.
+        let mut events = event::Events::new();
+        let fired_events = Rc::new(RefCell::new(FiredEvents::new()));
+        install_event_listeners(&mut events, &fired_events);
         Self {
             base,
             sim_host: None,
@@ -180,6 +383,8 @@ impl INode for MindCampaign {
             current_map_name: None,
             planet_mesh_cache: None,
             service: ServiceTracker::new(),
+            events,
+            fired_events,
         }
     }
 
@@ -730,11 +935,26 @@ impl MindCampaign {
     /// and saves. No-op without a host/runtime.
     fn pump_runtime(&mut self) {
         let Some(mut host) = self.host() else {
+            // Menu/harness facade: the `capture_sector` fallback queues rows on
+            // the facade session, so drain them here too (PAR-0577 residual).
+            let rows = self.session.take_event_rows();
+            dispatch_event_rows(&mut self.events, rows);
             return;
         };
         let Some(mut runtime) = host.bind_mut().take_campaign_runtime() else {
+            let rows = self.session.take_event_rows();
+            dispatch_event_rows(&mut self.events, rows);
             return;
         };
+        // PAR-0577 residual: drain the play-flow `EventRow` outbox into the
+        // `EventType` bus. The runtime session is authoritative while a sector
+        // is live, so its outbox is the one dispatched; the facade session's
+        // rows are a clone of it (the `start_*` flows install the runtime from
+        // `self.session.clone()`), and dropping them keeps a later fallback
+        // drain from replaying the same rows.
+        let rows = runtime.session.take_event_rows();
+        let _ = self.session.take_event_rows();
+        dispatch_event_rows(&mut self.events, rows);
         // The runtime's tracker is authoritative while a sector is live; mirror
         // it every pump so the persist path and the UI queries see the same
         // `Vars.service` state the campaign systems just updated (GAPS #68).
@@ -2637,6 +2857,18 @@ impl MindCampaign {
         };
         let changed = result.complete || !result.spent.is_empty();
 
+        // `ResearchDialog.complete` (`ResearchDialog.java:624`):
+        // `Events.fire(new ResearchEvent(node.content))` once the node is
+        // finished (host-owned fire site; PAR-0577 residual).
+        if result.complete
+            && let Some(payload) = event_content_of(content_ref)
+        {
+            self.events
+                .dispatch_game(event::GameEvent::ResearchEvent(event::ResearchEvent {
+                    content: payload,
+                }));
+        }
+
         // Deduct the spent stacks exactly like `ResearchDialog.rebuildItems`'s
         // `ItemSeq.add(item, -amount)`: percentage removal from the other
         // sectors in order, then the remainder from the active sector last
@@ -3335,6 +3567,82 @@ impl MindCampaign {
             out.push(&GString::from(name.as_str()));
         }
         out
+    }
+
+    /// Fires a host-side `PlayerJoin` (`NetServer` join path,
+    /// `NetServer.java:1020`) or `PlayerLeave` (`onDisconnect`,
+    /// `NetServer.java:618`).
+    ///
+    /// The relay roster is identity-based and the port has no `Player.id`
+    /// counter, so `player` is the relay member row id (the closest stable
+    /// analogue), truncated to the wire `u32`. Called from
+    /// `MindNet::drain_members_rows` on `connected` transitions; `#[func]` so
+    /// the MCP oracle can drive the bus headlessly.
+    #[func]
+    pub fn fire_player_event(&mut self, join: bool, player: i64) -> bool {
+        let player = u32::try_from(player).unwrap_or(u32::MAX);
+        if join {
+            self.events
+                .dispatch_game(event::GameEvent::PlayerJoin(event::PlayerJoin { player }));
+        } else {
+            self.events
+                .dispatch_game(event::GameEvent::PlayerLeave(event::PlayerLeave { player }));
+        }
+        true
+    }
+
+    /// Drains the rows the `EventType` bus dispatched (`[{class, detail}]`),
+    /// oldest first (PAR-0577 residual; MCP/UI observability).
+    #[func]
+    pub fn take_fired_events(&mut self) -> Array<VarDictionary> {
+        let rows = self.fired_events.borrow_mut().take();
+        let mut out = Array::<VarDictionary>::new();
+        for row in rows {
+            let mut dict = VarDictionary::new();
+            dict.set("class", &GString::from(row.class));
+            dict.set("detail", &GString::from(row.detail.as_str()));
+            out.push(&dict);
+        }
+        out
+    }
+
+    /// Rows dispatched per `EventType` class since the last clear
+    /// (`[{"class", "count"}]`, declaration order of first dispatch).
+    #[func]
+    pub fn fired_event_counts_json(&self) -> GString {
+        let counts = &self.fired_events.borrow().counts;
+        let rows: Vec<serde_json::Value> = counts
+            .iter()
+            .map(|(class, count)| serde_json::json!({"class": class, "count": count}))
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// Total rows dispatched since the last clear.
+    #[func]
+    pub fn fired_event_total(&self) -> i64 {
+        self.fired_events.borrow().total() as i64
+    }
+
+    /// Rows dispatched for one `EventType` class since the last clear.
+    #[func]
+    pub fn fired_event_count(&self, class: GString) -> i64 {
+        self.fired_events.borrow().count(&class.to_string()) as i64
+    }
+
+    /// Retained row count (bounded record, not the drained rows).
+    #[func]
+    pub fn fired_event_pending(&self) -> i64 {
+        self.fired_events.borrow().len() as i64
+    }
+
+    /// Drops the retained rows and the per-class counters (match reset).
+    #[func]
+    pub fn clear_fired_events(&mut self) {
+        if !self.fired_events.borrow().is_empty() {
+            log::info!("campaign event bus: cleared");
+        }
+        self.fired_events.borrow_mut().clear();
     }
 
     /// `ContentInfoDialog.show(content)`: name/description/details plus the
@@ -4848,6 +5156,16 @@ impl MindCampaign {
             core: "core-nucleus".to_owned(),
             elapsed: 0.0,
             charged: false,
+            next_dust_ring: 0,
+            white_fade: false,
+            // A cutscene RNG seeded from the launch site: a replay of the same
+            // launch draws the same bolts/dust.
+            rand: mind_core::math::ArcRand::new(
+                ((world.0 as i64 as u64) << 32) ^ (world.1 as i64 as u64),
+            ),
+            bolt_seed: (world.0 as i64).wrapping_mul(73_856_093)
+                ^ (world.1 as i64).wrapping_mul(19_349_663),
+            extra_bolts: 0,
         });
         log::info!("accelerator launch to `{planet}:{sector}`");
         true
@@ -4878,19 +5196,134 @@ impl MindCampaign {
         }
     }
 
+    /// Spawns the `Fx.lightning` polylines of a launch bolt burst
+    /// (`Accelerator.java:364-367,423-429`; `Lightning.create`'s view event).
+    ///
+    /// The sim-side branches (damage 40) need a `CombatCtx`; the host renderer
+    /// has no sim handle, so this is the cutscene's visual half (residual noted
+    /// on PAR-0602: a `MindSimHost::spawn_lightning` seam would cover damage).
+    fn accelerator_lightning(&self, bolts: &[mind_core::render::accelerator::LaunchBolt]) {
+        let Some(fx) = wiring::optional(&self.fx) else {
+            return;
+        };
+        let bus = fx.bind().bus_handle();
+        // `lightningColor = Pal.accent` (Accelerator.java:62).
+        let color = mind_core::content::Rgba::new(
+            mind_core::render::drawf::pal::ACCENT[0],
+            mind_core::render::drawf::pal::ACCENT[1],
+            mind_core::render::drawf::pal::ACCENT[2],
+            mind_core::render::drawf::pal::ACCENT[3],
+        );
+        for bolt in bolts {
+            if bolt.points.len() < 2 {
+                continue;
+            }
+            let points: smallvec::SmallVec<[(f32, f32); 8]> = bolt.points.iter().copied().collect();
+            bus.push(mind_core::fx::FxEvent::EffectWithData {
+                effect: mind_core::content::registries::fx_meta::EffectRef::Named(
+                    mind_core::content::EffectId::LIGHTNING,
+                ),
+                x: bolt.x,
+                y: bolt.y,
+                rotation: bolt.angle,
+                color,
+                data: mind_core::fx::EffectData::Positions(points),
+            });
+        }
+    }
+
+    /// Spawns one `beginLaunch` dust ring's `Fx.coreLandDust` rays
+    /// (`Accelerator.java:373-384`): the ray snaps to its tile
+    /// (`Tile.worldx()` = tile corner) and is tinted by
+    /// `t.floor().mapColor * (1.7 + range(0.15))`.
+    fn accelerator_dust(&self, rays: &[mind_core::render::accelerator::DustRay]) {
+        if rays.is_empty() {
+            return;
+        }
+        let Some(registry) = self.registry.as_ref() else {
+            return;
+        };
+        let tile_size = mind_core::config::TILESIZE as f32;
+        // Resolve every tile's floor colour before borrowing `MindFx`.
+        let floors: Vec<Option<mind_core::content::Rgba>> = match self.host() {
+            Some(host) => {
+                let guard = host.bind();
+                let grid = guard.grid();
+                rays.iter()
+                    .map(|ray| {
+                        let tx = i16::try_from((ray.x / tile_size).floor() as i32).ok()?;
+                        let ty = i16::try_from((ray.y / tile_size).floor() as i32).ok()?;
+                        grid.floor_at(mind_core::world::TilePos::new(tx, ty))
+                            .and_then(|floor| registry.block(floor))
+                            .and_then(|def| def.map_color)
+                    })
+                    .collect()
+            }
+            None => vec![None; rays.len()],
+        };
+        let Some(mut fx) = wiring::optional(&self.fx) else {
+            return;
+        };
+        let mut bound = fx.bind_mut();
+        for (ray, floor) in rays.iter().zip(floors) {
+            let Some(floor) = floor else {
+                continue;
+            };
+            let color = mind_core::content::Rgba::new(
+                (floor.r * ray.brightness).clamp(0.0, 1.0),
+                (floor.g * ray.brightness).clamp(0.0, 1.0),
+                (floor.b * ray.brightness).clamp(0.0, 1.0),
+                floor.a,
+            );
+            // `t.worldx()`/`t.worldy()`: the tile corner, not a centre.
+            let x = (ray.x / tile_size).floor() * tile_size;
+            let y = (ray.y / tile_size).floor() * tile_size;
+            bound.spawn_view_effect(
+                mind_core::content::EffectId::CORE_LAND_DUST,
+                x,
+                y,
+                ray.rotation,
+                color,
+            );
+        }
+    }
+
+    /// `beginLaunch`'s cover image (`Accelerator.java:343-354`): the HUD's
+    /// white cover fades in over `duration` seconds at the end of the launch.
+    fn accelerator_white_fade(&self, duration: f64) {
+        let Some(ui_root) = wiring::optional(&self.ui_root) else {
+            return;
+        };
+        let fade = {
+            let root = ui_root.bind();
+            root.fade_in_node()
+        };
+        let Some(mut fade) = fade else {
+            return;
+        };
+        if fade.has_method("start_white") {
+            let _ = fade.call("start_white", &[duration.to_variant()]);
+        }
+    }
+
     /// Advances an accelerator launch: the `Time.run(chargeDuration)` burst
     /// (`coreLaunchConstruct` + `launchAccelerator` + `launchSound`,
-    /// Accelerator.java:358-362) and the `Time.runTask(launchDuration() - 6f)`
-    /// switch (:273-283): `launching = false`, `unlockedOnLand`,
-    /// `universe.clearLoadoutInfo()`, `updateLaunchResources(resources)`,
-    /// `updateLoadout((CoreBlock)launchBlock)`, `control.playSector(sector)`.
+    /// Accelerator.java:358-362), `beginLaunch`'s 20 `Lightning.create` bolts
+    /// and 13 `coreLandDust` rings (:364-387), `updateLaunch`'s extra bolt
+    /// (:423-429), the white cover image (:343-354), and the
+    /// `Time.runTask(launchDuration() - 6f)` switch (:273-283):
+    /// `launching = false`, `unlockedOnLand`, `universe.clearLoadoutInfo()`,
+    /// `updateLaunchResources(resources)`, `updateLoadout((CoreBlock)launchBlock)`,
+    /// `control.playSector(sector)`.
     fn pump_accelerator_launch(&mut self, delta: f64) {
         let Some(mut pending) = self.pending_accelerator.take() else {
             return;
         };
+        let sequence = accelerator_sequence();
         // Arc `Time.delta` (clamped like the camera rig's frame delta).
-        pending.elapsed += ((delta * 60.0) as f32).clamp(0.0001, 4.0);
-        if !pending.charged && pending.elapsed >= ACCELERATOR_CHARGE_TICKS {
+        let frame_ticks = ((delta * 60.0) as f32).clamp(0.0001, 4.0);
+        pending.elapsed += frame_ticks;
+        if !pending.charged && pending.elapsed >= sequence.charge_tick() {
             pending.charged = true;
             self.accelerator_fx("coreLaunchConstruct", pending.world, 5.0);
             self.accelerator_fx("launchAccelerator", pending.world, 0.0);
@@ -4899,8 +5332,66 @@ impl MindCampaign {
                 // `Effect.shake(10f, 14f, this)`.
                 camera.bind_mut().apply_shake_event(10.0, 14.0);
             }
+            // `for(int i = 0; i < launchLightning; i++)
+            //  Lightning.create(team, lightningColor, lightningDamage, ...)`
+            // (:364-367). The sim branch is host-owned (residual); the view
+            // half is the `Fx.lightning` polyline the renderer draws.
+            let bolts = mind_core::render::accelerator::launch_bolts(
+                pending.world.0,
+                pending.world.1,
+                &mut pending.rand,
+                pending.bolt_seed,
+            );
+            self.accelerator_lightning(&bolts);
         }
-        if pending.elapsed < ACCELERATOR_SWITCH_TICKS {
+        // `Time.run(i * 2f)` dust rings (`Accelerator.java:369-386`): ring `i`
+        // spawns at `chargeDuration + i * 2` ticks.
+        while pending.next_dust_ring < ACCELERATOR_DUST_RINGS
+            && pending.elapsed >= dust_ring_at(&sequence, pending.next_dust_ring)
+        {
+            let ring = pending.next_dust_ring;
+            let rays = mind_core::render::accelerator::dust_rays(
+                &sequence,
+                5,
+                ring,
+                pending.world.0,
+                pending.world.1,
+                &mut pending.rand,
+            );
+            self.accelerator_dust(&rays);
+            pending.next_dust_ring += 1;
+        }
+        // `updateLaunch` (`Accelerator.java:423-429`): after the charge, each
+        // tick rolls `chanceDelta(lightningLaunchChance * pow3In(chargeFout))`.
+        if pending.elapsed > sequence.charge_tick() {
+            let fin_in = (1.0 - pending.elapsed / sequence.total()).clamp(0.0, 1.0);
+            let phase = mind_core::render::accelerator::LaunchPhase::from_land_time_in(
+                fin_in,
+                sequence.launch_duration,
+                sequence.charge_duration,
+            );
+            let chance = sequence.lightning_chance(&phase) * f64::from(frame_ticks);
+            if chance > 0.0 && f64::from(pending.rand.next_float()) < chance {
+                pending.extra_bolts = pending.extra_bolts.saturating_add(1);
+                let bolt = mind_core::render::accelerator::launch_bolt(
+                    pending.world.0,
+                    pending.world.1,
+                    &mut pending.rand,
+                    pending
+                        .bolt_seed
+                        .wrapping_add(1000)
+                        .wrapping_add(i64::from(pending.extra_bolts)),
+                );
+                self.accelerator_lightning(&[bolt]);
+            }
+        }
+        // `beginLaunch`'s cover image (`Accelerator.java:343-354`): delayed
+        // `(launchDuration() - 30) / 60` s, then faded in over `30 / 60` s.
+        if !pending.white_fade && pending.elapsed >= sequence.total() - 30.0 {
+            pending.white_fade = true;
+            self.accelerator_white_fade(30.0 / 60.0);
+        }
+        if pending.elapsed < sequence.switch_tick() {
             self.pending_accelerator = Some(pending);
             return;
         }
@@ -7104,12 +7595,37 @@ struct PendingAcceleratorLaunch {
     elapsed: f32,
     /// The `chargeDuration` burst (Accelerator.java:358-362) already played.
     charged: bool,
+    /// Next `beginLaunch` dust ring to spawn (`Time.run(i * 2f)`,
+    /// Accelerator.java:369-386).
+    next_dust_ring: usize,
+    /// The white cover image started (Accelerator.java:343-354).
+    white_fade: bool,
+    /// Launch-cutscene RNG (bolt angles/lengths, dust chances).
+    rand: mind_core::math::ArcRand,
+    /// `Lightning.create` polyline seed of the charge burst.
+    bolt_seed: i64,
+    /// `updateLaunch` bolts spawned so far (varies their polyline seeds).
+    extra_bolts: u32,
 }
 
-/// `launchDuration() - 6f` (Accelerator.java:273; 120 + 220 - 6).
-const ACCELERATOR_SWITCH_TICKS: f32 = 334.0;
-/// `chargeDuration` (Accelerator.java:52).
-const ACCELERATOR_CHARGE_TICKS: f32 = 220.0;
+/// `AcceleratorBuild`'s launch timeline (`launchDuration` 120 + `chargeDuration`
+/// 220, Accelerator.java:51-52) shared with the render pass.
+fn accelerator_sequence() -> mind_core::world::blocks::campaign::accelerator::LaunchSequence {
+    mind_core::world::blocks::campaign::accelerator::LaunchSequence::vanilla()
+}
+
+/// `beginLaunch`'s 13 dust rings (`for(int i = 0; i < 13; i++)`,
+/// Accelerator.java:370).
+const ACCELERATOR_DUST_RINGS: usize = mind_core::world::blocks::campaign::accelerator::DUST_RINGS;
+
+/// Launch tick at which `beginLaunch` dust ring `ring` spawns:
+/// `chargeDuration + i * 2` (`Time.run(i * 2f)`, Accelerator.java:370-371).
+fn dust_ring_at(
+    sequence: &mind_core::world::blocks::campaign::accelerator::LaunchSequence,
+    ring: usize,
+) -> f32 {
+    sequence.charge_tick() + sequence.dust_ring(5, ring).at
+}
 
 /// Clears one campaign sector's persisted base/items
 /// (`PlanetDialog.abandonSectorConfirm`, non-playing branch).
@@ -7627,5 +8143,183 @@ mod tests {
         assert!((radius - orbit[erekir_at]).abs() < 1e-3);
         // The viewed planet is a row when another body is the viewpoint.
         assert!(from_sun.iter().any(|row| row.name == "serpulo"));
+    }
+
+    /// PAR-0577 residual: the campaign bus dispatches the play-flow outbox rows
+    /// (`WorldLoadEvent` then `PlayEvent`) and the recorder listeners see both.
+    #[test]
+    fn campaign_bus_dispatches_the_play_flow_outbox() {
+        let mut bus = event::Events::new();
+        let log = Rc::new(RefCell::new(FiredEvents::new()));
+        install_event_listeners(&mut bus, &log);
+
+        let mut session = PlaySession::new(Rules::default());
+        let mut epoch = RulesEpoch::new();
+        let _ = play_map(&mut session, Rules::default(), None, |_| false, &mut epoch);
+        let rows = session.take_event_rows();
+        assert_eq!(
+            rows.iter()
+                .map(event::EventRow::class_name)
+                .collect::<Vec<_>>(),
+            vec!["WorldLoadEvent", "PlayEvent"]
+        );
+        assert_eq!(dispatch_event_rows(&mut bus, rows), 2);
+
+        let fired = log.borrow_mut().take();
+        assert_eq!(
+            fired.iter().map(|row| row.class).collect::<Vec<_>>(),
+            vec!["WorldLoadEvent", "PlayEvent"]
+        );
+        assert_eq!(log.borrow().count("WorldLoadEvent"), 1);
+        assert_eq!(log.borrow().count("PlayEvent"), 1);
+        assert_eq!(log.borrow().total(), 2);
+        assert!(session.take_event_rows().is_empty(), "outbox drained");
+    }
+
+    /// A `GameEvent` row routes to its own listener and records its payload; a
+    /// `SimEvent` row (`Logic.play`'s `PlayEvent`) routes through the queued
+    /// arm of the same bus.
+    #[test]
+    fn campaign_bus_routes_game_and_sim_rows_with_payloads() {
+        let mut bus = event::Events::new();
+        let log = Rc::new(RefCell::new(FiredEvents::new()));
+        install_event_listeners(&mut bus, &log);
+
+        let planet = PlanetId::new(0);
+        dispatch_event_rows(
+            &mut bus,
+            [
+                event::EventRow::Game(event::GameEvent::SectorLaunchEvent(
+                    event::SectorLaunchEvent { planet, sector: 15 },
+                )),
+                event::EventRow::Sim(event::SimEvent::PlayEvent(event::PlayEvent)),
+                event::EventRow::Game(event::GameEvent::PlayerJoin(event::PlayerJoin {
+                    player: 7,
+                })),
+                event::EventRow::Game(event::GameEvent::ResearchEvent(event::ResearchEvent {
+                    content: event::EventContent::Item(3),
+                })),
+            ],
+        );
+
+        let fired = log.borrow_mut().take();
+        let classes: Vec<&str> = fired.iter().map(|row| row.class).collect();
+        assert_eq!(
+            classes,
+            vec![
+                "SectorLaunchEvent",
+                "PlayEvent",
+                "PlayerJoin",
+                "ResearchEvent"
+            ]
+        );
+        assert_eq!(fired[0].detail, "0:15");
+        assert_eq!(fired[2].detail, "player 7");
+        assert_eq!(fired[3].detail, "item 3");
+    }
+
+    /// `EventContent` models item/liquid/unit only; a block research node has no
+    /// payload (reported as a mind-core residual, not silently mis-typed).
+    #[test]
+    fn research_payload_covers_item_liquid_and_unit_only() {
+        assert_eq!(
+            event_content_of(ContentRef::new(ContentType::Item, 3)),
+            Some(event::EventContent::Item(3))
+        );
+        assert_eq!(
+            event_content_of(ContentRef::new(ContentType::Liquid, 1)),
+            Some(event::EventContent::Liquid(1))
+        );
+        assert_eq!(
+            event_content_of(ContentRef::new(ContentType::Unit, 2)),
+            Some(event::EventContent::Unit(2))
+        );
+        assert_eq!(
+            event_content_of(ContentRef::new(ContentType::Block, 2)),
+            None
+        );
+        assert_eq!(event_content_detail(event::EventContent::Unit(2)), "unit 2");
+    }
+
+    /// The fired-event record is bounded by `EVENT_QUEUE_CAPACITY` (a
+    /// never-draining host cannot grow it without bound) but keeps counting.
+    #[test]
+    fn fired_events_record_is_bounded_and_counted() {
+        let mut log = FiredEvents::new();
+        for _ in 0..(event::EVENT_QUEUE_CAPACITY + 5) {
+            log.record("PlayerJoin", "player 1");
+        }
+        assert_eq!(log.len(), event::EVENT_QUEUE_CAPACITY);
+        assert_eq!(log.total(), (event::EVENT_QUEUE_CAPACITY + 5) as u64);
+        assert_eq!(
+            log.count("PlayerJoin"),
+            (event::EVENT_QUEUE_CAPACITY + 5) as u64
+        );
+        let retained = log.take();
+        assert_eq!(
+            retained.last().map(|row| row.class),
+            Some("PlayerJoin"),
+            "newest row is retained"
+        );
+        log.clear();
+        assert!(log.is_empty());
+        assert_eq!(log.total(), 0);
+    }
+
+    /// PAR-0602: the accelerator cutscene timeline is the shared
+    /// `LaunchSequence` (charge 220, switch 334, total 340) and the 13 dust
+    /// rings straddle the charge in `i * 2` tick steps.
+    #[test]
+    fn accelerator_cutscene_timeline_matches_the_java_schedule() {
+        let sequence = accelerator_sequence();
+        assert_eq!(sequence.total(), 340.0);
+        assert_eq!(sequence.charge_tick(), 220.0);
+        assert_eq!(sequence.switch_tick(), 334.0);
+        assert_eq!(ACCELERATOR_DUST_RINGS, 13);
+
+        assert_eq!(
+            dust_ring_at(&sequence, 0),
+            220.0,
+            "first ring at the charge"
+        );
+        assert_eq!(dust_ring_at(&sequence, 1), 222.0);
+        assert_eq!(dust_ring_at(&sequence, 12), 244.0, "last ring at i * 2");
+        // Every ring is due before the sector switch fires.
+        assert!(dust_ring_at(&sequence, 12) < sequence.switch_tick());
+
+        // The ring geometry is the block-size based `Accelerator` one:
+        // radius 2.5 + 1 + 144 = 147.5, rays ceil(147.5 * 2PI / 6) = 155.
+        let last = sequence.dust_ring(5, 12);
+        assert!((last.radius - (5.0 / 2.0 + 1.0 + 12.0 * 12.0)).abs() < 1e-4);
+        assert_eq!(last.rays, 155, "ceil(147.5 * 2PI / 6)");
+        assert!((last.chance - (0.7 - 0.24)).abs() < 1e-9);
+    }
+
+    /// PAR-0602: the charge-tick burst is 20 bolts, each with a >= 2-point
+    /// `Fx.lightning` polyline (length 5-25 -> 2-12 points), and the
+    /// `updateLaunch` roll only becomes possible after the charge.
+    #[test]
+    fn accelerator_burst_builds_twenty_lightning_polylines() {
+        let sequence = accelerator_sequence();
+        let mut rand = mind_core::math::ArcRand::new(0x5EED);
+        let bolts = mind_core::render::accelerator::launch_bolts(64.0, 64.0, &mut rand, 3);
+        assert_eq!(bolts.len(), 20);
+        for bolt in &bolts {
+            assert!(bolt.points.len() >= 2, "length {}", bolt.length);
+            assert!(bolt.points.len() <= 12);
+        }
+        // `updateLaunch` only rolls after the charge (`rawTime > charge`).
+        let charge = mind_core::render::accelerator::LaunchPhase::from_land_time_in(
+            (340.0 - 220.0) / 340.0,
+            120.0,
+            220.0,
+        );
+        assert_eq!(sequence.lightning_chance(&charge), 0.0);
+        let mid = mind_core::render::accelerator::LaunchPhase::from_land_time_in(
+            (340.0 - 280.0) / 340.0,
+            120.0,
+            220.0,
+        );
+        assert!(sequence.lightning_chance(&mid) > 0.0);
     }
 }

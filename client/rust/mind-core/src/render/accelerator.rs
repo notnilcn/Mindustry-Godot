@@ -415,6 +415,127 @@ pub fn launch_lightning(x: f32, y: f32, rand: &mut crate::math::ArcRand) -> Vec<
     out
 }
 
+/// One host-spawned launch bolt: the `Lightning.create` view payload
+/// (`Fx.lightning` draws [`Self::points`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LaunchBolt {
+    /// Bolt origin x (`x + trnsx(a, lightningOffset)`).
+    pub x: f32,
+    /// Bolt origin y (`y + trnsy(a, lightningOffset)`).
+    pub y: f32,
+    /// Bolt direction degrees.
+    pub angle: f32,
+    /// Bolt length in `Lightning.create` steps.
+    pub length: i32,
+    /// Jittered polyline the `Fx.lightning` body draws
+    /// (`combat::lightning::view_polyline`: the unobstructed `create` walk).
+    pub points: Vec<(f32, f32)>,
+}
+
+/// `beginLaunch`'s 20-bolt burst with its view polylines
+/// (`Accelerator.java:364-367`).
+///
+/// The angles/lengths come from [`launch_lightning`]; each bolt's polyline is
+/// the deterministic unobstructed `Lightning.create` walk
+/// ([`crate::combat::lightning::view_polyline`]) seeded by `seed_base + index`
+/// so a replay of the cutscene draws the same bolts. The damaged sim branches
+/// are host-owned and remain a residual (`Accelerator` has no sim-side
+/// `Lightning.create` call in the port yet).
+pub fn launch_bolts(
+    x: f32,
+    y: f32,
+    rand: &mut crate::math::ArcRand,
+    seed_base: i64,
+) -> Vec<LaunchBolt> {
+    launch_lightning(x, y, rand)
+        .into_iter()
+        .enumerate()
+        .map(|(index, bolt)| bolt_with_view(bolt, seed_base.wrapping_add(index as i64)))
+        .collect()
+}
+
+/// `updateLaunch`'s extra bolt after the charge (`Accelerator.java:423-429`):
+/// one `Mathf.random(360f)` angle and `Mathf.random(lengthMin, lengthMax)`
+/// length, with the same view polyline as the charge burst.
+pub fn launch_bolt(x: f32, y: f32, rand: &mut crate::math::ArcRand, seed: i64) -> LaunchBolt {
+    let angle = rand.next_float() * 360.0;
+    let (dx, dy) = drawf::trns(angle, LIGHTNING_OFFSET);
+    bolt_with_view(
+        LightningBolt {
+            x: x + dx,
+            y: y + dy,
+            angle,
+            length: rand.random_range_int(LIGHTNING_LENGTH_MIN, LIGHTNING_LENGTH_MAX),
+        },
+        seed,
+    )
+}
+
+/// Adds the `Fx.lightning` polyline to one bolt.
+fn bolt_with_view(bolt: LightningBolt, seed: i64) -> LaunchBolt {
+    LaunchBolt {
+        points: crate::combat::lightning::view_polyline(
+            seed,
+            bolt.x,
+            bolt.y,
+            bolt.angle,
+            bolt.length,
+        ),
+        x: bolt.x,
+        y: bolt.y,
+        angle: bolt.angle,
+        length: bolt.length,
+    }
+}
+
+/// One `coreLandDust` spawn of a `beginLaunch` ring
+/// (`Accelerator.java:373-384`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DustRay {
+    /// World x (`x + trnsx(angle, radius)`).
+    pub x: f32,
+    /// World y (`y + trnsy(angle, radius)`).
+    pub y: f32,
+    /// Dust rotation (`angle + Mathf.range(30f)`).
+    pub rotation: f32,
+    /// `1.7f + Mathf.range(0.15f)` brightness applied to the floor map colour.
+    pub brightness: f32,
+}
+
+/// The dust spawns of `beginLaunch` ring `index` around `(x, y)`
+/// (`Accelerator.java:372-384`).
+///
+/// `radius = 15` (`size/2 + 1`) `+ 12 * index`, `rays = ceil(radius * 2PI / 6)`,
+/// and each ray rolls `Mathf.chance(0.7 - index * 0.02)`. The floor map colour
+/// of each tile is the host's job (it owns the grid/registry).
+pub fn dust_rays(
+    sequence: &crate::world::blocks::campaign::accelerator::LaunchSequence,
+    size: i32,
+    index: usize,
+    x: f32,
+    y: f32,
+    rand: &mut crate::math::ArcRand,
+) -> Vec<DustRay> {
+    let ring = sequence.dust_ring(size, index);
+    let mut out = Vec::new();
+    for ray in 0..ring.rays.max(0) {
+        if f64::from(rand.next_float()) >= ring.chance {
+            continue;
+        }
+        let angle = ray as f32 * 360.0 / ring.rays.max(1) as f32;
+        let (ox, oy) = drawf::trns(angle, ring.radius);
+        // `Mathf.range(30f)` = `random(-30f, 30f)`; the colour's
+        // `Mathf.range(0.15f)` is rolled in the same argument order as Java.
+        out.push(DustRay {
+            x: x + ox,
+            y: y + oy,
+            rotation: angle + (rand.next_float() * 60.0 - 30.0),
+            brightness: 1.7 + rand.next_float() * 0.15,
+        });
+    }
+    out
+}
+
 /// `Mathf.lerp` (Arc).
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
@@ -602,6 +723,62 @@ mod tests {
         let (bx, by) = drawf::trns(45.0 + 90.0, 80.0);
         assert!((fout.handles[0][1].0 - (100.0 + bx)).abs() < 1e-4);
         assert!((fout.handles[0][1].1 - (60.0 + by)).abs() < 1e-4);
+    }
+
+    /// `updateLaunch`'s per-tick bolt and the 20-bolt `beginLaunch` burst both
+    /// carry the `Fx.lightning` polyline (`Lightning.create`'s unobstructed
+    /// walk), deterministic for the same seed.
+    #[test]
+    fn launch_bolts_carry_deterministic_lightning_polylines() {
+        let mut a = crate::math::ArcRand::new(11);
+        let bolts = launch_bolts(100.0, 60.0, &mut a, 5);
+        assert_eq!(bolts.len(), LAUNCH_LIGHTNING);
+        for (index, bolt) in bolts.iter().enumerate() {
+            let (dx, dy) = drawf::trns(bolt.angle, LIGHTNING_OFFSET);
+            assert!((bolt.x - (100.0 + dx)).abs() < 1e-3);
+            assert!((bolt.y - (60.0 + dy)).abs() < 1e-3);
+            assert_eq!(bolt.points.len(), (bolt.length / 2).max(0) as usize);
+            assert!(
+                (LIGHTNING_LENGTH_MIN..=LIGHTNING_LENGTH_MAX).contains(&bolt.length),
+                "{index}"
+            );
+        }
+        let mut b = crate::math::ArcRand::new(11);
+        assert_eq!(bolts, launch_bolts(100.0, 60.0, &mut b, 5), "deterministic");
+
+        let mut rand = crate::math::ArcRand::new(3);
+        let bolt = launch_bolt(100.0, 60.0, &mut rand, 9);
+        assert_eq!(bolt.points.len(), (bolt.length / 2).max(0) as usize);
+        assert!((0.0..360.0).contains(&bolt.angle));
+    }
+
+    /// `beginLaunch`'s dust rings (`Accelerator.java:372-384`): ring `i` at
+    /// radius `size/2 + 1 + 12 i`, `ceil(radius * 2PI / 6)` rays, a per-ray
+    /// `chance(0.7 - i * 0.02)` roll and the `1.7 + range(0.15)` brightness.
+    #[test]
+    fn dust_rays_follow_the_ring_geometry_and_chances() {
+        let sequence = crate::world::blocks::campaign::accelerator::LaunchSequence::vanilla();
+        let mut rand = crate::math::ArcRand::new(17);
+        let rays = dust_rays(&sequence, 7, 0, 100.0, 60.0, &mut rand);
+        assert!(!rays.is_empty(), "ring 0 rolls 70% of 5 rays");
+        assert!(rays.len() <= 5);
+        for ray in &rays {
+            let dx = ray.x - 100.0;
+            let dy = ray.y - 60.0;
+            let distance = (dx * dx + dy * dy).sqrt();
+            assert!((distance - 4.5).abs() < 1e-3, "radius {distance}");
+            assert!(
+                (ray.brightness - 1.7).abs() <= 0.15 + 1e-4,
+                "brightness {}",
+                ray.brightness
+            );
+        }
+        // The outermost ring is at radius 148.5 with 156 rays and a 46% chance.
+        let outer = dust_rays(&sequence, 7, 12, 100.0, 60.0, &mut rand);
+        assert!(!outer.is_empty());
+        let distance = ((outer[0].x - 100.0).powi(2) + (outer[0].y - 60.0).powi(2)).sqrt();
+        assert!((distance - (4.5 + 12.0 * 12.0)).abs() < 1e-2);
+        assert!(outer.len() <= sequence.dust_ring(7, 12).rays as usize);
     }
 
     #[test]

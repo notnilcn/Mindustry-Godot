@@ -120,6 +120,31 @@ pub fn create(
     )
 }
 
+/// View-side polyline of one `Lightning.create` branch (the `Fx.lightning`
+/// payload) for host-spawned bolts that have no sim context.
+///
+/// The accelerator cutscene's 20-bolt burst (`Accelerator.java:364-367`) is
+/// spawned by the host renderer, not by a sim system, so it cannot call
+/// [`create`] (no `CombatCtx`); this mirrors `create_internal`'s unobstructed
+/// walk — `length / 2` steps, each point jittered by `range_symmetric(3.0)` and
+/// advanced `HIT_RANGE / 2` along a rotation jittered by `range_symmetric(20)`
+/// — so the drawn bolt looks identical to a real branch with no targets.
+pub fn view_polyline(seed: i64, x0: f32, y0: f32, rotation0: f32, length: i32) -> Vec<(f32, f32)> {
+    let mut rand = Rand::new(seed as i64 as u64);
+    let mut x = x0;
+    let mut y = y0;
+    let mut rotation = rotation0;
+    let mut lines: Vec<(f32, f32)> = Vec::new();
+    for _ in 0..(length / 2).max(0) {
+        lines.push((x + rand.range_symmetric(3.0), y + rand.range_symmetric(3.0)));
+        rotation += rand.range_symmetric(20.0);
+        let rad = rotation.to_radians();
+        x += rad.cos() * HIT_RANGE / 2.0;
+        y += rad.sin() * HIT_RANGE / 2.0;
+    }
+    lines
+}
+
 /// Creates a lightning branch from a `hitter` bullet
 /// (`Lightning.create(Bullet bullet, ...)`).
 ///
@@ -442,6 +467,26 @@ mod tests {
             ..PhysicsComp::default()
         });
         entity
+    }
+
+    /// PAR-0602: the accelerator cutscene's host-spawned bolts have no
+    /// `CombatCtx`, so they draw [`view_polyline`] — the same unobstructed walk
+    /// `create_internal` performs with no targets (deterministic per seed).
+    #[test]
+    fn view_polyline_mirrors_the_unobstructed_walk() {
+        let a = view_polyline(7, 100.0, 60.0, 0.0, 10);
+        assert_eq!(a.len(), 5, "length / 2 points");
+        assert_eq!(a, view_polyline(7, 100.0, 60.0, 0.0, 10), "deterministic");
+        assert_ne!(a, view_polyline(8, 100.0, 60.0, 0.0, 10), "seed matters");
+        // The first point is the origin jittered within `range(3)`; the walk
+        // then advances `HIT_RANGE / 2` per step (up to 8 links).
+        let first = a[0];
+        assert!((first.0 - 100.0).abs() < 3.0);
+        assert!((first.1 - 60.0).abs() < 3.0);
+        let reach = ((a[4].0 - 100.0).powi(2) + (a[4].1 - 60.0).powi(2)).sqrt();
+        assert!(reach < HIT_RANGE * 5.0, "walk length {reach}");
+        assert!(view_polyline(7, 100.0, 60.0, 0.0, 0).is_empty());
+        assert!(view_polyline(7, 100.0, 60.0, 0.0, 1).is_empty());
     }
 
     #[test]

@@ -90,16 +90,21 @@ pub struct MatchEvent {
 /// The client `mind-stdb` codec (`event_type.rs`, serde internally tagged on
 /// `"type"` with camelCase fields) requires every struct field to be present, so
 /// the envelopes spell out `player: null` where the module has no port player id
-/// and carry the plain text in ignored extra fields.
+/// and carry the plain text in ignored extra fields (`name`/`reason`/`map`) —
+/// serde ignores unknown fields, including on the class's unit variants.
 ///
-/// Kinds deliberately left as plain text: `MatchCreate` (the map id is rendered
-/// verbatim by the client toast) and `PlayerLeave` (the leave reason is rendered
-/// verbatim), plus the module-only kinds. Those need the client toast to prefer
-/// the typed payload first (`mind-gdext/src/ui/fragments/toasts.rs`, outside this
-/// crate's ownership).
+/// Every kind with an upstream class now publishes an envelope; the client
+/// toast (`mind-gdext/src/ui/fragments/toasts.rs`) renders the typed payload
+/// and falls back to the verbatim detail only for module-only kinds.
 pub fn typed_detail(kind: EventKind, detail: &str) -> Option<String> {
     let text = json_escape(detail);
     Some(match kind {
+        // `World.loadMap` fires `WorldLoadEvent`; the match's map id rides the
+        // ignored `name` channel (the client toast shows it verbatim).
+        EventKind::MatchCreate if text.is_empty() => r#"{"type":"WorldLoadEvent"}"#.to_owned(),
+        EventKind::MatchCreate => {
+            format!(r#"{{"type":"WorldLoadEvent","name":"{text}"}}"#)
+        }
         // `Logic.play` fires `PlayEvent`; the lobby start row stands in.
         EventKind::MatchStart => r#"{"type":"PlayEvent"}"#.to_owned(),
         // `Logic.gameOver` fires `GameOverEvent`; the module has no winning team
@@ -109,6 +114,14 @@ pub fn typed_detail(kind: EventKind, detail: &str) -> Option<String> {
         }
         EventKind::MatchEnd => {
             format!(r#"{{"type":"GameOverEvent","winner":0,"reason":"{text}"}}"#)
+        }
+        // `NetServer.onDisconnect` fires `PlayerLeave`; the module has no port
+        // player id, and the leave reason rides the ignored `reason` channel.
+        EventKind::PlayerLeave if text.is_empty() => {
+            r#"{"type":"PlayerLeave","player":null}"#.to_owned()
+        }
+        EventKind::PlayerLeave => {
+            format!(r#"{{"type":"PlayerLeave","player":null,"reason":"{text}"}}"#)
         }
         // `NetServer` join path fires `PlayerJoin`.
         EventKind::PlayerJoin if text.is_empty() => {
@@ -245,18 +258,40 @@ mod tests {
             typed_detail(EventKind::ConfigChange, "waveSpacing=30").as_deref(),
             Some(r#"{"type":"ConfigEvent","tile":null,"player":null,"value":"waveSpacing=30"}"#)
         );
-        // Kinds whose detail is rendered verbatim stay plain text.
+        // Kinds with no upstream class stay plain text.
         for kind in [
-            EventKind::MatchCreate,
-            EventKind::PlayerLeave,
             EventKind::PlayerChat,
             EventKind::VoteStarted,
+            EventKind::VotePassed,
+            EventKind::VoteFailed,
+            EventKind::PlayerKick,
+            EventKind::PlayerBan,
+            EventKind::PlayerUnban,
+            EventKind::AdminAction,
             EventKind::NameBan,
+            EventKind::NameUnban,
             EventKind::SyncRequest,
             EventKind::ClientCommand,
         ] {
             assert_eq!(typed_detail(kind, "text"), None, "{kind:?} stays plain");
         }
+        // MatchCreate/PlayerLeave carry the ignored `name`/`reason` channels.
+        assert_eq!(
+            typed_detail(EventKind::MatchCreate, "").as_deref(),
+            Some(r#"{"type":"WorldLoadEvent"}"#)
+        );
+        assert_eq!(
+            typed_detail(EventKind::MatchCreate, "groundZero").as_deref(),
+            Some(r#"{"type":"WorldLoadEvent","name":"groundZero"}"#)
+        );
+        assert_eq!(
+            typed_detail(EventKind::PlayerLeave, "").as_deref(),
+            Some(r#"{"type":"PlayerLeave","player":null}"#)
+        );
+        assert_eq!(
+            typed_detail(EventKind::PlayerLeave, "host left").as_deref(),
+            Some(r#"{"type":"PlayerLeave","player":null,"reason":"host left"}"#)
+        );
     }
 
     /// Detail text is JSON-escaped: a name/reason cannot break the envelope.

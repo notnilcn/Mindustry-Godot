@@ -1791,18 +1791,48 @@ impl MindNet {
             return;
         };
         let mut members = Vec::new();
+        // PAR-0577 residual: the relay roster is the host's player set, so its
+        // membership transitions fire the host-owned `PlayerJoin`/`PlayerLeave`
+        // (`NetServer.java:1020` join path, `:618` `onDisconnect`). The
+        // `connected` flag is the transition source: a row inserted while
+        // disconnected is only a reserved seat, and a disconnect arrives as an
+        // update (or a delete) of the connected row.
+        let mut joins: Vec<u32> = Vec::new();
+        let mut leaves: Vec<u32> = Vec::new();
         for change in binder.drain() {
             match change {
-                RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
+                RowChange::Insert(row) => {
+                    if row.connected {
+                        joins.push(roster_player_id(row.member_id));
+                    }
                     members.push(row.debug_json());
                     self.roster.apply_member(RowChange::Insert(row.clone()));
                     self.members.insert(row.identity.to_hex().to_string(), row);
                 }
+                RowChange::Update { old, new } => {
+                    if !old.connected && new.connected {
+                        joins.push(roster_player_id(new.member_id));
+                    } else if old.connected && !new.connected {
+                        leaves.push(roster_player_id(new.member_id));
+                    }
+                    members.push(new.debug_json());
+                    self.roster.apply_member(RowChange::Insert(new.clone()));
+                    self.members.insert(new.identity.to_hex().to_string(), new);
+                }
                 RowChange::Delete(row) => {
+                    if row.connected {
+                        leaves.push(roster_player_id(row.member_id));
+                    }
                     self.roster.apply_member(RowChange::Delete(row.clone()));
                     self.members.remove(&row.identity.to_hex().to_string());
                 }
             }
+        }
+        for player in joins {
+            self.fire_player_event(true, player);
+        }
+        for player in leaves {
+            self.fire_player_event(false, player);
         }
         if !members.is_empty() {
             self.last_members_json = format!("[{}]", members.join(","));
@@ -1810,6 +1840,21 @@ impl MindNet {
         // The relay's team assignment can change on join, start or a team
         // switch (`assign_team`); the local sim must adopt it (PAR-0600).
         self.apply_relay_team();
+    }
+
+    /// Dispatches one host-side `PlayerJoin`/`PlayerLeave` on the campaign
+    /// `EventType` bus (silent when the scene has no campaign node).
+    fn fire_player_event(&mut self, join: bool, player: u32) {
+        let Some(mut campaign) = self.campaign.as_ref().cloned() else {
+            return;
+        };
+        if !campaign.has_method("fire_player_event") {
+            return;
+        }
+        campaign.call(
+            "fire_player_event",
+            &[join.to_variant(), i64::from(player).to_variant()],
+        );
     }
 
     /// Applies the relay-assigned team to the local sim when [`Self::my_team`]
@@ -2730,6 +2775,15 @@ fn events_facade_json(events: &EventBus) -> serde_json::Value {
             .map(|event| event.to_json())
             .collect(),
     )
+}
+
+/// Port player id for a relay member row (`PlayerJoin`/`PlayerLeave` payload).
+///
+/// Java's `Player.id` is a small per-connection counter (`NetServer` join
+/// path); the relay's auto-inc `relay_member.member_id` is the closest stable
+/// identity the client sees, so it is truncated to the wire `u32`.
+fn roster_player_id(member_id: u64) -> u32 {
+    u32::try_from(member_id).unwrap_or(u32::MAX)
 }
 
 /// `Administration.TraceInfo` wire payload for `Call.traceInfo` (PAR-0601),
