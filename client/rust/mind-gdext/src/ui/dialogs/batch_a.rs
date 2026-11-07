@@ -368,6 +368,11 @@ const ICON_FONT_SIZE: i32 = 28;
 /// `prefs.margin(14f)`.
 const PREFS_MARGIN: i32 = 14;
 /// The pane's inset inside the shared shell body (see [`setup_prefs`]).
+///
+/// `PAR-0435` recorded a 9 px-too-high Graphics list in the GDScript-era frame
+/// (`runs/20261017-L-twin/java/36-graphics.png`: 58 vs 67); the native shell's
+/// title/body stack since lands the first row at Java's y=67, pinned by the
+/// `dialog_sweep_check` assertion. Do not add to this inset.
 const PANE_INSET_TOP: f32 = 12.0;
 const PANE_INSET_BOTTOM: f32 = 3.0;
 /// `Math.min(Core.graphics.getWidth() / 1.2f / Scl.scl(1f), 500f)`.
@@ -3439,6 +3444,7 @@ fn database_padded<C: Inherits<Control>>(
 fn database_divider(color: Color) -> Gd<ColorRect> {
     // code-instantiated: one divider per runtime section row.
     let mut line = ColorRect::new_alloc();
+    line.set_name("database-rule");
     line.set_color(color);
     line.set_custom_minimum_size(Vector2::new(0.0, 3.0));
     line.set_h_size_flags(SizeFlags::EXPAND_FILL);
@@ -3974,5 +3980,17 @@ mod tests {
         assert_eq!(effects_preview_scale(-1.0), 1.0);
         assert_eq!(effects_preview_scale(100.0), EFFECTS_PREVIEW_MAX_SCALE);
         assert_eq!(effects_preview_scale(10_000.0), EFFECTS_PREVIEW_MIN_SCALE);
+    }
+
+    /// PAR-0435: the native shell already lands the first Settings Graphics
+    /// row on Java's y=67 (`runs/20261017-L-twin/java/36-graphics.png`); the
+    /// `dialog_sweep_check` assertion pins it. The pane inset must stay 12 px
+    /// on top of Java's `prefs.margin(14f)` — the old GDScript frame's 58 px
+    /// came from the pre-cutover shell.
+    #[test]
+    fn settings_pane_inset_stays_java_pane_margin() {
+        assert_eq!(PANE_INSET_TOP, 12.0);
+        assert_eq!(PANE_INSET_BOTTOM, 3.0);
+        assert_eq!(PREFS_MARGIN, 14);
     }
 }

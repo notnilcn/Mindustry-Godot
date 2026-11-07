@@ -4482,3 +4482,72 @@ fn canvas_redraw(state: &Rc<RefCell<CanvasEditState>>) {
         surface.queue_redraw();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CanvasEditDialog.java:185`: the desktop paint surface is 480 px (the
+    /// port used 300 before L07 T5).
+    #[test]
+    fn canvas_surface_is_480_px() {
+        assert_eq!(CANVAS_EXTENT, 480.0);
+        // `CanvasEditDialog.update`: `if(time >= refreshTime)` with
+        // `refreshTime = 60 * 2` ticks -> a 2 s auto-save at 60 Hz.
+        assert_eq!(CANVAS_SAVE_TIME, 120.0);
+        // `Blocks.canvas` (`Blocks.java:6957`) sets `canvasSize = 12`; the
+        // port's fallback must match the flushed sync payload.
+        assert_eq!(CANVAS_DEFAULT_SIZE, 12);
+        assert_eq!(CANVAS_DEFAULT_BPP, 3);
+    }
+
+    /// `_nearest_palette`: the closest palette entry by squared RGB distance
+    /// (`CanvasEditDialog.java:224-274`'s `findClosest`).
+    #[test]
+    fn nearest_palette_picks_exact_and_closest_entries() {
+        // Packed RGBA8888: red, green, blue.
+        let palette = [0xff00_00ffu32, 0x00ff_00ff, 0x0000_ffff];
+        let red = Color::from_rgba8(0xff, 0, 0, 0xff);
+        let green = Color::from_rgba8(0, 0xff, 0, 0xff);
+        let blue = Color::from_rgba8(0, 0, 0xff, 0xff);
+        assert_eq!(nearest_palette(&palette, red), 0);
+        assert_eq!(nearest_palette(&palette, green), 1);
+        assert_eq!(nearest_palette(&palette, blue), 2);
+        // A dark red is closer to red than to green/blue.
+        assert_eq!(
+            nearest_palette(&palette, Color::from_rgba8(0x80, 0, 0, 0xff)),
+            0
+        );
+        // Alpha is ignored (squared RGB distance only).
+        assert_eq!(
+            nearest_palette(&palette, Color::from_rgba8(0, 0xff, 0, 0x00)),
+            1
+        );
+        // An empty palette falls back to 0 (never panics).
+        assert_eq!(nearest_palette(&[], red), 0);
+    }
+
+    /// `convertX`/`convertY` (`CanvasEditDialog.java:78-84`): a screen point
+    /// maps to a cell by the surface/size ratio, and `_index_at` clamps cells
+    /// outside the canvas.
+    #[test]
+    fn canvas_cell_and_index_math_matches_java() {
+        let shared = CanvasSurfaceState {
+            size: 12,
+            ..CanvasSurfaceState::default()
+        };
+        let rect = Vector2::new(480.0, 480.0);
+        assert_eq!(cell_at(&shared, rect, Vector2::new(0.0, 0.0)), (0, 0));
+        assert_eq!(cell_at(&shared, rect, Vector2::new(479.0, 479.0)), (11, 11));
+        assert_eq!(cell_at(&shared, rect, Vector2::new(40.0, 80.0)), (1, 2));
+        // Java's `(int)` cast truncates toward zero.
+        assert_eq!(cell_at(&shared, rect, Vector2::new(-1.0, 0.0)).0, 0);
+        assert_eq!(cell_at(&shared, rect, Vector2::new(-41.0, 0.0)).0, -1);
+        assert_eq!(index_at(12, (0, 0)), Some(0));
+        assert_eq!(index_at(12, (11, 0)), Some(11));
+        assert_eq!(index_at(12, (0, 1)), Some(12));
+        assert_eq!(index_at(12, (12, 0)), None);
+        assert_eq!(index_at(12, (0, 12)), None);
+        assert_eq!(index_at(12, (-1, 0)), None);
+    }
+}

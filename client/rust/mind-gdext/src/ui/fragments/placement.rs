@@ -150,6 +150,43 @@ const BLOCK_SELECT_COMBO_MS: i64 = 400;
 /// `PlacementFragment.blockSelect` grid width (arrow up/down wrap).
 const BLOCK_GRID_COLUMNS: i64 = 4;
 
+/// Bottom-anchored frame fit (`PAR-0449`).
+///
+/// Java's `PlacementFragment` builds `full.bottom().right()` and puts the hover
+/// `topTable` in its first row, so the hover panel grows **upward** while the
+/// block palette keeps its bottom edge (`PlacementFragment.java:285,344-449`).
+/// The port's scene anchors `Panel` bottom-right, so the same fit is applied
+/// every frame: the panel's top offset is its content height, the bottom offset
+/// stays 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PanelFit {
+    /// Offset from the parent's bottom to the panel's top (negative).
+    pub top: f32,
+    /// Offset from the parent's bottom to the panel's bottom (always 0).
+    pub bottom: f32,
+}
+
+/// Fits a bottom-anchored panel to `content_height` (`PAR-0449`).
+///
+/// The palette is the last row, so `palette_bottom` is the parent bottom for
+/// every content height: growing the hover info never pushes the palette down.
+pub(crate) fn fit_panel(parent_height: f32, content_height: f32) -> PanelFit {
+    let height = content_height.clamp(0.0, parent_height.max(content_height));
+    PanelFit {
+        top: -height,
+        bottom: 0.0,
+    }
+}
+
+impl PanelFit {
+    /// The palette's bottom edge in parent space: constant, independent of the
+    /// hover panel's height.
+    #[cfg(test)]
+    pub(crate) fn palette_bottom(&self, parent_height: f32) -> f32 {
+        parent_height + self.bottom
+    }
+}
+
 /// `MindPlacementFragment` — the block/category palette.
 #[derive(GodotClass)]
 #[class(base=Control, init)]
@@ -227,6 +264,9 @@ pub struct MindPlacementFragment {
     block_select_ms: i64,
     /// `PlacementFragment.selectedBlocks`: category name -> remembered block.
     selected_blocks: HashMap<String, String>,
+    /// Last panel content height applied by [`Self::fit_panel`] (`PAR-0449`).
+    #[init(val = -1.0)]
+    panel_height: f32,
 }
 
 #[godot_api]
@@ -313,6 +353,7 @@ impl IControl for MindPlacementFragment {
             self.refresh_input_bar();
         }
         self.update_top_table();
+        self.fit_panel();
         self.update_selection_highlight();
         self.update_command_panel();
         // Java recolours every cell in a per-frame `button.update`; the port
@@ -1336,6 +1377,31 @@ impl MindPlacementFragment {
             // `setPressedNoSignal`: the ButtonGroup must not re-fire `pressed`.
             button.set_pressed_no_signal(active == Some(instance));
         }
+    }
+
+    // ---- panel growth (`PAR-0449`) ----------------------------------------
+
+    /// Grows the bottom-anchored panel upward to its content height, keeping
+    /// the block palette's bottom edge fixed. The hover info table is the first
+    /// row and its bar list can be tall (e.g. the Interplanetary Accelerator's
+    /// `powerbuffer` row), so a fixed-height panel used to push the palette
+    /// down and clip the last bar row.
+    fn fit_panel(&mut self) {
+        let Some(mut panel) = self.panel.clone() else {
+            return;
+        };
+        if !panel.is_instance_valid() {
+            return;
+        }
+        let height = panel.get_combined_minimum_size().y;
+        if (height - self.panel_height).abs() < 0.5 {
+            return;
+        }
+        self.panel_height = height;
+        let parent_height = self.base().get_size().y;
+        let fit = fit_panel(parent_height, height);
+        panel.set_offset(Side::TOP, fit.top);
+        panel.set_offset(Side::BOTTOM, fit.bottom);
     }
 
     // ---- top table --------------------------------------------------------
@@ -2643,5 +2709,27 @@ mod tests {
             top_state_key("", "building", "core-nucleus", core),
             top_state_key("", "tile", "core-nucleus", core)
         );
+    }
+
+    /// `PAR-0449`: the hover info panel grows upward; the palette's bottom edge
+    /// does not move when the bar list grows (Java's bottom-right frame).
+    #[test]
+    fn hover_panel_grows_upward_keeping_palette_anchored() {
+        let screen = 648.0;
+        // No bars vs the Interplanetary Accelerator's full bar list
+        // (`health, power, items, power, batteries, powerbuffer`).
+        let short = fit_panel(screen, 254.0);
+        let tall = fit_panel(screen, 470.0);
+        assert!(tall.top < short.top, "top rises as the hover panel grows");
+        assert_eq!(short.bottom, 0.0, "the panel stays bottom-anchored");
+        assert_eq!(tall.bottom, 0.0);
+        // The palette is the last row: its bottom is the frame bottom in both
+        // frames, so a tall bar list cannot push the palette down/clip it.
+        assert_eq!(short.palette_bottom(screen), tall.palette_bottom(screen));
+        assert_eq!(short.palette_bottom(screen), screen);
+        // A content height above the parent keeps the top at the parent top.
+        let huge = fit_panel(screen, 700.0);
+        assert_eq!(huge.top, -700.0);
+        assert_eq!(huge.palette_bottom(screen), screen);
     }
 }

@@ -615,14 +615,13 @@ fn valid_float(text: &str) -> Option<f64> {
 
 /// `Point2.pack(x, y)`: two 16-bit coordinates in one int.
 fn pack_point2(x: i32, y: i32) -> i32 {
-    ((x & 0xFFFF) | ((y & 0xFFFF) << 16)) as u32 as i32
+    // `arc Point2.pack` (`Point2.java:40-42`): x in the high half, y low.
+    ((x as i16 as i32) << 16) | ((y as i16 as u16) as i32)
 }
 
-/// `Point2.x/y` unpack: sign-extends the low half for `x`.
+/// `Point2.x/y` unpack: both halves sign-extend (`Point2.java:44-52`).
 fn unpack_point2(packed: i32) -> (i32, i32) {
-    let x = (packed << 16) >> 16;
-    let y = packed >> 16;
-    (x, y)
+    ((packed >> 16) as i16 as i32, packed as i16 as i32)
 }
 
 /// A modal overlay scrim + frame added over the dialog (`_show_overlay`).
@@ -5530,6 +5529,24 @@ mod tests {
         assert_eq!(
             white.to_u32(ColorChannelOrder::RGBA),
             Color::from_rgba8(255, 255, 255, 254).to_u32(ColorChannelOrder::RGBA)
+        );
+    }
+
+    /// `editorPos` is `arc Point2.pack`: x in the high half, y in the low half
+    /// (`Point2.java:40-52`). The port used to swap the halves, so a node
+    /// placed at (5,2) rendered at (2,5) and wrote a Java-incompatible map.
+    #[test]
+    fn editor_pos_packs_x_high_and_y_low() {
+        for (x, y) in [(5, 2), (0, 0), (-1, -2), (99, -100), (-32768, 32767)] {
+            let packed = pack_point2(x, y);
+            assert_eq!(packed, (x << 16) | (y & 0xFFFF), "Point2.pack({x}, {y})");
+            assert_eq!(unpack_point2(packed), (x, y), "round trip ({x}, {y})");
+        }
+        // The `-999` unplaced default is symmetric, so maps written before the
+        // fix keep their sentinel.
+        assert_eq!(
+            pack_point2(-999, -999),
+            mind_core::io::json::objectives::default_editor_pos()
         );
     }
 

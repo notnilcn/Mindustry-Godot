@@ -33,9 +33,9 @@
 use godot::classes::control::SizeFlags;
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
-    Button, CenterContainer, Control, DirAccess, FileAccess, HBoxContainer, INode, Label, Node,
-    PackedScene, PanelContainer, ResourceLoader, ScrollContainer, Shader, ShaderMaterial,
-    TextureRect, VBoxContainer, Window,
+    Button, CenterContainer, ColorRect, Control, DirAccess, FileAccess, HBoxContainer, HSlider,
+    INode, Label, Node, PackedScene, PanelContainer, ResourceLoader, ScrollContainer, Shader,
+    ShaderMaterial, TextureRect, VBoxContainer, Window,
 };
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
@@ -1232,11 +1232,20 @@ impl INode for MindDialogSweepCheck {
                 // PAR-0470: the `@edit` overlay opener must survive a press made
                 // while the dialog's mutable bind is live.
                 self.press_custom_rules_edit();
+                // PAR-0435/PAR-0426/PAR-0151: drive the measured pages before
+                // the layout assertions in the next frame.
+                self.press_settings_graphics();
+                self.press_database_table_tab();
                 self.step = 3;
-                self.delay = 1;
+                self.delay = 2;
             }
             3 => {
                 self.assert_custom_rules_overlay();
+                // The measured Java twin frames are 1152x648; these assertions
+                // pin the three layout fixes from the headless fix pass.
+                self.assert_host_layout();
+                self.assert_settings_first_row();
+                self.assert_database_rule();
                 for (_, dialog) in &mut self.dialogs {
                     dialog.bind_mut().hide_dialog();
                 }
@@ -1297,6 +1306,11 @@ impl MindDialogSweepCheck {
 
     /// Instantiates one dialog per manifest entry and checks its shell.
     fn instantiate_all(&mut self) {
+        // The real game applies the theme from `MindUiRoot.enter_tree`; this
+        // oracle has no UiRoot. Install the same theme on the first process
+        // frame (the autoload atlas is loaded by then) so the dialog layout is
+        // comparable to the twin frames.
+        let theme = kit::theme::build();
         let text = FileAccess::get_file_as_string("res://ui/dialogs_manifest.json");
         let Ok(manifest) = mind_core::ui::manifest::DialogsManifest::from_json(&text.to_string())
         else {
@@ -1331,6 +1345,10 @@ impl MindDialogSweepCheck {
             pending.push((name, dialog));
         }
         for (_, dialog) in &pending {
+            // The real game's dialogs live under `MindUiRoot`, which carries the
+            // theme; this oracle has no UiRoot, so set it per dialog.
+            let mut dialog_for_theme = dialog.clone();
+            dialog_for_theme.set_theme(&theme);
             let node: Gd<Node> = dialog.clone().upcast();
             self.base_mut().add_child(&node);
         }
@@ -1402,6 +1420,214 @@ impl MindDialogSweepCheck {
             "custom_rules",
             "`@edit` overlay built outside the bind",
         );
+    }
+
+    /// One instantiated manifest dialog by registry key.
+    fn dialog_named(&self, name: &str) -> Option<Gd<MindDialog>> {
+        self.dialogs
+            .iter()
+            .find(|(dialog_name, _)| dialog_name == name)
+            .map(|(_, dialog)| dialog.clone())
+    }
+
+    /// A named descendant `Control` of a dialog.
+    fn descendant(&self, node: &Gd<Node>, name: &str) -> Option<Gd<Control>> {
+        let found = node.clone().find_children_ex(name).owned(false).done();
+        found
+            .iter_shared()
+            .find_map(|child| child.try_cast::<Control>().ok())
+    }
+
+    /// The first descendant `Button` whose label text equals `wanted`.
+    fn button_with_label(&self, node: &Gd<Node>, wanted: &str) -> Option<Gd<Button>> {
+        let found = node
+            .clone()
+            .find_children_ex("*")
+            .type_("Button")
+            .owned(false)
+            .done();
+        for child in found.iter_shared() {
+            let Ok(button) = child.try_cast::<Button>() else {
+                continue;
+            };
+            let labels = button
+                .clone()
+                .find_children_ex("*")
+                .type_("Label")
+                .owned(false)
+                .done();
+            let wanted = GString::from(wanted);
+            let matches = labels
+                .iter_shared()
+                .filter_map(|label| label.try_cast::<Label>().ok())
+                .any(|label| label.get_text() == wanted);
+            if matches {
+                return Some(button);
+            }
+        }
+        None
+    }
+
+    /// `SettingsMenuDialog` category entry: press `@settings.graphics` so the
+    /// next frame's assertion measures the Graphics list (`PAR-0435`).
+    fn press_settings_graphics(&mut self) {
+        let Some(settings) = self.dialog_named("settings") else {
+            self.check(false, "settings", "dialog instantiated");
+            return;
+        };
+        let node: Gd<Node> = settings.clone().upcast();
+        let wanted = kit::t("@settings.graphics").to_string();
+        let Some(mut button) = self.button_with_label(&node, &wanted) else {
+            self.check(false, "settings", "`@settings.graphics` menu button exists");
+            return;
+        };
+        let _ = button.emit_signal("pressed", &[]);
+    }
+
+    /// PAR-0435: the first Graphics row sits at Java's y=67 in the 1152x648
+    /// twin frame (`runs/20261017-L-twin/java/36-graphics.png`). The pre-cutover
+    /// GDScript dialog started at 58; the native shell measures 67, so this
+    /// pins the settings body inset (`PANE_INSET_TOP` + `prefs.margin(14f)`).
+    fn assert_settings_first_row(&mut self) {
+        let Some(settings) = self.dialog_named("settings") else {
+            self.check(false, "settings", "dialog instantiated");
+            return;
+        };
+        let node: Gd<Node> = settings.clone().upcast();
+        let found = node
+            .clone()
+            .find_children_ex("*")
+            .type_("HSlider")
+            .owned(false)
+            .done();
+        let Some(slider) = found
+            .iter_shared()
+            .find_map(|child| child.try_cast::<HSlider>().ok())
+        else {
+            self.check(false, "settings", "Graphics page built (a slider exists)");
+            return;
+        };
+        let y = slider.get_global_rect().position.y;
+        self.check(
+            (y - 67.0).abs() <= 2.0,
+            "settings",
+            &format!("Graphics first row top {y:.1} px (Java 67)"),
+        );
+    }
+
+    /// The database opens on the all-content tab; the sweep scene has no
+    /// campaign, so select the port-only achievements tab to make the shared
+    /// category header/rule stack render (`PAR-0426`).
+    fn press_database_table_tab(&mut self) {
+        let Some(database) = self.dialog_named("database") else {
+            self.check(false, "database", "dialog instantiated");
+            return;
+        };
+        let node: Gd<Node> = database.clone().upcast();
+        let Some(button) = self.descendant(&node, "tab-achievements") else {
+            self.check(false, "database", "achievements tab exists");
+            return;
+        };
+        let mut button: Gd<Button> = match button.try_cast::<Button>() {
+            Ok(button) => button,
+            Err(_) => {
+                self.check(false, "database", "achievements tab is a button");
+                return;
+            }
+        };
+        let _ = button.emit_signal("pressed", &[]);
+    }
+
+    /// PAR-0426: the category header stack places its accent rule at Java's
+    /// y=168 in the 1152x648 twin frame
+    /// (`runs/20261018-s2-L01-T3/diff/coredb-side.png`). The pre-cutover
+    /// GDScript dialog sat 10-16 px low; the native shell measures 166 here
+    /// (2 px), so this pins the shared search-row/rail/header geometry. The
+    /// sweep scene has no campaign, so the port-only achievements tab drives
+    /// the same header + rule builder.
+    fn assert_database_rule(&mut self) {
+        let Some(database) = self.dialog_named("database") else {
+            self.check(false, "database", "dialog instantiated");
+            return;
+        };
+        let node: Gd<Node> = database.clone().upcast();
+        let found = node
+            .clone()
+            .find_children_ex("database-rule")
+            .owned(false)
+            .done();
+        let Some(rule) = found
+            .iter_shared()
+            .find_map(|child| child.try_cast::<ColorRect>().ok())
+        else {
+            self.check(false, "database", "category rule rendered");
+            return;
+        };
+        let y = rule.get_global_rect().position.y;
+        self.check(
+            (y - 168.0).abs() <= 3.0,
+            "database",
+            &format!("first category rule top {y:.1} px (Java 168)"),
+        );
+    }
+
+    /// PAR-0151: Java's floating host layout — 300x70 name + colour and port
+    /// rows, then `[65 spacer][300x70 @host][65x70 ?]`, with no gamemode row
+    /// (`HostDialog.java:22-73`).
+    fn assert_host_layout(&mut self) {
+        let Some(host) = self.dialog_named("host") else {
+            self.check(false, "host", "dialog instantiated");
+            return;
+        };
+        let node: Gd<Node> = host.clone().upcast();
+        let near = |a: f32, b: f32| (a - b).abs() <= 2.0;
+        for (name, width, height) in [
+            ("host-name-row", 300.0, 70.0),
+            ("host-port-row", 300.0, 70.0),
+            ("host-button", 300.0, 70.0),
+            ("host-help", 65.0, 70.0),
+            ("host-swatch", 54.0, 54.0),
+        ] {
+            let Some(control) = self.descendant(&node, name) else {
+                self.check(false, "host", &format!("`{name}` exists"));
+                continue;
+            };
+            let rect = control.get_global_rect();
+            self.check(
+                near(rect.size.x, width) && near(rect.size.y, height),
+                "host",
+                &format!("{name} is {width}x{height} (got {})", rect.size),
+            );
+        }
+        // `cont.add().width(65f)` spacer before `@host`.
+        if let Some(spacer) = self.descendant(&node, "host-spacer") {
+            self.check(
+                near(spacer.get_global_rect().size.x, 65.0),
+                "host",
+                "spacer is 65 px wide",
+            );
+        }
+        // No gamemode row: Java's HostDialog has none (the port invented one).
+        let mode_label = kit::t("@mode.sandbox").to_string();
+        self.check(
+            self.button_with_label(&node, &mode_label).is_none(),
+            "host",
+            "no gamemode row (Java has none)",
+        );
+        // `BaseDialog.setFillParent(true)`: the full-screen `fullDialog` shell
+        // (no boxed `defaultDialog` panel around the floating rows).
+        if let Some(panel) = host.get_node_or_null("Center/Panel")
+            && let Ok(panel) = panel.try_cast::<Control>()
+        {
+            self.check(
+                panel.get_theme_type_variation() == "fullDialog",
+                "host",
+                &format!(
+                    "panel uses the fullDialog shell (got `{}`)",
+                    panel.get_theme_type_variation()
+                ),
+            );
+        }
     }
 
     fn assert_visibility(&mut self, what: &str, expected: bool) {

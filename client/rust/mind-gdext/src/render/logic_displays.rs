@@ -51,6 +51,71 @@ fn dict_bool(dict: &Row, key: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// One `CanvasBlock.draw` edge sprite (`CanvasBlock.java:274-288`): atlas
+/// region, rotation in degrees and whether the second corner is y-flipped.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CanvasEdgeSprite {
+    /// `side1`/`side2`/`corner1`/`corner2`.
+    pub region: &'static str,
+    /// `i * 90`.
+    pub rotation: f32,
+    /// `Draw.yscl = -1f` (the second corner draw).
+    pub flip_y: bool,
+}
+
+/// `CanvasBlock.draw`'s edge pass (`CanvasBlock.java:274-288`).
+///
+/// `neighbour_edges` is the block's `blending` bitmask (a set bit means a
+/// same-block neighbour on that side). Every side without a neighbour gets its
+/// `side1`/`side2` sprite; a corner sprite is added where a neighbouring side
+/// joins, and the remaining corner is drawn y-flipped:
+///
+/// ```java
+/// for(int i = 0; i < 4; i++){
+///     if((blending & (1 << i)) == 0){
+///         Draw.rect(i >= 2 ? side2 : side1, x, y, i * 90);
+///         if((blending & (1 << ((i + 1) % 4))) != 0)
+///             Draw.rect(i >= 2 ? corner2 : corner1, x, y, i * 90);
+///         if((blending & (1 << Mathf.mod(i - 1, 4))) != 0){
+///             Draw.yscl = -1f;
+///             Draw.rect(i >= 2 ? corner2 : corner1, x, y, i * 90);
+///             Draw.yscl = 1f;
+///         }
+///     }
+/// }
+/// ```
+pub(crate) fn canvas_edge_sprites(neighbour_edges: u8) -> Vec<CanvasEdgeSprite> {
+    let mut out = Vec::new();
+    for side in 0..4u8 {
+        if neighbour_edges & (1 << side) != 0 {
+            continue;
+        }
+        let next = (side + 1) % 4;
+        let previous = (side + 3) % 4;
+        out.push(CanvasEdgeSprite {
+            region: if side >= 2 { "side2" } else { "side1" },
+            rotation: f32::from(side) * 90.0,
+            flip_y: false,
+        });
+        let corner = if side >= 2 { "corner2" } else { "corner1" };
+        if neighbour_edges & (1 << next) != 0 {
+            out.push(CanvasEdgeSprite {
+                region: corner,
+                rotation: f32::from(side) * 90.0,
+                flip_y: false,
+            });
+        }
+        if neighbour_edges & (1 << previous) != 0 {
+            out.push(CanvasEdgeSprite {
+                region: corner,
+                rotation: f32::from(side) * 90.0,
+                flip_y: true,
+            });
+        }
+    }
+    out
+}
+
 /// Logic display pass (`Node2D` under the `Layer.block` band).
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -227,27 +292,11 @@ impl LogicDisplayRenderer {
                 // second corner is y-flipped).
                 let blending = dict_i64(&dict, "blending") as u8;
                 if blending != 0 {
-                    for side in 0..4u8 {
-                        if blending & (1 << side) != 0 {
-                            continue;
-                        }
-                        let side_region = if side >= 2 { "side2" } else { "side1" };
-                        if let Some(texture) = self.regions.get(&node, side_region) {
+                    for sprite in canvas_edge_sprites(blending) {
+                        if let Some(texture) = self.regions.get(&node, sprite.region) {
                             let (w, h) = RegionCache::natural_size(&texture);
-                            cmds.push((texture, cx, cy, w, h, side as f32 * 90.0));
-                        }
-                        let corner_region = if side >= 2 { "corner2" } else { "corner1" };
-                        if blending & (1 << ((side + 1) % 4)) != 0
-                            && let Some(texture) = self.regions.get(&node, corner_region)
-                        {
-                            let (w, h) = RegionCache::natural_size(&texture);
-                            cmds.push((texture, cx, cy, w, h, side as f32 * 90.0));
-                        }
-                        if blending & (1 << ((side + 3) % 4)) != 0
-                            && let Some(texture) = self.regions.get(&node, corner_region)
-                        {
-                            let (w, h) = RegionCache::natural_size(&texture);
-                            cmds.push((texture, cx, cy, w, -h, side as f32 * 90.0));
+                            let h = if sprite.flip_y { -h } else { h };
+                            cmds.push((texture, cx, cy, w, h, sprite.rotation));
                         }
                     }
                 }
@@ -349,5 +398,81 @@ impl LogicDisplayRenderer {
                 self.textures.insert(key, (texture, width, height));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CanvasBlock.draw` (`CanvasBlock.java:274-288`): an isolated canvas
+    /// draws all four side sprites (no corners — no neighbouring edge joins).
+    #[test]
+    fn isolated_canvas_draws_four_sides() {
+        let sprites = canvas_edge_sprites(0);
+        let regions: Vec<&str> = sprites.iter().map(|sprite| sprite.region).collect();
+        assert_eq!(regions, vec!["side1", "side1", "side2", "side2"]);
+        let rotations: Vec<f32> = sprites.iter().map(|sprite| sprite.rotation).collect();
+        assert_eq!(rotations, vec![0.0, 90.0, 180.0, 270.0]);
+        assert!(sprites.iter().all(|sprite| !sprite.flip_y));
+    }
+
+    /// A fully surrounded canvas draws only its centre texture.
+    #[test]
+    fn surrounded_canvas_has_no_edges() {
+        assert!(canvas_edge_sprites(0b1111).is_empty());
+    }
+
+    /// Java emits one corner for the next side and a y-flipped corner for the
+    /// previous side; side 1 therefore gets both `corner1` draws (next = 2,
+    /// previous = 0) and the second is flipped.
+    #[test]
+    fn corner_pairs_flip_the_previous_corner() {
+        // Side 0 is open, sides 1 and 3 have neighbours: side sprite + both
+        // corners (unflipped for the next side, flipped for the previous).
+        let sprites = canvas_edge_sprites(0b1010);
+        let side0: Vec<&CanvasEdgeSprite> = sprites
+            .iter()
+            .filter(|sprite| sprite.rotation == 0.0)
+            .collect();
+        assert_eq!(side0.len(), 3);
+        assert_eq!(side0[0].region, "side1");
+        assert!(!side0[0].flip_y);
+        assert_eq!(side0[1].region, "corner1");
+        assert!(!side0[1].flip_y);
+        assert!(side0[2].flip_y, "the previous-side corner is y-flipped");
+    }
+
+    /// Sides 2 and 3 use the second-corner/second-side regions.
+    #[test]
+    fn upper_sides_use_the_second_regions() {
+        // Side 2 open, sides 1 and 3 neighbours: side2 + both corner2 draws.
+        let sprites = canvas_edge_sprites(0b1010);
+        let side2: Vec<&CanvasEdgeSprite> = sprites
+            .iter()
+            .filter(|sprite| sprite.rotation == 180.0)
+            .collect();
+        assert_eq!(side2.len(), 3);
+        assert_eq!(side2[0].region, "side2");
+        assert!(
+            side2
+                .iter()
+                .any(|sprite| sprite.region == "corner2" && sprite.flip_y)
+        );
+
+        // Side 2 open with side 3 (next) a neighbour: corner2 unflipped.
+        let sprites = canvas_edge_sprites(0b1000);
+        assert!(
+            sprites
+                .iter()
+                .any(|sprite| sprite.region == "corner2" && !sprite.flip_y)
+        );
+        // Side 3 open with side 2 (previous) a neighbour: corner2 flipped.
+        let sprites = canvas_edge_sprites(0b0100);
+        assert!(
+            sprites
+                .iter()
+                .any(|sprite| sprite.region == "corner2" && sprite.flip_y)
+        );
     }
 }

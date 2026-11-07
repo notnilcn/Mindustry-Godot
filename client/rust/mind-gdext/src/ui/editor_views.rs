@@ -2835,32 +2835,18 @@ impl MindMapObjectivesCanvas {
 
     /// [`Self::valid_place`] against an already parsed objective list.
     fn valid_place_in(&self, objectives: &VarArray, x: i32, y: i32, ignore: i64) -> bool {
-        if !(-BOUNDS..=BOUNDS).contains(&x) || !(-BOUNDS..=BOUNDS).contains(&y) {
-            return false;
-        }
-        for index in 0..objectives.len() {
-            if index as i64 == ignore {
-                continue;
-            }
-            let value = objectives
-                .at(index)
-                .try_to::<VarDictionary>()
-                .unwrap_or_default();
-            let pos = dict_i64(&value, "editorPos");
-            if !has_pos(pos) {
-                continue;
-            }
-            let nx = node_x_at(pos);
-            let ny = node_y_at(pos);
-            if nx < x + OBJ_WIDTH
-                && nx + OBJ_WIDTH > x
-                && ny < y + OBJ_HEIGHT
-                && ny + OBJ_HEIGHT > y
-            {
-                return false;
-            }
-        }
-        true
+        let others: Vec<(i32, i32)> = (0..objectives.len())
+            .filter(|index| *index as i64 != ignore)
+            .filter_map(|index| {
+                let value = objectives
+                    .at(index)
+                    .try_to::<VarDictionary>()
+                    .unwrap_or_default();
+                let pos = dict_i64(&value, "editorPos");
+                has_pos(pos).then(|| (node_x_at(pos), node_y_at(pos)))
+            })
+            .collect();
+        valid_place_rect(x, y, &others)
     }
 
     /// Index of the node whose rect contains `point`, or `-1`. Nodes paint in
@@ -2999,13 +2985,26 @@ impl MindMapObjectivesCanvas {
     }
 }
 
-/// `Point2.pack`-style `editorPos` used by the canvas (`x` low, `y` high).
-fn pack_pos(x: i64, y: i64) -> i64 {
-    let mut value = (x & 0xFFFF) | ((y & 0xFFFF) << 16);
-    if value >= 2147483648 {
-        value -= 4294967296;
+/// `ObjectiveTilemap.validPlace` (`MapObjectivesCanvas.java:305-326`): the
+/// target is inside `[-bounds, bounds]` and its 5x2 tile rect does not overlap
+/// any other placed objective's rect. Edge contact is allowed (strict
+/// comparisons in Java).
+pub(crate) fn valid_place_rect(x: i32, y: i32, others: &[(i32, i32)]) -> bool {
+    if !(-BOUNDS..=BOUNDS).contains(&x) || !(-BOUNDS..=BOUNDS).contains(&y) {
+        return false;
     }
-    value
+    for &(nx, ny) in others {
+        if nx < x + OBJ_WIDTH && nx + OBJ_WIDTH > x && ny < y + OBJ_HEIGHT && ny + OBJ_HEIGHT > y {
+            return false;
+        }
+    }
+    true
+}
+
+/// `Point2.pack`-style `editorPos` used by the canvas (`arc Point2.pack`:
+/// **x in the high half, y in the low half**, `Point2.java:40-42`).
+fn pack_pos(x: i64, y: i64) -> i64 {
+    i64::from(((x as i16 as i32) << 16) | ((y as i16 as u16) as i32))
 }
 
 /// `_has_pos(editorPos)`: the packed `(-999, -999)` sentinel means "unplaced".
@@ -3058,4 +3057,43 @@ fn clampf(value: f32, min: f32, max: f32) -> f32 {
         return value;
     }
     value.clamp(min, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `NodePosition.pack`/`unpack` (`MapObjectivesCanvas.NodePosition`): the
+    /// signed 16-bit halves round-trip and the sentinel marks "unplaced".
+    #[test]
+    fn objective_editor_pos_packs_signed_halves() {
+        for (x, y) in [(0, 0), (5, 2), (-1, -2), (-100, 99), (32767, -32768)] {
+            let packed = pack_pos(i64::from(x), i64::from(y));
+            assert_eq!(node_x_at(packed), x, "x for ({x},{y})");
+            assert_eq!(node_y_at(packed), y, "y for ({x},{y})");
+            assert!(has_pos(packed));
+        }
+        assert!(!has_pos(pack_pos(-999, -999)), "the default sentinel");
+    }
+
+    /// `ObjectiveTilemap.validPlace` (`MapObjectivesCanvas.java:305-326`): the
+    /// 5x2 rects may touch but not overlap, and the `[-100, 100]` bounds hold.
+    #[test]
+    fn objective_placement_rejects_overlap_but_allows_edge_contact() {
+        // Free space.
+        assert!(valid_place_rect(0, 0, &[]));
+        // Same cell overlaps.
+        assert!(!valid_place_rect(0, 0, &[(0, 0)]));
+        // Overlap by one tile in either axis.
+        assert!(!valid_place_rect(1, 0, &[(0, 0)]));
+        assert!(!valid_place_rect(0, 1, &[(0, 0)]));
+        // Edge contact is legal (strict inequalities in Java).
+        assert!(valid_place_rect(OBJ_WIDTH, 0, &[(0, 0)]));
+        assert!(valid_place_rect(0, OBJ_HEIGHT, &[(0, 0)]));
+        assert!(valid_place_rect(-OBJ_WIDTH, 0, &[(0, 0)]));
+        // Bounds are inclusive and checked before the overlap scan.
+        assert!(valid_place_rect(BOUNDS, BOUNDS, &[]));
+        assert!(!valid_place_rect(BOUNDS + 1, 0, &[]));
+        assert!(!valid_place_rect(0, -BOUNDS - 1, &[]));
+    }
 }

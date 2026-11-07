@@ -11,9 +11,9 @@
 //!
 //! - `host` (`client/ui/dialogs/host_dialog.gd`, `HostDialog.java`): the
 //!   remembered player name/colour (`name`/`color-0`), the remembered port
-//!   (`port`, default 6567) and the gamemode row. The dialog never hosts by
-//!   itself: it pushes the identity to `MindNet` and emits
-//!   `host_requested(host_name, mode)`, which `UiRoot` turns into the
+//!   (`port`, default 6567) and Java's floating `[60 spacer][300][?]` row. The
+//!   dialog never hosts by itself: it pushes the identity to `MindNet` and
+//!   emits `host_requested(host_name, mode)`, which `UiRoot` turns into the
 //!   `MindNet.host_current_world` call.
 //! - `load` (`client/ui/dialogs/load_dialog.gd`, `LoadDialog.java`): a search
 //!   row plus gamemode filter toggles and a card grid built from
@@ -50,9 +50,9 @@ use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::text_server::AutowrapMode;
 use godot::classes::texture_rect::StretchMode;
 use godot::classes::{
-    Button, CenterContainer, ColorRect, Control, HBoxContainer, Json, LineEdit, Node, Panel,
-    PanelContainer, ProjectSettings, RichTextLabel, StyleBoxEmpty, StyleBoxFlat, Texture2D, Time,
-    VBoxContainer,
+    Button, CenterContainer, ColorRect, Control, HBoxContainer, Json, LineEdit, MarginContainer,
+    Node, Panel, PanelContainer, ProjectSettings, RichTextLabel, StyleBoxEmpty, StyleBoxFlat,
+    Texture2D, Time, VBoxContainer,
 };
 use godot::global::HorizontalAlignment;
 use godot::obj::{NewAlloc, NewGd, Singleton};
@@ -467,14 +467,16 @@ fn format_millis(millis: i64) -> String {
 // HostDialogController (manifest id `host`)
 // ---------------------------------------------------------------------------
 
-/// Gamemode keys (`@mode.*`) offered by the host dialog (`HostDialog.MODES`).
-const HOST_MODES: [&str; 5] = [
-    "@mode.survival",
-    "@mode.sandbox",
-    "@mode.attack",
-    "@mode.pvp",
-    "@mode.editor",
-];
+/// `HostDialog.w`: the name/port tables and the `@host` button width
+/// (`HostDialog.java:16`).
+const HOST_WIDTH: f32 = 300.0;
+/// `HostDialog`'s row height (`HostDialog.java:33,62`): the name/colour and
+/// port tables are `width(w).height(70f)`.
+const HOST_ROW_HEIGHT: f32 = 70.0;
+/// Java's empty spacer column before `@host` (`cont.add().width(65f)`).
+const HOST_SPACER_WIDTH: f32 = 65.0;
+/// The `?` info button size (`size(65f, 70f).padLeft(6f)`).
+const HOST_HELP_WIDTH: f32 = 65.0;
 /// Upstream `Core.settings.getInt("port", port)` default (`HostDialog.java:57`).
 const HOST_DEFAULT_PORT: i64 = 6567;
 /// `maxLength(40)` on the player-name field (`HostDialog.java:24`).
@@ -485,21 +487,17 @@ const HOST_NAME_SETTING: &str = "name";
 const HOST_COLOR_SETTING: &str = "color-0";
 /// `Core.settings` `port` key (`HostDialog.java:56`).
 const HOST_PORT_SETTING: &str = "port";
-/// `Core.settings` `mode` key: the gamemode row's remembered selection.
-const HOST_MODE_SETTING: &str = "mode";
 /// Per-controller generation (`ready` re-runs on an extension reload).
 const HOST_GENERATION_META: &str = "_mind_batch_h_host_generation";
 /// The installed picker `color_selected` callable.
 const HOST_PICKER_HOOK: &str = "_mind_batch_h_host_picker_hook";
 
-/// `HostDialog` state: the validated fields and the presentational mode row.
+/// `HostDialog` state: the validated fields and the colour swatch.
 struct HostState {
     name_field: Option<Gd<LineEdit>>,
     port_field: Option<Gd<LineEdit>>,
     host_button: Option<Gd<Button>>,
     swatch_tint: Option<Gd<ColorRect>>,
-    /// Selected `@mode.*` key (`_mode`).
-    mode: String,
     /// Player colour shown in the swatch (`player.color()`).
     color: Color,
     generation: i64,
@@ -512,16 +510,15 @@ impl Default for HostState {
             port_field: None,
             host_button: None,
             swatch_tint: None,
-            mode: HOST_MODES[0].to_string(),
             color: Color::WHITE,
             generation: 0,
         }
     }
 }
 
-/// `HostDialog` — host configuration (name + colour + gamemode + port) and the
-/// `@host` intent. The dialog emits `host_requested`; `UiRoot` turns that into
-/// the `MindNet.host_current_world` call (`HostDialog.runHost`).
+/// `HostDialog` — host configuration (name + colour + port) and the `@host`
+/// intent. The dialog emits `host_requested`; `UiRoot` turns that into the
+/// `MindNet.host_current_world` call (`HostDialog.runHost`).
 pub struct HostDialogController {
     state: Rc<RefCell<HostState>>,
 }
@@ -546,21 +543,32 @@ impl DialogController for HostDialogController {
     }
 }
 
-/// `HostDialog._build`: name + colour row, mode row, port row and `@host`.
+/// `HostDialog._build`: Java's floating rows — a 300x70 name + colour table, a
+/// 300x70 port table, then `[65 spacer][@host 300x70][? 65x70]`
+/// (`HostDialog.java:22-73`). The dialog is a `setFillParent(true)` BaseDialog,
+/// so the widgets float over the paused menu with no boxed panel.
 fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
     dialog.clear_content();
     dialog.clear_buttons();
+    // `BaseDialog.setFillParent(true)` (`Dialog.java:22`): full-screen shell,
+    // `Styles.defaultDialog` = `windowEmpty`, so there is no visible box.
+    dialog.enable_full_dialog(true);
+    // Arc's `cont` centres its single `expand().fill()` cell.
+    dialog.apply_cont_top(false);
     let dialog_gd = dialog.to_gd();
     let mut table = dialog.content_table();
-    table.add_theme_constant_override("separation", 6);
 
+    // ---- name + colour row: `cont.table(t -> ...).width(w).height(70f)` ----
     let name_hint = kit::t("@name").to_string();
-    // code-instantiated: the name + colour row (`HostDialog.java:22-34`); the
-    // 300 px row width and final paddings land in I08 T12.
+    // code-instantiated: the 300x70 Java row (a code-built composite).
     let mut name_row = HBoxContainer::new_alloc();
-    name_row.add_theme_constant_override("separation", 6);
-    name_row.add_child(&factory::label(&name_hint));
+    name_row.set_name("host-name-row");
+    name_row.set_custom_minimum_size(Vector2::new(HOST_WIDTH, HOST_ROW_HEIGHT));
+    name_row.add_theme_constant_override("separation", 0);
+    // `t.add("@name").padRight(10)`
+    name_row.add_child(&host_label_cell(&name_hint, 10));
     let mut name_field = factory::field(&name_hint);
+    name_field.set_name("host-name-field");
     name_field.set_max_length(HOST_NAME_MAX_LENGTH);
     // `HostDialog.java:24`: the field opens with the remembered name.
     name_field.set_text(&GString::from(stored_player_name().as_str()));
@@ -577,12 +585,17 @@ fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
         });
         name_field.connect("text_changed", &callable);
     }
-    name_row.add_child(&name_field);
-    // code-instantiated: the square colour swatch is tinted at runtime by the
-    // colour chosen in the `picker` dialog (`HostDialog.java:28-34`).
+    // `t.field(...).grow().pad(8)`
+    name_row.add_child(&host_field_cell(&name_field, 8));
+    // `t.button(Tex.whiteui, Styles.squarei, 40, ...).size(54f)`: tinted at
+    // runtime by the colour chosen in the `picker` dialog
+    // (`HostDialog.java:28-34`).
+    // code-instantiated: the square colour swatch is tinted from the setting.
     let mut swatch = Button::new_alloc();
+    swatch.set_name("host-swatch");
     swatch.set_theme_type_variation("squarei");
     swatch.set_custom_minimum_size(Vector2::new(54.0, 54.0));
+    swatch.set_v_size_flags(SizeFlags::SHRINK_CENTER);
     let color = stored_player_color();
     let mut tint = ColorRect::new_alloc();
     tint.set_color(color);
@@ -600,44 +613,32 @@ fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
         swatch.connect("pressed", &callable);
     }
     name_row.add_child(&swatch);
-    table.bind_mut().add(&name_row).grow_x().pad(4.0);
+    table
+        .bind_mut()
+        .add(&name_row)
+        .width(HOST_WIDTH)
+        .height(HOST_ROW_HEIGHT)
+        .colspan(3)
+        .pad(4.0);
     table.bind_mut().row();
     {
         let mut st = state.borrow_mut();
         st.name_field = Some(name_field);
         st.swatch_tint = Some(tint);
         st.color = color;
-        st.mode = host_stored_mode();
     }
 
-    // code-instantiated: gamemode buttons are the data-driven mode list.
-    let mut mode_row = HBoxContainer::new_alloc();
-    let current_mode = state.borrow().mode.clone();
-    for mode in HOST_MODES {
-        let mut button = Button::new_alloc();
-        button.set_text(&kit::t(mode));
-        button.set_theme_type_variation("flatTogglet");
-        button.set_toggle_mode(true);
-        button.set_pressed(mode == current_mode);
-        let state_for = state.clone();
-        let callable = Callable::from_fn("host_select_mode", move |_args: &[&Variant]| {
-            state_for.borrow_mut().mode = mode.to_string();
-            settings_put_text(HOST_MODE_SETTING, mode);
-            Variant::nil()
-        });
-        button.connect("pressed", &callable);
-        mode_row.add_child(&button);
-    }
-    table.bind_mut().add(&mode_row).grow_x().pad(4.0);
-    table.bind_mut().row();
-
-    // code-instantiated: the port row is a fixed composite (label + validated
-    // field) mirroring `HostDialog.java:51-73`.
+    // ---- port row: `cont.table(t -> ...).width(w).height(70f)` ----
     let port_hint = kit::t("@server.port").to_string();
+    // code-instantiated: the 300x70 Java port row.
     let mut port_row = HBoxContainer::new_alloc();
-    port_row.add_theme_constant_override("separation", 6);
-    port_row.add_child(&factory::label(&port_hint));
+    port_row.set_name("host-port-row");
+    port_row.set_custom_minimum_size(Vector2::new(HOST_WIDTH, HOST_ROW_HEIGHT));
+    port_row.add_theme_constant_override("separation", 0);
+    // `t.add("@server.port").padRight(10)`
+    port_row.add_child(&host_label_cell(&port_hint, 10));
     let mut port_field = factory::field("");
+    port_field.set_name("host-port-field");
     let stored_port =
         settings_int(HOST_PORT_SETTING, HOST_DEFAULT_PORT).unwrap_or(HOST_DEFAULT_PORT);
     let port = if (1..=65535).contains(&stored_port) {
@@ -656,14 +657,27 @@ fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
         });
         port_field.connect("text_changed", &callable);
     }
-    port_row.add_child(&port_field);
-    table.bind_mut().add(&port_row).grow_x().pad(4.0);
+    // `portField[0] = t.field(...).pad(8).grow().maxTextLength(5).valid(...)`
+    port_row.add_child(&host_field_cell(&port_field, 8));
+    table
+        .bind_mut()
+        .add(&port_row)
+        .width(HOST_WIDTH)
+        .height(HOST_ROW_HEIGHT)
+        .colspan(3)
+        .pad(4.0);
     table.bind_mut().row();
     state.borrow_mut().port_field = Some(port_field);
 
+    // ---- `cont.add().width(65f)` + `@host` + `?` (`HostDialog.java:66-73`) ----
+    // code-instantiated: the empty 65 px spacer cell.
+    let mut spacer = Control::new_alloc();
+    spacer.set_name("host-spacer");
+    table.bind_mut().add(&spacer).width(HOST_SPACER_WIDTH);
     // code-instantiated: the host action button is created here because the
     // validated port field gates its disabled state at runtime.
     let mut host_button = factory::button(&kit::t("@host").to_string());
+    host_button.set_name("host-button");
     {
         let dialog_for = dialog_gd.clone();
         let state_for = state.clone();
@@ -673,20 +687,65 @@ fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
         });
         host_button.connect("pressed", &callable);
     }
-    if let Some(mut row) = dialog.buttons_row() {
-        row.add_child(&host_button);
+    table
+        .bind_mut()
+        .add(&host_button)
+        .width(HOST_WIDTH)
+        .height(HOST_ROW_HEIGHT);
+    // `if(!steam) cont.button("?", () -> ui.showInfo("@host.info"))...`
+    let mut help = factory::button("?");
+    help.set_name("host-help");
+    {
+        let callable = Callable::from_fn("host_info", move |_args: &[&Variant]| {
+            let _ = ui_call("show_info", &[kit::t("@host.info").to_variant()]);
+            Variant::nil()
+        });
+        help.connect("pressed", &callable);
     }
+    table
+        .bind_mut()
+        .add(&help)
+        .width(HOST_HELP_WIDTH)
+        .height(HOST_ROW_HEIGHT)
+        .pad_left(6.0);
     state.borrow_mut().host_button = Some(host_button);
+    host_on_port_changed(state);
 }
 
-/// The remembered `mode` setting, restricted to the offered keys.
-fn host_stored_mode() -> String {
-    let stored = settings_text(HOST_MODE_SETTING, HOST_MODES[0]).unwrap_or_default();
-    if HOST_MODES.contains(&stored.as_str()) {
-        stored
-    } else {
-        HOST_MODES[0].to_string()
+/// A Java row label cell (`t.add("@name").padRight(10)`): the label keeps its
+/// minimum width and centres vertically in the 70 px row.
+fn host_label_cell(text: &str, pad_right: i32) -> Gd<MarginContainer> {
+    // code-instantiated: per-open row label cell.
+    let mut margin = MarginContainer::new_alloc();
+    margin.add_theme_constant_override("margin_right", pad_right);
+    // code-instantiated: vertical centring box for the label.
+    let mut center = VBoxContainer::new_alloc();
+    center.set_alignment(AlignmentMode::CENTER);
+    let mut label = factory::label(text);
+    label.set_v_size_flags(SizeFlags::SHRINK_CENTER);
+    center.add_child(&label);
+    margin.add_child(&center);
+    margin
+}
+
+/// A Java field cell (`t.field(...).pad(8).grow()`): 8 px side pads with the
+/// field centred in the 70 px row.
+fn host_field_cell(field: &Gd<LineEdit>, pad: i32) -> Gd<MarginContainer> {
+    // code-instantiated: per-open field cell.
+    let mut margin = MarginContainer::new_alloc();
+    for side in ["margin_left", "margin_right"] {
+        margin.add_theme_constant_override(side, pad);
     }
+    margin.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    // code-instantiated: vertical centring box for the field.
+    let mut center = VBoxContainer::new_alloc();
+    center.set_alignment(AlignmentMode::CENTER);
+    center.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    let mut field = field.clone();
+    field.set_h_size_flags(SizeFlags::EXPAND_FILL);
+    center.add_child(&field);
+    margin.add_child(&center);
+    margin
 }
 
 /// `HostDialog.portField.valid`: an integer in `1..=65535`.
@@ -798,7 +857,7 @@ fn host_hook_picker(dialog: &Gd<MindDialog>, state: &Rc<RefCell<HostState>>) {
 
 /// `HostDialog._host`: validate, push identity, emit `host_requested`, close.
 fn host_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<HostState>>) {
-    let (valid, name, mode) = {
+    let (valid, name) = {
         let st = state.borrow();
         (
             host_port_valid(&st),
@@ -806,7 +865,6 @@ fn host_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<HostState>>) {
                 .clone()
                 .map(|field| field.get_text().to_string())
                 .unwrap_or_default(),
-            st.mode.clone(),
         )
     };
     if !valid {
@@ -821,9 +879,12 @@ fn host_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<HostState>>) {
     emit_dialog_signal(
         dialog,
         "host_requested",
+        // `HostDialog.runHost` hosts the currently loaded world; the second
+        // signal argument is kept for ABI compatibility (the mode row is not
+        // part of Java's HostDialog).
         &[
             GString::from(name.as_str()).to_variant(),
-            GString::from(mode.as_str()).to_variant(),
+            GString::new().to_variant(),
         ],
     );
     // `HostDialog.runHost` hides the dialog once the host call is dispatched.
