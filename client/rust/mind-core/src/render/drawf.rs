@@ -367,6 +367,115 @@ pub fn dash_circle_segments(x: f32, y: f32, radius: f32) -> Vec<[f32; 4]> {
     out
 }
 
+/// `Mathf.dst(x, y, x2, y2)` (`Mathf.java::dst`).
+pub fn dst(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
+    ((x2 - x).powi(2) + (y2 - y).powi(2)).sqrt()
+}
+
+/// `Drawf.dashLineDst` division count: `(int)(dst(x, y, x2, y2) / tilesize *
+/// 1.6f)` (`Drawf.java:219-221`).
+pub fn dash_line_dst_divisions(x: f32, y: f32, x2: f32, y2: f32) -> i32 {
+    (dst(x, y, x2, y2) / crate::config::TILESIZE as f32 * 1.6) as i32
+}
+
+/// `Drawf.dashLine` division count: `(int)(max(|dx|, |dy|) / tilesize * 2)`
+/// (`Drawf.java:227-229`).
+pub fn dash_line_divisions(x: f32, y: f32, x2: f32, y2: f32) -> i32 {
+    ((x - x2).abs().max((y - y2).abs()) / crate::config::TILESIZE as f32 * 2.0) as i32
+}
+
+/// `Drawf.dashRect`'s four sides (`Drawf.java:257-262`), each
+/// `[x1, y1, x2, y2]` clockwise from the top-left corner. The caller runs
+/// [`dash_line_divisions`] per side.
+pub fn dash_rect_lines(x: f32, y: f32, width: f32, height: f32) -> [[f32; 4]; 4] {
+    [
+        [x, y, x + width, y],
+        [x + width, y, x + width, y + height],
+        [x + width, y + height, x, y + height],
+        [x, y + height, x, y],
+    ]
+}
+
+/// `Drawf.dashSquare` (`Drawf.java:249-251`): `dashRect(x - size/2, y - size/2,
+/// size, size)`.
+pub fn dash_square_lines(x: f32, y: f32, size: f32) -> [[f32; 4]; 4] {
+    dash_rect_lines(x - size / 2.0, y - size / 2.0, size, size)
+}
+
+/// `Mathf.round(value, step)`: `Math.round(value / step) * step`.
+pub fn round_step(value: f32, step: i32) -> i32 {
+    (value / step as f32).round() as i32 * step
+}
+
+/// One `Drawf.point` vertex (`Drawf.java:116-120`): rotate the local point by
+/// `rotation` degrees and translate by the flame origin.
+fn flame_point(local_x: f32, local_y: f32, x: f32, y: f32, rotation: f32) -> (f32, f32) {
+    let (rx, ry) = trns(rotation, 1.0);
+    let (c, s) = (rx, ry);
+    (local_x * c - local_y * s + x, local_x * s + local_y * c + y)
+}
+
+/// `Drawf.flame(x, y, divisions, rotation, length, width, pan)`
+/// (`Drawf.java:69-102`): the two half-arc sides, left first then right, as a
+/// polygon point list for `Fill.poly`.
+pub fn flame_points(
+    x: f32,
+    y: f32,
+    divisions: i32,
+    rotation: f32,
+    length: f32,
+    width: f32,
+    pan: f32,
+) -> Vec<(f32, f32)> {
+    let divisions = divisions.max(1);
+    let count = divisions as f32;
+    let len1 = length * pan;
+    let len2 = length * (1.0 - pan);
+    let mut points = Vec::with_capacity((divisions * 2) as usize);
+    for i in 0..divisions {
+        // Left side: half arc 90 -> 270.
+        let rot = 90.0 + 180.0 * i as f32 / count;
+        let (px, py) = trns(rot, width);
+        let local_x = (px + width) / width * len1;
+        points.push(flame_point(local_x, py, x, y, rotation));
+    }
+    for i in 0..divisions {
+        // Right side: half arc -90 -> 90.
+        let rot = -90.0 + 180.0 * i as f32 / count;
+        let (px, py) = trns(rot, width);
+        let local_x = len1 + px / width * len2;
+        points.push(flame_point(local_x, py, x, y, rotation));
+    }
+    points
+}
+
+/// `Drawf.flameFront(x, y, divisions, rotation, length, width)`
+/// (`Drawf.java:103-115`): one half-arc front ellipse, with the Java quirks —
+/// `divisions = Mathf.round(divisions, 2) + 1` and the loop running
+/// `0..=divisions` (so `divisions + 1` points).
+pub fn flame_front_points(
+    x: f32,
+    y: f32,
+    divisions: i32,
+    rotation: f32,
+    length: f32,
+    width: f32,
+) -> Vec<(f32, f32)> {
+    let divisions = round_step(divisions as f32, 2) + 1;
+    if divisions <= 0 {
+        return Vec::new();
+    }
+    let count = divisions as f32;
+    let mut points = Vec::with_capacity(divisions as usize + 1);
+    for i in 0..=divisions {
+        let rot = -90.0 + 180.0 * i as f32 / count;
+        let (px, py) = trns(rot, width);
+        let local_x = px / width * length;
+        points.push(flame_point(local_x, py, x, y, rotation));
+    }
+    points
+}
+
 /// `Lines.poly(x, y, sides, radius, angle)` (`Lines.java:414-419`): the closed
 /// vertex ring starting at `angle_deg` (first == last for a connectable line).
 pub fn poly_ring(x: f32, y: f32, sides: u32, radius: f32, angle_deg: f32) -> Vec<(f32, f32)> {
@@ -550,6 +659,63 @@ mod tests {
 
         // radius 5 -> 10 + 3 = 13 -> odd -> 14 -> 7 segments.
         assert_eq!(dash_circle_segments(0.0, 0.0, 5.0).len(), 7);
+    }
+
+    /// GAPS #53: the remaining `Drawf` dash helpers
+    /// (`drawf.java:219-268`): distance/side-derived divisions, the rectangle
+    /// sides and the square shortcut.
+    #[test]
+    fn dash_helpers_match_drawf() {
+        // `dashLineDst(0, 0, 30, 40)`: dst 50 / 8 * 1.6 = 10.
+        assert_eq!(dash_line_dst_divisions(0.0, 0.0, 30.0, 40.0), 10);
+        // `dashLine(0, 0, 80, 0)`: max(80, 0) / 8 * 2 = 20.
+        assert_eq!(dash_line_divisions(0.0, 0.0, 80.0, 0.0), 20);
+        let rect = dash_rect_lines(10.0, 20.0, 30.0, 40.0);
+        assert_eq!(rect[0], [10.0, 20.0, 40.0, 20.0]);
+        assert_eq!(rect[1], [40.0, 20.0, 40.0, 60.0]);
+        assert_eq!(rect[2], [40.0, 60.0, 10.0, 60.0]);
+        assert_eq!(rect[3], [10.0, 60.0, 10.0, 20.0]);
+        let square = dash_square_lines(10.0, 20.0, 8.0);
+        assert_eq!(square[0], [6.0, 16.0, 14.0, 16.0]);
+    }
+
+    /// GAPS #53: `Drawf.flameFront` (`Drawf.java:103-115`) — a 3-point half arc
+    /// for `divisions = 1` after the `Mathf.round(divisions, 2) + 1` quirk.
+    #[test]
+    fn flame_front_points_follow_the_half_arc() {
+        let points = flame_front_points(0.0, 0.0, 1, 0.0, 10.0, 1.0);
+        assert_eq!(points.len(), 4, "round(1, 2) = 2, +1, loop 0..=3");
+        // rot -90: (0, -1); -30: (8.66, -0.5); 30: (8.66, 0.5); 90: (0, 1).
+        let close =
+            |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+        assert!(close(points[0], (0.0, -1.0)), "{:?}", points[0]);
+        assert!(close(points[1], (8.660_254, -0.5)), "{:?}", points[1]);
+        assert!(close(points[2], (8.660_254, 0.5)), "{:?}", points[2]);
+        assert!(close(points[3], (0.0, 1.0)), "{:?}", points[3]);
+        // Rotation rotates the whole arc about the origin.
+        let rotated = flame_front_points(0.0, 0.0, 1, 90.0, 10.0, 1.0);
+        assert!(close(rotated[0], (1.0, 0.0)), "{:?}", rotated[0]);
+    }
+
+    /// GAPS #53: `Drawf.flame` (`Drawf.java:69-102`) — left half arc first,
+    /// then the right side offset by `len1 = length * pan`.
+    #[test]
+    fn flame_points_split_at_pan() {
+        let points = flame_points(0.0, 0.0, 1, 0.0, 10.0, 1.0, 0.5);
+        assert_eq!(points.len(), 2);
+        // Left side at rot 90: local (len1, width) = (5, 1).
+        assert!((points[0].0 - 5.0).abs() < 1e-4);
+        assert!((points[0].1 - 1.0).abs() < 1e-4);
+        // Right side at rot -90: local (len1, -width) = (5, -1).
+        assert!((points[1].0 - 5.0).abs() < 1e-4);
+        assert!((points[1].1 + 1.0).abs() < 1e-4);
+        // `pan = 0` puts the whole length on the right side: the arc starts at
+        // the origin and its last sample reaches `length`.
+        let tail = flame_points(0.0, 0.0, 2, 0.0, 10.0, 1.0, 0.0);
+        assert!(tail[2].0.abs() < 1e-4, "{:?}", tail[2]);
+        assert!((tail[3].0 - 10.0).abs() < 1e-4, "{:?}", tail[3]);
+        assert_eq!(round_step(13.0, 2), 14);
+        assert_eq!(round_step(1.0, 2), 2);
     }
 
     #[test]

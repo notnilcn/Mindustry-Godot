@@ -73,7 +73,18 @@ impl<'a> AtlasIcons<'a> {
     }
 
     /// Rasterises one `Fonts.logic` glyph at 16 px (`LogicDisplay.java:227-235`).
+    ///
+    /// `'\0'` is the font's `.notdef` box (`fonts.logic`'s `missingGlyph`,
+    /// `FreeTypeFontGenerator` installs it for every unmapped character):
+    /// Godot's `FontFile` never exposes glyph index `0`, so it is synthesised
+    /// by [`notdef_glyph`] instead. Blank glyphs (the synthesised space) have a
+    /// positive glyph index but no atlas texture (`get_glyph_texture_idx` `-1`);
+    /// querying `get_texture_image(-1)` logged a Godot error, so they are
+    /// skipped exactly like Java's `getGlyph(c) == null` branch.
     fn logic_glyph(&self, c: char) -> Option<Glyph> {
+        if c == '\0' {
+            return Some(notdef_glyph());
+        }
         let assets = self.assets.clone()?;
         let mut font = assets.bind().logic_font()?;
         let size = Vector2i::new(16, 0);
@@ -83,6 +94,10 @@ impl<'a> AtlasIcons<'a> {
         }
         font.render_glyph(0, size, index);
         let texture_index = font.get_glyph_texture_idx(0, size, index);
+        if texture_index < 0 {
+            // No atlas page for this glyph (space and other blank glyphs).
+            return None;
+        }
         let image = font.get_texture_image(0, size, texture_index)?;
         let uv = font.get_glyph_uv_rect(0, size, index);
         let (image_width, image_height) = (image.get_width() as f32, image.get_height() as f32);
@@ -192,6 +207,38 @@ impl DisplayDrawContext for AtlasIcons<'_> {
     }
 }
 
+/// The `.notdef` box for characters the logic font cannot draw
+/// (`FontData.missingGlyph`; `'\0'` in `mind_core::logic::font::GLYPH_CHARS`).
+///
+/// A 5x7 hollow rectangle at cap height, sitting on the baseline (y-down
+/// `y_offset` `-height`). Godot's `FontFile` does not expose glyph index `0`
+/// (`get_glyph_index` returns `0` for "not found"), so drawing the real
+/// `.notdef` would need `render_glyph(0, ..)`; synthesising the box is exact
+/// enough for the 16 px display font and cannot log a Godot error.
+fn notdef_glyph() -> Glyph {
+    const WIDTH: u32 = 5;
+    const HEIGHT: u32 = 7;
+    let mut pixels = vec![0u32; (WIDTH * HEIGHT) as usize];
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            if x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1 {
+                pixels[(y * WIDTH + x) as usize] = 0xffff_ffff;
+            }
+        }
+    }
+    Glyph {
+        image: RgbaImage {
+            width: WIDTH,
+            height: HEIGHT,
+            pixels,
+        },
+        x_offset: 1.0,
+        y_offset: -(HEIGHT as f32),
+        cap_height: HEIGHT as f32,
+        ascent: 3.0,
+    }
+}
+
 /// An `Image` as RGBA8888 pixels in `0xRRGGBBAA` order (row 0 = top).
 fn rgba_from_image(image: &Gd<Image>) -> Option<RgbaImage> {
     let mut image = image.clone();
@@ -216,4 +263,27 @@ fn rgba_from_image(image: &Gd<Image>) -> Option<RgbaImage> {
         height,
         pixels,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::notdef_glyph;
+
+    /// The synthesised `.notdef` box keeps the logic-font cap-height
+    /// proportions and places like a baseline glyph (`Glyph::print_center`).
+    #[test]
+    fn notdef_box_is_a_hollow_baseline_box() {
+        let glyph = notdef_glyph();
+        assert_eq!(glyph.image.width, 5);
+        assert_eq!(glyph.image.height, 7);
+        // Border pixels are opaque, the interior is clear.
+        assert_eq!(glyph.image.pixels[0], 0xffff_ffff);
+        assert_eq!(glyph.image.pixels[5 + 2], 0);
+        assert_eq!(glyph.image.pixels[4 * 5 + 2], 0, "bottom border is row 6");
+        assert_eq!(glyph.image.pixels[6 * 5 + 2], 0xffff_ffff);
+        // `print_center`: (x + w/2 + xoffset, y - yoffset - h/2).
+        let (cx, cy) = glyph.print_center(10.0, 20.0);
+        assert!((cx - 13.5).abs() < 1e-6, "cx {cx}");
+        assert!((cy - 23.5).abs() < 1e-6, "cy {cy}");
+    }
 }

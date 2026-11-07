@@ -27,6 +27,7 @@ use crate::math::ArcRand;
 use crate::render::commands::{Blend, DrawCmd, FillKind, LineKind, ShapeKind};
 use crate::render::ids::{RegionId, RegionIdTable};
 use crate::render::layer::Layer;
+use crate::render::liquid_frames;
 
 /// One draw primitive with its resolved `Layer` z and blend mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -159,6 +160,18 @@ impl DescDraw {
     }
 }
 
+/// Content-resolved `DrawLiquidTile.drawLiquid` fields (`fill_liquid_tiles`):
+/// the `Liquid` record the tiled animation frames and tint come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LiquidFrame {
+    /// `Liquid.id` (the per-liquid animation phase offset; `Liquid.java:107`).
+    pub id: u16,
+    /// `Liquid.gas` (`fluid-gas-<i>` frames instead of `fluid-liquid-<i>`).
+    pub gas: bool,
+    /// `Liquid.color` tint (RGBA8888).
+    pub color: u32,
+}
+
 /// Immutable view of the entity a descriptor draws (the port of the Arc
 /// `Building` fields the drawers read). All positions are world pixels.
 #[derive(Clone, Copy, Debug)]
@@ -191,6 +204,11 @@ pub struct DrawState {
     pub liquid_amount: f32,
     /// Current liquid color.
     pub liquid_color: u32,
+    /// Dominant liquid content id (`Liquid.id`; the `Liquid.getAnimationFrame`
+    /// phase offset when the drawer names no liquid).
+    pub liquid_id: u16,
+    /// Dominant liquid `Liquid.gas`.
+    pub liquid_gas: bool,
     /// Heat amount (`HeatBlock.heat`).
     pub heat: f32,
     /// Heat requirement (`HeatBlock.heatRequirement`).
@@ -221,6 +239,8 @@ impl DrawState {
             liquid_capacity: 1.0,
             liquid_amount: 0.0,
             liquid_color: 0xffff_ffff,
+            liquid_id: 0,
+            liquid_gas: false,
             heat: 0.0,
             heat_requirement: 1.0,
             side_heat: [0.0; 4],
@@ -302,10 +322,16 @@ pub enum DrawDesc {
     },
     /// `DrawLiquidTile`.
     LiquidTile {
-        /// `DrawLiquidTile.padding` (`<0` = 0).
+        /// `DrawLiquidTile.padding` (`<0` = 0); the port uses it for all four
+        /// sides (`DrawLiquidTile.load` copies it into the unset pads).
         padding: f32,
         /// Alpha multiplier.
         alpha: f32,
+        /// `DrawLiquidTile.drawLiquid` content name (`None` = the building's
+        /// current liquid).
+        liquid: Option<&'static str>,
+        /// Content-resolved `drawLiquid` fields ([`fill_liquid_tiles`]).
+        frame: Option<LiquidFrame>,
     },
     /// `DrawPower`.
     Power {
@@ -946,11 +972,7 @@ pub fn execute(
                 with_alpha(0xffff_ffff, a),
             ));
         }
-        DrawDesc::LiquidRegion { alpha, .. } | DrawDesc::LiquidTile { alpha, .. } => {
-            let suffix = match desc {
-                DrawDesc::LiquidRegion { suffix, .. } => *suffix,
-                _ => "-liquid",
-            };
+        DrawDesc::LiquidRegion { suffix, alpha } => {
             let r = region(name, suffix, ids);
             let frac = clamp(
                 state.liquid_amount / state.liquid_capacity.max(f32::EPSILON),
@@ -970,6 +992,48 @@ pub fn execute(
                 0.0,
                 state.liquid_color,
             ));
+        }
+        // `DrawLiquidTile.draw` -> `LiquidBlock.drawTiledFrames`
+        // (`DrawLiquidTile.java:26-30`, `LiquidBlock.java:39-77`): the liquid's
+        // 50-frame animation tiled over every block cell, truncated against the
+        // drawer's padding. This is `Renderer.fluidFrames` (`Renderer.java:131-141`).
+        DrawDesc::LiquidTile {
+            padding,
+            alpha,
+            frame,
+            ..
+        } => {
+            let (liquid_id, gas, color) = frame
+                .map(|frame| (frame.id, frame.gas, frame.color))
+                .unwrap_or((state.liquid_id, state.liquid_gas, state.liquid_color));
+            let frac = clamp(
+                state.liquid_amount / state.liquid_capacity.max(f32::EPSILON),
+                0.0,
+                1.0,
+            ) * alpha;
+            // `Drawf.liquid`: `if(alpha < 1f/255f) return;` then
+            // `Draw.color(color, alpha * color.a)` (gases carry `a = 0.6`;
+            // `Liquid.java:96-100`).
+            let color_alpha = f32::from(color as u8) / 255.0;
+            let draw_alpha = frac * color_alpha;
+            if draw_alpha < 1.0 / 255.0 {
+                return;
+            }
+            let frame = liquid_frames::animation_frame(state.time, gas, liquid_id);
+            let r = ids.intern_str(liquid_frames::frame_region(gas, frame));
+            for tile in liquid_frames::tiled_frames(state.size, state.x, state.y, *padding) {
+                out.push(DescDraw::sprite(
+                    state.layer,
+                    Blend::Normal,
+                    r,
+                    tile.x,
+                    tile.y,
+                    tile.w,
+                    tile.h,
+                    0.0,
+                    with_alpha(color, draw_alpha),
+                ));
+            }
         }
         DrawDesc::Power {
             suffix,
@@ -2276,21 +2340,30 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
         "phase-weaver" => vec![region_desc("-bottom"), DrawDesc::Weave, DrawDesc::Default],
         "cryofluid-mixer" => vec![
             region_desc("-bottom"),
+            // `new DrawLiquidTile(Liquids.water)` / `(Liquids.cryofluid)`
+            // (`Blocks.java:1181`).
             DrawDesc::LiquidTile {
                 padding: 0.0,
                 alpha: 1.0,
+                liquid: Some("water"),
+                frame: None,
             },
             DrawDesc::LiquidTile {
                 padding: 0.0,
                 alpha: 1.0,
+                liquid: Some("cryofluid"),
+                frame: None,
             },
             DrawDesc::Default,
         ],
         "melter" | "separator" | "disassembler" => vec![
             region_desc("-bottom"),
+            // `new DrawLiquidTile()` (current liquid; `Blocks.java:1227/1248/1268`).
             DrawDesc::LiquidTile {
                 padding: 0.0,
                 alpha: 1.0,
+                liquid: None,
+                frame: None,
             },
             DrawDesc::Default,
         ],
@@ -2366,9 +2439,12 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
         ],
         "cultivator" => vec![
             region_desc("-bottom"),
+            // `new DrawLiquidTile(Liquids.water)` (`Blocks.java:2972`).
             DrawDesc::LiquidTile {
                 padding: 0.0,
                 alpha: 1.0,
+                liquid: Some("water"),
+                frame: None,
             },
             DrawDesc::Default,
             DrawDesc::Cultivator {
@@ -2393,9 +2469,12 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
         // `liquidOutputDirections = {1, 3}` (L06 T5).
         "electrolyzer" => vec![
             region_desc("-bottom"),
+            // `new DrawLiquidTile(Liquids.water, 2f)` (`Blocks.java:1374`).
             DrawDesc::LiquidTile {
                 padding: 2.0,
                 alpha: 1.0,
+                liquid: Some("water"),
+                frame: None,
             },
             DrawDesc::Bubbles {
                 color: 0x7693_e3ff,
@@ -2598,6 +2677,8 @@ pub fn from_drawer(spec: &DrawerSpec) -> DrawDesc {
         DrawerKind::LiquidTile => DrawDesc::LiquidTile {
             padding: 0.0,
             alpha: spec.alpha,
+            liquid: spec.liquid.as_deref().map(intern),
+            frame: None,
         },
         // `DrawPower.java:14-24`.
         DrawerKind::Power => DrawDesc::Power {
@@ -2943,29 +3024,56 @@ fn fill_liquid_outputs(chain: &mut [DrawDesc], def: &BlockDef, content: &Content
     // `world::block_kind_data` (`BlockDef.output_liquids` stays empty), so an
     // empty content vector keeps whatever the hand-written chain carries
     // (`vanilla_chain("electrolyzer")`); a mod block sets the field and wins.
-    if def.output_liquids.is_empty() {
-        return;
-    }
-    for desc in chain {
-        match desc {
-            DrawDesc::LiquidOutputs { outputs } => {
-                *outputs = def
-                    .output_liquids
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, (liquid, _))| {
-                        let side = def
-                            .liquid_output_directions
-                            .get(index)
-                            .copied()
-                            .unwrap_or(-1);
-                        content
-                            .liquid(*liquid)
-                            .map(|liquid| (liquid.name.clone(), side))
-                    })
-                    .collect();
+    if !def.output_liquids.is_empty() {
+        for desc in chain.iter_mut() {
+            match desc {
+                DrawDesc::LiquidOutputs { outputs } => {
+                    *outputs = def
+                        .output_liquids
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, (liquid, _))| {
+                            let side = def
+                                .liquid_output_directions
+                                .get(index)
+                                .copied()
+                                .unwrap_or(-1);
+                            content
+                                .liquid(*liquid)
+                                .map(|liquid| (liquid.name.clone(), side))
+                        })
+                        .collect();
+                }
+                DrawDesc::Multi(list) => fill_liquid_outputs(list, def, content),
+                _ => {}
             }
-            DrawDesc::Multi(list) => fill_liquid_outputs(list, def, content),
+        }
+    }
+    // `DrawLiquidTile.drawLiquid` is content-backed even for vanilla blocks
+    // whose `BlockDef.output_liquids` is empty (the hand-written chains name
+    // the fluid), so resolve it on every call.
+    fill_liquid_tiles(chain, content);
+}
+
+/// Resolves each `DrawLiquidTile.drawLiquid` name into the `Liquid` record the
+/// tiled frames need (`Liquid.getAnimationFrame` phase, gas frames, tint).
+fn fill_liquid_tiles(chain: &mut [DrawDesc], content: &ContentRegistry) {
+    for desc in chain.iter_mut() {
+        match desc {
+            DrawDesc::LiquidTile {
+                liquid: Some(name),
+                frame,
+                ..
+            } => {
+                if let Some(liquid) = content.liquid_by_name(name) {
+                    *frame = Some(LiquidFrame {
+                        id: liquid.id.raw(),
+                        gas: liquid.gas,
+                        color: liquid.color.to_rgba8888(),
+                    });
+                }
+            }
+            DrawDesc::Multi(list) => fill_liquid_tiles(list, content),
             _ => {}
         }
     }
@@ -3759,5 +3867,135 @@ mod tests {
             panic!("expected DrawArcSmelt");
         };
         assert!((alpha - 0.25).abs() < 1e-6);
+    }
+
+    /// GAPS #53: `DrawLiquidTile` draws the animated fluid frames over every
+    /// block cell (`LiquidBlock.drawTiledFrames`), not the single `-liquid`
+    /// region fill.
+    #[test]
+    fn liquid_tile_emits_fluid_frames_over_the_footprint() {
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut st = state();
+        st.liquid_capacity = 10.0;
+        st.liquid_amount = 10.0;
+        st.liquid_id = 42;
+        st.liquid_color = 0x596a_b8ff;
+        execute(
+            &DrawDesc::LiquidTile {
+                padding: 0.0,
+                alpha: 1.0,
+                liquid: None,
+                frame: None,
+            },
+            "melter",
+            &st,
+            &mut ids,
+            &mut out,
+        );
+        assert_eq!(out.len(), 4, "size-2 block tiles one frame per cell");
+        let DrawCmd::Sprite {
+            region,
+            w,
+            h,
+            color,
+            ..
+        } = out[0].cmd
+        else {
+            panic!("expected sprite");
+        };
+        // `(42 * 5) % 50 = 10` at `Time.time = 0`.
+        assert_eq!(ids.name(region), Some("fluid-liquid-10"));
+        assert_eq!((w, h), (32.0, 32.0));
+        let emitted = Rgba::from_rgba8888(color);
+        assert!((emitted.a - 1.0).abs() < 1e-6);
+    }
+
+    /// A resolved `DrawLiquidTile.drawLiquid` wins over the dominant liquid:
+    /// gas frames, the liquid's own animation phase and its tint
+    /// (`DrawLiquidTile.java:26-30`, `Liquid.java:96-100/106-108`).
+    #[test]
+    fn liquid_tile_prefers_the_resolved_draw_liquid() {
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let mut st = state();
+        st.time = 95.0;
+        st.liquid_capacity = 10.0;
+        st.liquid_amount = 10.0;
+        execute(
+            &DrawDesc::LiquidTile {
+                padding: 0.0,
+                alpha: 1.0,
+                liquid: Some("hydrogen"),
+                frame: Some(LiquidFrame {
+                    id: 7,
+                    gas: true,
+                    color: 0x8090a099,
+                }),
+            },
+            "regenerator",
+            &st,
+            &mut ids,
+            &mut out,
+        );
+        assert!(!out.is_empty());
+        let DrawCmd::Sprite { region, color, .. } = out[0].cmd else {
+            panic!("expected sprite");
+        };
+        // gas: (95 / 190 * 50) = 25, + 7*5 = 35 -> 60 % 50 = 10.
+        assert_eq!(ids.name(region), Some("fluid-gas-10"));
+        // `Drawf.liquid`: alpha * color.a (0x99 / 255 = 0.6).
+        let emitted = Rgba::from_rgba8888(color);
+        assert!((emitted.a - 0.6).abs() < 2.0 / 255.0, "{}", emitted.a);
+    }
+
+    /// `Drawf.liquid`'s `if(alpha < 1f/255f) return;` early-out.
+    #[test]
+    fn liquid_tile_skips_an_empty_tank() {
+        let mut ids = RegionIdTable::new();
+        let mut out = Vec::new();
+        let st = state();
+        execute(
+            &DrawDesc::LiquidTile {
+                padding: 0.0,
+                alpha: 1.0,
+                liquid: None,
+                frame: None,
+            },
+            "melter",
+            &st,
+            &mut ids,
+            &mut out,
+        );
+        assert!(out.is_empty());
+    }
+
+    /// `chain_for_with` resolves the hand-written `DrawLiquidTile` names into
+    /// content records (`fill_liquid_tiles`); `cryofluid-mixer` names water and
+    /// cryofluid (`Blocks.java:1181`).
+    #[test]
+    fn chain_for_with_resolves_draw_liquid_names() {
+        let content = crate::content::test_support::test_registry();
+        let def = content
+            .block_by_name("cryofluid-mixer")
+            .expect("cryofluid-mixer");
+        let chain = chain_for_with(def, &content);
+        let tiles: Vec<_> = chain
+            .iter()
+            .filter_map(|desc| match desc {
+                DrawDesc::LiquidTile { liquid, frame, .. } => Some((*liquid, *frame)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tiles.len(), 2, "water + cryofluid");
+        assert_eq!(tiles[0].0, Some("water"));
+        assert_eq!(tiles[1].0, Some("cryofluid"));
+        for (name, frame) in tiles {
+            let liquid = content.liquid_by_name(name.expect("name")).expect("liquid");
+            let frame = frame.expect("resolved");
+            assert_eq!(frame.id, liquid.id.raw());
+            assert_eq!(frame.gas, liquid.gas);
+            assert_eq!(frame.color, liquid.color.to_rgba8888());
+        }
     }
 }

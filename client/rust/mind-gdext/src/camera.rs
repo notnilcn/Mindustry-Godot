@@ -833,6 +833,24 @@ impl MindCamera2D {
         Vector2::new(self.camera.viewport.0, self.camera.viewport.1)
     }
 
+    /// `Core.camera.position.x/y` + `Core.camera.width/height` in world pixels
+    /// (GAPS #26 host half).
+    ///
+    /// These are the values Java's `NetClient.clientSnapshot` uploads as the
+    /// player's view (`NetClient.java:766-780` -> `NetServer.clientSnapshot`'s
+    /// `con.viewX/viewY/viewWidth/viewHeight`), which
+    /// `UnitComp.sense(cameraX..cameraHeight)` then divides back by
+    /// `tilesize` (`UnitComp.java:287-290`). Rust-only seam (not a `#[func]`):
+    /// only [`MindSimHost`](crate::sim_host::MindSimHost) consumes it.
+    pub fn logic_view_bounds(&self) -> (f32, f32, f32, f32) {
+        (
+            self.camera.position.0,
+            self.camera.position.1,
+            self.camera.camera_width(),
+            self.camera.camera_height(),
+        )
+    }
+
     /// `Renderer.scaleCamera(amount)` (relative zoom-by).
     #[func]
     pub fn zoom_by(&mut self, amount: f64) {

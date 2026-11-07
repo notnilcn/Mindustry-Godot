@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T02:48:14Z",
+  "updated": "2026-11-07T02:51:28Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -32632,6 +32632,13 @@
         "cargo test -p mind-gdext --lib render::floor => 10 passed (colored floor quads tinted, colored wall quad tinted, plain wall untouched)",
         "cargo test -p mind-core --lib render:: => 259 passed",
         "cargo check -p mind-gdext => ok"
+      ],
+      "notes": [
+        {
+          "at": "2026-11-07T02:51:28Z",
+          "by": "hx-26",
+          "text": "colored_tint also implements Java's floorChanged/blockChanged default: extraData == 0 (uninitialised) tints white instead of black (ColoredFloor.java:168-173, ColoredWall.java:53-58); floor_main test updated. Verified: render::floor_main 5 passed, cargo check -p mind-gdext ok."
+        }
       ]
     },
     "PAR-0615": {

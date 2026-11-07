@@ -106,6 +106,40 @@ pub fn tiling_cell(x: i32, y: i32, size: u8) -> (u8, u8) {
     (col, row)
 }
 
+/// `ColoredFloor.drawBase`/`ColoredWall.drawBase` tint: `tile.extraData | 0xff`
+/// (`ColoredFloor.java:71-74`, `ColoredWall.java:44-49`).
+///
+/// The stored colour's alpha byte is the config flag (`flagIgnoreDifferentColor`
+/// `1`, `flagSmoothBlend` `2`, `flagApplyDarkness` `2` for walls); Java masks it
+/// out (`| 0xff`) to keep the tile opaque.
+pub fn colored_tint(extra_data: i32) -> u32 {
+    if extra_data == 0 {
+        // `ColoredFloor.floorChanged`/`ColoredWall.blockChanged` reset an
+        // uninitialised tile to the class default (white) so a fresh map never
+        // draws black (`ColoredFloor.java:168-173`, `ColoredWall.java:53-58`).
+        0xffff_ffff
+    } else {
+        (extra_data as u32) | 0xff
+    }
+}
+
+/// Whether a block draws `tile.extraData` as a colour
+/// (`ColoredFloor`/`ColoredWall`).
+pub fn is_colored_block(kind: crate::content::BlockKind) -> bool {
+    matches!(
+        kind,
+        crate::content::BlockKind::ColoredFloor | crate::content::BlockKind::ColoredWall
+    )
+}
+
+/// Applies a `ColoredFloor`/`ColoredWall` tint to one baked quad colour,
+/// preserving the quad's alpha (`Floor.drawMain` ends with `Draw.alpha(1f)`,
+/// which keeps the coloured RGB for the edge/overlay draws;
+/// `Floor.java:264-303`).
+pub fn apply_colored_tint(color: u32, tint: u32) -> u32 {
+    (tint & 0xffff_ff00) | (color & 0xff)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +196,24 @@ mod tests {
             autotile_region("metal-tiles-11", 9, 3, 1, 1, 0),
             "metal-tiles-11-2-9"
         );
+    }
+
+    /// GAPS #53: `ColoredFloor`/`ColoredWall` tint `extraData | 0xff` and
+    /// only replace the quad RGB, keeping a quad's own alpha.
+    #[test]
+    fn colored_tint_masks_alpha_and_keeps_quad_alpha() {
+        // An editor-picked colour with flags in the alpha byte.
+        assert_eq!(colored_tint(0x12_34_56_02u32 as i32), 0x1234_56ff);
+        // An uninitialised tile falls back to the class default white
+        // (`ColoredFloor.floorChanged`).
+        assert_eq!(colored_tint(0), 0xffff_ffff);
+        assert_eq!(colored_tint(-1), 0xffff_ffff);
+        // Liquid-overlay repeat quads carry an alpha; the tint keeps it.
+        assert_eq!(apply_colored_tint(0xffff_ffff, 0x1234_56ff), 0x1234_56ff);
+        assert_eq!(apply_colored_tint(0xffff_ff80, 0x1234_56ff), 0x1234_5680);
+        assert!(is_colored_block(crate::content::BlockKind::ColoredFloor));
+        assert!(is_colored_block(crate::content::BlockKind::ColoredWall));
+        assert!(!is_colored_block(crate::content::BlockKind::Floor));
     }
 
     #[test]

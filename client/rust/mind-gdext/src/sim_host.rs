@@ -822,6 +822,9 @@ impl INode for MindSimHost {
         let (axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move) = self.player_control();
         self.sim
             .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move);
+        // GAPS #26 host half: `NetServer.clientSnapshot`'s per-frame player
+        // view upload (camera/selection/ping) before the logic tick reads it.
+        self.push_logic_player_view();
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -9028,8 +9031,9 @@ impl MindSimHost {
             .map(|state| state.production_efficiency)
             .or_else(|| crafter.map(|state| state.warmup))
             .unwrap_or(0.0);
-        // Dominant liquid entry (for `liquidColor`/`liquidAmount` consumers).
-        let (liquid_amount, liquid_color) = ecs
+        // Dominant liquid entry (for `liquidColor`/`liquidAmount` and the
+        // `Liquid.getAnimationFrame` fallback consumers).
+        let (liquid_id, liquid_gas, liquid_amount, liquid_color) = ecs
             .get::<LiquidModule>(entity)
             .map(|module| {
                 let (id, amount) = module
@@ -9039,13 +9043,17 @@ impl MindSimHost {
                     .max_by(|a, b| a.1.total_cmp(b.1))
                     .map(|(id, amount)| (id as u16, *amount))
                     .unwrap_or((0, 0.0));
-                let color = content
-                    .liquid(LiquidId::new(id))
-                    .map(|liquid| liquid.color.to_rgba8888())
-                    .unwrap_or(0xffff_ffff);
-                (amount, color)
+                let liquid = content.liquid(LiquidId::new(id));
+                (
+                    id,
+                    liquid.map(|liquid| liquid.gas).unwrap_or(false),
+                    amount,
+                    liquid
+                        .map(|liquid| liquid.color.to_rgba8888())
+                        .unwrap_or(0xffff_ffff),
+                )
             })
-            .unwrap_or((0.0, 0xffff_ffff));
+            .unwrap_or((0, false, 0.0, 0xffff_ffff));
         Some(mind_core::render::draw_desc::DrawState {
             warmup,
             progress: crafter.map(|state| state.progress).unwrap_or(0.0),
@@ -9060,6 +9068,8 @@ impl MindSimHost {
             liquid_capacity: def.liquid_capacity,
             liquid_amount,
             liquid_color,
+            liquid_id,
+            liquid_gas,
             heat: ecs
                 .get::<HeatState>(entity)
                 .map(|state| state.heat)
@@ -13312,5 +13322,179 @@ mod tests {
         assert_eq!(target, Some(nova));
         assert!((fraction - 0.5).abs() < 1e-6, "fraction {fraction}");
         assert!(arrived);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GAPS #26 host half — the per-frame `LAccess` player-view push.
+// ---------------------------------------------------------------------------
+
+/// Node path of the HUD ping marker (`ui/fragments/hud.rs`
+/// `MindPingOverlay`): the port's `PlayerComp.pingX/pingY/pingTime/pingText`
+/// state (`PlayerComp.drawPing`).
+const PING_OVERLAY_PATH: &str = "/root/Spine/Ui/UiRoot/HudGroup/hud/PingOverlay";
+
+/// Composes the [`LogicPlayerView`] the host pushes each frame.
+///
+/// Java reads the same state off the local `Player`:
+/// `cameraX..cameraHeight` from `Core.camera.position/width/height`
+/// (`UnitComp.java:287-290`; sent by `NetClient.java:766-780` as
+/// `con.viewX/viewY/viewWidth/viewHeight`), `selectedBlock`/`selectedRotation`
+/// from the input handler (`InputHandler.java:998-999`), and
+/// `pingX/pingY/pingText` from the ping marker
+/// (`InputHandler.java:286-302`). Kept Godot-free so the mapping is testable.
+pub fn compose_logic_player_view(
+    camera: (f32, f32, f32, f32),
+    selected_block: BlockId,
+    selected_rotation: u8,
+    ping: Option<(f32, f32, Option<String>)>,
+) -> mind_core::logic::globals::LogicPlayerView {
+    // `player.selectedBlock` is nullable; the port uses `BlockId::AIR` for "no
+    // block selected" (`input/mod.rs::sync_selected_block`).
+    let selected = if selected_block == BlockId::AIR {
+        None
+    } else {
+        Some(selected_block)
+    };
+    let (ping_pos, ping_text) = match ping {
+        Some((x, y, text)) => (Some((x, y)), text.filter(|text| !text.trim().is_empty())),
+        None => (None, None),
+    };
+    mind_core::logic::globals::LogicPlayerView {
+        camera_x: camera.0,
+        camera_y: camera.1,
+        camera_w: camera.2,
+        camera_h: camera.3,
+        selected_block: selected,
+        // `Sim::set_selected_rotation` clamps to 0..4; the view push does it
+        // here because the whole resource is replaced.
+        selected_rotation: selected_rotation.rem_euclid(4),
+        ping: ping_pos,
+        ping_text,
+    }
+}
+
+impl MindSimHost {
+    /// `Core.camera.position/width/height` in world pixels (the Java values
+    /// `NetClient.clientSnapshot` uploads; `NetClient.java:768-769`).
+    fn camera_view_bounds(&self) -> (f32, f32, f32, f32) {
+        self.camera
+            .as_ref()
+            .map(|camera| camera.bind().logic_view_bounds())
+            .unwrap_or((0.0, 0.0, 0.0, 0.0))
+    }
+
+    /// Live ping marker state from the HUD overlay
+    /// (`PlayerComp.pingX/pingY/pingText`, cleared when `pingTime` runs out).
+    fn ping_state(&self) -> Option<(f32, f32, Option<String>)> {
+        let mut overlay = self
+            .base()
+            .try_get_node_as::<godot::classes::Node>(PING_OVERLAY_PATH)?;
+        if !overlay.has_method("ping_state") {
+            return None;
+        }
+        let state = overlay
+            .call("ping_state", &[])
+            .try_to::<VarDictionary>()
+            .ok()?;
+        let visible = state
+            .get("visible")
+            .and_then(|value| value.try_to::<bool>().ok())
+            .unwrap_or(false);
+        let time = state
+            .get("time")
+            .and_then(|value| value.try_to::<f32>().ok())
+            .unwrap_or(0.0);
+        if !visible || time <= 0.0 {
+            // `Player.isPinging()` is false once `pingTime` reaches 0.
+            return None;
+        }
+        let x = state
+            .get("x")
+            .and_then(|value| value.try_to::<f32>().ok())?;
+        let y = state
+            .get("y")
+            .and_then(|value| value.try_to::<f32>().ok())?;
+        let text = state
+            .get("text")
+            .and_then(|value| value.try_to::<GString>().ok())
+            .map(|text| text.to_string());
+        Some((x, y, text))
+    }
+
+    /// Replacement `LAccess` player view built from the live camera, input
+    /// selection and ping marker.
+    fn logic_player_view(&self) -> mind_core::logic::globals::LogicPlayerView {
+        let rotation = self
+            .input
+            .as_ref()
+            .map(|input| input.bind().placement_view().rotation)
+            .unwrap_or(0);
+        compose_logic_player_view(
+            self.camera_view_bounds(),
+            self.sim.selected_block(),
+            rotation,
+            self.ping_state(),
+        )
+    }
+
+    /// GAPS #26 host half: pushes camera/selection/ping into the sim each frame
+    /// so the `LAccess` senses match Java (`UnitComp.java:287-311`).
+    ///
+    /// The whole resource is replaced, mirroring
+    /// `NetServer.clientSnapshot`'s `con.viewX = ...` writes; the camera and
+    /// selection halves were previously never uploaded, so every sense read
+    /// the core defaults (`0`/`NaN`/`null`).
+    fn push_logic_player_view(&mut self) {
+        let view = self.logic_player_view();
+        self.sim.set_logic_player_view(view);
+    }
+}
+
+#[cfg(test)]
+mod logic_view_tests {
+    use super::compose_logic_player_view;
+    use mind_core::content::BlockId;
+
+    #[test]
+    fn compose_maps_camera_selection_and_ping() {
+        let view = compose_logic_player_view(
+            (160.0, 96.0, 320.0, 180.0),
+            BlockId::new(42),
+            2,
+            Some((80.0, 96.0, Some("here".to_owned()))),
+        );
+        assert_eq!(view.camera_x, 160.0);
+        assert_eq!(view.camera_y, 96.0);
+        assert_eq!(view.camera_w, 320.0);
+        assert_eq!(view.camera_h, 180.0);
+        assert_eq!(view.selected_block, Some(BlockId::new(42)));
+        assert_eq!(view.selected_rotation, 2);
+        assert_eq!(view.ping, Some((80.0, 96.0)));
+        assert_eq!(view.ping_text.as_deref(), Some("here"));
+        assert!(view.is_pinging());
+    }
+
+    #[test]
+    fn compose_uses_air_for_no_selection_and_clears_empty_ping_text() {
+        let view = compose_logic_player_view(
+            (0.0, 0.0, 64.0, 32.0),
+            BlockId::AIR,
+            7,
+            Some((8.0, 16.0, Some("   ".to_owned()))),
+        );
+        assert_eq!(view.selected_block, None, "AIR is Java's null selection");
+        assert_eq!(view.selected_rotation, 3, "rotation wraps into 0..4");
+        assert_eq!(view.ping, Some((8.0, 16.0)), "a plain ping keeps its point");
+        assert_eq!(view.ping_text, None, "an empty ping label is null");
+        assert!(view.is_pinging());
+    }
+
+    #[test]
+    fn compose_without_ping_reads_not_pinging() {
+        let view = compose_logic_player_view((1.0, 2.0, 3.0, 4.0), BlockId::new(5), 0, None);
+        assert_eq!(view.ping, None);
+        assert_eq!(view.ping_text, None);
+        assert!(!view.is_pinging());
     }
 }

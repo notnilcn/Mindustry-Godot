@@ -819,13 +819,21 @@ pub(crate) fn tile_quads_with(
         if block_cache_layer(block) == CacheLayerId::Walls {
             // `TiledWall.drawBase` (`TiledWall.java:105-119`): the block packs
             // adjacent same-block walls exactly like `TiledFloor`.
+            // GAPS #53: `ColoredWall.drawBase` tints with
+            // `tile.extraData | 0xff` before `super.drawBase`
+            // (`ColoredWall.java:44-49`).
+            let color = if floor_main::is_colored_block(block.kind) {
+                floor_main::colored_tint(tile.extra_data)
+            } else {
+                0xffff_ffff
+            };
             let mut quad = PendingQuad {
                 region: block.region.clone(),
                 cx,
                 cy,
                 w: block.size.max(1) as f32 * size,
                 h: block.size.max(1) as f32 * size,
-                color: 0xffff_ffff,
+                color,
                 variant: false,
                 // Arc `Draw.rect` puts the region's top at the world's top; the
                 // world pass runs through the y-flip camera, so every upright
@@ -973,6 +981,19 @@ pub(crate) fn floor_draw_base_quads_with(
         let mut repeat = main;
         repeat.color = 0xffff_ff00u32 | overlay_redraw_alpha(floor.overlay_alpha);
         out.push(repeat);
+    }
+
+    // GAPS #53: `ColoredFloor.drawBase` sets `Draw.color(tile.extraData |
+    // 0xff)` before `super.drawBase`, so `drawMain`, the edge blenders and the
+    // overlay draw all carry the tint (`ColoredFloor.java:71-74`). The
+    // `flagSmoothBlend` autotile corner interpolation is not ported: the flat
+    // tint is Java's non-smooth branch, which is the only colour path the
+    // editor exposes for a plain (non-autotiled) tile.
+    if floor_main::is_colored_block(floor.kind) {
+        let tint = floor_main::colored_tint(tile.extra_data);
+        for quad in &mut out {
+            quad.color = floor_main::apply_colored_tint(quad.color, tint);
+        }
     }
 
     out
@@ -1495,5 +1516,50 @@ mod tests {
         let bare = tile_quads(&world, &registry, world.tile(2, 2), CacheLayerId::Water);
         assert!(!bare.is_empty());
         assert!(bare.iter().all(|quad| quad.color != 0xffff_ff59));
+    }
+
+    /// GAPS #53: `ColoredFloor.drawBase` tints the main/edge/overlay quads with
+    /// `tile.extraData | 0xff` (`ColoredFloor.java:71-74`).
+    #[test]
+    fn colored_floor_tints_its_quads() {
+        let registry = test_registry();
+        let colored = block(&registry, "colored-floor");
+        let mut world = WorldGrid::new(3, 3);
+        fill(&mut world, colored);
+        let tile = world.tiles.get_mut(1, 1);
+        // Alpha byte 0 = a plain colour (not `flagSmoothBlend = 2`).
+        tile.extra_data = 0x12_34_56_00;
+        let quads =
+            floor_draw_base_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
+        assert!(!quads.is_empty());
+        for quad in &quads {
+            assert_eq!(
+                quad.color & 0xffff_ff00,
+                0x1234_5600,
+                "tint RGB from extraData"
+            );
+            assert_eq!(quad.color & 0xff, 0xff, "alpha is masked to opaque");
+        }
+    }
+
+    /// GAPS #53: `ColoredWall.drawBase` tints the static wall quad the same
+    /// way (`ColoredWall.java:44-49`).
+    #[test]
+    fn colored_wall_tints_the_wall_quad() {
+        let registry = test_registry();
+        let wall = block(&registry, "colored-wall");
+        let mut world = WorldGrid::new(3, 3);
+        world.tiles.get_mut(1, 1).block = wall;
+        world.tiles.get_mut(1, 1).extra_data = 0x00_ff_80_01;
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Walls);
+        let Some(quad) = quads.first() else {
+            panic!("wall quad");
+        };
+        assert_eq!(quad.color, 0x00ff_80ff);
+        // A plain wall keeps the untouched white tint.
+        let stone = block(&registry, "stone-wall");
+        world.tiles.get_mut(2, 2).block = stone;
+        let plain = tile_quads(&world, &registry, world.tile(2, 2), CacheLayerId::Walls);
+        assert_eq!(plain.first().map(|quad| quad.color), Some(0xffff_ffff));
     }
 }
