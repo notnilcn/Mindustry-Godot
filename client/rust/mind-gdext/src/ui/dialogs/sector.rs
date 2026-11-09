@@ -2,6 +2,11 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
 //! Sector select, research-root select and the player-color palette.
+//!
+//! Upstream: core/src/mindustry/ui/dialogs/SectorSelectDialog.java,
+//! core/src/mindustry/ui/dialogs/ResearchDialog.java (the `@techtree.select`
+//! root picker and its root planets), and
+//! core/src/mindustry/ui/dialogs/PaletteDialog.java.
 
 use godot::classes::{Button, Control, HBoxContainer, Label, LineEdit};
 use godot::obj::NewAlloc;
@@ -96,7 +101,10 @@ impl SectorSelectDialog {
             .map(|search| search.get_text().to_string().to_lowercase())
             .unwrap_or_default();
         let mut entries = VarArray::new();
-        for sector in dialog.campaign_section("sectors").iter_shared() {
+        for sector in dialog
+            .campaign_section_for(&self.planet, "sectors")
+            .iter_shared()
+        {
             let Ok(sector) = sector.try_to::<VarDictionary>() else {
                 continue;
             };

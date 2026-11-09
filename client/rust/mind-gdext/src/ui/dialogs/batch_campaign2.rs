@@ -12,9 +12,9 @@
 //! Campaign dialog controllers, batch 2: research, schematics, loadout,
 //! launch loadout, sector stats, custom game and map play.
 //!
-//! Each controller binds the data-driven part of one `client/ui/dialogs/*.gd`
-//! script to the shared [`MindDialog`] shell. Static structure lives in the
-//! dialog scenes; every row here is rebuilt from the `MindCampaign` read models
+//! Each controller is a native Rust controller that builds the data-driven
+//! content of one `.tscn` dialog shell. The static structure lives in the
+//! scenes; every row here is rebuilt from the `MindCampaign` read models
 //! (`campaign_views_json`, `research_tree_json`, `launch_dialog_json`) and the
 //! `MindPreview` map registry, so the controllers stay UI-only. The tech-tree
 //! canvas, the `@globalitems` pool and the schematic previews are the native
@@ -44,6 +44,7 @@ use godot::prelude::*;
 use mind_core::game::schematic::Schematic;
 use mind_core::game::schematics;
 use mind_core::io::{FileSystem, NativeFs, Paths};
+use mind_core::util::strip_colors;
 
 use super::super::dialog::{DialogController, MindDialog};
 use super::super::kit::widgets::factory;
@@ -304,22 +305,6 @@ fn setting_put_text(key: &str, value: &str) {
     );
 }
 
-/// `MindDialog.open_content_info`: opens the `content` dialog for a name.
-fn open_content_info(content: &str) {
-    if content.is_empty() {
-        return;
-    }
-    let mut context = VarDictionary::new();
-    context.set("content", &gs(content));
-    let _ = ui_call(
-        "open_dialog",
-        &[
-            gs("content").to_variant(),
-            gs(json_stringify(&context)).to_variant(),
-        ],
-    );
-}
-
 /// Emit-only UI sound (`MindUi.play_ui_sound`).
 fn play_ui_sound(name: &str) {
     let _ = ui_call("play_ui_sound", &[gs(name).to_variant()]);
@@ -435,41 +420,6 @@ fn panel_with_box(style: Gd<StyleBoxFlat>) -> Gd<PanelContainer> {
     let mut panel = PanelContainer::new_alloc();
     panel.add_theme_stylebox_override("panel", &style);
     panel
-}
-
-/// `Strings.stripColors(text)` (`[#rrggbb]`/`[name]` tags removed) lowercased.
-fn strip_color_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let characters: Vec<char> = text.chars().collect();
-    let mut index = 0usize;
-    while index < characters.len() {
-        let character = characters[index];
-        if character != '[' {
-            out.push(character);
-            index += 1;
-            continue;
-        }
-        let Some(close_offset) = characters[index..].iter().position(|value| *value == ']') else {
-            out.push(character);
-            index += 1;
-            continue;
-        };
-        let inner: String = characters[index + 1..index + close_offset].iter().collect();
-        let color_tag = inner
-            .strip_prefix('#')
-            .map(|hex| {
-                (3..=8).contains(&hex.len()) && hex.chars().all(|value| value.is_ascii_hexdigit())
-            })
-            .unwrap_or(false);
-        let name_tag = !inner.is_empty() && inner.chars().all(|value| value.is_ascii_lowercase());
-        if color_tag || name_tag {
-            index += close_offset + 1;
-            continue;
-        }
-        out.push(character);
-        index += 1;
-    }
-    out.to_lowercase()
 }
 
 /// Connects `callable` to `signal` once per dialog (`is_connected` cannot match
@@ -1343,7 +1293,7 @@ fn research_rebuild_popup(
         info.set_custom_minimum_size(Vector2::new(50.0, 0.0));
         let content = row_str(&node, "content");
         let callable = Callable::from_fn("research_info", move |_args: &[&Variant]| {
-            open_content_info(&content);
+            super::batch_a::open_content_info(&content);
         });
         info.connect("pressed", &callable);
         row.add_child(&info);
@@ -6476,21 +6426,30 @@ pub(crate) fn maplist_passes_filter(
         return true;
     }
     let needle = search.as_str();
-    if strip_color_tags(&row_str(map, "name")).contains(needle) {
+    if strip_colors(&row_str(map, "name"))
+        .to_lowercase()
+        .contains(needle)
+    {
         return true;
     }
     if row_bool(&settings, "searchAuthor")
-        && strip_color_tags(&row_str(map, "author")).contains(needle)
+        && strip_colors(&row_str(map, "author"))
+            .to_lowercase()
+            .contains(needle)
     {
         return true;
     }
     if row_bool(&settings, "searchDescription")
-        && strip_color_tags(&row_str(map, "description")).contains(needle)
+        && strip_colors(&row_str(map, "description"))
+            .to_lowercase()
+            .contains(needle)
     {
         return true;
     }
     if row_bool(&settings, "searchModname")
-        && strip_color_tags(&row_str(map, "mod_name")).contains(needle)
+        && strip_colors(&row_str(map, "mod_name"))
+            .to_lowercase()
+            .contains(needle)
     {
         return true;
     }
@@ -7386,9 +7345,15 @@ mod tests {
 
     #[test]
     fn color_tags_strip_like_strings_strip_colors() {
-        assert_eq!(strip_color_tags("[scarlet]Wall[white]"), "wall");
-        assert_eq!(strip_color_tags("[#ff0000]Copper"), "copper");
-        assert_eq!(strip_color_tags("[not a color]"), "[not a color]");
+        // `Map.plainName()` + `toLowerCase()`: the shared Java-faithful strip
+        // then the search's case fold.
+        assert_eq!(strip_colors("[scarlet]Wall[white]").to_lowercase(), "wall");
+        assert_eq!(strip_colors("[#ff0000]Copper").to_lowercase(), "copper");
+        assert_eq!(
+            strip_colors("[not a color]").to_lowercase(),
+            "[not a color]"
+        );
+        assert_eq!(strip_colors("[NotATag]").to_lowercase(), "[notatag]");
     }
 
     #[test]

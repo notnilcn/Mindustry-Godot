@@ -3,11 +3,18 @@
 
 //! `Strings.stripColors` / `Strings.sanitizeFilename` ports (`arc.util.Strings`).
 //!
-//! Needed by `maps/Map.compareTo`/`findFile` (plan 06 §3.1). Deviation: named
-//! color tags are accepted structurally (letters/digits/`#` hex) rather than via
-//! Arc's full `Colors` table, which is a view concern.
+//! Needed by `maps/Map.compareTo`/`findFile` (plan 06 §3.1) and the dialog
+//! search filters. [`strip_colors`] mirrors `Strings.parseColorMarkup`
+//! exactly, including the `Colors` name table Mindustry extends in
+//! `UI.loadColors()`.
 
 /// Removes Arc color markup from a string (`Strings.stripColors`).
+///
+/// Mirrors `Strings.parseColorMarkup`: `[]` pops a color, `[[` escapes a
+/// literal `[`, `[#hex]` accepts 1..=8 hex digits, and `[name]` strips only
+/// when `Colors.get(name)` is non-null — Arc's canonical names, the lowercased
+/// underscore-free aliases `Colors.load` registers, and Mindustry's
+/// `UI.loadColors()` additions. Unknown or malformed tags stay literal.
 pub fn strip_colors(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -44,8 +51,10 @@ fn parse_color_markup(str: &[u8], start: usize, end: usize) -> i32 {
             for i in start + 1..end {
                 match str[i] {
                     b']' => {
+                        // `if(i < start + 2 || i > start + 9) break;` — 1..=8
+                        // hex digits, the alpha pair optional.
                         let digits = i - start - 1;
-                        if !(2..=8).contains(&digits) {
+                        if !(1..=8).contains(&digits) {
                             return -1;
                         }
                         return (i - start) as i32;
@@ -61,16 +70,115 @@ fn parse_color_markup(str: &[u8], start: usize, end: usize) -> i32 {
         _ => {
             for i in start + 1..end {
                 if str[i] == b']' {
-                    // Structurally valid named color tag.
-                    let ok = str[start..i]
-                        .iter()
-                        .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_');
-                    return if ok { (i - start) as i32 } else { -1 };
+                    // `Color namedColor = Colors.get(...); null => not a tag.`
+                    let name = std::str::from_utf8(&str[start..i]).unwrap_or("");
+                    return if is_color_name(name) {
+                        (i - start) as i32
+                    } else {
+                        -1
+                    };
                 }
             }
             -1
         }
     }
+}
+
+/// Arc `Colors` canonical names (`arc-core/src/arc/graphics/Colors.java:55-99`).
+const ARC_COLOR_NAMES: &[&str] = &[
+    "CLEAR",
+    "BLACK",
+    "WHITE",
+    "LIGHT_GRAY",
+    "GRAY",
+    "DARK_GRAY",
+    "LIGHT_GREY",
+    "GREY",
+    "DARK_GREY",
+    "BLUE",
+    "NAVY",
+    "ROYAL",
+    "SLATE",
+    "SKY",
+    "CYAN",
+    "TEAL",
+    "GREEN",
+    "ACID",
+    "LIME",
+    "FOREST",
+    "OLIVE",
+    "YELLOW",
+    "GOLD",
+    "GOLDENROD",
+    "ORANGE",
+    "BROWN",
+    "TAN",
+    "BRICK",
+    "RED",
+    "SCARLET",
+    "CRIMSON",
+    "CORAL",
+    "SALMON",
+    "PINK",
+    "MAGENTA",
+    "PURPLE",
+    "VIOLET",
+    "MAROON",
+];
+
+/// The lowercase aliases `Colors.load` registers with underscores removed
+/// (`Colors.java:103`: `key.toLowerCase().replace("_", "")`).
+const ARC_COLOR_NAMES_LOWER: &[&str] = &[
+    "clear",
+    "black",
+    "white",
+    "lightgray",
+    "gray",
+    "darkgray",
+    "lightgrey",
+    "grey",
+    "darkgrey",
+    "blue",
+    "navy",
+    "royal",
+    "slate",
+    "sky",
+    "cyan",
+    "teal",
+    "green",
+    "acid",
+    "lime",
+    "forest",
+    "olive",
+    "yellow",
+    "gold",
+    "goldenrod",
+    "orange",
+    "brown",
+    "tan",
+    "brick",
+    "red",
+    "scarlet",
+    "crimson",
+    "coral",
+    "salmon",
+    "pink",
+    "magenta",
+    "purple",
+    "violet",
+    "maroon",
+];
+
+/// Mindustry's `UI.loadColors()` additions
+/// (`core/src/mindustry/core/UI.java:102-106`).
+const MIND_COLOR_NAMES: &[&str] = &["accent", "unlaunched", "highlight", "stat", "negstat"];
+
+/// `Colors.get(name) != null`: a named tag is only a color when the exact
+/// string is registered.
+fn is_color_name(name: &str) -> bool {
+    ARC_COLOR_NAMES.contains(&name)
+        || ARC_COLOR_NAMES_LOWER.contains(&name)
+        || MIND_COLOR_NAMES.contains(&name)
 }
 
 /// Sanitizes a filename (`Strings.sanitizeFilename`): reserved DOS names are
@@ -120,11 +228,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strip_colors_removes_tags() {
+    fn strip_colors_matches_arc_parse_color_markup() {
+        // `[]` pop, the canonical and lowercase aliases, `[[]` escape.
         assert_eq!(strip_colors("[red]hello[] world"), "hello world");
+        assert_eq!(strip_colors("[accent]A[lightgray]B[LIGHT_GRAY]C"), "ABC");
+        assert_eq!(strip_colors("[clear]x"), "x");
+        assert_eq!(strip_colors("[[]"), "[");
+        assert_eq!(strip_colors("[[]x"), "[x");
         assert_eq!(strip_colors("plain"), "plain");
+        // 1..=8 hex digits; the alpha pair is optional.
         assert_eq!(strip_colors("[#ff0000]x"), "x");
-        assert_eq!(strip_colors("a[unknown-not-color]b"), "ab");
+        assert_eq!(strip_colors("[#f]x"), "x");
+        assert_eq!(strip_colors("[#ff0000ff]x"), "x");
+        assert_eq!(strip_colors("[#]x"), "[#]x");
+        assert_eq!(strip_colors("[#gg]x"), "[#gg]x");
+        assert_eq!(strip_colors("[#ff0000000]x"), "[#ff0000000]x");
+        // Only registered names strip: `[NotATag]`/`[tags]` stay literal, and
+        // the lowercase aliases have their underscores removed.
+        assert_eq!(strip_colors("a[NotATag]b"), "a[NotATag]b");
+        assert_eq!(strip_colors("a[tags]b"), "a[tags]b");
+        assert_eq!(strip_colors("a[light_gray]b"), "a[light_gray]b");
         // Unterminated tag is left as-is.
         assert_eq!(strip_colors("a[red"), "a[red");
     }

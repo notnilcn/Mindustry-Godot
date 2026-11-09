@@ -63,6 +63,7 @@ use godot::classes::{
 use godot::global::{HorizontalAlignment, VerticalAlignment};
 use godot::obj::{EngineEnum, NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
+use mind_core::util::strip_colors;
 
 use super::super::dialog::{DialogController, MindDialog};
 use super::super::kit::widgets::border_image::MindBorderImage;
@@ -250,50 +251,6 @@ fn fmt_key(key: &str, args: &[&str]) -> String {
         result = result.replace(&format!("{{{index}}}"), arg);
     }
     result
-}
-
-/// `Strings.stripColors`: drops `[color]` / `[#rrggbb]` / `[]` markup tags.
-///
-/// The GDScript regex was `\[(#?[0-9a-fA-F]{6,8}|[a-zA-Z_]*)\]`; this scanner
-/// accepts exactly the same tag bodies.
-fn strip_colors(text: &str) -> String {
-    let characters: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
-    let mut index = 0usize;
-    while index < characters.len() {
-        if characters[index] != '[' {
-            out.push(characters[index]);
-            index += 1;
-            continue;
-        }
-        let Some(close) = characters[index + 1..].iter().position(|c| *c == ']') else {
-            out.push(characters[index]);
-            index += 1;
-            continue;
-        };
-        let body: String = characters[index + 1..index + 1 + close].iter().collect();
-        if is_color_tag(&body) {
-            index += close + 2;
-            continue;
-        }
-        out.push(characters[index]);
-        index += 1;
-    }
-    out
-}
-
-/// One `[…]` tag body accepted by [`strip_colors`]: `#` plus 6/8 hex digits,
-/// or a plain identifier (`[]` included).
-fn is_color_tag(body: &str) -> bool {
-    if let Some(hex) = body.strip_prefix('#') {
-        return (hex.len() == 6 || hex.len() == 8) && hex.chars().all(|c| c.is_ascii_hexdigit());
-    }
-    if body.len() == 6 || body.len() == 8 {
-        let hex = body.chars().all(|c| c.is_ascii_hexdigit());
-        let name = body.chars().all(|c| c.is_ascii_alphabetic() || c == '_');
-        return hex || name;
-    }
-    body.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 /// A solid `StyleBoxFlat` (`_flat`).
@@ -2249,11 +2206,7 @@ fn mods_content_icon(entry: &VarDictionary) -> Gd<Button> {
         let callable = Callable::from_fn("mods_content_info", move |_args: &[&Variant]| {
             let name = content_name.clone();
             defer_action("mods_content_info_now", move || {
-                if let Some(node) = dialog_node("mods")
-                    && let Ok(dialog) = node.try_cast::<MindDialog>()
-                {
-                    super::batch_a::open_content_info(&dialog, &name);
-                }
+                super::batch_a::open_content_info(&name);
             });
             Variant::nil()
         });
@@ -3899,9 +3852,13 @@ mod tests {
 
     #[test]
     fn strip_colors_drops_arc_tags() {
+        // `ModsDialog.java:256` / the state-details tooltip use plain
+        // `Strings.stripColors`: only registered names and 1..=8 hex digits.
         assert_eq!(strip_colors("[accent]Copper[lightgray] ore"), "Copper ore");
         assert_eq!(strip_colors("[#ff0000]red[]"), "red");
-        assert_eq!(strip_colors("no [tags] here"), "no  here");
+        assert_eq!(strip_colors("[LIGHT_GRAY]grey[#f]x"), "greyx");
+        assert_eq!(strip_colors("no [tags] here"), "no [tags] here");
         assert_eq!(strip_colors("keep [1] digits"), "keep [1] digits");
+        assert_eq!(strip_colors("[NotATag]"), "[NotATag]");
     }
 }

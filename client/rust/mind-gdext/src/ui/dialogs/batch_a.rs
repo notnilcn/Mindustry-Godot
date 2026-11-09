@@ -271,9 +271,10 @@ fn bundle_or(key: &str, fallback: &str) -> String {
     }
 }
 
-/// `MindDialog.open_content_info` has no native base method; every content
-/// link in this batch routes through this helper.
-pub fn open_content_info(dialog: &Gd<MindDialog>, content: &str) {
+/// `ContentInfoDialog.show(content)`: opens the shared `content` dialog for a
+/// content name. Java's dialog takes the content alone (there is no caller
+/// dialog argument), so every content link routes through this one helper.
+pub(super) fn open_content_info(content: &str) {
     if content.is_empty() {
         return;
     }
@@ -288,7 +289,6 @@ pub fn open_content_info(dialog: &Gd<MindDialog>, content: &str) {
             ],
         );
     }
-    let _ = dialog;
 }
 
 /// The dialog's viewport width (`get_viewport_rect().size.x`).
@@ -3068,7 +3068,6 @@ fn database_select_tab(
 
 /// `_rebuild`: the filtered `databaseCategory`/`databaseTag` grid.
 fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>) {
-    let node = dialog.to_gd();
     let (mut grid, view, tab, query) = {
         let st = state.borrow();
         let Some(grid) = st.grid.clone() else {
@@ -3164,7 +3163,7 @@ fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>)
             list.add_theme_constant_override("v_separation", 6);
             let entries = dict_array(&row, "entries");
             for entry in entries.iter_shared() {
-                list.add_child(&database_entry_button(&node, &entry));
+                list.add_child(&database_entry_button(&entry));
             }
             let fillers = (columns - entries.len() as i32).max(0);
             for _ in 0..fillers {
@@ -3353,7 +3352,7 @@ fn database_entry_matches(entry: &VarDictionary, query: &str) -> bool {
 
 /// One grid cell: the content icon when unlocked (`ui.content.show`), else the
 /// gray lock glyph (`new Image(Icon.lock, Pal.gray)`).
-fn database_entry_button(dialog: &Gd<MindDialog>, entry_value: &Variant) -> Gd<Button> {
+fn database_entry_button(entry_value: &Variant) -> Gd<Button> {
     let entry = entry_value.try_to::<VarDictionary>().unwrap_or_default();
     let entry_name = dict_text(&entry, "name");
     let unlocked = dict_bool(&entry, "unlocked");
@@ -3382,11 +3381,10 @@ fn database_entry_button(dialog: &Gd<MindDialog>, entry_value: &Variant) -> Gd<B
             image_button.set_text(&GString::from(database_entry_label(&entry).as_str()));
         }
         {
-            let target = dialog.clone();
             let name_for_info = entry_name.clone();
             let callable =
                 Callable::from_fn("database_content_info", move |_args: &[&Variant]| {
-                    open_content_info(&target, &name_for_info);
+                    open_content_info(&name_for_info);
                 });
             image_button.connect("pressed", &callable);
         }
@@ -3823,7 +3821,7 @@ fn content_add_cell(
             return next;
         }
         "icon" => {
-            let icon = content_icon_cell(dialog, &cell);
+            let icon = content_icon_cell(&cell);
             let mut line = line.clone();
             line.add_child(&icon);
         }
@@ -3840,7 +3838,7 @@ fn content_add_cell(
 /// `StatValues.stack`: a 32 px content icon with an outline amount and a click
 /// through to the item/liquid info dialog. Unit icons (`power`, `liquid`,
 /// `waves`) have no atlas region and draw the icon-font glyph instead.
-fn content_icon_cell(dialog: &Gd<MindDialog>, cell: &VarDictionary) -> Gd<Control> {
+fn content_icon_cell(cell: &VarDictionary) -> Gd<Control> {
     let icon_size = dict_float(cell, "size", 32.0);
     let region = dict_text(cell, "region");
     if kit::icon_texture(&region).is_none() {
@@ -3860,9 +3858,8 @@ fn content_icon_cell(dialog: &Gd<MindDialog>, cell: &VarDictionary) -> Gd<Contro
     button.set_v_size_flags(SizeFlags::SHRINK_CENTER);
     let content = dict_text(cell, "content");
     if !content.is_empty() {
-        let target = dialog.clone();
         let callable = Callable::from_fn("content_stat_icon", move |_args: &[&Variant]| {
-            open_content_info(&target, &content);
+            open_content_info(&content);
         });
         button.connect("pressed", &callable);
     }

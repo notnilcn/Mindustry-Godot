@@ -379,34 +379,6 @@ fn simplify_path(path: &str) -> String {
     }
 }
 
-/// `Strings.stripColors`: drops `[]`, `[#rrggbb]` and colour-name tags.
-#[allow(dead_code)] // ported surface; not reachable from the native call graph (kept for parity)
-fn strip_colors(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find('[') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        let Some(end) = after.find(']') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let tag = &after[..end];
-        let hex = tag.strip_prefix('#').is_some_and(|digits| {
-            (3..=8).contains(&digits.len()) && digits.chars().all(|c| c.is_ascii_hexdigit())
-        });
-        let named = tag.chars().all(|c| c.is_ascii_lowercase());
-        if !(hex || named) {
-            out.push('[');
-            out.push_str(tag);
-            out.push(']');
-        }
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
 // ---------------------------------------------------------------------------
 // WidgetGalleryDialog
 // ---------------------------------------------------------------------------
@@ -2165,13 +2137,5 @@ mod tests {
         assert_eq!(simplify_path("user://a/b/.."), "user://a");
         assert_eq!(simplify_path("/a/./b//c"), "/a/b/c");
         assert_eq!(simplify_path("user://"), "user://");
-    }
-
-    #[test]
-    fn strip_colors_drops_color_tags_only() {
-        assert_eq!(strip_colors("[accent]Hail"), "Hail");
-        assert_eq!(strip_colors("[#ff0000]Red[]"), "Red");
-        assert_eq!(strip_colors("a[NotATag]b"), "a[NotATag]b");
-        assert_eq!(strip_colors("no tags"), "no tags");
     }
 }
