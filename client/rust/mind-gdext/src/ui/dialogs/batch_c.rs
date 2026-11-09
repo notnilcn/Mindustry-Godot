@@ -346,42 +346,6 @@ fn panel_with_box(style: Gd<StyleBoxFlat>) -> Gd<PanelContainer> {
     panel
 }
 
-/// `Strings.stripColors` (`[#rrggbb]`/`[name]` tags removed) lowercased.
-#[allow(dead_code)]
-fn strip_color_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let bytes: Vec<char> = text.chars().collect();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        let character = bytes[index];
-        if character != '[' {
-            out.push(character);
-            index += 1;
-            continue;
-        }
-        let Some(close) = bytes[index..].iter().position(|value| *value == ']') else {
-            out.push(character);
-            index += 1;
-            continue;
-        };
-        let inner: String = bytes[index + 1..index + close].iter().collect();
-        let color_tag = inner
-            .strip_prefix('#')
-            .map(|hex| {
-                (3..=8).contains(&hex.len()) && hex.chars().all(|value| value.is_ascii_hexdigit())
-            })
-            .unwrap_or(false);
-        let name_tag = inner.chars().all(|value| value.is_ascii_lowercase());
-        if color_tag || name_tag {
-            index += close + 1;
-            continue;
-        }
-        out.push(character);
-        index += 1;
-    }
-    out.to_lowercase()
-}
-
 /// Connects `callable` to `signal` once per dialog (`is_connected` cannot match
 /// a `Callable::from_fn`, so the dialog node carries the latch).
 fn connect_once(

@@ -2,23 +2,22 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // Source: core/src/mindustry/ui/dialogs/PausedDialog.java (14-217),
 //         core/src/mindustry/ui/dialogs/GameOverDialog.java (43-184),
-//         core/src/mindustry/ui/dialogs/JoinDialog.java (77-775),
-//         core/src/mindustry/ui/dialogs/HostDialog.java (22-99),
-//         core/src/mindustry/ui/dialogs/LoadDialog.java (47-292),
-//         core/src/mindustry/ui/dialogs/SaveDialog.java (10-39).
+//         core/src/mindustry/ui/dialogs/JoinDialog.java (77-775).
+//         HostDialog/LoadDialog/SaveDialog moved to `batch_h.rs`.
 
-//! In-game menu dialogs: the pause rows, the game-over summary, the server
-//! browser and host setup, and the save/load slot grids.
+//! In-game menu dialogs: the pause rows, the game-over summary and the server
+//! browser.
 //!
-//! Every controller mirrors one `client/ui/dialogs/*.gd` script and keeps its
-//! data flow: prompts and the dialog stack go through `MindUi`, saves/rules/
-//! sector state through the campaign facade, and server probes/identity through
-//! `MindNet`. Signals (`host_requested`, `connect_requested`,
-//! `join_requested`, `save_requested`, `slot_selected`, …) are declared on
-//! [`MindDialog`] and emitted with `emit_signal`, so `UiRoot`'s wiring keeps
-//! working unchanged. A signal emitted by `MindUi` runs while `MindUi` is
-//! bound; those handlers queue their work through [`defer_action`] because
-//! re-entering a bound GDExtension object panics (`PAR-0066`).
+//! Every controller is a native Rust controller that builds the data-driven
+//! content of one `.tscn` dialog shell, sourced from the `MindCampaign` read
+//! models where the Java dialog reads game state. Prompts and the dialog stack
+//! go through `MindUi`, sector state through the campaign facade, and server
+//! probes/identity through `MindNet`. Signals (`connect_requested`,
+//! `join_requested`, …) are declared on [`MindDialog`] and emitted with
+//! `emit_signal`, so `UiRoot`'s wiring keeps working unchanged. A signal
+//! emitted by `MindUi` runs while `MindUi` is bound; those handlers queue
+//! their work through [`defer_action`] because re-entering a bound GDExtension
+//! object panics (`PAR-0066`).
 
 use std::cell::RefCell;
 use std::rc::Rc;

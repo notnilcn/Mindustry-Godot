@@ -2,6 +2,12 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
 //! Small dialogs: About, Credits, Discord, FullText.
+//!
+//! Upstream: core/src/mindustry/ui/dialogs/AboutDialog.java (the credits
+//! dialog is its `showCredits`),
+//! core/src/mindustry/ui/dialogs/DiscordDialog.java,
+//! core/src/mindustry/ui/dialogs/FullTextDialog.java, and
+//! core/src/mindustry/ui/Links.java (`Links.getLinks()`).
 
 use godot::builtin::Side;
 use godot::classes::{

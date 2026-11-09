@@ -2,6 +2,13 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
 //! List select, admin/ban lists, trace info and campaign complete.
+//!
+//! Upstream: core/src/mindustry/ui/dialogs/BaseDialog.java (the generic picker
+//! pattern), core/src/mindustry/editor/WaveInfoDialog.java
+//! (`showUnits`/`showEffects`), core/src/mindustry/ui/dialogs/BansDialog.java,
+//! core/src/mindustry/ui/dialogs/AdminsDialog.java,
+//! core/src/mindustry/ui/dialogs/TraceDialog.java,
+//! core/src/mindustry/ui/dialogs/CampaignCompleteDialog.java.
 
 use std::cell::RefCell;
 use std::rc::Rc;
