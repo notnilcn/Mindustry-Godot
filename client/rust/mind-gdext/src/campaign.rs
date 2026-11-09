@@ -1484,16 +1484,18 @@ impl MindCampaign {
         true
     }
 
-    /// Starts a campaign sector (host-side launch), returning success.
-    ///
-    /// `loadout_json` is an optional `[{item, amount}]` launch loadout applied
-    /// on the fresh-launch path (empty string = default).
+    /// Starts a campaign sector with the default (empty) launch loadout,
+    /// returning success. Delegates to [`Self::start_sector_with_loadout`] with
+    /// an empty payload; use that method to pass an explicit
+    /// `[{item, amount}]` loadout.
     #[func]
     pub fn start_sector(&mut self, planet: GString, sector: i32) -> bool {
         self.start_sector_with_loadout(planet, sector, GString::from(""))
     }
 
-    /// Starts a campaign sector with an explicit launch loadout (WS3 wiring).
+    /// Starts a campaign sector with an explicit launch loadout (WS3 wiring):
+    /// `loadout_json` is the optional `[{item, amount}]` payload applied on the
+    /// fresh-launch path (empty string = default).
     #[func]
     pub fn start_sector_with_loadout(
         &mut self,
@@ -3629,12 +3631,11 @@ impl MindCampaign {
         (complete, self.bundle.format(key, &[argument.as_str()]))
     }
 
-    /// Copies the facade campaign into the installed runtime (post-research /
-    /// rule edits).
     /// Refreshes the live runtime's unlocked-content cache from the registry
-    /// after research/clear flows. The campaign itself is never copied
-    /// facade -> runtime (T1: the runtime copy is authoritative while a sector
-    /// runs; mutations go through [`Self::with_campaign_mut`]).
+    /// after research/clear flows. It does **not** copy the facade campaign
+    /// into the runtime: while a sector runs the runtime copy is authoritative
+    /// (T1) and campaign mutations go through [`Self::with_campaign_mut`], so
+    /// only the derived unlocked-content set is pushed.
     fn push_campaign_to_runtime(&mut self) {
         let unlocked = self
             .registry
@@ -7682,11 +7683,12 @@ fn parse_loadout_stacks(
     serde_json::from_value(stacks).ok()
 }
 
-/// Launch payload split: the chosen schematic index (`Schematics.all`, `None`
-/// for the items-only fallback) and the `stacks` array JSON for
-/// `MindSimHost.place_launch_loadout`.
-/// Parses the launcher launch payload (`PlanetDialog` `playSelected`):
+/// Parses the launcher launch payload (`PlanetDialog.playSelected`):
 /// `(schematic index, origin sector id, stacks JSON)`.
+///
+/// The schematic index indexes `Schematics.all` (`None` for the items-only
+/// fallback); the `stacks` array JSON is forwarded to
+/// `MindSimHost.place_launch_loadout`.
 fn parse_launch_payload(json: &str) -> (Option<i32>, Option<u16>, String) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return (None, None, String::from("[]"));

@@ -9,13 +9,15 @@
 //!
 //! Godot-free view structs + builders that consume the plan-12 read APIs
 //! (`Universe`/`Campaign`/`Planet`/`Sector`, `CampaignRules`/`Difficulty`,
-//! `Schematics`, `TechStore`, `CampaignStats`). The GDScript dialogs read the
-//! serialized form through the documented `MindUi.campaign_views()` endpoint;
-//! `mind-headless ui campaign` renders the same structs against a committed
-//! golden so the data contract is asserted without Godot or a live world.
+//! `Schematics`, `TechStore`, `CampaignStats`). Rust owns the UI: the native
+//! dialogs in `mind-gdext/src/ui/` read the serialized form through the
+//! `MindUi.campaign_views()` / `MindCampaign.campaign_views_json()` seam (there
+//! is no GDScript), and `mind-headless ui campaign` renders the same structs
+//! against a committed golden so the data contract is asserted without Godot or
+//! a live world.
 //!
-//! Static layout stays in the `.tscn`/`.gd` dialog scenes; this module owns the
-//! data projection and formatting only (plan 14 §3.10 rule 2).
+//! `.tscn` scenes name the native UI classes and carry static layout only; this
+//! module owns the data projection and formatting (plan 14 §3.10 rule 2).
 
 use serde::Serialize;
 
