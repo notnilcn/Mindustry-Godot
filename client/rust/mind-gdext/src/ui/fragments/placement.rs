@@ -2601,6 +2601,11 @@ mod tests {
 
     #[test]
     fn icon_alias_converts_camel_case_and_falls_back() {
+        // Godot-FFI-backed lookups/types need the engine; plain `cargo test`
+        // runs without it (the headless oracles cover the engine path).
+        if !godot::sys::is_godot_initialized() {
+            return;
+        }
         assert_eq!(resolve_icon_alias("downOpen"), "down-open");
         assert_eq!(resolve_icon_alias("commandAttack"), "command-attack");
         // The port has no glyph for this alias: `Icon.cancel` instead.

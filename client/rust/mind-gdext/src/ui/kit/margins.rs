@@ -44,6 +44,11 @@ mod tests {
 
     #[test]
     fn missing_ui_reports_zero() {
+        // Godot-FFI-backed lookups/types need the engine; plain `cargo test`
+        // runs without it (the headless oracles cover the engine path).
+        if !godot::sys::is_godot_initialized() {
+            return;
+        }
         // No `MindUi` in a unit-test host: every gutter collapses to zero.
         assert_eq!(left(), 0.0);
         assert_eq!(right(), 0.0);

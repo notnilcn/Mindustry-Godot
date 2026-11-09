@@ -214,6 +214,11 @@ mod tests {
 
     #[test]
     fn unknown_alias_is_empty() {
+        // Godot-FFI-backed lookups/types need the engine; plain `cargo test`
+        // runs without it (the headless oracles cover the engine path).
+        if !godot::sys::is_godot_initialized() {
+            return;
+        }
         assert_eq!(glyph("definitely-not-an-icon"), GString::new());
         assert_eq!(glyph_code("definitely-not-an-icon"), None);
     }

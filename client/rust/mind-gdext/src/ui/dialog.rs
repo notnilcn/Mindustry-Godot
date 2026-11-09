@@ -1101,8 +1101,12 @@ mod tests {
 
     #[test]
     fn empty_context_json_is_empty_dictionary() {
-        // Pure parsing path: an empty string short-circuits before Godot JSON.
-        assert_eq!(VarDictionary::new(), VarDictionary::new());
+        // The empty context is the shared empty `VarDictionary`; both the
+        // dictionary and the parse routine are engine-backed.
+        if !godot::sys::is_godot_initialized() {
+            return;
+        }
+        assert!(parse_json_object(&GString::from("")).is_empty());
     }
 
     /// `campaign_views_json` is projected per planet; the sector select asks
