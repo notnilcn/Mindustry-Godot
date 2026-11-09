@@ -67,6 +67,10 @@ jobs:
         shell: bash
         run: cargo test --manifest-path client/rust/Cargo.toml -p mind-core
 
+      - name: cargo test -p mind-core --features msav-import
+        shell: bash
+        run: cargo test --manifest-path client/rust/Cargo.toml -p mind-core --features msav-import
+
       - name: headless goldens
         shell: bash
         run: |

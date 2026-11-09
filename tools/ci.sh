@@ -108,6 +108,13 @@ cargo check --manifest-path "$MANIFEST" --workspace
 say "cargo test -p mind-core"
 cargo test --manifest-path "$MANIFEST" -p mind-core
 
+# `sim/unit_runtime.rs`'s `msav_tests`/`markers_region_tests` are
+# `cfg(all(test, feature = "msav-import"))`. The default run above never enables
+# the feature, so they would never execute; this stage is the only gate on the
+# `.msav` save-import path (`docs/PLANS/02-FINDINGS.md` #7).
+say "cargo test -p mind-core --features msav-import"
+cargo test --manifest-path "$MANIFEST" -p mind-core --features msav-import
+
 # Phantom Camera port: the easing/smoothing unit tests are Godot-free (they check
 # the oracle's `_smooth_damp`); the in-engine parity benchmark
 # (`tools/pcam_parity.sh`) is too slow for this gate and stays manual/nightly.

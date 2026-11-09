@@ -2692,14 +2692,13 @@ mod tests {
     /// The evaluator's EV-0047 repro at the core level: load the vendored
     /// Ground Zero map, materialize its buildings, place a mechanical drill on
     /// map ore (stored in `tile.overlay`) beside a core and tick. The drill
-    /// must deliver copper into the core's item module. Skips without the
-    /// vendored asset (`msav-import` feature only).
+    /// must deliver copper into the core's team-shared inventory. Skips without
+    /// the vendored asset (`msav-import` feature only).
     #[cfg(feature = "msav-import")]
     #[test]
     fn ground_zero_drill_feeds_the_materialized_core() {
         use crate::editor::context::EditorContext;
         use crate::io::save::{SaveIo, SaveReadState};
-        use crate::world::modules::ItemModule;
         use std::path::Path;
 
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2789,15 +2788,18 @@ mod tests {
             .entity_at(TilePos::new(x as i16, y as i16))
             .expect("drill entity");
         let copper = content.item_id("copper").expect("copper");
-        for _ in 0..300 {
+        // `CoreBlock.CoreBuild` stores into the team-shared inventory
+        // (`CoreBlock.java:764-780`), not the core entity's own `ItemModule`.
+        // Let the drill warm up and mine (mechanical drill + 4-ore footprint is
+        // roughly one copper per 650 ticks), then read the team pool.
+        for _ in 0..1800 {
             sim.tick().expect("tick");
         }
-        let stored = sim
-            .ecs
-            .0
-            .get::<ItemModule>(core_entity)
-            .map(|m| m.get(copper))
-            .unwrap_or(0);
+        let stored = crate::world::blocks::storage::team_items::core_item_count(
+            &sim.ecs.0,
+            core_entity,
+            copper,
+        );
         assert!(
             stored >= 1,
             "core received no copper from the map-ore drill; drill entity {drill_entity:?}"
