@@ -44,6 +44,10 @@ use crate::sim_host::MindSimHost;
 
 use super::atlas_bind::region_geometry_with_variants;
 
+/// Per-page `(texture, quads)` buckets for rotated overlay letters
+/// (`CharacterOverlay` letters carry a quarter-turn rotation).
+type RotatedGroups = BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<(Quad, f32)>)>;
+
 /// `FloorRenderer.growSprites` padding (0.04 world px).
 const GROW: f32 = 0.04;
 const _: () = assert!(GROW > 0.0);
@@ -562,20 +566,19 @@ impl FloorRenderer {
         let colors = self
             .block_colors
             .get_or_insert_with(crate::render::minimap::load_block_colors);
-        if let Some(&color) = colors.get(floor.raw() as usize) {
-            if color != 0 && color != 255 {
-                return Rgba::from_rgba8888(color | 0xff);
-            }
+        if let Some(&color) = colors.get(floor.raw() as usize)
+            && color != 0
+            && color != 255
+        {
+            return Rgba::from_rgba8888(color | 0xff);
         }
-        let fallback = self
-            .host
+        self.host
             .clone()
             .bind()
             .content_registry()
             .and_then(|content| content.block(floor))
             .and_then(|def| def.map_color)
-            .unwrap_or(Rgba::new(0.0, 0.0, 0.0, 1.0));
-        fallback
+            .unwrap_or(Rgba::new(0.0, 0.0, 0.0, 1.0))
     }
 
     /// Current counters.
@@ -668,8 +671,7 @@ impl FloorRenderer {
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
         // `CharacterOverlay` letters carry a quarter-turn rotation
         // (`CharacterOverlay.java:31`); they bake into their own page meshes.
-        let mut rotated_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<(Quad, f32)>)> =
-            BTreeMap::new();
+        let mut rotated_groups: RotatedGroups = BTreeMap::new();
         let host = self.host.clone();
         let changes = host.clone().bind().grid().floor_changes;
         let mut tiled = TiledStates::new(cx, cy, changes);
@@ -1465,6 +1467,8 @@ fn lin(cx: i32, cy: i32, chunks_x: i32) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
     use mind_core::content::registries::create_base_content;
     use mind_core::content::{MemoryBundle, MemoryUnlockStore};
@@ -1828,7 +1832,9 @@ mod tests {
         tile.overlay = rune;
         tile.overlay_data = 5;
         let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
-        let overlay = quads.iter().find(|quad| quad.region.starts_with("rune-overlay"));
+        let overlay = quads
+            .iter()
+            .find(|quad| quad.region.starts_with("rune-overlay"));
         let Some(overlay) = overlay else {
             panic!("rune overlay quad: {:?}", base_region(&quads));
         };
@@ -1854,7 +1860,11 @@ mod tests {
         tile.overlay = rune;
         tile.overlay_data = 109i8.clamp(0, 127);
         let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
-        assert!(!quads.iter().any(|quad| quad.region.starts_with("rune-overlay")));
+        assert!(
+            !quads
+                .iter()
+                .any(|quad| quad.region.starts_with("rune-overlay"))
+        );
     }
 
     /// GAPS #53 environment props: `SteamVent.drawMain`
@@ -1887,6 +1897,10 @@ mod tests {
         // Missing a corner removes the overlay.
         world.tiles.get_mut(1, 1).floor = block(&registry, "stone");
         let broken = tile_quads(&world, &registry, world.tile(3, 3), CacheLayerId::Normal);
-        assert!(!broken.iter().any(|quad| quad.region.starts_with("rhyolite-vent")));
+        assert!(
+            !broken
+                .iter()
+                .any(|quad| quad.region.starts_with("rhyolite-vent"))
+        );
     }
 }

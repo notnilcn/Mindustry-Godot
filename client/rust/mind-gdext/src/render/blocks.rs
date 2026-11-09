@@ -606,8 +606,8 @@ impl BlockRenderer {
                             let main = self.resolver.find(&def.region).unwrap_or(region);
                             let params = props_draw::SeaBushParams::default();
                             let lobes = props_draw::sea_bush_lobes(
-                                tile.x as i32,
-                                tile.y as i32,
+                                tile.x,
+                                tile.y,
                                 tick as f32,
                                 main.w,
                                 main.h,
@@ -657,11 +657,8 @@ impl BlockRenderer {
                         // seeded-rotation shadow at `power - 1` (black 0.6) and
                         // the sprite at `power + 1`.
                         if def.kind == BlockKind::TallBlock {
-                            let rotation =
-                                props_draw::tall_block_rotation(tile.x as i32, tile.y as i32);
-                            if let Some(shadow) =
-                                self.seeded_shadow(def, tile.x as i32, tile.y as i32)
-                            {
+                            let rotation = props_draw::tall_block_rotation(tile.x, tile.y);
+                            if let Some(shadow) = self.seeded_shadow(def, tile.x, tile.y) {
                                 let entry = tall_shadow_groups
                                     .entry(shadow.page)
                                     .or_insert((shadow.texture.clone(), Vec::new()));
@@ -675,9 +672,7 @@ impl BlockRenderer {
                                     color: 0x0000_0099,
                                 });
                             }
-                            let main = self
-                                .seeded_variant(def, tile.x as i32, tile.y as i32)
-                                .unwrap_or(region);
+                            let main = self.seeded_variant(def, tile.x, tile.y).unwrap_or(region);
                             let entry = tall_top_groups
                                 .entry(main.page)
                                 .or_insert((main.texture.clone(), Vec::new()));
@@ -698,11 +693,8 @@ impl BlockRenderer {
                         // `power + 1`.
                         if def.kind == BlockKind::TreeBlock {
                             let time = tick as f32;
-                            let rotation =
-                                props_draw::tree_rotation(tile.x as i32, tile.y as i32, time);
-                            if let Some(shadow) =
-                                self.seeded_shadow(def, tile.x as i32, tile.y as i32)
-                            {
+                            let rotation = props_draw::tree_rotation(tile.x, tile.y, time);
+                            if let Some(shadow) = self.seeded_shadow(def, tile.x, tile.y) {
                                 let entry = tall_shadow_groups
                                     .entry(shadow.page)
                                     .or_insert((shadow.texture.clone(), Vec::new()));
@@ -716,16 +708,9 @@ impl BlockRenderer {
                                     color: 0xffff_ffff,
                                 });
                             }
-                            let main = self
-                                .seeded_variant(def, tile.x as i32, tile.y as i32)
-                                .unwrap_or(region);
-                            let corners = props_draw::tree_quad(
-                                tile.x as i32,
-                                tile.y as i32,
-                                time,
-                                main.w,
-                                main.h,
-                            );
+                            let main = self.seeded_variant(def, tile.x, tile.y).unwrap_or(region);
+                            let corners =
+                                props_draw::tree_quad(tile.x, tile.y, time, main.w, main.h);
                             let entry = tree_warp_groups
                                 .entry(main.page)
                                 .or_insert((main.texture.clone(), Vec::new()));

@@ -763,9 +763,7 @@ impl MindFx {
             log::warn!("fx: missing caustics shader");
             return None;
         };
-        let Some(noise) = self.raw_texture("sprites/caustics.png") else {
-            return None;
-        };
+        let noise = self.raw_texture("sprites/caustics.png")?;
         let mut material = ShaderMaterial::new_gd();
         material.set_shader(&shader);
         material.set_shader_parameter("u_noise", &noise.to_variant());

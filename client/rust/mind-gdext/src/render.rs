@@ -1514,7 +1514,7 @@ impl MindWorldRenderer {
         let capture_due = self
             .screenshot
             .as_ref()
-            .is_some_and(|pending| self.stats.frames >= pending.started + 1);
+            .is_some_and(|pending| self.stats.frames > pending.started);
         if capture_due {
             self.finish_screenshot();
         }

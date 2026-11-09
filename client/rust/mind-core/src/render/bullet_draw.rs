@@ -64,6 +64,10 @@ pub struct ContinuousLaserLayer {
 }
 
 /// Per-colour `ContinuousLaserBulletType.draw` layers (`:55-66`).
+///
+/// One parameter per Java draw input; grouping them into a struct would only
+/// re-introduce the same field list at every call site.
+#[allow(clippy::too_many_arguments)]
 pub fn continuous_laser_layers(
     width: f32,
     stroke_from: f32,
