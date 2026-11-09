@@ -384,7 +384,7 @@ case "$TASK" in
   stdb) TASK_CMD=(bash "$REPO_ROOT/server/build.sh") ;;
   bench)
     TASK_CMD=(cargo run -q --release --manifest-path "$MANIFEST" -p mind-headless --
-      bench --ticks 100000 --scenario bench_baseline)
+      bench --ticks 300000 --scenario bench_baseline)
     ;;
   raw)
     (( ${#TASK_ARGS[@]} > 0 )) || die '--cmd/--name needs a command (use --cmd -- CMD...)'

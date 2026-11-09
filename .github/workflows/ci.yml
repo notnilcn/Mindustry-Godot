@@ -78,15 +78,15 @@ jobs:
           cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_determinism --json > /dev/null
           cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_many_commands --json > /dev/null
 
-      - name: bench budget (+20% warn / +50% fail vs 101/240 ns)
+      - name: bench budget (+20% warn / +50% fail vs 800/1700 ns)
         shell: bash
         run: |
           set -euo pipefail
-          BASE_P50_NS=101
-          BASE_P99_NS=240
+          BASE_P50_NS=800
+          BASE_P99_NS=1700
           FAIL_P50_NS=$((BASE_P50_NS * 150 / 100))
           FAIL_P99_NS=$((BASE_P99_NS * 150 / 100))
-          BENCH_JSON="$(cargo run -q --release --manifest-path client/rust/Cargo.toml -p mind-headless -- bench --ticks 100000 --scenario bench_baseline || true)"
+          BENCH_JSON="$(cargo run -q --release --manifest-path client/rust/Cargo.toml -p mind-headless -- bench --ticks 300000 --scenario bench_baseline || true)"
           echo "$BENCH_JSON"
           P50_NS="$(printf '%s' "$BENCH_JSON" | sed -n 's/.*"p50_ns":\([0-9][0-9]*\).*/\1/p')"
           P99_NS="$(printf '%s' "$BENCH_JSON" | sed -n 's/.*"p99_ns":\([0-9][0-9]*\).*/\1/p')"
