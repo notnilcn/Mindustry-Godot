@@ -648,6 +648,10 @@ pub struct Sector {
     pub preset_difficulty: f32,
     /// Preset `requireUnlock`.
     pub preset_require_unlock: bool,
+    /// Preset `showHidden` (`SectorPreset.showHidden`): `Sector.name()` returns
+    /// the preset name for a hidden-but-shown sector even without an unlock
+    /// requirement (`Sector.java:153-164`).
+    pub preset_show_hidden: bool,
     /// Preset `captureWave`.
     pub preset_capture_wave: i32,
     /// Preset `alwaysUnlocked`.
@@ -696,6 +700,7 @@ impl Sector {
             preset: None,
             preset_difficulty: 0.0,
             preset_require_unlock: true,
+            preset_show_hidden: false,
             preset_capture_wave: 0,
             preset_always_unlocked: false,
             preset_name: None,
@@ -761,6 +766,39 @@ impl Sector {
     /// `Sector.hasSave`.
     pub fn has_save(&self) -> bool {
         self.save.is_some()
+    }
+
+    /// `Sector.name()` (`Sector.java:153-164`), the single sector display name
+    /// used by the planet dialog, launch dialog and toasts.
+    ///
+    /// Port deviations, both deliberate: the preset name is the raw content
+    /// name, not the localized one (`NameMaps`/bundle localization stays in the
+    /// view layer, which already re-localizes preset names for the dialogs),
+    /// and an empty `info.name` is treated as unset (`Sector.java` only checks
+    /// for null; the port's rename path stores `Some("")` and every other
+    /// display site filters it).
+    pub fn display_name(&self, planet: &Planet) -> String {
+        if let Some(name) = self
+            .info
+            .info
+            .name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        {
+            return name.to_owned();
+        }
+        // `preset != null && (preset.requireUnlock || preset.showHidden)`.
+        if self.preset.is_some()
+            && (self.preset_require_unlock || self.preset_show_hidden)
+            && let Some(preset) = &self.preset_name
+        {
+            return preset.clone();
+        }
+        // Single-sector "planets" use their own name for the sector name.
+        if planet.sectors.len() == 1 {
+            return planet.name.clone();
+        }
+        self.id.to_string()
     }
 
     /// `Sector.isBeingPlayed`.
@@ -1023,6 +1061,60 @@ mod tests {
         assert!(sector.is_attacked(None));
         assert!(sector.is_frozen(None));
         assert!(!sector.is_captured(None));
+    }
+
+    /// Findings #3/#4: `Sector.name()` precedence (`Sector.java:153-164`) —
+    /// a player-set `info.name`; the preset name only when
+    /// `requireUnlock || showHidden`; the planet name on a single-sector planet;
+    /// else the bare grid index. The port also treats an empty stored name as
+    /// unset (documented deviation).
+    #[test]
+    fn display_name_matches_java_precedence() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::Planet;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let def = registry.planet_by_name("serpulo").expect("serpulo");
+        let planet = Planet::from_def(&registry, def, 0.0);
+        assert!(planet.sectors.len() > 1, "serpulo is a multi-sector planet");
+
+        let mut sector = Sector::new(planet.id, 15);
+        sector.preset = registry
+            .sector_by_name("groundZero")
+            .map(|preset| preset.id);
+        sector.preset_name = Some("groundZero".to_owned());
+
+        // A player rename always wins.
+        sector.info.info.name = Some("Renamed".to_owned());
+        assert_eq!(sector.display_name(&planet), "Renamed");
+        // An empty stored name is treated as unset (port filter).
+        sector.info.info.name = Some(String::new());
+
+        // Preset name with `requireUnlock`.
+        sector.preset_require_unlock = true;
+        sector.preset_show_hidden = false;
+        assert_eq!(sector.display_name(&planet), "groundZero");
+
+        // Preset name with `showHidden`, even without an unlock requirement.
+        sector.preset_require_unlock = false;
+        sector.preset_show_hidden = true;
+        assert_eq!(sector.display_name(&planet), "groundZero");
+
+        // Neither flag: a multi-sector planet falls back to the bare index.
+        sector.preset_show_hidden = false;
+        assert_eq!(sector.display_name(&planet), "15");
+
+        // A single-sector planet names its sector after the planet, even with a
+        // preset that has no unlock/show-hidden requirement.
+        let mut single = planet.clone();
+        single.sectors = vec![sector.clone()];
+        assert_eq!(sector.display_name(&single), single.name);
+
+        // No preset at all: the same index fallback on a multi-sector planet.
+        sector.preset = None;
+        sector.preset_name = None;
+        assert_eq!(sector.display_name(&planet), "15");
     }
 
     #[test]

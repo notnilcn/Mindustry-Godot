@@ -171,6 +171,7 @@ impl Planet {
                 sector.preset = Some(preset_id);
                 sector.preset_difficulty = preset.difficulty;
                 sector.preset_require_unlock = preset.require_unlock;
+                sector.preset_show_hidden = preset.show_hidden;
                 sector.preset_capture_wave = preset.capture_wave;
                 sector.preset_always_unlocked = preset.unlock.always_unlocked;
                 sector.preset_name = Some(preset.name.clone());
@@ -696,6 +697,15 @@ mod tests {
         assert_eq!(sector.preset, Some(ground_zero.id));
         assert_eq!(sector.preset_difficulty, 1.0);
         assert_eq!(sector.preset_capture_wave, 10);
+        assert!(!sector.preset_show_hidden, "groundZero sets no showHidden");
+        // Finding #3/#4: `Sector.name()` needs `preset.showHidden`, so
+        // `Planet::from_def` must copy it (the hidden submission at sector 27).
+        let shielded = registry
+            .sector_by_name("sector-serpulo-27")
+            .expect("shielded submission");
+        let shielded_sector = serpulo.sector(shielded.sector).expect("sector 27");
+        assert_eq!(shielded_sector.preset, Some(shielded.id));
+        assert!(shielded_sector.preset_show_hidden);
     }
 
     /// H04 T4: Java `Planet.applyDefaultRules` yields `CampaignRules` all-false

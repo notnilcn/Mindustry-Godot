@@ -2445,17 +2445,25 @@ impl MindCampaign {
             let CampaignEvent::SectorInvasion { planet, sector, .. } = event else {
                 continue;
             };
-            let planet_name = self
+            let planet_record = self
                 .campaign
                 .as_ref()
-                .and_then(|campaign| campaign.planet(*planet).map(|planet| planet.name.clone()))
+                .and_then(|campaign| campaign.planet(*planet));
+            let planet_name = planet_record
+                .map(|planet| planet.name.clone())
                 .unwrap_or_default();
-            let name = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(*planet, *sector))
-                .map(|record| sector_toast_name(record, &planet_name, *sector))
-                .unwrap_or_else(|| format!("{planet_name}-{sector}"));
+            // `Sector.name()` (`Sector.java:153-164`) through the one shared
+            // implementation; the record can be missing only if the event's
+            // sector is out of range (the port's defensive fallback is the bare
+            // grid index, never Java's `<planet>-<id>`).
+            let name = planet_record
+                .zip(
+                    self.campaign
+                        .as_ref()
+                        .and_then(|campaign| campaign.sector(*planet, *sector)),
+                )
+                .map(|(planet, record)| record.display_name(planet))
+                .unwrap_or_else(|| sector.to_string());
             log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
             let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
                 continue;
@@ -6320,21 +6328,9 @@ impl MindCampaign {
             ) else {
                 return GString::from("{}");
             };
-            let from_name = launcher_sector
-                .info
-                .info
-                .name
-                .clone()
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| {
-                    launcher_sector.preset_name.clone().unwrap_or_else(|| {
-                        if planet_record.sectors.len() == 1 {
-                            planet_record.name.clone()
-                        } else {
-                            launcher_sector.id.to_string()
-                        }
-                    })
-                });
+            // `Core.bundle.format("launch.from", sector.name())`
+            // (`LaunchLoadoutDialog.java:165`): one display-name implementation.
+            let from_name = launcher_sector.display_name(planet_record);
             (
                 launcher_sector.items().clone(),
                 destination_sector.allow_launch_loadout(planet_def.allow_launch_loadout),
@@ -7453,22 +7449,6 @@ fn render_stat_cells(cells: &[Cell]) -> serde_json::Value {
         })
         .collect();
     serde_json::Value::Array(rendered)
-}
-
-/// `Sector.name()` (`Sector.java:243-245`): the stored display name, else the
-/// preset name, else `<planet>-<id>`.
-fn sector_toast_name(
-    record: &mind_core::game::sector::Sector,
-    planet_name: &str,
-    id: u16,
-) -> String {
-    if let Some(name) = &record.info.info.name {
-        return name.clone();
-    }
-    if let Some(preset) = &record.preset_name {
-        return preset.clone();
-    }
-    format!("{planet_name}-{id}")
 }
 
 /// Reads a numeric `Variant` as an integer (`LoadoutDialog`'s amounts are
