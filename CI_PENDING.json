@@ -6,14 +6,14 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-09T07:52:44Z",
+  "updated": "2026-11-09T08:21:51Z",
   "entries": [
     {
-      "id": "CP-20261109-075244",
-      "created_at": "2026-11-09T07:52:44Z",
+      "id": "CP-20261109-082151",
+      "created_at": "2026-11-09T08:21:51Z",
       "agent": "ci-fixer-pass",
       "branch": "main",
-      "head": "16bade41",
+      "head": "8aa830ec",
       "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
       "dirty_files": 1,
       "area": "client/rust/mind-gdext/src/render",
@@ -35,11 +35,11 @@
       "status": "pending"
     },
     {
-      "id": "CP-20261109-075244-2",
-      "created_at": "2026-11-09T07:52:44Z",
+      "id": "CP-20261109-082151-2",
+      "created_at": "2026-11-09T08:21:51Z",
       "agent": "ci-fixer-pass",
       "branch": "main",
-      "head": "16bade41",
+      "head": "8aa830ec",
       "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
       "dirty_files": 1,
       "area": "client/rust/mind-gdext/src/ui",
@@ -60,11 +60,11 @@
       "status": "pending"
     },
     {
-      "id": "CP-20261109-075244-3",
-      "created_at": "2026-11-09T07:52:44Z",
+      "id": "CP-20261109-082151-3",
+      "created_at": "2026-11-09T08:21:51Z",
       "agent": "ci-fixer-pass",
       "branch": "main",
-      "head": "16bade41",
+      "head": "8aa830ec",
       "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
       "dirty_files": 1,
       "area": "client/rust/mind-core/tests/golden",
@@ -82,11 +82,11 @@
       "status": "pending"
     },
     {
-      "id": "CP-20261109-075244-4",
-      "created_at": "2026-11-09T07:52:44Z",
+      "id": "CP-20261109-082151-4",
+      "created_at": "2026-11-09T08:21:51Z",
       "agent": "ci-fixer-pass",
       "branch": "main",
-      "head": "16bade41",
+      "head": "8aa830ec",
       "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
       "dirty_files": 1,
       "area": "tools/ci.sh",
