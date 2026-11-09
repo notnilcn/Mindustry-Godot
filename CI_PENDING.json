@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-07T03:04:06Z",
+  "updated": "2026-11-09T06:04:16Z",
   "entries": [
     {
       "id": "CP-20261105-042043",
@@ -1754,6 +1754,188 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib logic_view; ... -p mind-core --lib render::",
       "expected": "3 + 259 + 84 pass; headless boot exit 0",
       "risk": "per-frame HUD lookups; DrawDesc liquid field surface; tint overlay; dash consumer pending",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060405",
+      "created_at": "2026-11-09T06:04:05Z",
+      "agent": "findings-orchestrator",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "tools/ci.sh",
+      "summary": "Gate the msav-import tests in CI and fix the never-run ground-zero drill test [findings #7]",
+      "files": [
+        ".github/workflows/ci.yml",
+        "tools/ci.sh",
+        "tools/AGENTS.md",
+        "client/rust/mind-core/src/sim/runtime.rs"
+      ],
+      "gates": [
+        "fmt",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "bash tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --features msav-import",
+      "expected": "the new 'cargo test -p mind-core --features msav-import' stage reaches the msav_tests/markers_region_tests modules; ground_zero_drill_feeds_the_materialized_core passes (team-shared core inventory, 1800-tick mining window)",
+      "risk": "The full feature-gated suite also runs the pre-existing red combat_golden::turret_ammo_fire_matches_golden (fails at 291e30a8 too; unrelated to this pass)",
+      "notes": "Stage label in runs/ci/*/run.json is 'cargo test -p mind-core --features msav-import'; mapped to the cargo-test gate.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060405-2",
+      "created_at": "2026-11-09T06:04:05Z",
+      "agent": "findings-orchestrator",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/scenes/editor",
+      "summary": "Remove unexported MindDialog properties from the editor dialog scenes [findings #11]",
+      "files": [
+        "client/scenes/editor/banned_content_dialog.tscn",
+        "client/scenes/editor/map_generate_dialog.tscn",
+        "client/scenes/editor/map_info_dialog.tscn",
+        "client/scenes/editor/map_load_dialog.tscn",
+        "client/scenes/editor/map_locales_dialog.tscn",
+        "client/scenes/editor/map_objectives_dialog.tscn",
+        "client/scenes/editor/map_processors_dialog.tscn",
+        "client/scenes/editor/map_resize_dialog.tscn",
+        "client/scenes/editor/sector_generate_dialog.tscn",
+        "client/scenes/editor/wave_info_dialog.tscn"
+      ],
+      "gates": [
+        "godot-import",
+        "ui-widgets-check",
+        "ui-layout-check",
+        "dialog-sweep"
+      ],
+      "repro": "bash tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn",
+      "expected": "DIALOGCHECK: failed=0; every editor dialog still builds, shows and hides",
+      "risk": "Scene-only change: removed editor_path/routes/content_type/applied/map_dir/canvas_scene, which MindDialog does not export; the controllers resolve the editor via kit::editor() and instantiate the objectives canvas themselves",
+      "notes": "The map_objectives scene's now-unused canvas ext_resource was removed with it.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060405-3",
+      "created_at": "2026-11-09T06:04:05Z",
+      "agent": "findings-orchestrator",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Correct the ui/PORTING.md widget helper inventory [findings #16]",
+      "files": [
+        "client/rust/mind-gdext/src/ui/PORTING.md"
+      ],
+      "gates": [
+        "fmt"
+      ],
+      "repro": "read client/rust/mind-gdext/src/ui/PORTING.md; grep 'pub fn' client/rust/mind-gdext/src/ui/kit/widgets/factory.rs",
+      "expected": "the doc lists only real factory functions and points the widget-node names at widgets/ modules",
+      "risk": "Documentation only; no build impact.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060416",
+      "created_at": "2026-11-09T06:04:16Z",
+      "agent": "findings-campaign",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/campaign.rs",
+      "summary": "Fix campaign findings #1 #2 #3 #4 #8 #9 #13 #14: registry-aware sector-record writes, shared capture hook, Sector::display_name, unit-debug hoist, schematic/save-slot memos, doc fixes, regenerated ui campaign golden",
+      "files": [
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-core/src/game/runtime.rs",
+        "client/rust/mind-core/src/game/sector.rs",
+        "client/rust/mind-core/src/game/planet.rs",
+        "client/rust/mind-core/src/ui/campaign.rs",
+        "client/rust/mind-core/tests/goldens/ui/campaign.json",
+        "parity/golden_manifest.json"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "parity",
+        "goldens",
+        "godot-import",
+        "dialog-sweep"
+      ],
+      "repro": "cargo test -p mind-core --lib display_name; cargo test -p mind-core --lib fixture_sector_names; cargo test -p mind-core --lib captured_sector_hook; cargo test -p mind-gdext --lib dir_memo; cargo test -p mind-gdext --lib unit_count_rows",
+      "expected": "mind-core lib 3242 passed / 0 failed; mind-gdext lib 425 passed with the same 9 Godot-FFI UI failures as base 7955da05; parity goldens PASS (ui campaign golden regenerated, checksum 90a53cbad6c6c44d)",
+      "risk": "Sector display names are the only UI-visible behaviour change: preset sectors with neither requireUnlock nor showHidden now use the bare grid index (golden regenerated). Pre-existing gate reds at 7955da05: clippy mind-core render/bullet_draw.rs too-many-arguments, clippy mind-gdext fx.rs/render/*, fmt drift in mind-gdext/src/render/floor.rs, 9 Godot-FFI UI unit tests.",
+      "notes": "Schematic/save-slot memos are directory-mtime keyed and cleared on content boot/clear_data. Residual per-rebuild cost: campaign_views_json still reads a preset .msav header for disallowed-loadout destination sectors (Erekir).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060416-2",
+      "created_at": "2026-11-09T06:04:16Z",
+      "agent": "fix-locales",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/ui/dialogs",
+      "summary": "Port MapLocalesDialog to a native editor dialog controller [findings #6]",
+      "files": [
+        "client/rust/mind-gdext/src/ui/dialogs/batch_e.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "dialog-sweep"
+      ],
+      "repro": "bash tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib -- ui::dialogs::batch_e",
+      "expected": "14/14 batch_e tests pass; dialog_sweep_check reports failed=0 for map_locales; no clippy/check diagnostics in batch_e.rs",
+      "risk": "New three-column dialog body (sidebar/card pane/add panel) plus overlay sub-dialogs; first look at MindTable/MindScroll min-size propagation and fit at the 1152x648 default viewport. Workspace clippy/fmt are already red in fx.rs/render*.rs (not this entry).",
+      "notes": "Gap: state.mapLocales has no editor-facade seam so only the locales map tag is written; locale labels show codes; Java sub-dialogs are port overlays (ESC closes the parent dialog).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261109-060416-3",
+      "created_at": "2026-11-09T06:04:16Z",
+      "agent": "fix-dialogs",
+      "branch": "main",
+      "head": "5d25961a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 1,
+      "area": "client/rust/mind-gdext/src/ui",
+      "summary": "Planet-scoped sector select, single ContentInfo helper, Java-faithful strip_colors, upstream dialog headers [findings #5 #10 #12 #13 #15]",
+      "files": [
+        "client/rust/mind-core/src/util/strings.rs",
+        "client/rust/mind-gdext/src/ui/dialog.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_a.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_b.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_c.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_d.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/batch_g.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/misc.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/sector.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/simple.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-import",
+        "ui-layout-check",
+        "ui-widgets-check",
+        "dialog-sweep"
+      ],
+      "repro": "bash tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib util::strings && bash tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib",
+      "expected": "strip_colors unit tests pass; sector_select lists the context planet's authored sectors; DIALOGCHECK: failed=0",
+      "risk": "strip_colors is shared (maps/bundle masking): unknown tags now stay literal and 1-digit hex strips; sector-select row source is now the context planet; batch_b/campaign2 header-only. Pre-existing reds to expect: fmt (render/floor.rs), clippy (mind-core render/bullet_draw.rs; mind-gdext render/{blocks,floor}.rs, render.rs, fx.rs), mind-gdext lib tests 9 engine-binding failures identical at 7955da05.",
       "status": "pending"
     }
   ]
