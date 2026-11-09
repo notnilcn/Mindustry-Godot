@@ -45,7 +45,7 @@ use mind_core::game::play::{
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::{CampaignRuntime, UnlockRef};
+use mind_core::game::runtime::{CampaignRuntime, UnlockRef, on_captured_sector};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -1000,8 +1000,12 @@ impl MindCampaign {
         {
             // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
             // live sector record (core snapshot, items, production, wave) lands
-            // in settings next to the autosave (PAR-0153).
-            self.persist_sector_record_in(Some(&mut runtime));
+            // in settings next to the autosave (PAR-0153). The writer takes the
+            // registry explicitly (finding #1): no facade field is borrowed
+            // across the `&mut self` call.
+            let registry = self.registry.take();
+            self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
+            self.registry = registry;
             // `GameService.storeStats` at the autosave boundary: the tracker's
             // stats/achievements land in the settings store alongside the
             // sector record (the exit persist flushes the file).
@@ -1057,7 +1061,7 @@ impl MindCampaign {
                         self.saving_finish_tick = Some(tick.saturating_add(3));
                         log::info!("capture save queued (`{}`)", file.display());
                     }
-                    self.persist_sector_record_in(Some(&mut runtime));
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                 }
                 mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
                     self.campaign_complete = true;
@@ -1086,7 +1090,7 @@ impl MindCampaign {
                     // `SaveVersion.writeMeta` persists the sector record next to
                     // the save (spawn position + prepared core state), which the
                     // lost-sector replay reads on the re-attack.
-                    self.persist_sector_record_in(Some(&mut runtime));
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                     dirty = true;
                 }
                 _ => {}
@@ -2379,18 +2383,27 @@ impl MindCampaign {
         let captured = if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
+                // `SectorCaptureEvent` listener inputs: Java fires the event
+                // inside `Logic.sectorCapture` before `rules.attackMode =
+                // false`, so snapshot the attacking flag and the pre-capture
+                // loss counter first (finding #2).
+                let was_attack_mode = runtime.session.rules.attack_mode;
+                let buildings_destroyed = runtime.session.stats.buildings_destroyed;
                 let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
                 let ok = !events.is_empty();
                 for event in events {
-                    // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
-                    // the captured sector's wave team turns derelict on the next
-                    // tick (`Sim::apply_campaign_world_requests`). The debug
-                    // capture path must queue it like the game-state path.
-                    if matches!(
-                        event,
-                        mind_core::game::play::PlayEvent::SectorCapture { .. }
-                    ) {
-                        runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+                    // Shared with `game_state_tick_system` (GAPS #68 /
+                    // finding #2): the `GameService` capture hooks
+                    // (`on_sector_capture`) and the `Logic.java:117-121`
+                    // derelict-wave-team queue now run on this path too, so a
+                    // capture here counts for achievements.
+                    if let mind_core::game::play::PlayEvent::SectorCapture { planet, .. } = &event {
+                        on_captured_sector(
+                            &mut runtime,
+                            *planet,
+                            was_attack_mode,
+                            buildings_destroyed,
+                        );
                     }
                     runtime.events.push(event);
                 }
@@ -4967,27 +4980,40 @@ impl MindCampaign {
     /// progress, item pools and the production windows survive a client restart
     /// (PAR-0081/PAR-0082).
     fn persist_sector_record(&mut self) {
+        // The record writer takes the registry explicitly (finding #1); take the
+        // facade copy for the call and restore it afterwards so `&mut self` is
+        // free for the campaign/settings half.
+        let registry = self.registry.take();
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
-                self.persist_sector_record_in(Some(&mut runtime));
+                self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                 host.bind_mut().put_campaign_runtime(runtime);
+                self.registry = registry;
                 return;
             }
         }
-        self.persist_sector_record_in(None);
+        self.persist_sector_record_in(None, registry.as_ref());
+        self.registry = registry;
     }
 
     /// `persist_sector_record` body. `runtime` is the already-taken live
     /// runtime when the caller holds it (`pump_runtime` events); with `None`
     /// the host runtime (when installed) is taken for the read and put back.
-    fn persist_sector_record_in(&mut self, mut runtime: Option<&mut CampaignRuntime>) {
+    ///
+    /// `registry` is the explicit content registry (finding #1): `pump_runtime`
+    /// has `self.registry` `take()`n for its whole event window, so reading the
+    /// facade field here silently skipped the capture/game-over record write.
+    /// Every caller owns the borrow (the `&mut self` below cannot hold one).
+    fn persist_sector_record_in(
+        &mut self,
+        mut runtime: Option<&mut CampaignRuntime>,
+        registry: Option<&ContentRegistry>,
+    ) {
         let Some((planet, sector_id)) = self.session.sector else {
             return;
         };
-        let Some(planet_name) = self
-            .registry
-            .as_ref()
+        let Some(planet_name) = registry
             .and_then(|registry| registry.planet(planet))
             .map(|record| record.name.clone())
         else {
@@ -5023,8 +5049,7 @@ impl MindCampaign {
                 .and_then(|campaign| campaign.sector(planet, sector_id))
                 .and_then(|sector| sector.preset);
             let preset_name = preset.and_then(|preset| {
-                self.registry
-                    .as_ref()
+                registry
                     .and_then(|registry| registry.sector(preset))
                     .map(|def| def.name.clone())
             });
