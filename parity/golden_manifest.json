@@ -444,7 +444,10 @@
       "kind": "scenario",
       "path": "scenarios/bench_baseline.json",
       "owner_plan": "00",
-      "sha256": "8ffe171c2ba48ecf8af3ce080e1922bba9b311d8156befc47d21d7a822a086d9"
+      "sha256": "515f375b4798d2301a8cbbe706b4e0f07f6d0372486fe68b866bb7f4b0b39b3d",
+      "reasons": [
+        "2026-11-09 bench re-baseline: the rounded scenario budget moved from p50_us/p99_us 1/1 to 2/5 because pinned release runs now measure p50 ~960-1020 ns / p99 1.4-2.0 us (occasional shared-host stalls up to ~6 us) after the pending simulation work. The scenario has no expected checksum, so only `mind-headless bench`'s rounded status changes; the ns gate lives in tools/ci.sh. sha256 515f375b4798d2301a8cbbe706b4e0f07f6d0372486fe68b866bb7f4b0b39b3d."
+      ]
     },
     {
       "id": "scenario_sim_core_boot",

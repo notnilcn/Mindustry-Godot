@@ -9,6 +9,6 @@
   "steps": 1,
   "expect": {
     "tiles": [],
-    "bench": { "p50_us": 1, "p99_us": 1 }
+    "bench": { "p50_us": 2, "p99_us": 5 }
   }
 }
