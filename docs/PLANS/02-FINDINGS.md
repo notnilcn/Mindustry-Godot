@@ -24,3 +24,45 @@ they are doc hygiene, and C01 may fix them.
 | 14 | `campaign.rs` 1398–1401, 3526–3531, 7557–7561 | Stale or duplicated doc comments (`start_sector` mentions a `loadout_json` argument it does not take; two conflicting paragraphs; a duplicated doc on `parse_launch_payload`). | S01 may fix them (they are listed in S01). |
 | 15 | `ui/dialogs/batch_c.rs:351` vs `batch_campaign2.rs:441`, `batch_d.rs:384`, `batch_g.rs:259` | Four `strip_color(s|_tags)` helpers with different semantics (c also strips `[]`, d keeps non-color tags). `mind_core::util::strings::strip_colors` exists. | Decide the Java-faithful one per call site (Java `Strings.stripColors`). |
 | 16 | `ui/kit/widgets/factory.rs` vs `ui/PORTING.md` | `PORTING.md` documents `factory::check`, `bar`, `warning_bar`, `items_display`, which do not exist. | C01 fixes the doc (or F1 adds the helpers). |
+
+## Resolution (2026-11-09)
+
+All 16 findings were fixed in a dedicated pass on top of `7955da05` (the plan
+base plus the render/bullet work); the refactor packages themselves were not
+run. Commits: `1c95aab0`/`a99b5c67`/`f1e9e0aa`/`c62fb191` (findings
+#1/#2/#3/#4/#8/#9/#13/#14), `1f104114` (#5/#10/#12/#13/#15), `4c671d61` (#6),
+`ed41cb7e` (#7), `29761912` (#11), `95528c32` (#16), `5ee0c248` (the regenerated
+`ui campaign` golden).
+
+| # | Resolved by |
+|---|---|
+| 1 | `persist_sector_record_in` takes the `ContentRegistry` explicitly; every call site (autosave boundary, capture, game over, wrapper) passes the registry that `pump_runtime` owns, so the capture/game-over record write is no longer skipped. |
+| 2 | `mind_core::game::runtime::on_captured_sector` shares the `GameService.on_sector_capture` hook and the derelict-wave-team queue between `game_state_tick_system` and `MindCampaign::capture_sector`, which snapshots the pre-capture `attack_mode`/`buildings_destroyed` values like Java. |
+| 3, 4 | One Java-faithful `Sector::display_name(&Planet)` (`Sector.java:153-164`), with the missing `preset_show_hidden` copied in `Planet::from_def`; the core UI projection, the launch `from` label and the invasion toast all call it. |
+| 5 | `MindDialog::campaign_views_for`/`campaign_section_for` pass the requested planet; `SectorSelectDialog` reads its context planet's sector rows. |
+| 6 | `MapLocalesDialog` replaced by a native controller in `ui/dialogs/batch_e.rs` (locale sidebar, property cards, search/filter, add/edit/delete, icon gallery, apply/back save confirm). |
+| 7 | `cargo test -p mind-core --features msav-import` added to `tools/ci.sh` and the GitHub workflow; the never-run `ground_zero_drill_feeds_the_materialized_core` was fixed to assert on the team-shared core inventory after a realistic mining window. |
+| 8 | `objective_live_stats_json` fetches/parses `unit_debug_json` at most once per call (lazy, UnitCount only) and filters through the tested `count_unit_rows`. |
+| 9 | The schematic library and the save-slot listing are memoized on their directory mtime (`DirMemo`), shared by every read endpoint and cleared on content boot/data clear. |
+| 10 | One `open_content_info(&str)` helper (Java `ContentInfoDialog.show(content)` shape); the duplicate and its unused dialog parameter are gone. |
+| 11 | The unexported `MindDialog` properties (`editor_path`, `routes`, plus the other GDScript-only keys) were removed from `client/scenes/editor/*.tscn`. |
+| 12, 13, 14 | Upstream citations added to `simple.rs`/`misc.rs`/`sector.rs`; the stale `.gd`/module headers in `mind-core/src/ui/campaign.rs`, `batch_campaign2.rs` and `batch_b.rs` rewritten; the three stale/duplicated `campaign.rs` doc comments fixed. |
+| 15 | `mind_core::util::strings::strip_colors` is now a faithful `Strings.parseColorMarkup` port (`Colors` name table, 1..=8 hex digits, `[[` escape); the four local copies were deleted or replaced, with the Java call-site semantics documented. |
+| 16 | `ui/PORTING.md` now lists the real `factory` surface and points the remaining names at their widget-node modules. |
+
+**Follow-ups noticed during the pass** (not part of the findings):
+
+- `MindCampaign::capture_sector` still does not award the `CampaignComplete`
+  achievements; only `game_state_tick_system` calls `on_campaign_complete`
+  (finding #2 covered `on_sector_capture` only).
+- `campaign_views_json` still reads a destination preset's `.msav` header per
+  rebuild for disallowed-loadout sectors (Erekir), outside finding #9's two
+  caches.
+- Remaining stale GDScript prose: `ui/dialogs/mod.rs`, `batch_a.rs`,
+  `batch_d.rs`, `batch_f.rs`, `batch_h.rs`, `batch_i.rs`,
+  `mind-gdext/src/campaign.rs` line 4 and a few `.gd` doc citations.
+- Pre-existing red gates already at `7955da05` (unrelated to these fixes):
+  `mind-core/tests/combat_golden.rs::turret_ammo_fire_matches_golden`, clippy
+  `too_many_arguments` in `render/bullet_draw.rs`, clippy lints in
+  `mind-gdext/src/fx.rs`/`render.rs`/`render/blocks.rs`/`render/floor.rs`, the
+  unformatted `render/floor.rs`, and 9 Godot-FFI-only `mind-gdext` unit tests.
