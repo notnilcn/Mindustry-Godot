@@ -93,11 +93,21 @@ kit::ui() / kit::hud() / kit::campaign() / kit::sim_host() / kit::editor()
 
 `widgets::factory` is the replacement for the old `MindWidgets` static
 helpers: `table()`, `stack()`, `scroll()`, `label(text)`, `styled_label`,
-`button(text)`, `image_button`, `icon_button(icon, text, style, align)`,
-`glyph_label`, `image`, `field`, `slider`, `space`, `bar`, `warning_bar`,
-`grid_image`, `border_image`, `check`, `mobile_button`, `req_image`,
-`items_display`, `core_items_display`, `fade_in`, `fade_out`, `remove_after`,
+`button(text)`, `image_button`, `image_button_first`,
+`icon_button(icon, text, style, align)`, `glyph_button`, `glyph_label`,
+`image`, `field`, `slider`, `space`, `fade_in`, `fade_out`, `remove_after`,
 `content_icon`, `inset_to_content`.
+
+The remaining `MindWidgets` entries are widget *nodes* (not factory
+functions), each in its own `widgets/` module: `bar::MindBar`
+(`setup`/`reset`/`snap`/`flash`/`blink`/`outline`), `warning_bar`,
+`grid_image::MindGridImage::with_size`, `border_image::MindBorderImage`
+(`with_region`/`border`), `check::MindCheck::setup`,
+`mobile_button::MindMobileButton::setup`, `req_image::MindReqImage::setup`,
+`items_display::MindItemsDisplay`, `core_items_display::MindCoreItemsDisplay`,
+`collapser`, `minimap`, `schematic_image`, `research_view`,
+`research_items_display`, `tooltip`, `player_status`, `item_command_row`,
+`item_selection`, `multi_req_image`.
 
 ## Dialog controllers
 
