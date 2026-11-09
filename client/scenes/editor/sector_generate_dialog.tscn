@@ -3,4 +3,3 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
 
 [node name="SectorGenerateDialog" unique_id=106603929 instance=ExtResource("1_base")]
-editor_path = NodePath("/root/Spine/MindEditor")

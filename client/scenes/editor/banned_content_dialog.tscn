@@ -3,5 +3,3 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
 
 [node name="BannedContentDialog" unique_id=1657881791 instance=ExtResource("1_base")]
-editor_path = NodePath("/root/Spine/MindEditor")
-content_type = "block"

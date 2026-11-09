@@ -3,5 +3,3 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
 
 [node name="MapInfoDialog" unique_id=150338802 instance=ExtResource("1_base")]
-editor_path = NodePath("/root/Spine/MindEditor")
-routes = Array[String](["map_info", "wave_info", "map_objectives", "map_generate", "map_locales", "map_processors", "map_assets"])
