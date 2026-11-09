@@ -1,0 +1,330 @@
+# sim_host.rs methods inside `impl MindSimHost` at 291e30a8 -> destination file under sim_host/ (W1-S05).
+# Columns: fn_line  doc_start  end_line  name  kind  dest.  kind: func=#[func] private, pub func=#[func] pub, private, pub(crate), pub (Rust-only).
+# Free items (types, free fns) are not listed; use the range table in W1-S05. doc_start may precede earlier items for the first method after a block; trust fn_line.
+892	986	964	bootstrap	private	mod
+990	965	1014	install_logic_globals	private	boot
+1023	1015	1112	install_sim_seams	private	boot
+1118	1113	1133	install_fx_sink	private	boot
+1137	1134	1160	place_block	pub func	commands
+1165	1161	1179	tile_holds_block	private	commands
+1183	1180	1194	break_block	pub func	commands
+1201	1195	1224	place_block_rot	pub func	commands
+1230	1225	1241	valid_place_preview	pub func	commands
+1245	1242	1253	get_state_json	pub func	state
+1257	1254	1259	get_checksum	pub func	state
+1264	1260	1266	get_checksum_scoped	pub func	state
+1269	1267	1272	checksum_scoped_value	pub	state
+1276	1273	1278	pending_command_count	pub func	commands
+1283	1279	1285	enqueue_sim_command	pub	commands
+1289	1286	1297	submit_player_command	pub	commands
+1301	1298	1306	install_relay_outbox	pub	commands
+1309	1307	1311	clear_relay_outbox	pub	commands
+1315	1312	1320	with_registry	pub	commands
+1327	1321	1492	apply_sim_command_json	pub func	commands
+1505	1493	1609	submit_player_command_json	pub func	commands
+1615	1610	1617	default_team	pub func	state
+1622	1618	1624	selectable_units_json	pub func	command_panel
+1630	1625	1632	unit_debug_json	pub func	command_panel
+1637	1633	1656	command_targets_json	func	command_panel
+1661	1657	1663	drain_wall_flashes	pub	state
+1669	1664	1680	drain_build_damage_json	func	command_panel
+1685	1681	1687	boss_json	pub func	state
+1692	1688	1695	debug_apply_status	pub func	inspect
+1700	1696	1709	content_counts	pub func	state
+1714	1710	1733	content_list	pub func	state
+1739	1734	1744	content_hash	pub func	state
+1749	1745	1751	set_sim_tick	pub func	state
+1758	1752	1776	encode_snapshot	pub func	state
+1780	1777	1782	get_tick	pub func	state
+1786	1783	1788	world_revision	pub func	state
+1792	1789	1794	get_update_id	pub func	state
+1798	1795	1800	get_state	pub func	state
+1804	1801	1810	get_group_counts	pub func	state
+1814	1811	1821	get_group_count	pub func	state
+1825	1822	1827	is_paused	pub func	state
+1832	1828	1834	rules_pause_disabled	pub func	state
+1840	1835	1844	network_state	pub func	state
+1848	1845	1869	network_counts	pub func	state
+1877	1870	1883	control_block_unit_id	pub	inspect
+1889	1884	2001	building_debug	pub func	inspect
+2007	2002	2021	building_config_json	pub func	config
+2026	2022	2033	status_permanent	pub func	config
+2043	2034	2118	logic_picker_json	pub func	config
+2125	2119	2150	preview_config_tap	pub func	config
+2154	2151	2169	building_config_string	pub func	config
+2173	2170	2193	light_color	pub func	config
+2197	2194	2217	building_enabled	pub func	config
+2221	2218	2250	power_debug	pub func	inspect
+2254	2251	2274	liquid_debug	pub func	inspect
+2278	2275	2299	heat_debug	pub func	inspect
+2318	2300	2320	logic_available	pub func	logic
+2324	2321	2330	logic_statement_names	pub func	logic
+2334	2331	2376	logic_run	pub func	logic
+2380	2377	2383	logic_place	pub func	logic
+2388	2384	2403	logic_get_code	pub func	logic
+2411	2404	2444	logic_set_code	pub func	logic
+2448	2445	2450	logic_last_error	pub func	logic
+2455	2451	2515	logic_get_state	pub func	logic
+2520	2516	2532	logic_event_log_json	pub func	logic
+2536	2533	2538	logic_cutscene_state	pub	logic
+2541	2539	2543	take_logic_shake	pub	logic
+2548	2544	2559	logic_cutscene_json	pub func	logic
+2564	2560	2583	drain_logic_messages	pub func	logic
+2590	2584	2624	logic_display_commands	pub func	logic
+2628	2625	2683	logic_display_state	pub func	logic
+2688	2684	2716	logic_display_pixel	pub func	logic
+2725	2717	2780	logic_display_sync	pub func	logic
+2786	2781	2828	logic_canvas_sync	pub func	logic
+2834	2829	2872	logic_canvas_image	pub func	logic
+2877	2873	2903	logic_canvas_pixels	pub func	logic
+2907	2904	2947	logic_display_image	pub func	logic
+2956	2948	2990	logic_configure_code	pub func	logic
+2994	2991	2997	logic_bench	pub func	logic
+3001	2998	3004	logic_set_rule	pub func	logic
+3009	3005	3039	logic_rules_probe	pub func	logic
+3044	3040	3060	logic_set_flag	pub func	logic
+3077	3061	3079	request_save	pub func	io
+3084	3080	3111	write_save_preview	pub func	io
+3115	3112	3117	request_load	pub func	io
+3121	3118	3123	io_pending	pub func	io
+3128	3124	3130	io_saving	pub func	io
+3135	3131	3137	set_save_playtime	pub func	io
+3141	3138	3143	flush_io	pub	io
+3147	3144	3169	take_io_requests_json	pub func	io
+3175	3170	3203	take_io_responses_json	pub func	io
+3207	3204	3240	deliver_io_response_json	pub func	io
+3250	3241	3271	reset_to_menu	pub func	pump
+3275	3272	3282	set_paused	pub func	pump
+3287	3283	3289	set_command_mode_satisfied	pub func	pump
+3293	3290	3301	step	pub func	pump
+3306	3302	3349	load_scenario	pub func	world_load
+3356	3350	3373	set_sector_gen_extras	pub func	world_load
+3377	3374	3387	set_sector_gen_extras_rs	pub	world_load
+3397	3388	3399	set_sector_resume_file	pub	world_load
+3405	3400	3407	take_corrupt_sector_save	pub	world_load
+3414	3408	3416	set_pending_launch	pub func	world_load
+3423	3417	3426	set_pending_launch_core	pub func	world_load
+3429	3427	3434	single_core_schematic	private	world_load
+3438	3435	3440	generated_loadout_placed	pub	world_load
+3445	3441	3466	load_user_schematics	private	world_load
+3471	3467	3509	resolve_generated_loadout	private	world_load
+3518	3510	3521	load_sector	pub func	world_load
+3533	3522	3577	load_map_world	pub func	world_load
+3585	3578	3591	next_map_gen_seed	private	world_load
+3597	3592	3599	set_next_map_gen_seed	pub	world_load
+3604	3600	3622	resolve_map_path	private	world_load
+3627	3623	3629	last_map_error	pub func	world_load
+3633	3630	3863	load_sector_world	private	world_load
+3870	3864	3997	finish_world_load	private	world_load
+4001	3998	4003	last_sector_rules	pub	campaign_link
+4006	4004	4008	sector_spawn_count	pub	campaign_link
+4012	4009	4014	take_sector_plans	pub	campaign_link
+4019	4015	4021	take_sector_resume	pub	campaign_link
+4027	4022	4030	apply_world_rules	pub	campaign_link
+4036	4031	4056	apply_static_fog	pub	campaign_link
+4060	4057	4075	player_core_blocks	pub	campaign_link
+4079	4076	4098	core_teams	pub	campaign_link
+4105	4099	4169	replay_lost_sector	pub	campaign_link
+4173	4170	4175	install_campaign_runtime	pub	campaign_link
+4178	4176	4182	clear_campaign_runtime	pub	campaign_link
+4185	4183	4187	take_campaign_runtime	pub	campaign_link
+4190	4188	4197	put_campaign_runtime	pub	campaign_link
+4203	4198	4209	campaign_service	pub	campaign_link
+4213	4210	4219	campaign_universe_secondsf	pub	campaign_link
+4224	4220	4232	campaign_core_snapshot	pub	campaign_link
+4237	4233	4255	sync_campaign_session	pub	campaign_link
+4261	4256	4263	reset_loaded_unit_controllers	pub	campaign_link
+4268	4264	4270	request_wave_spawn	pub	campaign_link
+4274	4271	4301	apply_capture_replacements	pub	campaign_link
+4305	4302	4323	tile_region	pub	plans
+4328	4324	4355	place_block_at	pub	plans
+4359	4356	4361	player_can_build	pub	plans
+4364	4362	4367	queue_player_place_at	pub	plans
+4371	4368	4380	queue_player_place_config	pub	plans
+4383	4381	4385	block_rotates	pub	plans
+4390	4386	4421	copy_schematic_plans	pub	plans
+4425	4422	4427	queue_team_rebuild	pub	plans
+4431	4428	4433	remove_plans_in	pub	plans
+4438	4434	4466	team_ghost_plans_json	pub func	plans
+4472	4467	4474	debug_kill_unit	pub func	inspect
+4479	4475	4500	debug_kill_building	pub func	inspect
+4506	4501	4523	debug_create_fire	pub func	inspect
+4529	4524	4565	debug_deposit_puddle	pub func	inspect
+4572	4566	4576	debug_spawn_player	pub func	inspect
+4580	4577	4582	any_unit_has_command	pub	command_panel
+4585	4583	4591	command_mode_satisfied	pub	command_panel
+4595	4592	4597	command_mode_objective	pub func	command_panel
+4601	4598	4603	selected_block	pub func	world_query
+4607	4604	4625	select_block	pub func	world_query
+4629	4626	4641	capture	pub func	pump
+4646	4642	4655	tile_blocks	pub	world_query
+4658	4656	4660	world_size	pub	world_query
+4663	4661	4665	world_loads	pub	world_query
+4670	4666	4672	best_core_position_px	pub	world_query
+4677	4673	4681	best_core_position	pub func	world_query
+4686	4682	4699	best_core_block	pub	world_query
+4706	4700	4716	player_control	private	player
+4721	4717	4727	set_input_locked	pub func	player
+4730	4728	4732	player_unit_position	pub	player
+4736	4733	4738	player_actively_building	pub	player
+4742	4739	4744	player_plan_count	pub	player
+4749	4745	4772	player_unit_can_boost	pub	player
+4775	4773	4777	commandable_buildings	pub	player
+4781	4778	4783	try_repair_derelict	pub	player
+4788	4784	4797	player_can_deposit_at	pub	player
+4801	4798	4815	player_team	pub	player
+4825	4816	4872	set_player_team	pub func	player
+4886	4873	4912	set_player_team_from_relay	pub	player
+4915	4913	4917	player_can_mine	pub	player
+4920	4918	4922	player_mine_target	pub	player
+4925	4923	4928	set_player_mine	pub	player
+4933	4929	4954	spawn_player_unit	pub func	player
+4958	4955	4960	has_player_unit	pub func	player
+4966	4961	5013	player_unit_status	pub func	player
+5022	5014	5065	player_core_healths_json	pub func	player
+5072	5066	5093	player_near_drop_zone	pub func	player
+5097	5094	5099	render_rules_or_default	private	player
+5103	5100	5110	live_rules	pub	player
+5116	5111	5122	in_campaign	pub	player
+5127	5123	5136	config_planet	pub	player
+5144	5137	5307	light_sources	pub	render_light
+5311	5308	5323	border_darkness_enabled	pub	render_light
+5329	5324	5335	player_team_color	pub func	render_light
+5343	5336	5389	linked_tile_floors	pub	render_light
+5396	5390	5478	power_lasers	pub	render_light
+5484	5479	5584	beam_node_lasers	pub	render_light
+5588	5585	5649	bridge_links	pub	render_light
+5654	5650	5669	unit_debug_positions	pub func	player
+5676	5670	5753	turret_debug	pub func	player
+5758	5754	5767	player_unit_pos	pub func	player
+5772	5768	5774	player_unit_moved	pub func	player
+5778	5775	5783	player_mine_tile	pub func	player
+5787	5784	5789	player_mined_count	pub func	player
+5792	5790	5800	player_unit_stack	pub	player
+5805	5801	5817	player_stack_json	pub func	player
+5823	5818	5866	debug_add_core_items	pub func	inspect
+5871	5867	5911	debug_add_building_liquid	pub func	inspect
+5916	5912	5949	debug_add_building_items	pub func	inspect
+5957	5950	5967	place_launch_loadout	pub func	campaign_link
+5973	5968	5979	place_launch_core	pub func	campaign_link
+5983	5980	6022	place_loadout_schematic	private	campaign_link
+6026	6023	6039	player_core_tile	private	campaign_link
+6044	6040	6062	player_build_plans_json	pub func	plans
+6067	6063	6069	clear_player_build_plans	pub func	plans
+6076	6070	6106	pick_target_at	pub	plans
+6111	6107	6135	player_plan_at_world	pub	plans
+6140	6136	6150	hint_state_json	pub func	state
+6156	6151	6160	hint_event	pub func	state
+6164	6161	6166	set_player_building_paused	pub func	plans
+6172	6167	6180	construct_progress	pub func	plans
+6183	6181	6185	grid	pub	world_query
+6189	6186	6216	unit_draws	pub	render_units
+6220	6217	6511	unit_draws_full	pub	render_units
+6514	6512	6516	audio_log	pub	render_blocks
+6521	6517	6527	ambient_snapshot	pub	render_blocks
+6530	6528	6548	audio_frame_loops	pub	render_blocks
+6551	6549	6560	audio_turret_loops	pub	render_blocks
+6563	6561	6568	audio_game_state	pub	render_blocks
+6572	6569	6598	weather_views	pub	render_blocks
+6602	6599	6664	weather_json	pub func	inspect
+6670	6665	6712	debug_create_weather	pub func	inspect
+6715	6713	6717	content_registry	pub	state
+6722	6718	6729	block_config_kinds	pub	config
+6734	6730	6741	factory_command_json	pub func	config
+6746	6742	6758	message_limits	pub	config
+6763	6759	6777	unit_factory_config	pub	config
+6784	6778	6787	block_items_json	pub	config
+6793	6788	6799	building_items_json	pub func	config
+6804	6800	6819	building_has_unit_overlap	pub func	config
+6826	6820	6835	door_tap_allowed	pub func	config
+6838	6836	6854	accelerator_at	private	campaign_link
+6863	6855	6885	accelerator_config_spec	pub func	campaign_link
+6894	6886	6919	accelerator_tapped	pub func	campaign_link
+6923	6920	6926	accelerator_can_launch	pub func	campaign_link
+6934	6927	6954	accelerator_launch	pub func	campaign_link
+6958	6955	6962	accelerator_end_launch	pub func	campaign_link
+6973	6963	7004	install_live_block_runtime	private	boot
+7007	7005	7018	apply_command	private	pump
+7022	7019	7029	drain_pending_commands	private	pump
+7033	7030	7071	drain_ai_placements	private	pump
+7077	7072	7085	publish_selectable_units	private	pump
+7088	7086	7129	advance_steps	private	pump
+7132	7130	7136	tick_fx_view	private	pump
+7138	7137	7144	emit_state	private	pump
+7146	7145	7152	emit_world_changed	private	pump
+7155	7153	7157	emit_world_loaded	private	pump
+7164	7158	7179	capture_to	private	pump
+7182	7180	7204	process_capture	private	pump
+7212	7205	7217	core_items_json	pub func	campaign_link
+7222	7218	7251	player_core_items	pub	campaign_link
+7256	7252	7274	conveyor_items	pub	render_blocks
+7280	7275	7306	belt_draw	pub	render_blocks
+7312	7307	7319	drill_draw	pub	render_blocks
+7325	7320	7335	turret_draw	pub	render_blocks
+7341	7336	7430	turret_draw_input	pub	render_blocks
+7437	7431	7473	unit_command_view	pub	render_units
+7479	7474	7517	force_shields	pub	render_units
+7523	7518	7565	unit_shields	pub	render_units
+7572	7566	7659	unit_ability_draws	pub	render_units
+7665	7660	7713	building_statuses	pub	render_units
+7720	7714	7751	hover_info_world	pub func	hover
+7758	7752	7791	hover_info	pub func	hover
+7794	7792	7898	hover_tile	private	hover
+7908	7899	7975	block_requirements_json	pub func	hover
+7988	7976	8052	block_placement_info_json	pub func	hover
+8061	8053	8104	palette_tints_json	pub func	hover
+8109	8105	8114	tile_at	private	world_query
+8118	8115	8129	building_rotation	pub	world_query
+8133	8130	8140	construct_draw	pub	world_query
+8146	8141	8244	tile_debug	pub func	inspect
+8251	8245	8286	world_gen_debug	pub func	inspect
+8290	8287	8298	construct_at	pub	world_query
+8303	8299	8310	building_team	pub	world_query
+8315	8311	8319	building_team_at	pub func	world_query
+8325	8320	8330	can_place_player	pub	world_query
+8335	8331	8366	remove_player_core_items	pub	campaign_link
+8372	8367	8414	write_record_items_to_core	pub	campaign_link
+8419	8415	8443	launch_payloads_json	pub func	campaign_link
+8448	8444	8483	landing_pads_json	pub func	campaign_link
+8489	8484	8494	preview_can_place	pub	plans
+8502	8495	8565	block_place_range	pub	plans
+8572	8566	8574	logic_place_range	pub	plans
+8580	8575	8601	preview_can_break	pub	plans
+8606	8602	8612	place_range_check	pub	plans
+8623	8613	8663	placement_blocker	pub	plans
+8674	8664	8701	rebuild_highlight_tiles	pub	plans
+8706	8702	8738	player_builder_view	pub	plans
+8742	8739	8745	plan_matches	pub	plans
+8750	8746	8755	block_size	pub func	world_query
+8764	8756	8787	building_center_world	pub func	world_query
+8791	8788	8840	block_state_draw	pub	render_blocks
+8846	8841	8861	cached_state_key	pub	render_blocks
+8868	8862	8905	cached_crack_draws	pub	render_blocks
+8910	8906	8943	fire_draws	pub	render_blocks
+8947	8944	9002	puddle_draws	pub	render_blocks
+9006	9003	9079	block_draw_state	pub	render_blocks
+9083	9080	9098	team_block_plans	pub	render_blocks
+9104	9099	9142	bullet_draws	pub	render_blocks
+9150	9143	9564	building_bars_json	pub func	bars
+9578	9565	9618	building_consumption_json	pub func	bars
+9622	9619	9624	fog_static_bytes	pub	inspect
+9628	9625	9630	fog_sources	pub	inspect
+9641	9631	9675	fog_debug_json	pub func	inspect
+9681	9676	9707	fog_debug_tile_json	pub func	inspect
+9713	9708	9735	fog_debug_json_rect	pub func	inspect
+9740	9736	9755	debug_set_fog	pub func	inspect
+9760	9756	9762	debug_set_building_team	pub func	inspect
+9770	9763	9777	command_panel_json	pub func	command_panel
+9784	9778	9828	command_panel_units	pub(crate)	command_panel
+9834	9829	9852	command_draws_target	pub	command_panel
+9857	9853	9859	command_targets	pub	command_panel
+9865	9860	9871	drain_build_damage	pub	command_panel
+9876	9872	9888	block_offset	pub	command_panel
+9895	9889	9962	overlay_view	pub	overlay
+9968	9963	10088	config_overlay	pub(crate)	overlay
+10093	10089	10198	select_overlay	pub(crate)	overlay
+10203	10199	10263	overlay_probe	pub func	overlay
+10269	10264	10291	place_range_json	pub func	overlay
+10298	10292	10363	unit_build_draw	pub	render_units
+10368	10364	10417	pad_draws	pub	render_blocks
+10423	10418	10425	accelerator_draws	pub	render_blocks

@@ -74,6 +74,38 @@ pub fn plan(
     })
 }
 
+/// Camera zoom that fits the whole plan into `viewport` (the closest
+/// fixed-window equivalent of Java's plan-sized `FrameBuffer`): `min(vw/w,
+/// vh/h)`, clamped to a positive value.
+pub fn fit_zoom(viewport_w: f32, viewport_h: f32, plan: &ScreenshotPlan) -> f32 {
+    if plan.width <= 0 || plan.height <= 0 || viewport_w <= 0.0 || viewport_h <= 0.0 {
+        return 1.0;
+    }
+    (viewport_w / plan.width as f32)
+        .min(viewport_h / plan.height as f32)
+        .max(0.0001)
+}
+
+/// The viewport-pixel rect `[x, y, w, h]` covered by the plan at `zoom`,
+/// centred in the viewport. Java's `FrameBuffer(w, h)` captures exactly
+/// `plan.width × plan.height` at 1:1; a fixed window instead renders the plan
+/// scaled to fit and this rect crops the captured image back to the map.
+pub fn capture_rect(
+    viewport_w: f32,
+    viewport_h: f32,
+    plan: &ScreenshotPlan,
+    zoom: f32,
+) -> [i32; 4] {
+    if viewport_w <= 0.0 || viewport_h <= 0.0 || plan.width <= 0 || plan.height <= 0 {
+        return [0, 0, 1, 1];
+    }
+    let width = ((plan.width as f32 * zoom).round() as i32).clamp(1, viewport_w as i32);
+    let height = ((plan.height as f32 * zoom).round() as i32).clamp(1, viewport_h as i32);
+    let x = ((viewport_w as i32 - width) / 2).max(0);
+    let y = ((viewport_h as i32 - height) / 2).max(0);
+    [x, y, width, height]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +137,28 @@ mod tests {
         assert_eq!(planned.force_alpha, 255);
         // With the memory check off, huge maps still plan.
         assert!(plan(10000, 10000, 8, false, false).is_some());
+    }
+
+    /// GAPS #53 `ScreenshotPlan` consumption: a 2000x2000 map fits a 1600x900
+    /// viewport at zoom 0.45 and crops a centred 900x900 rect at 1:1 map pixels
+    /// after the fit scale.
+    #[test]
+    fn fit_zoom_and_capture_rect_center_the_plan() {
+        let planned = plan(250, 250, 8, false, true).expect("allowed");
+        let zoom = fit_zoom(1600.0, 900.0, &planned);
+        assert!((zoom - 0.45).abs() < 1e-6);
+        let rect = capture_rect(1600.0, 900.0, &planned, zoom);
+        assert_eq!(rect, [350, 0, 900, 900]);
+        // A map smaller than the viewport zooms in until one axis is filled.
+        let small = plan(20, 10, 8, false, true).expect("allowed");
+        let zoom = fit_zoom(1600.0, 900.0, &small);
+        assert!((zoom - 10.0).abs() < 1e-6);
+        assert_eq!(
+            capture_rect(1600.0, 900.0, &small, zoom),
+            [0, 50, 1600, 800]
+        );
+        // Degenerate viewports keep a positive zoom.
+        assert_eq!(fit_zoom(0.0, 0.0, &planned), 1.0);
+        assert_eq!(capture_rect(0.0, 0.0, &planned, 1.0), [0, 0, 1, 1]);
     }
 }

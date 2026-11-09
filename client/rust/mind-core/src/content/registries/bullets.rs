@@ -493,6 +493,38 @@ pub struct BulletDef {
     pub damage_interval: f32,
     /// `ContinuousBulletType.shake`.
     pub shake: f32,
+    /// `ContinuousLaserBulletType.fadeTime` (`ContinuousLaserBulletType.java:16`,
+    /// 16): the beam fades out over the last `fadeTime` ticks.
+    pub fade_time: f32,
+    /// `ContinuousLaserBulletType.lightStroke`
+    /// (`ContinuousLaserBulletType.java:17`) /
+    /// `ContinuousFlameBulletType.lightStroke`
+    /// (`ContinuousFlameBulletType.java:14`), both 40: beam line-light stroke.
+    pub light_stroke: f32,
+    /// `ContinuousLaserBulletType.divisions` (`:18`, 13) /
+    /// `ContinuousFlameBulletType.divisions` (`:16`, 25): `Drawf.flameFront` /
+    /// `Drawf.flame` arc division count.
+    pub divisions: i32,
+    /// `ContinuousLaserBulletType.strokeFrom` (`:19`, 2): stroke multiplier at
+    /// the innermost colour layer.
+    pub stroke_from: f32,
+    /// `ContinuousLaserBulletType.strokeTo` (`:19`, 0.5): stroke multiplier at
+    /// the outermost colour layer.
+    pub stroke_to: f32,
+    /// `ContinuousLaserBulletType.pointyScaling` (`:19`, 0.75): front-ellipse
+    /// length interpolation factor.
+    pub pointy_scaling: f32,
+    /// `ContinuousLaserBulletType.backLength` (`:20`, 7): rear ellipse length.
+    pub back_length: f32,
+    /// `ContinuousLaserBulletType.frontLength` (`:20`, 35): front ellipse length.
+    pub front_length: f32,
+    /// `ContinuousLaserBulletType.oscScl` (`:21`, 0.8) /
+    /// `ContinuousFlameBulletType.oscScl` (`:15`, 1.2): width/angle oscillation
+    /// scale (`Mathf.sin`/`Mathf.absin`).
+    pub osc_scl: f32,
+    /// `ContinuousLaserBulletType.oscMag` (`:21`, 1.5) /
+    /// `ContinuousFlameBulletType.oscMag` (`:15`, 0.02): oscillation magnitude.
+    pub osc_mag: f32,
     /// Large hitbox display (`Laser.largeHit`).
     pub large_hit: bool,
     /// Laser side ray length.
@@ -792,6 +824,20 @@ impl BulletDef {
             length: 0.0,
             damage_interval: 5.0,
             shake: 0.0,
+            // Continuous subclass draw fields (`ContinuousLaserBulletType.java:
+            // 16-21`, `ContinuousFlameBulletType.java:13-16`); the per-kind
+            // initializers below set the declared defaults. Kinds that do not
+            // declare a field keep 0 (not applicable).
+            fade_time: 0.0,
+            light_stroke: 0.0,
+            divisions: 0,
+            stroke_from: 0.0,
+            stroke_to: 0.0,
+            pointy_scaling: 0.0,
+            back_length: 0.0,
+            front_length: 0.0,
+            osc_scl: 0.0,
+            osc_mag: 0.0,
             large_hit: false,
             side_length: 29.0,
             side_width: 0.7,
@@ -1040,6 +1086,21 @@ impl BulletDef {
                 // path and for data patches.
                 bullet.light_color = Rgba::from_rgba8888(0xffa500ff);
                 bullet.light_opacity = 0.7;
+                // `ContinuousLaserBulletType` draw-field initializers
+                // (`ContinuousLaserBulletType.java:16-21`): `fadeTime = 16`,
+                // `lightStroke = 40`, `divisions = 13`, `strokeFrom = 2`,
+                // `strokeTo = 0.5`, `pointyScaling = 0.75`, `backLength = 7`,
+                // `frontLength = 35`, `oscScl = 0.8`, `oscMag = 1.5`.
+                bullet.fade_time = 16.0;
+                bullet.light_stroke = 40.0;
+                bullet.divisions = 13;
+                bullet.stroke_from = 2.0;
+                bullet.stroke_to = 0.5;
+                bullet.pointy_scaling = 0.75;
+                bullet.back_length = 7.0;
+                bullet.front_length = 35.0;
+                bullet.osc_scl = 0.8;
+                bullet.osc_mag = 1.5;
             }
             BulletKind::Shrapnel => {
                 // `ShrapnelBulletType()` constructor.
@@ -1152,6 +1213,27 @@ impl BulletDef {
                 bullet.laser_absorb = false;
                 bullet.ammo_multiplier = 1.0;
                 bullet.pierce_armor = true;
+                // `colors` initializer (`ContinuousFlameBulletType.java:33`):
+                // `eb7abe` a(.55), `e189f5` a(.7), `907ef7` a(.8), `91a4ff`,
+                // white — one `Drawf.flame` layer each.
+                bullet.colors = vec![
+                    Rgba::from_rgba8888(0xeb7abe8c),
+                    Rgba::from_rgba8888(0xe189f5b3),
+                    Rgba::from_rgba8888(0x907ef7cc),
+                    Rgba::from_rgba8888(0x91a4ffff),
+                    Rgba::WHITE,
+                ];
+                // `ContinuousFlameBulletType` draw-field initializers
+                // (`ContinuousFlameBulletType.java:14-16`): `lightStroke = 40`,
+                // `width = 3.7`, `oscScl = 1.2`, `oscMag = 0.02`,
+                // `divisions = 25`. The class does not declare
+                // fade/back/front/stroke/pointy fields, so they keep the shared
+                // not-applicable defaults (0).
+                bullet.light_stroke = 40.0;
+                bullet.width = 3.7;
+                bullet.osc_scl = 1.2;
+                bullet.osc_mag = 0.02;
+                bullet.divisions = 25;
                 // ContinuousBulletType initializer.
                 bullet.remove_after_pierce = false;
                 bullet.pierce_cap = -1;
@@ -2283,5 +2365,55 @@ mod tests {
         let plain = BulletDef::new(BulletKind::Plain);
         assert_eq!(plain.light_color, super::pal::POWER_LIGHT);
         assert_eq!(plain.light_opacity, 0.3);
+    }
+
+    /// PAR-0615 consumer: `ContinuousLaserBulletType`'s draw-field
+    /// initializers (`ContinuousLaserBulletType.java:16-21`).
+    #[test]
+    fn continuous_laser_def_carries_the_draw_fields() {
+        let def = BulletDef::new(BulletKind::ContinuousLaser);
+        assert_eq!(def.fade_time, 16.0);
+        assert_eq!(def.light_stroke, 40.0);
+        assert_eq!(def.divisions, 13);
+        assert_eq!(def.stroke_from, 2.0);
+        assert_eq!(def.stroke_to, 0.5);
+        assert_eq!(def.pointy_scaling, 0.75);
+        assert_eq!(def.back_length, 7.0);
+        assert_eq!(def.front_length, 35.0);
+        assert_eq!(def.osc_scl, 0.8);
+        assert_eq!(def.osc_mag, 1.5);
+        // `colors = {ec745855, ec7458aa, ff9c5a, white}` (`:18`).
+        assert_eq!(def.colors.len(), 4);
+        assert_eq!(def.colors[2], Rgba::from_rgba8888(0xff9c5aff));
+        assert_eq!(def.width, 9.0);
+    }
+
+    /// PAR-0615 consumer: `ContinuousFlameBulletType`'s draw-field initializers
+    /// (`ContinuousFlameBulletType.java:13-16`) and the not-applicable defaults
+    /// of the laser-only fields.
+    #[test]
+    fn continuous_flame_def_carries_the_draw_fields() {
+        let def = BulletDef::new(BulletKind::ContinuousFlame);
+        assert_eq!(def.light_stroke, 40.0);
+        assert_eq!(def.osc_scl, 1.2);
+        assert_eq!(def.osc_mag, 0.02);
+        assert_eq!(def.divisions, 25);
+        // `width = 3.7f` (`:15`).
+        assert_eq!(def.width, 3.7);
+        // `colors` (`:33`) holds the five `Drawf.flame` layers; layer 1 is the
+        // purple `e189f5` used as `hitColor`/`lightColor` (`:40-41`).
+        assert_eq!(def.colors.len(), 5);
+        assert_eq!(def.colors[1], Rgba::from_rgba8888(0xe189f5b3));
+        assert_eq!(def.hit_color, Rgba::from_rgba8888(0xe189f5ff));
+        // The laser-only fields are not declared by the flame class.
+        assert_eq!(def.fade_time, 0.0);
+        assert_eq!(def.back_length, 0.0);
+        assert_eq!(def.front_length, 0.0);
+        assert_eq!(def.stroke_from, 0.0);
+        assert_eq!(def.stroke_to, 0.0);
+        assert_eq!(def.pointy_scaling, 0.0);
+        // Plain/Continuous bullets keep the shared zero defaults.
+        assert_eq!(BulletDef::new(BulletKind::Continuous).osc_scl, 0.0);
+        assert_eq!(BulletDef::new(BulletKind::Plain).divisions, 0);
     }
 }

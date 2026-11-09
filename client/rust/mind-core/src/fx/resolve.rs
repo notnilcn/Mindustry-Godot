@@ -420,9 +420,11 @@ fn triangle(params: &TriangleParams, e: &EffectContainer, program: &mut DrawProg
 }
 
 fn noise(params: &NoiseParams, e: &EffectContainer, program: &mut DrawProgram) {
-    // `NoiseEffect` never clips (plan 17 §2.4 #9); the layer scroll math is
-    // computed here and executed as a shader blit by plan 16.
+    // `NoiseEffect` never clips (plan 17 §2.4 #9); the layer chain follows
+    // `NoiseEffect.drawNoiseLayers` (`NoiseEffect.java:43-54`) and the pixels
+    // are executed by `MindFx` (camera-sized scrolled texture rects).
     let mut sspeed = 1.0f32;
+    let mut sscl = 1.0f32;
     let mut salpha = 1.0f32;
     let mut offset = 0.0f32;
     let base = params.color.unwrap_or(e.color);
@@ -439,10 +441,13 @@ fn noise(params: &NoiseParams, e: &EffectContainer, program: &mut DrawProgram) {
                 opacity: salpha * params.opacity,
                 scroll,
                 offset,
+                // `noisescl * sscl` (`NoiseEffect.java:51`).
+                scl: params.noise_scl * sscl,
             },
         ));
         sspeed *= params.layer_speed_mul;
         salpha *= params.layer_alpha_mul;
+        sscl *= params.layer_scl_mul;
         offset += 0.29;
         col.r *= params.layer_color_mul;
         col.g *= params.layer_color_mul;

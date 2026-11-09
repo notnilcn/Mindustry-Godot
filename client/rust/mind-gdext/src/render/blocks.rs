@@ -22,7 +22,9 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::content::{BlockDef, BlockKind};
+use mind_core::math::rand_arc::{pack_point2, random_seed_int};
 use mind_core::render::block_sprite::{crack_index, crack_rotation};
+use mind_core::render::props as props_draw;
 use mind_core::render::scan::{CameraKey, CameraView, visible_blocks};
 
 use crate::sim_host::MindSimHost;
@@ -95,6 +97,21 @@ pub struct BlockRenderer {
     nodes: Vec<Gd<MeshInstance2D>>,
     /// Pooled per-page nodes for vertex-warped `WobbleProp` quads.
     wobble_nodes: Vec<Gd<MeshInstance2D>>,
+    /// `Layer.blockProp` band (`Prop.layer = Layer.blockProp`): the `SeaBush`
+    /// lobes draw here (`SeaBush.java:25-46`).
+    prop_band: Option<Gd<Node2D>>,
+    /// Pooled per-page nodes for [`Self::prop_band`].
+    prop_nodes: Vec<Gd<MeshInstance2D>>,
+    /// `Layer.power` band: `TallBlock`/`TreeBlock` tops and shadows draw at
+    /// `power ± 1` (`TallBlock.java:11-12`, `TreeBlock.java:28-35`), so the
+    /// pooled nodes are children of the power band with relative z `±1`.
+    power_band: Option<Gd<Node2D>>,
+    /// Pooled per-page nodes for the tall-prop shadows (`power - 1`).
+    tall_shadow_nodes: Vec<Gd<MeshInstance2D>>,
+    /// Pooled per-page nodes for the tall-prop tops (`power + 1`).
+    tall_top_nodes: Vec<Gd<MeshInstance2D>>,
+    /// Pooled per-page nodes for the `TreeBlock` vertex-warped tops.
+    tree_warp_nodes: Vec<Gd<MeshInstance2D>>,
     /// Pooled construct-site nodes (index → node); reused across rebuilds.
     construct_nodes: Vec<Gd<MeshInstance2D>>,
     last_key: Option<CameraKey>,
@@ -132,6 +149,8 @@ impl BlockRenderer {
         assets: Option<Gd<crate::assets::MindAssets>>,
         band_node: Gd<Node2D>,
         building_band: Gd<Node2D>,
+        prop_band: Option<Gd<Node2D>>,
+        power_band: Option<Gd<Node2D>>,
         shaders: &ShaderRegistry,
     ) -> Self {
         // `Wall.WallBuild.draw` (`Wall.java:146-161`): `Fill.rect` in
@@ -162,6 +181,12 @@ impl BlockRenderer {
             resolver: RegionResolver::new(assets),
             nodes: Vec::new(),
             wobble_nodes: Vec::new(),
+            prop_band,
+            prop_nodes: Vec::new(),
+            power_band,
+            tall_shadow_nodes: Vec::new(),
+            tall_top_nodes: Vec::new(),
+            tree_warp_nodes: Vec::new(),
             construct_nodes: Vec::new(),
             last_key: None,
             last_revision: i64::MIN,
@@ -242,6 +267,18 @@ impl BlockRenderer {
         // `WobbleProp` quads carry per-vertex positions, so they get their own
         // mesh pool (`build_warp_quad_mesh`).
         let mut wobble_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)> =
+            BTreeMap::new();
+        // GAPS #53 environment props: `SeaBush` lobes at `Layer.blockProp`,
+        // tall-block tops/shadows at `Layer.power ± 1` and the `TreeBlock`
+        // vertex-warped top. Natural sprite sizes, not the 1x1 footprint
+        // (`Draw.rect(region, x, y)`).
+        let mut prop_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
+            BTreeMap::new();
+        let mut tall_shadow_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
+            BTreeMap::new();
+        let mut tall_top_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
+            BTreeMap::new();
+        let mut tree_warp_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)> =
             BTreeMap::new();
         // Belt items are collected separately and appended to their page after
         // every block quad is in place, so a later belt can never cover an item
@@ -562,6 +599,145 @@ impl BlockRenderer {
                             animating = true;
                             continue;
                         }
+                        // `SeaBush.drawBase` (`SeaBush.java:25-46`): one
+                        // rotated quad per lobe (bot region for the lower
+                        // lobes) at the prop layer, plus the centre region.
+                        if def.kind == BlockKind::SeaBush {
+                            let main = self.resolver.find(&def.region).unwrap_or(region);
+                            let params = props_draw::SeaBushParams::default();
+                            let lobes = props_draw::sea_bush_lobes(
+                                tile.x as i32,
+                                tile.y as i32,
+                                tick as f32,
+                                main.w,
+                                main.h,
+                                &params,
+                            );
+                            let bot = self.resolver.find(&format!("{}-bot", def.name));
+                            for lobe in &lobes {
+                                let drawn = if lobe.bot {
+                                    bot.as_ref().unwrap_or(&main)
+                                } else {
+                                    &main
+                                };
+                                let entry = prop_groups
+                                    .entry(drawn.page)
+                                    .or_insert((drawn.texture.clone(), Vec::new()));
+                                entry.1.push(UnitQuad {
+                                    cx: lobe.cx,
+                                    cy: lobe.cy,
+                                    w: lobe.w,
+                                    h: lobe.h,
+                                    rot: lobe.rotation,
+                                    uv: drawn.uv,
+                                    color: 0xffff_ffff,
+                                });
+                            }
+                            if let Some(center) =
+                                self.resolver.find(&format!("{}-center", def.name))
+                            {
+                                let entry = prop_groups
+                                    .entry(center.page)
+                                    .or_insert((center.texture.clone(), Vec::new()));
+                                entry.1.push(UnitQuad {
+                                    cx: anchor_x,
+                                    cy: anchor_y,
+                                    w: center.w,
+                                    h: center.h,
+                                    rot: 0.0,
+                                    uv: center.uv,
+                                    color: 0xffff_ffff,
+                                });
+                            }
+                            dynamic += 1;
+                            animating = true;
+                            continue;
+                        }
+                        // `TallBlock.drawBase` (`TallBlock.java:23-36`): the
+                        // seeded-rotation shadow at `power - 1` (black 0.6) and
+                        // the sprite at `power + 1`.
+                        if def.kind == BlockKind::TallBlock {
+                            let rotation =
+                                props_draw::tall_block_rotation(tile.x as i32, tile.y as i32);
+                            if let Some(shadow) =
+                                self.seeded_shadow(def, tile.x as i32, tile.y as i32)
+                            {
+                                let entry = tall_shadow_groups
+                                    .entry(shadow.page)
+                                    .or_insert((shadow.texture.clone(), Vec::new()));
+                                entry.1.push(UnitQuad {
+                                    cx: anchor_x + props_draw::TALL_BLOCK_SHADOW_OFFSET,
+                                    cy: anchor_y + props_draw::TALL_BLOCK_SHADOW_OFFSET,
+                                    w: shadow.w,
+                                    h: shadow.h,
+                                    rot: rotation,
+                                    uv: shadow.uv,
+                                    color: 0x0000_0099,
+                                });
+                            }
+                            let main = self
+                                .seeded_variant(def, tile.x as i32, tile.y as i32)
+                                .unwrap_or(region);
+                            let entry = tall_top_groups
+                                .entry(main.page)
+                                .or_insert((main.texture.clone(), Vec::new()));
+                            entry.1.push(UnitQuad {
+                                cx: anchor_x,
+                                cy: anchor_y,
+                                w: main.w,
+                                h: main.h,
+                                rot: rotation,
+                                uv: main.uv,
+                                color: 0xffff_ffff,
+                            });
+                            dynamic += 1;
+                            continue;
+                        }
+                        // `TreeBlock.drawBase` (`TreeBlock.java:18-38`): a
+                        // shadow at `power - 1` and the time-warped top at
+                        // `power + 1`.
+                        if def.kind == BlockKind::TreeBlock {
+                            let time = tick as f32;
+                            let rotation =
+                                props_draw::tree_rotation(tile.x as i32, tile.y as i32, time);
+                            if let Some(shadow) =
+                                self.seeded_shadow(def, tile.x as i32, tile.y as i32)
+                            {
+                                let entry = tall_shadow_groups
+                                    .entry(shadow.page)
+                                    .or_insert((shadow.texture.clone(), Vec::new()));
+                                entry.1.push(UnitQuad {
+                                    cx: anchor_x + props_draw::TREE_SHADOW_OFFSET,
+                                    cy: anchor_y + props_draw::TREE_SHADOW_OFFSET,
+                                    w: shadow.w,
+                                    h: shadow.h,
+                                    rot: rotation,
+                                    uv: shadow.uv,
+                                    color: 0xffff_ffff,
+                                });
+                            }
+                            let main = self
+                                .seeded_variant(def, tile.x as i32, tile.y as i32)
+                                .unwrap_or(region);
+                            let corners = props_draw::tree_quad(
+                                tile.x as i32,
+                                tile.y as i32,
+                                time,
+                                main.w,
+                                main.h,
+                            );
+                            let entry = tree_warp_groups
+                                .entry(main.page)
+                                .or_insert((main.texture.clone(), Vec::new()));
+                            entry.1.push(WarpQuad {
+                                corners,
+                                uv: main.uv,
+                                color: 0xffff_ffff,
+                            });
+                            dynamic += 1;
+                            animating = true;
+                            continue;
+                        }
                         push(&region, uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
                         // `Wall.WallBuild.draw` (`Wall.java:146-161`): while
                         // `hit >= 0.001`, a white (`flashColor`) additive
@@ -747,6 +923,12 @@ impl BlockRenderer {
 
         self.apply_groups(groups);
         self.apply_wobble_groups(wobble_groups);
+        self.apply_prop_groups(
+            prop_groups,
+            tall_shadow_groups,
+            tall_top_groups,
+            tree_warp_groups,
+        );
         self.apply_construct_sites(sites);
         // I02 T4: the additive wall-flash overlay (a solid white quad per
         // flashing wall, no texture: the vertex colour carries it).
@@ -898,35 +1080,155 @@ impl BlockRenderer {
     }
 
     fn apply_groups(&mut self, groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>) {
-        let mut index = 0usize;
-        for (_page, (texture, quads)) in groups {
-            if quads.is_empty() {
-                continue;
-            }
-            let Some(mesh) = build_unit_mesh(&quads) else {
-                continue;
-            };
-            let node = if index < self.nodes.len() {
-                self.nodes[index].clone()
-            } else {
-                let node = MeshInstance2D::new_alloc();
-                // code-instantiated: one pooled node per atlas page; count is
-                // page-driven (plan 16 §6.6).
-                self.band_node.clone().add_child(&node);
-                self.nodes.push(node.clone());
-                node
-            };
-            let mut node = node;
-            node.set_mesh(&mesh.upcast::<Mesh>());
-            if let Some(texture) = texture {
-                node.set_texture(&texture);
-            }
-            node.set_visible(true);
-            index += 1;
+        let band = Some(self.band_node.clone());
+        apply_unit_groups(&band, &mut self.nodes, groups, 0);
+    }
+
+    /// Seeded `variantRegions[...]` pick (`Prop.drawBase`/`TreeBlock.drawBase`:
+    /// `Mathf.randomSeed(tile.pos(), 0, variants - 1)`); variants <= 1 keep the
+    /// base chain.
+    fn seeded_variant(&mut self, def: &BlockDef, x: i32, y: i32) -> Option<ResolvedRegion> {
+        // `Block.region`/`variantRegions`, never the composed
+        // `block-<name>-full` icon (`Prop.drawBase`, `Prop.java:26-29`).
+        if def.variants <= 1 {
+            return self.resolver.find(&def.region);
         }
-        for node in self.nodes.iter_mut().skip(index) {
+        let index = random_seed_int(pack_point2(x, y), 0, def.variants - 1);
+        self.resolver
+            .find(&format!("{}{}", def.name, index + 1))
+            .or_else(|| self.resolver.find(&def.region))
+    }
+
+    /// `customShadowRegion`/`variantShadowRegions` (`@Load("@-shadow")`; the
+    /// variant sheet is `-shadow1..N` when `variants > 0`).
+    fn seeded_shadow(&mut self, def: &BlockDef, x: i32, y: i32) -> Option<ResolvedRegion> {
+        if def.variants > 1 {
+            let index = random_seed_int(pack_point2(x, y), 0, def.variants - 1);
+            if let Some(shadow) = self
+                .resolver
+                .find(&format!("{}-shadow{}", def.name, index + 1))
+            {
+                return Some(shadow);
+            }
+        }
+        self.resolver.find(&format!("{}-shadow", def.name))
+    }
+
+    /// Assigns the environment-prop meshes to their band pools
+    /// (`Layer.blockProp` for `SeaBush`, `Layer.power ± 1` for
+    /// `TallBlock`/`TreeBlock`).
+    fn apply_prop_groups(
+        &mut self,
+        prop_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>,
+        tall_shadow_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>,
+        tall_top_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>,
+        tree_warp_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)>,
+    ) {
+        let prop_band = self.prop_band.clone();
+        apply_unit_groups(&prop_band, &mut self.prop_nodes, prop_groups, 0);
+        let power_band = self.power_band.clone();
+        apply_unit_groups(
+            &power_band,
+            &mut self.tall_shadow_nodes,
+            tall_shadow_groups,
+            -1,
+        );
+        apply_unit_groups(&power_band, &mut self.tall_top_nodes, tall_top_groups, 1);
+        apply_warp_groups(&power_band, &mut self.tree_warp_nodes, tree_warp_groups, 1);
+    }
+}
+
+/// Assigns `groups` to pooled per-page `MeshInstance2D`s under `band` (one mesh
+/// per atlas page, spares hidden). `z_index` is relative to the band node so
+/// the `Layer.power ± 1` tall-prop bands land at Java's `power ± 1`.
+fn apply_unit_groups(
+    band: &Option<Gd<Node2D>>,
+    nodes: &mut Vec<Gd<MeshInstance2D>>,
+    groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>,
+    z_index: i32,
+) {
+    let Some(band) = band.clone() else {
+        for node in nodes.iter_mut() {
             node.set_visible(false);
         }
+        return;
+    };
+    let mut index = 0usize;
+    for (_page, (texture, quads)) in groups {
+        if quads.is_empty() {
+            continue;
+        }
+        let Some(mesh) = build_unit_mesh(&quads) else {
+            continue;
+        };
+        let node = if index < nodes.len() {
+            nodes[index].clone()
+        } else {
+            let node = MeshInstance2D::new_alloc();
+            // code-instantiated: one pooled node per atlas page; count is
+            // page-driven (plan 16 §6.6).
+            band.clone().add_child(&node);
+            nodes.push(node.clone());
+            node
+        };
+        let mut node = node;
+        node.set_mesh(&mesh.upcast::<Mesh>());
+        if let Some(texture) = texture {
+            node.set_texture(&texture);
+        }
+        node.set_z_as_relative(true);
+        node.set_z_index(z_index);
+        node.set_visible(true);
+        index += 1;
+    }
+    for node in nodes.iter_mut().skip(index) {
+        node.set_visible(false);
+    }
+}
+
+/// [`apply_unit_groups`] for vertex-warped quads (`TreeBlock.drawBase`).
+fn apply_warp_groups(
+    band: &Option<Gd<Node2D>>,
+    nodes: &mut Vec<Gd<MeshInstance2D>>,
+    groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<WarpQuad>)>,
+    z_index: i32,
+) {
+    let Some(band) = band.clone() else {
+        for node in nodes.iter_mut() {
+            node.set_visible(false);
+        }
+        return;
+    };
+    let mut index = 0usize;
+    for (_page, (texture, quads)) in groups {
+        if quads.is_empty() {
+            continue;
+        }
+        let Some(mesh) = build_warp_quad_mesh(&quads) else {
+            continue;
+        };
+        let node = if index < nodes.len() {
+            nodes[index].clone()
+        } else {
+            let node = MeshInstance2D::new_alloc();
+            // code-instantiated: one pooled node per atlas page; count is
+            // page-driven (plan 16 §6.6).
+            band.clone().add_child(&node);
+            nodes.push(node.clone());
+            node
+        };
+        let mut node = node;
+        node.set_mesh(&mesh.upcast::<Mesh>());
+        if let Some(texture) = texture {
+            node.set_texture(&texture);
+        }
+        node.set_z_as_relative(true);
+        node.set_z_index(z_index);
+        node.set_visible(true);
+        index += 1;
+    }
+    for node in nodes.iter_mut().skip(index) {
+        node.set_visible(false);
     }
 }
 

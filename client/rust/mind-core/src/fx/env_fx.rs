@@ -23,6 +23,24 @@ pub const PARTICLE_REGION: RegionKey = RegionKey("particle");
 /// The caustics shader (`Shaders.caustics`).
 pub const CAUSTICS_SHADER: ShaderKey = ShaderKey("caustics");
 
+/// `SurfaceShader.apply`'s camera uniforms (`Shaders.java:356-361`):
+/// `u_campos` is the camera's top-left corner, `u_resolution` its size and
+/// `u_time` is `Time.time`. Used by the `ShaderBlit` consumer (`MindFx`) to
+/// set up the `caustics.gdshader` material.
+pub fn surface_shader_uniforms(
+    cam_x: f32,
+    cam_y: f32,
+    cam_w: f32,
+    cam_h: f32,
+    time: f32,
+) -> ([f32; 2], [f32; 2], f32) {
+    (
+        [cam_x - cam_w / 2.0, cam_y - cam_h / 2.0],
+        [cam_w, cam_h],
+        time,
+    )
+}
+
 /// The underwater pass prims (`EnvRenderers.init` underwater body).
 ///
 /// `view_tick` replaces `Time.time`; `cam_*` is the camera rect used for the
@@ -161,6 +179,9 @@ pub fn scorching_prims(fog: bool, out: &mut Vec<DrawPrim>) {
             scorching::COLOR[2],
             scorching::COLOR[3],
         ),
+        // `Weather.drawNoiseLayers(tex, Color.scarlet, 1000f, 0.24f, …)`
+        // (`EnvRenderers.java:104`).
+        1000.0,
         0.24,
         0.4,
         1.0,
@@ -221,6 +242,16 @@ mod tests {
             )
             .count();
         assert!(rays <= underwater::RAYS);
+    }
+
+    /// GAPS #53 FX primitives: the caustics `ShaderBlit` consumer's uniforms
+    /// (`Shaders.java:356-361`).
+    #[test]
+    fn surface_shader_uniforms_are_camera_centered() {
+        let (campos, resolution, time) = surface_shader_uniforms(512.0, 256.0, 400.0, 200.0, 7.0);
+        assert_eq!(campos, [312.0, 156.0]);
+        assert_eq!(resolution, [400.0, 200.0]);
+        assert_eq!(time, 7.0);
     }
 
     #[test]

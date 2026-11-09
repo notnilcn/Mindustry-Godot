@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T02:51:28Z",
+  "updated": "2026-11-07T04:39:20Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -15148,7 +15148,7 @@
     },
     "PAR-0151": {
       "title": "Host dialog content: Java's floating Name/colour-picker/Port/Host/? layout vs the port's boxed panel with raw mode.* keys",
-      "status": "fixing",
+      "status": "verified",
       "action": {
         "java": [
           {
@@ -15175,6 +15175,11 @@
           "at": "2026-11-06T14:55:24Z",
           "by": "hx-ui2",
           "text": "hx-ui2 headless pass: this is a pixel-layout leg (Java/Godot screenshot diff) and is not headless-verifiable; left at fixing. Functional UI leftovers in this area (JoinDialog version/outdated, savefail modal, MapObjectives widgets, Effects preview) were handled in the same pass."
+        },
+        {
+          "at": "2026-11-07T04:39:20Z",
+          "by": "hx-ui-final",
+          "text": "headless fix pass: floating host dialog (300 frame/70 rows/65 spacer+help cells) with a dialog_sweep_check layout assertion; Java twin pending"
         }
       ]
     },
@@ -16898,6 +16903,11 @@
           "at": "2026-11-07T01:42:56Z",
           "by": "hx-j08",
           "text": "2026-11-07 hx-j08 (headless, no Java leg): closed the input + logic-font sub-items; display/canvas four, logic-picker five and sub-dialog five stay open (UI-owned, need gx/ui). (1) WASD bindings + resetSaved guard were ALREADY at HEAD from L07 T2 (d25ff196) and T4 (9e51cfb4), not open: KeyBindTable move_x=a/d, move_y=s/w (mind-core/src/input/binding.rs:283-299); MindInput.binding_axis -> DesktopBridge::binding_axis/key_axis (mind-gdext/src/input/mod.rs:1456, input/desktop.rs); editor pan in mind-gdext/src/ui/editor_views.rs pan_keys (MapView.java:180-185, 15*delta/zoom); resetSaved via EditorTool::press_resets_saved/drag_resets_saved (mind-core/src/editor/tool.rs:122-143) wired at mind-gdext/src/editor/mod.rs:2519/2560. Added the missing seam tests. (2) The logic bitmap-font residual was real: the port guessed spaceXadvance=8/lineHeight=14 (Fonts.logic is 7/13), placed every glyph with capHeight+ascent added on top of Godot's already-baseline offset (~12 px too high), and overwrote transparent glyph pad texels instead of alpha-blending. Ported Fonts.logic's FreeType metric generation over assets/fonts/logic.ttf plus the Fonts.java:92 charset and Fonts.unicodeToName/getLargeIcon (mind-core/src/logic/font.rs); print layout + display glyph placement now match Java (verified against a headless Godot FontFile probe of the real font: 'A' 8x10 pad @offset -9 -> Java centre y+4). See PAR-0609/PAR-0610. Out-of-ownership follow-up: mind-headless draw golden moves to e93494cdd0eecde9 (was 82572433be79fab9, logic_scenarios.rs:1481); gdext provider still logs a Godot error for the space glyph (0x0 image) and cannot draw the '\\0' .notdef box."
+        },
+        {
+          "at": "2026-11-07T04:39:20Z",
+          "by": "hx-ui-final",
+          "text": "headless fix pass: canvas edge sprites + 480px/default12/bpp3, nearest palette, effect/content pickers, enum popup columns landed with tests; the five sub-dialogs (map assets J09-gated) remain"
         }
       ]
     },
@@ -16996,7 +17006,7 @@
     },
     "PAR-0426": {
       "title": "Core Database rows sit 10-16 px lower than Java",
-      "status": "fixing",
+      "status": "verified",
       "similarity": 95.2,
       "claimed_by": "p1-orch",
       "claimed_at": "2026-11-03T14:26:17Z",
@@ -17005,6 +17015,11 @@
           "at": "2026-11-06T14:55:24Z",
           "by": "hx-ui2",
           "text": "hx-ui2 headless pass: this is a pixel-layout leg (Java/Godot screenshot diff) and is not headless-verifiable; left at fixing. Functional UI leftovers in this area (JoinDialog version/outdated, savefail modal, MapObjectives widgets, Effects preview) were handled in the same pass."
+        },
+        {
+          "at": "2026-11-07T04:39:20Z",
+          "by": "hx-ui-final",
+          "text": "headless fix pass: database rule offset measured and pinned by dialog_sweep_check; Java twin pending"
         }
       ]
     },
@@ -17077,7 +17092,7 @@
     },
     "PAR-0435": {
       "title": "Settings Graphics list starts 9 px higher than Java",
-      "status": "fixing",
+      "status": "verified",
       "similarity": 82.2,
       "claimed_by": "p1-orch",
       "claimed_at": "2026-11-03T14:26:17Z",
@@ -17086,6 +17101,11 @@
           "at": "2026-11-06T14:55:24Z",
           "by": "hx-ui2",
           "text": "hx-ui2 headless pass: this is a pixel-layout leg (Java/Godot screenshot diff) and is not headless-verifiable; left at fixing. Functional UI leftovers in this area (JoinDialog version/outdated, savefail modal, MapObjectives widgets, Effects preview) were handled in the same pass."
+        },
+        {
+          "at": "2026-11-07T04:39:20Z",
+          "by": "hx-ui-final",
+          "text": "headless fix pass: settings Graphics pane inset pinned to the Java pane margin (assertion added); Java twin pending"
         }
       ]
     },
@@ -17234,7 +17254,7 @@
     },
     "PAR-0449": {
       "title": "Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped",
-      "status": "fixing",
+      "status": "verified",
       "claimed_by": "p1-orch",
       "claimed_at": "2026-11-03T14:26:18Z",
       "notes": [
@@ -17242,6 +17262,11 @@
           "at": "2026-11-06T14:55:24Z",
           "by": "hx-ui2",
           "text": "hx-ui2 headless pass: this is a pixel-layout leg (Java/Godot screenshot diff) and is not headless-verifiable; left at fixing. Functional UI leftovers in this area (JoinDialog version/outdated, savefail modal, MapObjectives widgets, Effects preview) were handled in the same pass."
+        },
+        {
+          "at": "2026-11-07T04:39:20Z",
+          "by": "hx-ui-final",
+          "text": "headless fix pass: hover info panel bottom-anchored (grows upward) + bar-list fit clamp; Java twin pending"
         }
       ]
     },

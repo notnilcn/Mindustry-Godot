@@ -62,14 +62,6 @@ use crate::sim_host::{BulletDraw, MindSimHost};
 use super::atlas_bind::{Quad, build_mesh};
 use super::shaders::ShaderRegistry;
 
-/// Arc `Color.orange` (`Color.java:45`, `ffa500ff`) —
-/// `ContinuousLaserBulletType.lightColor` (`:40`).
-const ORANGE: [f32; 4] = [1.0, 0.647_058_8, 0.0, 1.0];
-/// `ContinuousLaserBulletType.lightStroke` / `ContinuousFlameBulletType
-/// .lightStroke` class default (`:12`/`:13`).
-const CONTINUOUS_LIGHT_STROKE: f32 = 40.0;
-/// `ContinuousLaserBulletType.lightOpacity` (`:41`).
-const CONTINUOUS_LASER_LIGHT_OPACITY: f32 = 0.7;
 /// `SapBulletType.draw`'s beam stroke (`SapBulletType.java:60`): `15f * fout`.
 const SAP_LIGHT_STROKE: f32 = 15.0;
 /// `LaserBulletType` line-light alpha: `Drawf.light(..., 0.6f)`
@@ -654,22 +646,27 @@ pub fn bullet_line_light(bullet: &BulletDraw, def: &BulletDef) -> Option<LineLig
             })
         }
         // `ContinuousLaserBulletType.draw` (`:68-70`): stroke `lightStroke`
-        // (40), `Color.orange`, opacity 0.7. Content gap: the port's
-        // `BulletDef::new(ContinuousLaser)` does not yet apply the Java
-        // initializer's `lightColor`/`lightOpacity`
-        // (`ContinuousLaserBulletType.java:40-41`), so the class defaults are
-        // used here until `mc/content/registries/bullets.rs` sets them
-        // (reported to the content owner).
-        BulletKind::ContinuousLaser => Some(beam(
-            bullet.fdata,
-            CONTINUOUS_LIGHT_STROKE,
-            [
-                ORANGE[0],
-                ORANGE[1],
-                ORANGE[2],
-                CONTINUOUS_LASER_LIGHT_OPACITY,
-            ],
-        )),
+        // (40), `Color.orange`, opacity 0.7 (all carried by the def:
+        // `ContinuousLaserBulletType.java:16-21`, `:40-41`).
+        BulletKind::ContinuousLaser => {
+            let fout = mind_core::render::bullet_draw::continuous_laser_fout(
+                bullet.time,
+                bullet.lifetime,
+                def.fade_time,
+            );
+            let target = def.length * fout;
+            let length = if bullet.fdata > 0.0 {
+                bullet.fdata.min(target)
+            } else {
+                target
+            };
+            let tint = rgba(def.light_color);
+            Some(beam(
+                length,
+                def.light_stroke,
+                [tint[0], tint[1], tint[2], def.light_opacity],
+            ))
+        }
         // `ContinuousFlameBulletType.draw` (`:95-97`): same geometry/stroke,
         // `lightColor = hitColor` = `colors[1]` at full alpha, `lightOpacity`
         // 0.7 — both carried by the def (`Bullet` kind initializer).
@@ -683,9 +680,17 @@ pub fn bullet_line_light(bullet: &BulletDraw, def: &BulletDef) -> Option<LineLig
                     .map(|color| rgba(*color))
                     .unwrap_or([0.882, 0.537, 0.961, 1.0])
             };
+            // `realLength = Damage.findLength(b, length * b.fin(lengthInterp))`.
+            let mult = mind_core::render::bullet_draw::continuous_flame_length_mult(fin);
+            let target = def.length * mult;
+            let length = if bullet.fdata > 0.0 {
+                bullet.fdata.min(target)
+            } else {
+                target
+            };
             Some(beam(
-                bullet.fdata,
-                CONTINUOUS_LIGHT_STROKE,
+                length,
+                def.light_stroke,
                 [tint[0], tint[1], tint[2], def.light_opacity],
             ))
         }

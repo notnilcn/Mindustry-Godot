@@ -199,7 +199,7 @@ pub enum PrimKind {
     NoiseLayer {
         /// Loose noise texture.
         texture: TextureKey,
-        /// Screen rect `[x, y, w, h]`.
+        /// Screen rect `[x, y, w, h]` (`[0, 0, 0, 0]` = the camera bounds).
         rect: [f32; 4],
         /// Tint.
         tint: Rgba,
@@ -209,6 +209,9 @@ pub enum PrimKind {
         scroll: [f32; 2],
         /// Layer offset.
         offset: f32,
+        /// `noisescl` for this layer (`NoiseEffect.drawNoiseLayers` multiplies
+        /// `noiseScl` by `layerSclMul` per layer, `NoiseEffect.java:43-54`).
+        scl: f32,
     },
     /// A generic shader blit (caustics, env) executed by plan 16.
     ShaderBlit {
@@ -499,6 +502,7 @@ fn hash_kind(kind: &PrimKind, hash: &mut u64) {
             opacity,
             scroll,
             offset,
+            scl,
         } => {
             *hash ^= 10;
             *hash = hash.wrapping_mul(0x1000_0000_01b3);
@@ -511,6 +515,7 @@ fn hash_kind(kind: &PrimKind, hash: &mut u64) {
             }
             mixv!(hash, *opacity);
             mixv!(hash, *offset);
+            mixv!(hash, *scl);
             mixc!(hash, *tint);
         }
         PrimKind::ShaderBlit { shader } => {

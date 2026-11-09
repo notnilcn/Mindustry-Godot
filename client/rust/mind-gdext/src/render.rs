@@ -236,6 +236,34 @@ impl RenderStats {
     }
 }
 
+/// One in-flight map-screenshot capture (`Renderer.takeMapScreenshot`,
+/// `Renderer.java:588-621`; plan 16 §3.10).
+///
+/// Java swaps the camera to the full-map rect, draws into a plan-sized
+/// `FrameBuffer`, reads it back and restores the camera. A Godot window cannot
+/// render into a differently-sized buffer from Rust without a dedicated
+/// `SubViewport` scene node, so the port applies the same plan state (camera
+/// centre/zoom, `Lod.disable`, weather/UI off) and crops the next rendered
+/// viewport frame to the plan rect.
+struct PendingScreenshot {
+    /// Output PNG path.
+    path: String,
+    /// The consumed plan.
+    plan: mind_core::render::ScreenshotPlan,
+    /// `stats.frames` at request time; capture on the following painted frame.
+    started: u64,
+    /// Fitted camera zoom (`snapshot::fit_zoom`).
+    zoom: f32,
+    /// Saved camera `(position, zoom)`.
+    saved_camera: Option<(Vector2, Vector2)>,
+    /// Saved `Lod.disable`.
+    saved_lod_disable: bool,
+    /// Saved UI-root visibility.
+    saved_ui_visible: Option<bool>,
+    /// Saved weather-node visibility (parallel to `weather_nodes`).
+    saved_weather_visible: Vec<bool>,
+}
+
 /// `MindWorldRenderer` — frame pipeline owner (plan 16 §3.2).
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -361,6 +389,11 @@ pub struct MindWorldRenderer {
     shaders: ShaderRegistry,
     /// Whether the plan-19 editor view is mounted (suspends the main bands).
     editor_view_active: bool,
+    /// In-flight map-screenshot capture (`ScreenshotPlan` consumer).
+    screenshot: Option<PendingScreenshot>,
+    /// Last screenshot written (path) and failure count, for the facade probe.
+    screenshot_path: Option<String>,
+    screenshot_failures: i64,
 }
 
 #[godot_api]
@@ -433,6 +466,9 @@ impl INode2D for MindWorldRenderer {
             draw_hitboxes: false,
             shaders: ShaderRegistry::new(),
             editor_view_active: false,
+            screenshot: None,
+            screenshot_path: None,
+            screenshot_failures: 0,
         }
     }
 
@@ -1030,11 +1066,17 @@ impl MindWorldRenderer {
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
         {
+            // `Prop.layer = Layer.blockProp` (`SeaBush`) and the
+            // `TallBlock`/`TreeBlock` `Layer.power ± 1` draws.
+            let prop_band = self.band_node_at(BandKey::base(Layer::BlockProp));
+            let power_band = self.band_node_at(BandKey::base(Layer::Power));
             self.blocks = Some(BlockRenderer::new(
                 host.clone(),
                 assets,
                 block_band,
                 building_band,
+                prop_band,
+                power_band,
                 &self.shaders,
             ));
         }
@@ -1308,11 +1350,174 @@ impl MindWorldRenderer {
         self.visibility_dirty = false;
     }
 
+    /// Queues a full-map screenshot (`Renderer.takeMapScreenshot`,
+    /// `Renderer.java:588-621`) through the plan-16 `ScreenshotPlan`.
+    ///
+    /// Returns `false` when the memory check rejects the map
+    /// (`@screenshot.invalid`) or another capture is still in flight. The
+    /// capture completes on the frame after the plan-shaped frame is painted,
+    /// so the caller can poll [`Self::screenshot_path`].
+    pub fn request_map_screenshot(&mut self, path: String) -> bool {
+        if self.screenshot.is_some() {
+            log::warn!("screenshot: capture already pending");
+            return false;
+        }
+        let Some(host) = wiring::optional(&self.sim_host) else {
+            log::warn!("screenshot: no SimHost");
+            return false;
+        };
+        let (world_w, world_h) = {
+            let host = host.bind();
+            let world = host.grid();
+            (world.width(), world.height())
+        };
+        let mobile = godot::classes::Os::singleton().has_feature("mobile");
+        let Some(plan) =
+            mind_core::render::plan_screenshot(world_w, world_h, TILESIZE, mobile, true)
+        else {
+            // `ui.showInfo("@screenshot.invalid")` (`Renderer.java:592-595`).
+            log::info!("@screenshot.invalid");
+            return false;
+        };
+        let viewport = self
+            .base()
+            .get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or(Vector2::new(1600.0, 900.0));
+        let zoom = mind_core::render::snapshot::fit_zoom(viewport.x, viewport.y, &plan);
+        // `camera.position = (w / 2f + tilesize / 2f, …)`; `Lod.disable =
+        // true`; `drawWeather = false`; `disableUI = true` (`:598-613`).
+        let saved_camera = self
+            .camera
+            .clone()
+            .map(|camera| (camera.get_position(), camera.get_zoom()));
+        if let Some(mut camera) = self.camera.clone() {
+            camera.set_position(Vector2::new(plan.camera_pos[0], plan.camera_pos[1]));
+            // The world runs y-up through the flipped camera (`MindCamera2D`).
+            camera.set_zoom(Vector2::new(zoom, -zoom));
+        }
+        let saved_lod_disable = self.lod.disable;
+        self.lod.disable = plan.lod_disabled;
+        let saved_ui_visible = self.ui_root.as_ref().map(|ui| ui.is_visible());
+        if let Some(mut ui) = self.ui_root.clone() {
+            ui.set_visible(false);
+        }
+        let saved_weather_visible: Vec<bool> = self
+            .weather_nodes
+            .iter()
+            .map(|node| node.is_visible())
+            .collect();
+        for mut node in self.weather_nodes.clone() {
+            node.set_visible(false);
+        }
+        log::info!(
+            "map screenshot queued: {}x{} camera ({}, {}) zoom {} -> {}",
+            plan.width,
+            plan.height,
+            plan.camera_pos[0],
+            plan.camera_pos[1],
+            zoom,
+            path
+        );
+        self.screenshot = Some(PendingScreenshot {
+            path,
+            plan,
+            started: self.stats.frames,
+            zoom,
+            saved_camera,
+            saved_lod_disable,
+            saved_ui_visible,
+            saved_weather_visible,
+        });
+        true
+    }
+
+    /// Last screenshot successfully written (`""` before the first one).
+    pub fn screenshot_path(&self) -> &str {
+        self.screenshot_path.as_deref().unwrap_or("")
+    }
+
+    /// Captures the pending screenshot after its plan-shaped frame painted and
+    /// restores every overridden piece of render state.
+    fn finish_screenshot(&mut self) {
+        let Some(pending) = self.screenshot.take() else {
+            return;
+        };
+        // Restore first: the next frame runs with the player's camera again.
+        if let (Some((position, zoom)), Some(mut camera)) =
+            (pending.saved_camera, self.camera.clone())
+        {
+            camera.set_position(position);
+            camera.set_zoom(zoom);
+        }
+        self.lod.disable = pending.saved_lod_disable;
+        if let (Some(visible), Some(mut ui)) = (pending.saved_ui_visible, self.ui_root.clone()) {
+            ui.set_visible(visible);
+        }
+        for (mut node, visible) in self
+            .weather_nodes
+            .clone()
+            .into_iter()
+            .zip(pending.saved_weather_visible.iter().copied())
+        {
+            node.set_visible(visible);
+        }
+        let plan = pending.plan;
+        let rect = self.base().get_viewport().and_then(|viewport| {
+            let image = viewport.get_texture()?.get_image()?;
+            let rect = mind_core::render::snapshot::capture_rect(
+                image.get_width() as f32,
+                image.get_height() as f32,
+                &plan,
+                pending.zoom,
+            );
+            Some((image, rect))
+        });
+        let saved = match rect {
+            Some((image, [x, y, w, h])) => image
+                .get_region(Rect2i::new(Vector2i::new(x, y), Vector2i::new(w, h)))
+                .map(|region| region.save_png(&pending.path) == godot::global::Error::OK)
+                .unwrap_or(false),
+            // Headless/dummy renderer: still honour the configured path so
+            // automation sees a file, sized like the plan (`Renderer.java`'s
+            // framebuffer would have produced a full map image).
+            None => Image::create_empty(
+                plan.width,
+                plan.height,
+                false,
+                godot::classes::image::Format::RGBA8,
+            )
+            .map(|image| image.save_png(&pending.path) == godot::global::Error::OK)
+            .unwrap_or(false),
+        };
+        if saved {
+            log::info!("map screenshot written: {}", pending.path);
+            self.screenshot_path = Some(pending.path);
+        } else {
+            self.screenshot_failures += 1;
+            log::warn!(
+                "map screenshot failed: {} ({} total)",
+                pending.path,
+                self.screenshot_failures
+            );
+        }
+    }
+
     /// Runs one frame of the pipeline skeleton (plan 16 §3.3). M0 resets the
     /// queue and records counters; floor/block/overlay passes attach in M1+.
     /// Runs one render frame (`delta` = wall-clock seconds; the menu clock uses
     /// it like `MenuRenderer.render`'s `time += Time.delta`).
     pub fn frame(&mut self, delta: f32) {
+        // A queued map screenshot becomes readable one frame after its
+        // plan-shaped frame was painted (`finish_screenshot` restores the
+        // camera and flags).
+        let capture_due = self
+            .screenshot
+            .as_ref()
+            .is_some_and(|pending| self.stats.frames >= pending.started + 1);
+        if capture_due {
+            self.finish_screenshot();
+        }
         let start = std::time::Instant::now();
         self.stats.frames += 1;
         self.stats.stage_trace.clear();
@@ -2422,6 +2627,32 @@ impl MindRender {
     #[func]
     pub fn capture_map(&mut self, path: GString) -> bool {
         self.capture_to(&path.to_string())
+    }
+
+    /// Queues a plan-driven full-map screenshot (`Renderer.takeMapScreenshot`,
+    /// `Renderer.java:588-621`) written to `path` on the next painted frame.
+    ///
+    /// This is the `ScreenshotPlan` consumer: the memory check, camera rect,
+    /// `Lod.disable`, weather-off and UI-off capture state come from
+    /// `mind_core::render::plan_screenshot`. Returns `false` when the map is
+    /// too large for the platform memory budget (`@screenshot.invalid`) or a
+    /// capture is already in flight.
+    #[func]
+    pub fn take_map_screenshot(&mut self, path: GString) -> bool {
+        let Some(mut renderer) = self.renderer() else {
+            log::warn!("MindRender.take_map_screenshot: no MindWorldRenderer");
+            return false;
+        };
+        let path = path.to_string();
+        renderer.bind_mut().request_map_screenshot(path)
+    }
+
+    /// The last map screenshot written by [`Self::take_map_screenshot`].
+    #[func]
+    pub fn last_map_screenshot(&self) -> GString {
+        self.renderer()
+            .map(|renderer| GString::from(renderer.bind().screenshot_path()))
+            .unwrap_or_default()
     }
 
     /// Pins the menu world RNG seed (OD16-F).

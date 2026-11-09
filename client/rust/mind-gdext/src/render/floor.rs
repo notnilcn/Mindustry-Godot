@@ -27,13 +27,14 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::content::registries::blocks::BlockDef;
-use mind_core::content::{BlockId, BlockKind, ContentRegistry, is_overlay_floor_kind};
+use mind_core::content::{BlockId, BlockKind, ContentRegistry, Rgba, is_overlay_floor_kind};
 use mind_core::math::rand_arc::{pack_point2, random_seed_int};
 use mind_core::render::floor_cache::{CHUNK_SIZE, FloorChunkGrid};
 use mind_core::render::floor_edges::{draw_edges, draw_non_layer, tile_at};
 use mind_core::render::floor_main;
 use mind_core::render::layer::CacheLayerId;
 use mind_core::render::list::{block_cache_layer, floor_cache_layer, is_accessible};
+use mind_core::render::props as props_draw;
 use mind_core::render::scan::CameraView;
 use mind_core::render::tiled;
 use mind_core::world::{Tile, WorldGrid};
@@ -123,6 +124,14 @@ pub(crate) struct PendingQuad {
     /// The block's own `region`, the `TiledFloor.load` 1x1 fallback when no
     /// packed sprite exists.
     pub tiled_base: Option<String>,
+    /// Draw rotation in degrees (`CharacterOverlay.drawBase`'s
+    /// `CharOverlayData.rotation * 90f`, `CharacterOverlay.java:31`); `0` for
+    /// every other quad.
+    pub rot: f32,
+    /// `Cliff.drawBase` (`Cliff.java:26-31`): the floor whose `mapColor * 1.6`
+    /// tints the `cliffmask` region (resolved in [`FloorRenderer::build_layer`],
+    /// which owns the `block_colors` palette).
+    pub cliff: Option<BlockId>,
 }
 
 /// A tile-sized edge cell from a `<blendGroup>-edge` region (`Floor.edge`).
@@ -151,6 +160,8 @@ fn edge_quad(
         tiling: None,
         tiled: None,
         tiled_base: None,
+        rot: 0.0,
+        cliff: None,
     }
 }
 
@@ -517,6 +528,9 @@ pub struct FloorRenderer {
     revision: i64,
     /// Chunk linear index → baked nodes.
     chunks: BTreeMap<usize, ChunkMeshes>,
+    /// `sprites/block_colors.png` row (`Block.mapColor` palette) for the
+    /// `Cliff.drawBase` tint (`Cliff.java:28`); loaded on the first cliff.
+    block_colors: Option<Vec<u32>>,
     stats: FloorStats,
 }
 
@@ -536,8 +550,32 @@ impl FloorRenderer {
             grid: FloorChunkGrid::new(width, height),
             dims: (width, height),
             chunks: BTreeMap::new(),
+            block_colors: None,
             stats: FloorStats::default(),
         }
+    }
+
+    /// `Block.mapColor` for a floor id: the packed `block_colors.png` palette
+    /// (`ContentLoader.loadColors`) first (`Cliff.drawBase` reads
+    /// `tile.floor().mapColor`, `Cliff.java:28`), else the registry colour.
+    fn map_color(&mut self, floor: BlockId) -> Rgba {
+        let colors = self
+            .block_colors
+            .get_or_insert_with(crate::render::minimap::load_block_colors);
+        if let Some(&color) = colors.get(floor.raw() as usize) {
+            if color != 0 && color != 255 {
+                return Rgba::from_rgba8888(color | 0xff);
+            }
+        }
+        let fallback = self
+            .host
+            .clone()
+            .bind()
+            .content_registry()
+            .and_then(|content| content.block(floor))
+            .and_then(|def| def.map_color)
+            .unwrap_or(Rgba::new(0.0, 0.0, 0.0, 1.0));
+        fallback
     }
 
     /// Current counters.
@@ -628,6 +666,10 @@ impl FloorRenderer {
     /// Builds the `MeshInstance2D` nodes for one `(chunk, CacheLayer)`.
     fn build_layer(&mut self, cx: i32, cy: i32, layer: CacheLayerId) -> Vec<Gd<MeshInstance2D>> {
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
+        // `CharacterOverlay` letters carry a quarter-turn rotation
+        // (`CharacterOverlay.java:31`); they bake into their own page meshes.
+        let mut rotated_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<(Quad, f32)>)> =
+            BTreeMap::new();
         let host = self.host.clone();
         let changes = host.clone().bind().grid().floor_changes;
         let mut tiled = TiledStates::new(cx, cy, changes);
@@ -686,8 +728,17 @@ impl FloorRenderer {
                                 (page, texture, uv)
                             }
                         };
-                        let entry = groups.entry(page).or_insert((texture, Vec::new()));
-                        entry.1.push(Quad {
+                        // `Cliff.drawBase` tint: `floor.mapColor * 1.6`
+                        // (`Cliff.java:28`), resolved here because the
+                        // `block_colors` palette lives on the renderer.
+                        let color = match quad.cliff {
+                            Some(floor) => {
+                                let tint = props_draw::cliff_tint(self.map_color(floor));
+                                mind_core::render::drawf::to_bits([tint.r, tint.g, tint.b, tint.a])
+                            }
+                            None => quad.color,
+                        };
+                        let baked = Quad {
                             cx: quad.cx,
                             cy: quad.cy,
                             w: quad.w,
@@ -696,9 +747,16 @@ impl FloorRenderer {
                             v0: uv[1],
                             u1: uv[2],
                             v1: uv[3],
-                            color: quad.color,
+                            color,
                             v_flip: quad.v_flip,
-                        });
+                        };
+                        if quad.rot != 0.0 {
+                            let entry = rotated_groups.entry(page).or_insert((texture, Vec::new()));
+                            entry.1.push((baked, quad.rot));
+                        } else {
+                            let entry = groups.entry(page).or_insert((texture, Vec::new()));
+                            entry.1.push(baked);
+                        }
                     }
                 }
             }
@@ -727,6 +785,23 @@ impl FloorRenderer {
             }
             // code-instantiated: one mesh per (chunk, CacheLayer, atlas page);
             // count/geometry are data-driven from the world bake (plan 16 §6.6).
+            band.clone().add_child(&node);
+            nodes.push(node);
+        }
+        for (_page, (texture, quads)) in rotated_groups {
+            if quads.is_empty() {
+                continue;
+            }
+            let Some(mesh) = build_rotated_mesh(&quads, grow) else {
+                continue;
+            };
+            let mut node = MeshInstance2D::new_alloc();
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            if let Some(texture) = texture {
+                node.set_texture(&texture);
+            }
+            // code-instantiated: one rotated mesh per (chunk, CacheLayer,
+            // atlas page); count is page-driven like the upright bakes.
             band.clone().add_child(&node);
             nodes.push(node);
         }
@@ -844,7 +919,16 @@ pub(crate) fn tile_quads_with(
                 tiling: None,
                 tiled: None,
                 tiled_base: None,
+                rot: 0.0,
+                cliff: None,
             };
+            // `Cliff.drawBase` (`Cliff.java:26-31`): `cliffs[tile.data & 0xff]`
+            // tinted by the floor's `mapColor * 1.6`. The palette lookup and
+            // tint happen in `build_layer` (it owns `block_colors`).
+            if block.kind == BlockKind::Cliff {
+                quad.region = props_draw::cliff_region_name(tile.data);
+                quad.cliff = Some(tile.floor);
+            }
             if block.kind == BlockKind::TiledWall
                 && let Some(states) = tiled.as_deref_mut()
                 && let Some(state) = states.state(
@@ -943,7 +1027,51 @@ pub(crate) fn floor_draw_base_quads_with(
     // `Floor.drawMain` (`Floor.java:264-292`): the tiling, autotile or plain
     // variant branch (J02 T2).
     let main = main_quad(world, content, tile, floor, false, tiled.as_deref_mut());
-    out.push(main.clone());
+    if floor.kind == BlockKind::SteamVent {
+        // `SteamVent.drawMain` (`SteamVent.java:74-83`): draw the parent floor,
+        // then (only on the top-right tile of a complete 3×3 vent) the 96×96
+        // variant sprite at the 3×3 centre. The port's floor bake is
+        // tile-sized, so the overlay is a 3×3-tile quad.
+        let parent = content.block(floor.blend_group_id()).unwrap_or(floor);
+        out.push(main_quad(
+            world,
+            content,
+            tile,
+            parent,
+            false,
+            tiled.as_deref_mut(),
+        ));
+        let vent = tile.floor;
+        if let Some((ox, oy)) =
+            props_draw::steam_vent_overlay_tile(tile.x as i32, tile.y as i32, vent, |x, y| {
+                tile_at(world, x, y).map(|other| other.floor)
+            })
+        {
+            let index = random_seed_int(
+                pack_point2(tile.x as i32, tile.y as i32),
+                0,
+                (floor.variants - 1).max(0),
+            );
+            out.push(PendingQuad {
+                region: format!("{}{}", floor.name, index + 1),
+                cx: ox as f32 * size,
+                cy: oy as f32 * size,
+                w: size * 3.0,
+                h: size * 3.0,
+                color: 0xffff_ffff,
+                variant: false,
+                v_flip: true,
+                crop: None,
+                tiling: None,
+                tiled: None,
+                tiled_base: None,
+                rot: 0.0,
+                cliff: None,
+            });
+        }
+    } else {
+        out.push(main.clone());
+    }
 
     // `Floor.drawBase`: `drawEdges` when `drawEdgeIn` (`Floor.java:252`).
     // The tile's own edge sprites plus the neighbours' — this is the
@@ -960,9 +1088,22 @@ pub(crate) fn floor_draw_base_quads_with(
         && tile.overlay != tile.floor
         && let Some(overlay) = content.block(tile.overlay)
     {
-        // The overlay's own `drawMain` (`Floor.drawOverlay` → `overlay.drawBase`,
-        // `Floor.java:304-309`): its autotile same-check reads `tile.overlay`.
-        out.push(main_quad(world, content, tile, overlay, true, tiled));
+        // `RuneOverlay.drawBase`/`CharacterOverlay.drawBase`
+        // (`RuneOverlay.java:31-36`, `CharacterOverlay.java:29-32`): the letter
+        // sprite selected by `tile.overlayData` (with the 2-bit quarter-turn
+        // rotation for characters), tinted by the class colour.
+        if matches!(
+            overlay.kind,
+            BlockKind::RuneOverlay | BlockKind::CharacterOverlay
+        ) {
+            if let Some(quad) = overlay_letter_quad(tile, overlay) {
+                out.push(quad);
+            }
+        } else {
+            // The overlay's own `drawMain` (`Floor.drawOverlay` → `overlay.drawBase`,
+            // `Floor.java:304-309`): its autotile same-check reads `tile.overlay`.
+            out.push(main_quad(world, content, tile, overlay, true, tiled));
+        }
         // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
         // variant only; a plain floor used as an overlay runs the full
         // `Floor.drawBase` (its own edges; the overlay-of-overlay step
@@ -997,6 +1138,48 @@ pub(crate) fn floor_draw_base_quads_with(
     }
 
     out
+}
+
+/// `RuneOverlay.drawBase`/`CharacterOverlay.drawBase` letter quad: the region
+/// packed as `<prefix><index>` (`RuneOverlay.java:20-22`,
+/// `CharacterOverlay.java:20-21`), tinted by the class colour and rotated by
+/// `CharOverlayData.rotation * 90f` for characters. Rune indices past
+/// `RuneOverlay.characters` draw nothing (`:33-35`).
+fn overlay_letter_quad(tile: &Tile, def: &BlockDef) -> Option<PendingQuad> {
+    let size = TILESIZE as f32;
+    let (region, rot) = match def.kind {
+        BlockKind::RuneOverlay => (
+            props_draw::rune_region_name(&def.name, tile.overlay_data)?,
+            0.0,
+        ),
+        BlockKind::CharacterOverlay => (
+            props_draw::character_region_name(
+                props_draw::CHARACTER_OVERLAY_PREFIX,
+                tile.overlay_data,
+            ),
+            props_draw::character_rotation(tile.overlay_data),
+        ),
+        _ => return None,
+    };
+    Some(PendingQuad {
+        region,
+        cx: tile.x as f32 * size,
+        cy: tile.y as f32 * size,
+        w: size,
+        h: size,
+        color: mind_core::render::drawf::to_bits({
+            let color = props_draw::overlay_color(&def.name);
+            [color.r, color.g, color.b, color.a]
+        }),
+        variant: false,
+        v_flip: true,
+        crop: None,
+        tiling: None,
+        tiled: None,
+        tiled_base: None,
+        rot,
+        cliff: None,
+    })
 }
 
 /// The `Draw.alpha(1f - overlayAlpha)` byte of the liquid-overlay redraw
@@ -1064,6 +1247,8 @@ fn main_quad(
         tiling,
         tiled: None,
         tiled_base: None,
+        rot: 0.0,
+        cliff: None,
     };
     // `TiledFloor.drawMain` (`TiledFloor.java:105-119`): the tile's packed
     // square selects `<name>-<size>-<variant>` and the split cell
@@ -1103,6 +1288,8 @@ fn main_quad(
             tiling: None,
             tiled: Some((square, variant, cell_x, cell_y)),
             tiled_base: Some(def.region.clone()),
+            rot: 0.0,
+            cliff: None,
         };
     }
     if def.tiling_variants > 0 {
@@ -1163,6 +1350,8 @@ fn main_quad(
         tiling: None,
         tiled: None,
         tiled_base: None,
+        rot: 0.0,
+        cliff: None,
     }
 }
 
@@ -1211,6 +1400,44 @@ pub(crate) fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
             tool.set_color(color);
             tool.set_uv(Vector2::new(u, v));
             tool.add_vertex(Vector3::new(vx, vy, 0.0));
+        }
+    }
+    tool.commit()
+}
+
+/// Builds an `ArrayMesh` from `(quad, rotation_degrees)` pairs, rotating each
+/// quad around its centre (the `CharacterOverlay` letter draw,
+/// `CharacterOverlay.java:31`). The y-flip camera UV mapping matches
+/// [`build_mesh`].
+pub(crate) fn build_rotated_mesh(quads: &[(Quad, f32)], grow: f32) -> Option<Gd<ArrayMesh>> {
+    if quads.is_empty() {
+        return None;
+    }
+    let mut tool = SurfaceTool::new_gd();
+    tool.begin(PrimitiveType::TRIANGLES);
+    for (quad, rotation) in quads {
+        let (sin, cos) = rotation.to_radians().sin_cos();
+        let (hw, hh) = (quad.w / 2.0 + grow, quad.h / 2.0 + grow);
+        let (v_top, v_bottom) = if quad.v_flip {
+            (quad.v1, quad.v0)
+        } else {
+            (quad.v0, quad.v1)
+        };
+        // Same convention as `build_mesh`: the smaller-y corners carry
+        // `v_top` (y-flip camera compensation through `v_flip`).
+        let corners = [
+            (-hw, -hh, quad.u0, v_top),
+            (hw, -hh, quad.u1, v_top),
+            (hw, hh, quad.u1, v_bottom),
+            (-hw, hh, quad.u0, v_bottom),
+        ];
+        for index in [0usize, 1, 2, 0, 2, 3] {
+            let (lx, ly, u, v) = corners[index];
+            let x = quad.cx + lx * cos - ly * sin;
+            let y = quad.cy + lx * sin + ly * cos;
+            tool.set_color(color_from(quad.color));
+            tool.set_uv(Vector2::new(u, v));
+            tool.add_vertex(Vector3::new(x, y, 0.0));
         }
     }
     tool.commit()
@@ -1561,5 +1788,105 @@ mod tests {
         world.tiles.get_mut(2, 2).block = stone;
         let plain = tile_quads(&world, &registry, world.tile(2, 2), CacheLayerId::Walls);
         assert_eq!(plain.first().map(|quad| quad.color), Some(0xffff_ffff));
+    }
+
+    /// GAPS #53 environment props: `Cliff.drawBase` (`Cliff.java:26-31`) picks
+    /// `cliffmask[tile.data & 0xff]` and carries the floor id for the
+    /// `mapColor * 1.6` tint applied by the bake.
+    #[test]
+    fn cliff_quad_uses_the_mask_and_floor_palette_slot() {
+        let registry = test_registry();
+        let cliff = block(&registry, "cliff");
+        let stone = block(&registry, "stone");
+        let mut world = WorldGrid::new(3, 3);
+        fill(&mut world, stone);
+        let tile = world.tiles.get_mut(1, 1);
+        tile.block = cliff;
+        tile.data = 0x22;
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Walls);
+        let Some(quad) = quads.first() else {
+            panic!("cliff quad");
+        };
+        assert_eq!(quad.region, "cliffmask34");
+        assert_eq!(quad.cliff, Some(stone));
+        // The tint itself is a `block_colors` palette lookup (needs the
+        // Godot asset tree), so the pure math is pinned in `render::props`.
+    }
+
+    /// GAPS #53 environment props: `RuneOverlay.drawBase`/`CharacterOverlay.
+    /// drawBase` (`RuneOverlay.java:31-36`, `CharacterOverlay.java:29-32`)
+    /// select the packed letter region and the character quarter-turn.
+    #[test]
+    fn overlay_letters_select_the_packed_region_and_rotation() {
+        let registry = test_registry();
+        let stone = block(&registry, "stone");
+        let rune = block(&registry, "rune-overlay");
+        let character = block(&registry, "character-overlay");
+        let mut world = WorldGrid::new(3, 3);
+        fill(&mut world, stone);
+        let tile = world.tiles.get_mut(1, 1);
+        tile.overlay = rune;
+        tile.overlay_data = 5;
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
+        let overlay = quads.iter().find(|quad| quad.region.starts_with("rune-overlay"));
+        let Some(overlay) = overlay else {
+            panic!("rune overlay quad: {:?}", base_region(&quads));
+        };
+        assert_eq!(overlay.region, "rune-overlay5");
+        assert_eq!(overlay.rot, 0.0);
+        // `3f4049` tint (`Blocks.java:963-966`).
+        assert_eq!(overlay.color, 0x3f40_49ff);
+
+        let tile = world.tiles.get_mut(1, 1);
+        tile.overlay = character;
+        tile.overlay_data = 0x42; // character 2, rotation 1 (90 degrees)
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
+        let overlay = quads
+            .iter()
+            .find(|quad| quad.region.starts_with("character-overlay"))
+            .expect("character overlay quad");
+        assert_eq!(overlay.region, "character-overlay2");
+        assert_eq!(overlay.rot, 90.0);
+        // `Pal.metalGrayDark` (`Blocks.java:955-957`).
+        assert_eq!(overlay.color, 0x6e70_80ff);
+        // A rune index past the sprite sheet draws nothing (`:33-35`).
+        let tile = world.tiles.get_mut(1, 1);
+        tile.overlay = rune;
+        tile.overlay_data = 109i8.clamp(0, 127);
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
+        assert!(!quads.iter().any(|quad| quad.region.starts_with("rune-overlay")));
+    }
+
+    /// GAPS #53 environment props: `SteamVent.drawMain`
+    /// (`SteamVent.java:74-83,108-116`) draws the parent floor on every vent
+    /// tile and the 3×3 variant only on the top-right tile.
+    #[test]
+    fn steam_vent_draws_parent_floor_and_center_overlay() {
+        let registry = test_registry();
+        let vent = block(&registry, "rhyolite-vent");
+        let mut world = WorldGrid::new(5, 5);
+        for y in 1..=3 {
+            for x in 1..=3 {
+                world.tiles.get_mut(x, y).floor = vent;
+            }
+        }
+        // A non-corner vent tile: parent floor only.
+        let inner = tile_quads(&world, &registry, world.tile(2, 2), CacheLayerId::Normal);
+        assert_eq!(inner.len(), 1, "parent floor only: {:?}", inner.len());
+        assert!(!inner[0].region.starts_with("rhyolite-vent"));
+        // The top-right tile adds the 96×96 (port: 3×3-tile) variant at the
+        // 3×3 centre.
+        let corner = tile_quads(&world, &registry, world.tile(3, 3), CacheLayerId::Normal);
+        let overlay = corner
+            .iter()
+            .find(|quad| quad.region.starts_with("rhyolite-vent"))
+            .expect("vent overlay");
+        assert!((overlay.w - 24.0).abs() < 1e-5);
+        assert!((overlay.cx - 16.0).abs() < 1e-5);
+        assert!((overlay.cy - 16.0).abs() < 1e-5);
+        // Missing a corner removes the overlay.
+        world.tiles.get_mut(1, 1).floor = block(&registry, "stone");
+        let broken = tile_quads(&world, &registry, world.tile(3, 3), CacheLayerId::Normal);
+        assert!(!broken.iter().any(|quad| quad.region.starts_with("rhyolite-vent")));
     }
 }

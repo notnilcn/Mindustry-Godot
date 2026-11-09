@@ -45,6 +45,7 @@ pub mod menu;
 pub mod minimap;
 pub mod overlay;
 pub mod pixelate;
+pub mod props;
 pub mod queue;
 pub mod rules;
 pub mod scan;
@@ -87,6 +88,12 @@ pub use list::{
 pub use lod::Lod;
 pub use menu::{MenuTile, MenuWorld, generate as generate_menu};
 pub use overlay::{CoreEdge, build_core_edges, displayed as core_edge_displayed};
+pub use props::{
+    CHARACTER_OVERLAY_PREFIX, SeaBushLobe, SeaBushParams, character_index, character_region_name,
+    character_rotation, cliff_minimap_color, cliff_region_name, cliff_tint, rune_region_name,
+    sea_bush_lobes, steam_vent_adjacent, steam_vent_overlay_tile, tall_block_rotation, tree_quad,
+    tree_rotation,
+};
 pub use queue::{QueueEntry, RenderQueue};
 pub use rules::RulesRenderView;
 pub use scan::{

@@ -32,6 +32,29 @@ use crate::sim_host::{BulletDraw, MindSimHost};
 /// Culling margin around the camera rect (world px).
 const CULL_MARGIN: f32 = 64.0;
 
+/// `ContinuousFlameBulletType.lengthWidthPans`
+/// (`ContinuousFlameBulletType.java:25-31`): lengths, widths and ellipse pans,
+/// interleaved as `LWPO1 LWPO2 LWPO3...` (five colour layers).
+const FLAME_LENGTH_WIDTH_PANS: [f32; 15] = [
+    1.12, 1.3, 0.32, //
+    1.0, 1.0, 0.3, //
+    0.8, 0.9, 0.2, //
+    0.5, 0.8, 0.15, //
+    0.25, 0.7, 0.1,
+];
+/// `ContinuousFlameBulletType.flareColor` (`:18`, `Color.valueOf("e189f5")`).
+const FLAME_FLARE_COLOR: Rgba = Rgba::from_rgba8888(0xe189f5ff);
+/// `ContinuousFlameBulletType.flareWidth` (`:19`, 3).
+const FLAME_FLARE_WIDTH: f32 = 3.0;
+/// `ContinuousFlameBulletType.flareLength` (`:19`, 40).
+const FLAME_FLARE_LENGTH: f32 = 40.0;
+/// `ContinuousFlameBulletType.flareInnerScl` (`:19`, 0.5).
+const FLAME_FLARE_INNER_SCL: f32 = 0.5;
+/// `ContinuousFlameBulletType.flareInnerLenScl` (`:19`, 0.5).
+const FLAME_FLARE_INNER_LEN_SCL: f32 = 0.5;
+/// `ContinuousFlameBulletType.flareRotSpeed` (`:19`, 1.2).
+const FLAME_FLARE_ROT_SPEED: f32 = 1.2;
+
 /// One resolved draw command.
 enum Cmd {
     Region {
@@ -150,6 +173,8 @@ impl INode2D for BulletRenderer {
                 return;
             };
             let visible = self.visible_rect();
+            // `Time.time` (the effect clock; frozen while paused like Java).
+            let tick = guard.get_tick() as f32;
             for bullet in self.bullets.clone() {
                 if let Some((min_x, min_y, max_x, max_y)) = visible
                     && (bullet.x < min_x - CULL_MARGIN
@@ -183,7 +208,7 @@ impl INode2D for BulletRenderer {
                         });
                     }
                 }
-                self.push_bullet(&mut cmds, &node, &bullet, def, content);
+                self.push_bullet(&mut cmds, &node, &bullet, def, content, tick);
             }
         }
 
@@ -266,6 +291,7 @@ impl BulletRenderer {
         bullet: &BulletDraw,
         def: &BulletDef,
         content: &ContentRegistry,
+        tick: f32,
     ) {
         let fin = (bullet.time / bullet.lifetime.max(1e-4)).clamp(0.0, 1.0);
         let fout = 1.0 - fin;
@@ -465,6 +491,172 @@ impl BulletRenderer {
                     points: tail.to_vec(),
                     color: color4(color),
                 });
+            }
+            BulletKind::ContinuousLaser => {
+                // `ContinuousLaserBulletType.draw` (`:48-74`): one line +
+                // back/front `Drawf.flameFront` ellipse per colour layer.
+                let fout =
+                    bullet_draw::continuous_laser_fout(bullet.time, bullet.lifetime, def.fade_time);
+                let target = def.length * fout;
+                // The behavior's `Damage.findLength` cut (`fdata`) is at most
+                // the fade-scaled length; before the first damage tick it is
+                // still 0, so fall back to the full beam.
+                let real_length = if bullet.fdata > 0.0 {
+                    bullet.fdata.min(target)
+                } else {
+                    target
+                };
+                let colors: Vec<Rgba> = if def.colors.is_empty() {
+                    vec![
+                        Rgba::from_rgba8888(0xec745855),
+                        Rgba::from_rgba8888(0xec7458aa),
+                        Rgba::from_rgba8888(0xff9c5aff),
+                        Rgba::WHITE,
+                    ]
+                } else {
+                    def.colors.clone()
+                };
+                let layers = bullet_draw::continuous_laser_layers(
+                    def.width,
+                    def.stroke_from,
+                    def.stroke_to,
+                    def.pointy_scaling,
+                    def.osc_scl,
+                    def.osc_mag,
+                    tick,
+                    fout,
+                    colors.len(),
+                );
+                for (color, layer) in colors.iter().zip(layers.iter()) {
+                    if layer.stroke <= 0.0 {
+                        continue;
+                    }
+                    let tint = color4(rgba(*color));
+                    let body_length = (real_length - def.front_length).max(0.0);
+                    let line = line_angle(bullet.x, bullet.y, bullet.rotation, body_length);
+                    cmds.push(Cmd::Line {
+                        x1: line.0,
+                        y1: line.1,
+                        x2: line.2,
+                        y2: line.3,
+                        width: layer.stroke,
+                        color: tint,
+                    });
+                    // Back ellipse at `rot + 180`.
+                    let back = drawf::flame_front_points(
+                        bullet.x,
+                        bullet.y,
+                        def.divisions,
+                        bullet.rotation + 180.0,
+                        def.back_length,
+                        layer.stroke / 2.0,
+                    );
+                    if back.len() >= 3 {
+                        cmds.push(Cmd::Poly {
+                            points: back,
+                            color: tint,
+                        });
+                    }
+                    // Front ellipse at the beam tip.
+                    let (vx, vy) = drawf::trns(bullet.rotation, body_length);
+                    let front = drawf::flame_front_points(
+                        bullet.x + vx,
+                        bullet.y + vy,
+                        def.divisions,
+                        bullet.rotation,
+                        def.front_length * layer.ellipse_len_scl,
+                        layer.stroke / 2.0,
+                    );
+                    if front.len() >= 3 {
+                        cmds.push(Cmd::Poly {
+                            points: front,
+                            color: tint,
+                        });
+                    }
+                }
+            }
+            BulletKind::ContinuousFlame => {
+                // `ContinuousFlameBulletType.draw` (`:49-79`): one
+                // `Drawf.flame` polygon per colour layer plus the four-triangle
+                // flare. `lengthInterp` is the class default `Interp.slope`.
+                let mult = bullet_draw::continuous_flame_length_mult(fin);
+                let target = def.length * mult;
+                let real_length = if bullet.fdata > 0.0 {
+                    bullet.fdata.min(target)
+                } else {
+                    target
+                };
+                let sin = bullet_draw::continuous_osc(tick, def.osc_scl.max(1e-6), def.osc_mag);
+                let colors: Vec<Rgba> = if def.colors.is_empty() {
+                    vec![
+                        Rgba::from_rgba8888(0xeb7abe8c),
+                        Rgba::from_rgba8888(0xe189f5b3),
+                        Rgba::from_rgba8888(0x907ef7cc),
+                        Rgba::from_rgba8888(0x91a4ffff),
+                        Rgba::WHITE,
+                    ]
+                } else {
+                    def.colors.clone()
+                };
+                for (index, color) in colors.iter().enumerate() {
+                    let tint = bullet_draw::continuous_flame_color(rgba(*color), tick);
+                    let Some((length, width, pan)) = bullet_draw::continuous_flame_layer(
+                        index,
+                        real_length,
+                        def.width,
+                        mult,
+                        sin,
+                        &FLAME_LENGTH_WIDTH_PANS,
+                    ) else {
+                        break;
+                    };
+                    let points = drawf::flame_points(
+                        bullet.x,
+                        bullet.y,
+                        def.divisions,
+                        bullet.rotation,
+                        length,
+                        width,
+                        pan,
+                    );
+                    if points.len() >= 3 {
+                        cmds.push(Cmd::Poly {
+                            points,
+                            color: color4(tint),
+                        });
+                    }
+                }
+                // `drawFlare` (class default true): four `flareColor` triangles
+                // then four inner white triangles (`:61-78`).
+                let angle = tick * FLAME_FLARE_ROT_SPEED;
+                for step in 0..4 {
+                    let rotation = step as f32 * 90.0 + 45.0 + angle;
+                    let flare = drawf::tri(
+                        bullet.x,
+                        bullet.y,
+                        FLAME_FLARE_WIDTH,
+                        FLAME_FLARE_LENGTH * (mult + sin),
+                        rotation,
+                    );
+                    cmds.push(Cmd::Poly {
+                        points: flare.to_vec(),
+                        color: color4(rgba(FLAME_FLARE_COLOR)),
+                    });
+                }
+                for step in 0..4 {
+                    let rotation = step as f32 * 90.0 + 45.0 + angle;
+                    let inner = drawf::tri(
+                        bullet.x,
+                        bullet.y,
+                        FLAME_FLARE_WIDTH * FLAME_FLARE_INNER_SCL,
+                        FLAME_FLARE_LENGTH * FLAME_FLARE_INNER_LEN_SCL * (mult + sin),
+                        rotation,
+                    );
+                    cmds.push(Cmd::Poly {
+                        points: inner.to_vec(),
+                        color: Color::WHITE,
+                    });
+                }
             }
             BulletKind::Liquid => {
                 // `LiquidBulletType.draw` (`:70-81`), non-boiling branch.

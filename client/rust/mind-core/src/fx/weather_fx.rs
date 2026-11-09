@@ -347,11 +347,36 @@ pub fn noise_uv(
 ) -> [f32; 4] {
     let speed = base_speed * intensity;
     let (wx, wy) = (vwind.0 * speed, vwind.1 * speed);
-    let scale = 1.0 / noisescl;
-    let scroll = time * scale + offset;
-    let (mut u, mut v) = (cam.x * scale, cam.y * scale);
-    let (mut u2, mut v2) = ((cam.x + cam.w) * scale, (cam.y + cam.h) * scale);
-    let (xa, ya) = (-wx * scroll, -wy * scroll);
+    noise_layer_uv(
+        [cam.x, cam.y, cam.w, cam.h],
+        time,
+        noisescl,
+        [-wx, -wy],
+        offset,
+    )
+}
+
+/// [`noise_uv`] over plain world bounds: the `NoiseEffect.drawNoise` texture
+/// coordinates used by both the weather noise pass and the `Fx.noise` effect
+/// prims (`NoiseEffect.java:57-71`). `scroll` holds the per-layer velocity
+/// `[-windX * speed, -windY * speed]` and `scl` is `noiseScl * layerSclMul^i`.
+/// The u/v origin is wrapped by the scroll (`TextureRegion.scroll`), the size
+/// is kept, so the rect may run outside `[0, 1]` (the texture must repeat).
+pub fn noise_layer_uv(
+    bounds: [f32; 4],
+    time: f32,
+    scl: f32,
+    scroll: [f32; 2],
+    offset: f32,
+) -> [f32; 4] {
+    let scale = if scl > 0.0 { 1.0 / scl } else { 1.0 };
+    let scroll_time = time * scale + offset;
+    let (mut u, mut v) = (bounds[0] * scale, bounds[1] * scale);
+    let (mut u2, mut v2) = (
+        (bounds[0] + bounds[2]) * scale,
+        (bounds[1] + bounds[3]) * scale,
+    );
+    let (xa, ya) = (scroll[0] * scroll_time, scroll[1] * scroll_time);
     if xa != 0.0 {
         let w = u2 - u;
         u = (u + xa) % 1.0;
@@ -538,6 +563,7 @@ impl WeatherFx {
         &self,
         texture: crate::render::draw::TextureKey,
         color: Rgba,
+        noise_scl: f32,
         opacity: f32,
         base_speed: f32,
         intensity: f32,
@@ -551,7 +577,7 @@ impl WeatherFx {
     ) {
         let mut sspeed = 1.0f32;
         let mut salpha = 1.0f32;
-        let mut _sscl = 1.0f32;
+        let mut sscl = 1.0f32;
         let mut offset = 0.0f32;
         let mut col = color;
         for _ in 0..layers {
@@ -566,11 +592,13 @@ impl WeatherFx {
                     opacity: salpha * opacity,
                     scroll,
                     offset,
+                    // `noisescl * sscl` (`NoiseEffect.java:51`).
+                    scl: noise_scl * sscl,
                 },
             ));
             sspeed *= layer_speed_mul;
             salpha *= layer_alpha_mul;
-            _sscl *= layer_scl_mul;
+            sscl *= layer_scl_mul;
             offset += 0.29;
             col = Rgba::new(
                 col.r * layer_color_mul,
@@ -949,6 +977,7 @@ mod tests {
         fx.build_noise_layers(
             crate::render::draw::TextureKey("distortAlpha"),
             Rgba::new(1.0, 0.14, 0.14, 1.0),
+            1000.0,
             0.24,
             0.4,
             1.0,
@@ -975,6 +1004,46 @@ mod tests {
             _ => unreachable!(),
         };
         assert!(second < first);
+        // `noisescl * sscl` decays by `layerSclMul` (0.8) each layer
+        // (`NoiseEffect.java:43-54`).
+        let scales: Vec<f32> = out
+            .iter()
+            .map(|p| match p.kind {
+                PrimKind::NoiseLayer { scl, .. } => scl,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(scales.len(), 4);
+        assert!((scales[0] - 1000.0).abs() < 1e-4);
+        assert!((scales[1] - 800.0).abs() < 1e-4);
+        assert!((scales[3] - 512.0).abs() < 1e-4);
+    }
+
+    /// GAPS #53 FX primitives: `NoiseEffect.drawNoise`'s scrolled UV rect
+    /// (`NoiseEffect.java:57-71`) is shared by the weather pass and the
+    /// `Fx.noise` `NoiseLayer` prim consumer.
+    #[test]
+    fn noise_layer_uv_matches_the_scroll() {
+        let bounds = [100.0, 50.0, 400.0, 200.0];
+        // `scale = 1 / noisescl`; no scroll: origin and extent scale only.
+        let uv = noise_layer_uv(bounds, 0.0, 1000.0, [0.0, 0.0], 0.0);
+        assert!((uv[0] - 0.1).abs() < 1e-6);
+        assert!((uv[1] - 0.05).abs() < 1e-6);
+        assert!((uv[2] - 0.5).abs() < 1e-6);
+        assert!((uv[3] - 0.25).abs() < 1e-6);
+        // `TextureRegion.scroll` wraps the scrolled origin and keeps the size
+        // (`u = (0.1 + scroll) % 1`).
+        let scrolled = noise_layer_uv(bounds, 1000.0, 1000.0, [-0.4, 0.0], 0.0);
+        assert!((scrolled[0] - ((0.1f32 - 0.4) % 1.0)).abs() < 1e-6);
+        assert!((scrolled[2] - scrolled[0] - 0.4).abs() < 1e-6);
+        // The layer offset participates in the scroll clock.
+        let offset = noise_layer_uv(bounds, 1000.0, 1000.0, [-0.4, 0.0], 0.29);
+        assert!((offset[0] - ((0.1f32 - 0.4 * 1.29f32) % 1.0)).abs() < 1e-6);
+        // A non-positive scale falls back to 1:1 pixels (no divide by zero).
+        assert_eq!(
+            noise_layer_uv([0.0, 0.0, 10.0, 10.0], 0.0, 0.0, [0.0, 0.0], 0.0),
+            [0.0, 0.0, 10.0, 10.0]
+        );
     }
 
     #[test]

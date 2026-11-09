@@ -12,7 +12,10 @@
 
 use godot::builtin::{Color, GString, PackedVector2Array, Rect2, VarDictionary, Vector2};
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, Node2D, Texture2D};
+use godot::classes::{
+    Camera2D, FileAccess, INode2D, Image, ImageTexture, Material, Node2D, Shader, ShaderMaterial,
+    Texture2D,
+};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
 
@@ -191,6 +194,14 @@ pub struct MindFx {
     /// Sibling `World/Camera2D` (scene-wired); receives `FxEvent::Shake`.
     #[export]
     pub camera: Option<Gd<crate::camera::MindCamera2D>>,
+    /// Loose-texture cache for `PrimKind::NoiseLayer`/`ShaderBlit`
+    /// (`sprites/<name>.png`, repeat-friendly), `None` = missing.
+    raw_textures: HashMap<String, Option<Gd<ImageTexture>>>,
+    /// `caustics` `ShaderBlit` material (`Shaders.caustics`), built once.
+    caustics_material: Option<Gd<ShaderMaterial>>,
+    /// Whether the caustics material load was attempted (a missing shader
+    /// must not retry every frame).
+    caustics_attempted: bool,
 }
 
 #[godot_api]
@@ -218,6 +229,9 @@ impl INode2D for MindFx {
             view_lights: Vec::new(),
             view_light_lines: Vec::new(),
             camera: None,
+            raw_textures: HashMap::new(),
+            caustics_material: None,
+            caustics_attempted: false,
         }
     }
 
@@ -315,6 +329,31 @@ impl MindFx {
         } else {
             None
         };
+        // GAPS #53 FX pixels: loose textures / the caustics material are also
+        // resolved before the `base_mut()` borrow.
+        let noise_texture = if let PrimKind::NoiseLayer { texture, .. } = &prim.kind {
+            self.raw_texture(texture.0)
+        } else {
+            None
+        };
+        let caustics = if let PrimKind::ShaderBlit { shader } = &prim.kind {
+            if shader.0 == "caustics" {
+                self.caustics_material()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let fx_camera_bounds = if matches!(
+            &prim.kind,
+            PrimKind::NoiseLayer { .. } | PrimKind::ShaderBlit { .. }
+        ) {
+            self.camera_rect()
+        } else {
+            None
+        };
+        let view_tick = self.view_tick as f32;
         // H03 T16: `Drawf.light` -> `renderer.lights` (Java `LightRenderer.add`
         // gates on `enabled()`); the prims are collected for the light pass
         // (`MindWorldRenderer` forwards them to `LightRenderer`) and never
@@ -532,8 +571,94 @@ impl MindFx {
                     .done();
                 true
             }
-            // Executed by plan 16's pipeline (no CPU geometry).
-            PrimKind::NoiseLayer { .. } | PrimKind::ShaderBlit { .. } => false,
+            // `NoiseEffect.drawNoise` (`NoiseEffect.java:57-71`): one
+            // camera-sized scrolled/tinted texture rect per layer. The weather
+            // pass draws the same pixels; here the prim comes from `Fx.noise`
+            // (and the scorching env pass).
+            PrimKind::NoiseLayer {
+                tint,
+                opacity,
+                scroll,
+                offset,
+                scl,
+                rect,
+                ..
+            } => {
+                let Some(texture) = noise_texture else {
+                    return false;
+                };
+                let Some(camera) = fx_camera_bounds else {
+                    return false;
+                };
+                let bounds = if rect[2] > 0.0 && rect[3] > 0.0 {
+                    *rect
+                } else {
+                    camera
+                };
+                let uv = mind_core::fx::weather_fx::noise_layer_uv(
+                    bounds, view_tick, *scl, *scroll, *offset,
+                );
+                let tw = texture.get_width() as f32;
+                let th = texture.get_height() as f32;
+                let src = Rect2::new(
+                    Vector2::new(uv[0] * tw, uv[1] * th),
+                    Vector2::new((uv[2] - uv[0]) * tw, (uv[3] - uv[1]) * th),
+                );
+                let dest = Rect2::new(
+                    Vector2::new(bounds[0], bounds[1]),
+                    Vector2::new(bounds[2], bounds[3]),
+                );
+                let mut color = to_color(*tint);
+                color.a *= opacity.clamp(0.0, 1.0);
+                base.draw_texture_rect_region_ex(&texture, dest, src)
+                    .modulate(color)
+                    .clip_uv(false)
+                    .done();
+                true
+            }
+            // `EnvRenderers` caustics blit (`EnvRenderers.java:34-38`): the
+            // `caustics.gdshader` material over the camera rect with
+            // `SurfaceShader.apply`'s uniforms (`Shaders.java:356-361`).
+            PrimKind::ShaderBlit { shader } => {
+                if shader.0 != "caustics" {
+                    return false;
+                }
+                let Some(material) = caustics else {
+                    return false;
+                };
+                let Some(bounds) = fx_camera_bounds else {
+                    return false;
+                };
+                let (campos, resolution, time) = mind_core::fx::env_fx::surface_shader_uniforms(
+                    bounds[0] + bounds[2] / 2.0,
+                    bounds[1] + bounds[3] / 2.0,
+                    bounds[2],
+                    bounds[3],
+                    view_tick,
+                );
+                let mut material = material;
+                material.set_shader_parameter(
+                    "u_campos",
+                    &Vector2::new(campos[0], campos[1]).to_variant(),
+                );
+                material.set_shader_parameter(
+                    "u_resolution",
+                    &Vector2::new(resolution[0], resolution[1]).to_variant(),
+                );
+                material.set_shader_parameter("u_time", &time.to_variant());
+                base.set_material(&material.upcast::<Material>());
+                base.draw_rect_ex(
+                    Rect2::new(
+                        Vector2::new(bounds[0], bounds[1]),
+                        Vector2::new(bounds[2], bounds[3]),
+                    ),
+                    Color::WHITE,
+                )
+                .filled(true)
+                .done();
+                base.set_material(Gd::<Material>::null_arg());
+                true
+            }
         }
     }
 
@@ -554,6 +679,98 @@ impl MindFx {
             });
         self.region_cache.insert(name, texture.clone());
         texture
+    }
+
+    /// World-space camera rect `[x, y, w, h]` (top-left) for the camera-sized
+    /// FX passes (`NoiseEffect.drawNoise` uses `Core.camera.bounds`,
+    /// `NoiseEffect.java:66-68`).
+    fn camera_rect(&self) -> Option<[f32; 4]> {
+        let viewport = self.base().get_viewport()?.get_visible_rect().size;
+        if viewport.x <= 0.0 || viewport.y <= 0.0 {
+            return None;
+        }
+        let (cx, cy, zoom) = self
+            .base()
+            .get_node_or_null("/root/Spine/World/Camera2D")
+            .and_then(|node| node.try_cast::<Camera2D>().ok())
+            .map(|camera| {
+                (
+                    camera.get_global_position().x,
+                    camera.get_global_position().y,
+                    camera.get_zoom().x.abs().max(0.01),
+                )
+            })
+            .unwrap_or((0.0, 0.0, 1.0));
+        let w = viewport.x / zoom;
+        let h = viewport.y / zoom;
+        Some([cx - w / 2.0, cy - h / 2.0, w, h])
+    }
+
+    /// Loads a loose noise/surface texture (`sprites/<name>.png` when `name`
+    /// has no slash), repeat-friendly, cached for the node's lifetime.
+    fn raw_texture(&mut self, name: &str) -> Option<Gd<ImageTexture>> {
+        if let Some(cached) = self.raw_textures.get(name) {
+            return cached.clone();
+        }
+        let dir = crate::assets::loader::resolve_assets_dir();
+        let path = if name.contains('/') {
+            format!("{dir}/{name}")
+        } else {
+            format!("{dir}/sprites/{name}.png")
+        };
+        let texture = Image::load_from_file(&path).and_then(|image| {
+            let texture = ImageTexture::create_from_image(&image);
+            if texture.is_none() {
+                log::warn!("fx: failed to create texture for `{path}`");
+            }
+            texture
+        });
+        if texture.is_none() {
+            log::warn!("fx: missing noise texture `{path}`");
+        }
+        self.raw_textures.insert(name.to_owned(), texture.clone());
+        texture
+    }
+
+    /// Builds the `caustics` `SurfaceShader` material (`Shaders.caustics` is a
+    /// `SurfaceShader` whose `textureName()` is `caustics`,
+    /// `Shaders.java:62-67`), with `u_noise` bound to `sprites/caustics.png`.
+    fn caustics_material(&mut self) -> Option<Gd<ShaderMaterial>> {
+        if self.caustics_attempted {
+            return self.caustics_material.clone();
+        }
+        self.caustics_attempted = true;
+        let dir = crate::assets::loader::resolve_assets_dir();
+        let candidates = [
+            String::from("res://shaders/caustics.gdshader"),
+            format!("{dir}/shaders/caustics.gdshader"),
+        ];
+        let mut shader = None;
+        for path in candidates {
+            if !FileAccess::file_exists(&path) {
+                continue;
+            }
+            let code = FileAccess::get_file_as_string(&path);
+            if code.is_empty() {
+                continue;
+            }
+            let mut candidate = Shader::new_gd();
+            candidate.set_code(&code);
+            shader = Some(candidate);
+            break;
+        }
+        let Some(shader) = shader else {
+            log::warn!("fx: missing caustics shader");
+            return None;
+        };
+        let Some(noise) = self.raw_texture("sprites/caustics.png") else {
+            return None;
+        };
+        let mut material = ShaderMaterial::new_gd();
+        material.set_shader(&shader);
+        material.set_shader_parameter("u_noise", &noise.to_variant());
+        self.caustics_material = Some(material.clone());
+        Some(material)
     }
 
     /// Appends decal/trail/weather view prims to the frame program (plan 17 M6).
@@ -954,7 +1171,8 @@ impl MindFx {
         }
     }
 
-    /// Primitives deferred to plan 16's pipeline (noise/shader/polyline).
+    /// Primitives the CPU executor could not draw (unknown `ShaderBlit` keys;
+    /// `NoiseLayer`/`caustics` execute in `draw_prim`).
     #[func]
     pub fn deferred_prim_count(&self) -> i64 {
         self.missed_events
