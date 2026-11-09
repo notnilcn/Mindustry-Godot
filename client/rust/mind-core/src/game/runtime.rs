@@ -996,13 +996,9 @@ pub fn game_state_tick_system(world: &mut World) {
         // `GameService` listeners (GAPS #68): sector capture, last-sector
         // victory and the PvP win approximation.
         match &event {
-            PlayEvent::SectorCapture { planet, .. } => runtime.service.on_sector_capture(
-                &runtime.session,
-                &runtime.campaign,
-                *planet,
-                was_attack_mode,
-                buildings_destroyed,
-            ),
+            PlayEvent::SectorCapture { planet, .. } => {
+                on_captured_sector(&mut runtime, *planet, was_attack_mode, buildings_destroyed)
+            }
             PlayEvent::CampaignComplete { planet, .. } => runtime
                 .service
                 .on_campaign_complete(&runtime.campaign, *planet),
@@ -1022,15 +1018,37 @@ pub fn game_state_tick_system(world: &mut World) {
                 winner,
             ));
         } else {
-            // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
-            // the captured sector's wave team turns derelict on the next tick.
-            if matches!(event, PlayEvent::SectorCapture { .. }) {
-                runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
-            }
+            // Sector-capture bookkeeping (the service hook and the derelict
+            // wave-team queue) was already applied by [`on_captured_sector`].
             runtime.events.push(event);
         }
     }
     world.insert_resource(runtime);
+}
+
+/// `SectorCaptureEvent` bookkeeping shared by [`game_state_tick_system`] and
+/// the facade's forced-capture path (`MindCampaign::capture_sector`).
+///
+/// Java's listeners run inside `Logic.sectorCapture` (`Logic.java:394-425`),
+/// which fires the event **before** clearing `rules.attackMode`: the service
+/// hook therefore receives the pre-capture `was_attack_mode` and
+/// `buildings_destroyed` values the caller snapshots before `sector_capture`.
+/// The `Logic.java:117-121` listener queues the captured sector's wave team to
+/// turn derelict on the next tick.
+pub fn on_captured_sector(
+    runtime: &mut CampaignRuntime,
+    planet: PlanetId,
+    was_attack_mode: bool,
+    buildings_destroyed: i32,
+) {
+    runtime.service.on_sector_capture(
+        &runtime.session,
+        &runtime.campaign,
+        planet,
+        was_attack_mode,
+        buildings_destroyed,
+    );
+    runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
 }
 
 /// `state.isCampaign() && state.getSector().isCaptured()` for the currently
@@ -2163,6 +2181,37 @@ mod tests {
             "canGameOver=false suppresses the check: {:?}",
             runtime.events
         );
+    }
+
+    /// Finding #2: the shared capture hook runs the `GameService` listener with
+    /// the pre-capture values and queues the derelict wave team — the seam both
+    /// `game_state_tick_system` and `MindCampaign::capture_sector` use.
+    #[test]
+    fn captured_sector_hook_tracks_achievements_and_derelict_team() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry
+            .sector_by_name("groundZero")
+            .expect("groundZero")
+            .sector;
+        let mut session = PlaySession::new(Rules {
+            attack_mode: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.sector = Some((planet, sector_id));
+        session.wave = 3;
+        let mut runtime = CampaignRuntime::new(session, campaign);
+
+        on_captured_sector(&mut runtime, planet, true, 0);
+
+        assert_eq!(runtime.service.service().get(SStat::AttacksWon), 1);
+        assert!(Achievement::DefeatAttack5Waves.unlocked(runtime.service.service()));
+        assert!(Achievement::CaptureNoBlocksBroken.unlocked(runtime.service.service()));
+        assert_eq!(runtime.pending_derelict_team, Some(2));
     }
 
     /// T7: `current_sector_captured` follows `Sector.isCaptured`

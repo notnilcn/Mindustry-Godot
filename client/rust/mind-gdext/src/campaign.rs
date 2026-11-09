@@ -45,7 +45,7 @@ use mind_core::game::play::{
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::{CampaignRuntime, UnlockRef};
+use mind_core::game::runtime::{CampaignRuntime, UnlockRef, on_captured_sector};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -59,7 +59,7 @@ use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths, SAVE_EXTENSION};
 use mind_core::io::json::quote_bare_keys;
 use mind_core::io::json::rules::GameStats;
-use mind_core::io::save::slot::list_save_slots as list_slot_files;
+use mind_core::io::save::slot::{SaveSlot, list_save_slots as list_slot_files};
 use mind_core::io::settings::{KEY_SAVE_INTERVAL, SettingsStore};
 use mind_core::io::{SaveIo, SaveMeta};
 use mind_core::random::JavaRandom;
@@ -269,6 +269,53 @@ fn dispatch_event_rows(
     count
 }
 
+/// The modification time of a directory used as a cache key (finding #9).
+///
+/// `None` means the directory (or its mtime) could not be read; the memo then
+/// reloads instead of pinning a possibly empty result.
+fn dir_mtime_key(dir: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(dir).and_then(|meta| meta.modified()).ok()
+}
+
+/// A directory-mtime-keyed memo (finding #9).
+///
+/// Only populated when the directory is readable, so an unreadable directory
+/// degrades to the uncached behaviour. The caller chooses what to load; the
+/// helpers here only own the invalidation rule and are unit-tested directly.
+#[derive(Debug, Default)]
+struct DirMemo<T> {
+    /// The mtime the cached value was loaded under.
+    key: Option<std::time::SystemTime>,
+    /// The cached value; `Some` only alongside a `Some` key.
+    value: Option<T>,
+}
+
+impl<T> DirMemo<T> {
+    /// The cached value when `key` is still the one it was loaded under.
+    fn get(&self, key: Option<std::time::SystemTime>) -> Option<&T> {
+        if key.is_some() && self.key == key {
+            self.value.as_ref()
+        } else {
+            None
+        }
+    }
+
+    /// Stores `value` under `key`; an unreadable directory is never cached.
+    fn store(&mut self, key: Option<std::time::SystemTime>, value: T) {
+        if key.is_none() {
+            return;
+        }
+        self.key = key;
+        self.value = Some(value);
+    }
+
+    /// Drops the cached value (content boot / data-root change).
+    fn clear(&mut self) {
+        self.key = None;
+        self.value = None;
+    }
+}
+
 /// `MindCampaign` — campaign/sector/rules/tech/schematic facade for MCP + UI.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -346,6 +393,16 @@ pub struct MindCampaign {
     /// Rows the bus dispatched, bounded by `EVENT_QUEUE_CAPACITY`
     /// (`take_fired_events` drains it; tests read it directly).
     fired_events: Rc<RefCell<FiredEvents>>,
+    /// Memoized schematic library (`schematics/` directory mtime; finding #9).
+    /// Dialogs rebuild `campaign_views_json` repeatedly and every uncached call
+    /// re-reads every `.msch`. Content-derived (block ids/names), so
+    /// [`Self::invalidate_caches`] clears it on a content/data-root reboot.
+    schematics_cache: RefCell<DirMemo<Rc<Schematics>>>,
+    /// Memoized save-slot listing (`saves/` directory mtime; finding #9).
+    /// `SaveIo::save` renames `<file> -> <file>-backup` and `<file>.tmp ->
+    /// <file>` inside that directory, so every save/overwrite/delete bumps the
+    /// key even when the slot is logically rewritten in place.
+    save_slots_cache: RefCell<DirMemo<Rc<Vec<SaveSlot>>>>,
 }
 
 #[godot_api]
@@ -385,6 +442,8 @@ impl INode for MindCampaign {
             service: ServiceTracker::new(),
             events,
             fired_events,
+            schematics_cache: RefCell::new(DirMemo::default()),
+            save_slots_cache: RefCell::new(DirMemo::default()),
         }
     }
 
@@ -599,6 +658,10 @@ impl MindCampaign {
             .globalize_path("user://")
             .to_string();
         self.paths = Paths::new(root);
+        // A content (re)boot can change the block ids/names the schematic must
+        // decode against, and the data root may move: drop the filesystem
+        // memos before anything reads them (finding #9).
+        self.invalidate_caches();
         // One shared store (`Core.settings`, PAR-0164): the `MindUi` autoload
         // initializes it before the scene; this call is the idempotent fallback.
         settings_hub::init(&self.paths);
@@ -797,20 +860,42 @@ impl MindCampaign {
         ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
     }
 
-    /// Loads the schematic library (`Schematics.load`: vanilla loadouts plus
-    /// every `.msch` under the data dir's `schematics/`; Java's
-    /// `schematicDirectory` is `dataDirectory/schematics`, which the profile
-    /// import extracts).
-    fn load_schematics(&self, registry: &ContentRegistry) -> Schematics {
-        let mut schematics = Schematics::new();
+    /// The schematic library (`Schematics.load`: vanilla loadouts plus every
+    /// `.msch` under the data dir's `schematics/`; Java's `schematicDirectory`
+    /// is `dataDirectory/schematics`, which the profile import extracts).
+    ///
+    /// Memoized on the directory mtime (finding #9): dialogs call
+    /// `campaign_views_json` repeatedly per rebuild and every uncached call
+    /// re-reads every file. The port only creates/deletes `.msch` files (the
+    /// schematic dialog writes a fresh name; `remove` deletes), so a directory
+    /// mtime catches every content change; a same-file in-place rewrite by an
+    /// external tool would not be seen.
+    fn load_schematics(&self, registry: &ContentRegistry) -> Rc<Schematics> {
         let dir = self.paths.root().join("schematics");
+        let key = dir_mtime_key(&dir);
+        if let Some(cached) = self.schematics_cache.borrow().get(key) {
+            return Rc::clone(cached);
+        }
+        let mut schematics = Schematics::new();
         if let Err(error) = schematics.load(&NativeFs, &dir, registry) {
             log::warn!(
                 "failed to load schematics from `{}`: {error}",
                 dir.display()
             );
         }
+        let schematics = Rc::new(schematics);
+        self.schematics_cache
+            .borrow_mut()
+            .store(key, Rc::clone(&schematics));
         schematics
+    }
+
+    /// Clears the filesystem-derived memos (finding #9). A content (re)boot can
+    /// change block ids/names the `Schematics` decode resolves, and
+    /// `bootstrap_with` re-points `self.paths`; both invalidate every entry.
+    fn invalidate_caches(&self) {
+        self.schematics_cache.borrow_mut().clear();
+        self.save_slots_cache.borrow_mut().clear();
     }
 
     /// `item.isOnPlanet(planet)` (`UnlockableContent.shownPlanets`).
@@ -1000,8 +1085,12 @@ impl MindCampaign {
         {
             // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
             // live sector record (core snapshot, items, production, wave) lands
-            // in settings next to the autosave (PAR-0153).
-            self.persist_sector_record_in(Some(&mut runtime));
+            // in settings next to the autosave (PAR-0153). The writer takes the
+            // registry explicitly (finding #1): no facade field is borrowed
+            // across the `&mut self` call.
+            let registry = self.registry.take();
+            self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
+            self.registry = registry;
             // `GameService.storeStats` at the autosave boundary: the tracker's
             // stats/achievements land in the settings store alongside the
             // sector record (the exit persist flushes the file).
@@ -1057,7 +1146,7 @@ impl MindCampaign {
                         self.saving_finish_tick = Some(tick.saturating_add(3));
                         log::info!("capture save queued (`{}`)", file.display());
                     }
-                    self.persist_sector_record_in(Some(&mut runtime));
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                 }
                 mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
                     self.campaign_complete = true;
@@ -1086,7 +1175,7 @@ impl MindCampaign {
                     // `SaveVersion.writeMeta` persists the sector record next to
                     // the save (spawn position + prepared core state), which the
                     // lost-sector replay reads on the re-attack.
-                    self.persist_sector_record_in(Some(&mut runtime));
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                     dirty = true;
                 }
                 _ => {}
@@ -1395,16 +1484,18 @@ impl MindCampaign {
         true
     }
 
-    /// Starts a campaign sector (host-side launch), returning success.
-    ///
-    /// `loadout_json` is an optional `[{item, amount}]` launch loadout applied
-    /// on the fresh-launch path (empty string = default).
+    /// Starts a campaign sector with the default (empty) launch loadout,
+    /// returning success. Delegates to [`Self::start_sector_with_loadout`] with
+    /// an empty payload; use that method to pass an explicit
+    /// `[{item, amount}]` loadout.
     #[func]
     pub fn start_sector(&mut self, planet: GString, sector: i32) -> bool {
         self.start_sector_with_loadout(planet, sector, GString::from(""))
     }
 
-    /// Starts a campaign sector with an explicit launch loadout (WS3 wiring).
+    /// Starts a campaign sector with an explicit launch loadout (WS3 wiring):
+    /// `loadout_json` is the optional `[{item, amount}]` payload applied on the
+    /// fresh-launch path (empty string = default).
     #[func]
     pub fn start_sector_with_loadout(
         &mut self,
@@ -2379,18 +2470,27 @@ impl MindCampaign {
         let captured = if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
+                // `SectorCaptureEvent` listener inputs: Java fires the event
+                // inside `Logic.sectorCapture` before `rules.attackMode =
+                // false`, so snapshot the attacking flag and the pre-capture
+                // loss counter first (finding #2).
+                let was_attack_mode = runtime.session.rules.attack_mode;
+                let buildings_destroyed = runtime.session.stats.buildings_destroyed;
                 let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
                 let ok = !events.is_empty();
                 for event in events {
-                    // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
-                    // the captured sector's wave team turns derelict on the next
-                    // tick (`Sim::apply_campaign_world_requests`). The debug
-                    // capture path must queue it like the game-state path.
-                    if matches!(
-                        event,
-                        mind_core::game::play::PlayEvent::SectorCapture { .. }
-                    ) {
-                        runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+                    // Shared with `game_state_tick_system` (GAPS #68 /
+                    // finding #2): the `GameService` capture hooks
+                    // (`on_sector_capture`) and the `Logic.java:117-121`
+                    // derelict-wave-team queue now run on this path too, so a
+                    // capture here counts for achievements.
+                    if let mind_core::game::play::PlayEvent::SectorCapture { planet, .. } = &event {
+                        on_captured_sector(
+                            &mut runtime,
+                            *planet,
+                            was_attack_mode,
+                            buildings_destroyed,
+                        );
                     }
                     runtime.events.push(event);
                 }
@@ -2432,17 +2532,25 @@ impl MindCampaign {
             let CampaignEvent::SectorInvasion { planet, sector, .. } = event else {
                 continue;
             };
-            let planet_name = self
+            let planet_record = self
                 .campaign
                 .as_ref()
-                .and_then(|campaign| campaign.planet(*planet).map(|planet| planet.name.clone()))
+                .and_then(|campaign| campaign.planet(*planet));
+            let planet_name = planet_record
+                .map(|planet| planet.name.clone())
                 .unwrap_or_default();
-            let name = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(*planet, *sector))
-                .map(|record| sector_toast_name(record, &planet_name, *sector))
-                .unwrap_or_else(|| format!("{planet_name}-{sector}"));
+            // `Sector.name()` (`Sector.java:153-164`) through the one shared
+            // implementation; the record can be missing only if the event's
+            // sector is out of range (the port's defensive fallback is the bare
+            // grid index, never Java's `<planet>-<id>`).
+            let name = planet_record
+                .zip(
+                    self.campaign
+                        .as_ref()
+                        .and_then(|campaign| campaign.sector(*planet, *sector)),
+                )
+                .map(|(planet, record)| record.display_name(planet))
+                .unwrap_or_else(|| sector.to_string());
             log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
             let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
                 continue;
@@ -3523,12 +3631,11 @@ impl MindCampaign {
         (complete, self.bundle.format(key, &[argument.as_str()]))
     }
 
-    /// Copies the facade campaign into the installed runtime (post-research /
-    /// rule edits).
     /// Refreshes the live runtime's unlocked-content cache from the registry
-    /// after research/clear flows. The campaign itself is never copied
-    /// facade -> runtime (T1: the runtime copy is authoritative while a sector
-    /// runs; mutations go through [`Self::with_campaign_mut`]).
+    /// after research/clear flows. It does **not** copy the facade campaign
+    /// into the runtime: while a sector runs the runtime copy is authoritative
+    /// (T1) and campaign mutations go through [`Self::with_campaign_mut`], so
+    /// only the derived unlocked-content set is pushed.
     fn push_campaign_to_runtime(&mut self) {
         let unlocked = self
             .registry
@@ -4020,7 +4127,9 @@ impl MindCampaign {
             })
             .unwrap_or_default();
         if !stems.is_empty() {
-            let saved = list_slot_files(&NativeFs, &self.save_paths());
+            // Memoized on the saves-directory mtime (finding #9): this listing
+            // reads every slot header on each dialog rebuild otherwise.
+            let saved = self.cached_save_slots();
             for view in &mut views.sectors {
                 if let Some(stem) = stems.get(&view.id)
                     && let Some(slot) = saved.iter().find(|slot| slot.index() == *stem)
@@ -4157,6 +4266,11 @@ impl MindCampaign {
                 serde_json::json!(session.stats.enemy_units_destroyed),
             );
             let team = i64::from(session.rules.default_team);
+            // `unit_debug_json` is a host round-trip plus a JSON parse; fetch it
+            // at most once per call, and only when a `UnitCount` objective runs
+            // (finding #8). The row filter itself is the pure
+            // [`count_unit_rows`].
+            let mut unit_rows: Option<Vec<serde_json::Value>> = None;
             for index in session.objectives.running_indices() {
                 match session.objectives.get(index) {
                     Some(mind_core::io::json::objectives::MapObjective::Timer(_)) => {
@@ -4168,23 +4282,15 @@ impl MindCampaign {
                     Some(mind_core::io::json::objectives::MapObjective::UnitCount(objective)) => {
                         let unit = objective.unit.as_deref().unwrap_or("");
                         // `state.rules.defaultTeam.data().countType(unit)`.
-                        let count = self
-                            .host()
-                            .map(|mut host| host.call("unit_debug_json", &[]).to_string())
-                            .and_then(|json| {
-                                serde_json::from_str::<Vec<serde_json::Value>>(&json).ok()
-                            })
-                            .map(|rows| {
-                                rows.iter()
-                                    .filter(|row| {
-                                        row.get("type").and_then(|value| value.as_str())
-                                            == Some(unit)
-                                            && row.get("team").and_then(|value| value.as_i64())
-                                                == Some(team)
-                                    })
-                                    .count()
-                            })
-                            .unwrap_or(0);
+                        let rows = unit_rows.get_or_insert_with(|| {
+                            self.host()
+                                .map(|mut host| host.call("unit_debug_json", &[]).to_string())
+                                .and_then(|json| {
+                                    serde_json::from_str::<Vec<serde_json::Value>>(&json).ok()
+                                })
+                                .unwrap_or_default()
+                        });
+                        let count = count_unit_rows(rows, unit, team);
                         unit_counts.insert(unit.to_owned(), serde_json::json!(count));
                     }
                     Some(mind_core::io::json::objectives::MapObjective::DestroyBlocks(
@@ -4967,27 +5073,40 @@ impl MindCampaign {
     /// progress, item pools and the production windows survive a client restart
     /// (PAR-0081/PAR-0082).
     fn persist_sector_record(&mut self) {
+        // The record writer takes the registry explicitly (finding #1); take the
+        // facade copy for the call and restore it afterwards so `&mut self` is
+        // free for the campaign/settings half.
+        let registry = self.registry.take();
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
-                self.persist_sector_record_in(Some(&mut runtime));
+                self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                 host.bind_mut().put_campaign_runtime(runtime);
+                self.registry = registry;
                 return;
             }
         }
-        self.persist_sector_record_in(None);
+        self.persist_sector_record_in(None, registry.as_ref());
+        self.registry = registry;
     }
 
     /// `persist_sector_record` body. `runtime` is the already-taken live
     /// runtime when the caller holds it (`pump_runtime` events); with `None`
     /// the host runtime (when installed) is taken for the read and put back.
-    fn persist_sector_record_in(&mut self, mut runtime: Option<&mut CampaignRuntime>) {
+    ///
+    /// `registry` is the explicit content registry (finding #1): `pump_runtime`
+    /// has `self.registry` `take()`n for its whole event window, so reading the
+    /// facade field here silently skipped the capture/game-over record write.
+    /// Every caller owns the borrow (the `&mut self` below cannot hold one).
+    fn persist_sector_record_in(
+        &mut self,
+        mut runtime: Option<&mut CampaignRuntime>,
+        registry: Option<&ContentRegistry>,
+    ) {
         let Some((planet, sector_id)) = self.session.sector else {
             return;
         };
-        let Some(planet_name) = self
-            .registry
-            .as_ref()
+        let Some(planet_name) = registry
             .and_then(|registry| registry.planet(planet))
             .map(|record| record.name.clone())
         else {
@@ -5023,8 +5142,7 @@ impl MindCampaign {
                 .and_then(|campaign| campaign.sector(planet, sector_id))
                 .and_then(|sector| sector.preset);
             let preset_name = preset.and_then(|preset| {
-                self.registry
-                    .as_ref()
+                registry
                     .and_then(|registry| registry.sector(preset))
                     .map(|def| def.name.clone())
             });
@@ -5760,12 +5878,12 @@ impl MindCampaign {
         let mut out = Array::<VarDictionary>::new();
         // `request_save` writes through Godot's `user://`, so scan that same
         // directory instead of the bootstrap-time `Saves` snapshot: a slot saved
-        // during this session must show up without a restart.
-        let root = ProjectSettings::singleton()
-            .globalize_path("user://")
-            .to_string();
-        let paths = Paths::new(root);
-        for slot in list_slot_files(&NativeFs, &paths) {
+        // during this session must show up without a restart. The slot listing
+        // is memoized on the directory mtime (finding #9); the rows are rebuilt
+        // on every call.
+        let paths = self.save_paths();
+        let slots = self.cached_save_slots();
+        for slot in slots.iter() {
             // `Saves.SaveSlot.previewTexture()` shows the saved preview PNG; a
             // slot that has none (imported saves, pre-fix saves) gets one from
             // its own tiles here (`Saves.java:343-358`).
@@ -5826,6 +5944,29 @@ impl MindCampaign {
             .globalize_path("user://")
             .to_string();
         Paths::new(root)
+    }
+
+    /// The `user://saves` slot listing, memoized on the saves directory's mtime
+    /// (finding #9): [`list_slot_files`] reads and parses every slot header, and
+    /// the campaign dialogs ask for the listing on every rebuild.
+    ///
+    /// Safe against in-place rewrites: every save path in the port goes through
+    /// `SaveIo::save`, which renames `<file> -> <file>-backup` and then
+    /// `<file>.tmp -> <file>` inside this directory, so even a logical
+    /// overwrite of the same slot bumps the directory mtime; imports and
+    /// deletes change the directory too. An unreadable directory bypasses the
+    /// memo rather than pinning an empty listing.
+    fn cached_save_slots(&self) -> Rc<Vec<SaveSlot>> {
+        let paths = self.save_paths();
+        let key = dir_mtime_key(&paths.saves());
+        if let Some(cached) = self.save_slots_cache.borrow().get(key) {
+            return Rc::clone(cached);
+        }
+        let slots = Rc::new(list_slot_files(&NativeFs, &paths));
+        self.save_slots_cache
+            .borrow_mut()
+            .store(key, Rc::clone(&slots));
+        slots
     }
 
     /// One `user://saves/<stem>.msav` slot, re-read from disk.
@@ -6295,21 +6436,9 @@ impl MindCampaign {
             ) else {
                 return GString::from("{}");
             };
-            let from_name = launcher_sector
-                .info
-                .info
-                .name
-                .clone()
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| {
-                    launcher_sector.preset_name.clone().unwrap_or_else(|| {
-                        if planet_record.sectors.len() == 1 {
-                            planet_record.name.clone()
-                        } else {
-                            launcher_sector.id.to_string()
-                        }
-                    })
-                });
+            // `Core.bundle.format("launch.from", sector.name())`
+            // (`LaunchLoadoutDialog.java:165`): one display-name implementation.
+            let from_name = launcher_sector.display_name(planet_record);
             (
                 launcher_sector.items().clone(),
                 destination_sector.allow_launch_loadout(planet_def.allow_launch_loadout),
@@ -7118,6 +7247,9 @@ impl MindCampaign {
         settings_hub::with_settings(|store| store.clear());
         self.campaign = None;
         self.registry = None;
+        // The memos hold content-derived data (schematic decode) and a
+        // filesystem listing under the root the data clear is about to wipe.
+        self.invalidate_caches();
         self.saves = Saves::new();
         self.session = PlaySession::default();
         self.runtime_installed = false;
@@ -7344,6 +7476,19 @@ fn apply_loaded_meta(session: &mut PlaySession, meta: &SaveMeta) {
     session.phase = State::Playing;
 }
 
+/// `TeamData.countType(unit)` over the `unit_debug_json` rows: the live units
+/// whose content type and team match (`MapObjectives.java:470`). Pure, so the
+/// once-per-call hoist in [`MindCampaign::objective_live_stats_json`] keeps an
+/// exact-output test (finding #8).
+fn count_unit_rows(rows: &[serde_json::Value], unit: &str, team: i64) -> usize {
+    rows.iter()
+        .filter(|row| {
+            row.get("type").and_then(serde_json::Value::as_str) == Some(unit)
+                && row.get("team").and_then(serde_json::Value::as_i64) == Some(team)
+        })
+        .count()
+}
+
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).
 ///
 /// **Deviation (J01 T6, kept deliberately).** Java slots are numeric files:
@@ -7428,22 +7573,6 @@ fn render_stat_cells(cells: &[Cell]) -> serde_json::Value {
         })
         .collect();
     serde_json::Value::Array(rendered)
-}
-
-/// `Sector.name()` (`Sector.java:243-245`): the stored display name, else the
-/// preset name, else `<planet>-<id>`.
-fn sector_toast_name(
-    record: &mind_core::game::sector::Sector,
-    planet_name: &str,
-    id: u16,
-) -> String {
-    if let Some(name) = &record.info.info.name {
-        return name.clone();
-    }
-    if let Some(preset) = &record.preset_name {
-        return preset.clone();
-    }
-    format!("{planet_name}-{id}")
 }
 
 /// Reads a numeric `Variant` as an integer (`LoadoutDialog`'s amounts are
@@ -7554,11 +7683,12 @@ fn parse_loadout_stacks(
     serde_json::from_value(stacks).ok()
 }
 
-/// Launch payload split: the chosen schematic index (`Schematics.all`, `None`
-/// for the items-only fallback) and the `stacks` array JSON for
-/// `MindSimHost.place_launch_loadout`.
-/// Parses the launcher launch payload (`PlanetDialog` `playSelected`):
+/// Parses the launcher launch payload (`PlanetDialog.playSelected`):
 /// `(schematic index, origin sector id, stacks JSON)`.
+///
+/// The schematic index indexes `Schematics.all` (`None` for the items-only
+/// fallback); the `stacks` array JSON is forwarded to
+/// `MindSimHost.place_launch_loadout`.
 fn parse_launch_payload(json: &str) -> (Option<i32>, Option<u16>, String) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return (None, None, String::from("[]"));
@@ -8321,5 +8451,68 @@ mod tests {
             220.0,
         );
         assert!(sequence.lightning_chance(&mid) > 0.0);
+    }
+
+    /// Finding #8: the `UnitCount` row filter counts live units by content
+    /// type and team only (a same-type unit on another team does not count).
+    #[test]
+    fn unit_count_rows_filter_by_type_and_team() {
+        let rows = serde_json::json!([
+            {"type": "dagger", "team": 1},
+            {"type": "dagger", "team": 1},
+            {"type": "dagger", "team": 2},
+            {"type": "mace", "team": 1},
+            {"type": "dagger"},
+            {"type": "dagger", "team": "1"},
+        ]);
+        let rows = rows.as_array().cloned().unwrap_or_default();
+        assert_eq!(count_unit_rows(&rows, "dagger", 1), 2);
+        assert_eq!(count_unit_rows(&rows, "dagger", 2), 1);
+        assert_eq!(count_unit_rows(&rows, "mace", 1), 1);
+        assert_eq!(count_unit_rows(&rows, "flare", 1), 0);
+        assert_eq!(count_unit_rows(&[], "dagger", 1), 0);
+    }
+
+    /// Finding #9: the directory-mtime memo only serves a value under the key
+    /// it was stored with, never caches an unreadable directory, and clears.
+    #[test]
+    fn dir_memo_invalidates_on_key_change_and_clear() {
+        use std::time::{Duration, SystemTime};
+
+        let first = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        let second = first + Duration::from_secs(1);
+        let mut memo = DirMemo::<u32>::default();
+        assert!(memo.get(Some(first)).is_none(), "empty memo");
+        assert!(memo.get(None).is_none(), "no key never hits");
+
+        memo.store(Some(first), 7);
+        assert_eq!(memo.get(Some(first)), Some(&7));
+        assert!(memo.get(Some(second)).is_none(), "new mtime reloads");
+        assert!(memo.get(None).is_none(), "unreadable dir bypasses");
+
+        // A fresh key replaces the value.
+        memo.store(Some(second), 9);
+        assert_eq!(memo.get(Some(second)), Some(&9));
+        assert!(memo.get(Some(first)).is_none());
+
+        // An unreadable directory is never cached.
+        memo.store(None, 11);
+        assert_eq!(memo.get(Some(second)), Some(&9));
+
+        memo.clear();
+        assert!(memo.get(Some(second)).is_none());
+    }
+
+    /// Finding #9 key reader: an existing directory yields a key, a missing one
+    /// yields `None` (so the caller reloads instead of pinning empty output).
+    #[test]
+    fn dir_mtime_key_reads_existing_and_missing_directories() {
+        assert!(dir_mtime_key(&std::env::temp_dir()).is_some());
+        assert!(
+            dir_mtime_key(std::path::Path::new(
+                "/definitely/not/a/mind-campaign-directory"
+            ))
+            .is_none()
+        );
     }
 }

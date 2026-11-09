@@ -9,13 +9,15 @@
 //!
 //! Godot-free view structs + builders that consume the plan-12 read APIs
 //! (`Universe`/`Campaign`/`Planet`/`Sector`, `CampaignRules`/`Difficulty`,
-//! `Schematics`, `TechStore`, `CampaignStats`). The GDScript dialogs read the
-//! serialized form through the documented `MindUi.campaign_views()` endpoint;
-//! `mind-headless ui campaign` renders the same structs against a committed
-//! golden so the data contract is asserted without Godot or a live world.
+//! `Schematics`, `TechStore`, `CampaignStats`). Rust owns the UI: the native
+//! dialogs in `mind-gdext/src/ui/` read the serialized form through the
+//! `MindUi.campaign_views()` / `MindCampaign.campaign_views_json()` seam (there
+//! is no GDScript), and `mind-headless ui campaign` renders the same structs
+//! against a committed golden so the data contract is asserted without Godot or
+//! a live world.
 //!
-//! Static layout stays in the `.tscn`/`.gd` dialog scenes; this module owns the
-//! data projection and formatting only (plan 14 §3.10 rule 2).
+//! `.tscn` scenes name the native UI classes and carry static layout only; this
+//! module owns the data projection and formatting (plan 14 §3.10 rule 2).
 
 use serde::Serialize;
 
@@ -122,8 +124,9 @@ pub struct SectorView {
     pub planet: String,
     /// Preset content name, when the sector is authored.
     pub preset: Option<String>,
-    /// Display name (`Sector.name()`: `info.name`, preset, single-sector
-    /// planet name, else the grid index).
+    /// Display name (`Sector::display_name`, `Sector.java:153-164`): `info.name`;
+    /// the preset name when `requireUnlock`/`showHidden`; the single-sector
+    /// planet name; else the grid index.
     pub name: String,
     /// The player renamed the sector (`info.name` set): the dialog shows
     /// `name` verbatim instead of the localized preset name.
@@ -911,26 +914,6 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
     }
 }
 
-/// `Sector.name()`: a player-set `info.name` wins, then the preset name
-/// (localized by the dialog), then the planet name for single-sector planets,
-/// then the bare grid index (`id + ""`).
-fn sector_display_name(planet: &Planet, sector: &Sector) -> String {
-    sector
-        .info
-        .info
-        .name
-        .clone()
-        .filter(|name| !name.is_empty())
-        .or_else(|| sector.preset_name.clone())
-        .unwrap_or_else(|| {
-            if planet.sectors.len() == 1 {
-                planet.name.clone()
-            } else {
-                sector.id.to_string()
-            }
-        })
-}
-
 /// `SerpuloPlanetGenerator.allowNumberedLaunch` (`SerpuloPlanetGenerator.java:91-93`):
 /// based, unattacked and a size >= 4 core. The being-played clause reads the
 /// live cores (`state.rules.defaultTeam.cores()`), which the caller supplies as
@@ -1003,7 +986,7 @@ fn sector_view(
         .name
         .as_ref()
         .is_some_and(|name| !name.is_empty());
-    let name = sector_display_name(planet, sector);
+    let name = sector.display_name(planet);
     let def = registry.planet(planet.id);
     let captured = sector.is_captured(playing);
     // `PlanetDialog.java:519-521`: `shieldTarget != null && !isCaptured() &&
@@ -1150,7 +1133,7 @@ fn sector_stats_view(
         SectorStatRef {
             planet: planet.name.clone(),
             sector: other.id,
-            name: sector_display_name(planet, other),
+            name: other.display_name(planet),
             icon: other.info.info.icon.clone(),
             content_icon: other.info.info.content_icon.clone(),
         }
@@ -2076,6 +2059,29 @@ mod tests {
         assert!(!views.loadouts.is_empty(), "core-shard loadouts present");
         assert_eq!(views.rules.difficulties.len(), 5, "all five difficulties");
         assert_eq!(views.rules.difficulty, "normal", "default difficulty");
+    }
+
+    /// Findings #3/#4: the fixture's sector rows now use `Sector::display_name`
+    /// (`Sector.java:153-164`). A Serpulo submission (`requireUnlock = false`,
+    /// `showHidden = false`) falls back to its bare grid index, while an
+    /// unlock-gated preset keeps its preset name.
+    #[test]
+    fn fixture_sector_names_follow_sector_name_precedence() {
+        let views = CampaignViews::vanilla_fixture();
+        let submission = views
+            .sectors
+            .iter()
+            .find(|sector| sector.preset.as_deref() == Some("sector-serpulo-76"))
+            .expect("submission sector 76");
+        assert!(!submission.named, "submissions carry no player rename");
+        assert_eq!(submission.name, submission.id.to_string());
+
+        let ground_zero = views
+            .sectors
+            .iter()
+            .find(|sector| sector.preset.as_deref() == Some("groundZero"))
+            .expect("groundZero sector");
+        assert_eq!(ground_zero.name, "groundZero");
     }
 
     #[test]
