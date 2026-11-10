@@ -239,6 +239,15 @@ impl MindDialog {
         button
     }
 
+    /// Adds the Java `BaseDialog.addCloseButton()` width-210 close button.
+    ///
+    /// 40 call sites already pass `210.0` to [`Self::add_close_button`]; this is
+    /// the same button without repeating the width.
+    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+    pub fn add_default_close_button(&mut self) {
+        self.add_close_button(210.0);
+    }
+
     /// Removes every button from the shared button row.
     pub fn clear_buttons(&mut self) {
         let Some(row) = self.buttons_row() else {
@@ -391,6 +400,17 @@ impl MindDialog {
     /// The live campaign facade, or `None` when absent (menu boot).
     pub fn campaign_node(&self) -> Option<Gd<Node>> {
         self.base().get_node_or_null(CAMPAIGN_PATH)
+    }
+
+    /// The live campaign facade as its typed class (T02's typed accessor).
+    ///
+    /// Precedent: `ui/landing.rs` and `ui/root.rs` hold the `#[export]` campaign
+    /// handle directly; dialogs only have the spine path.
+    #[allow(dead_code)] // adopted by T02 (docs/PLANS); C01 removes this
+    pub fn campaign(&self) -> Option<Gd<crate::campaign::MindCampaign>> {
+        self.campaign_node()?
+            .try_cast::<crate::campaign::MindCampaign>()
+            .ok()
     }
 
     /// Fetches a campaign read-model method returning JSON (`{}` when absent).
@@ -991,6 +1011,46 @@ impl MindDialog {
             .as_ref()
             .map(|controller| controller.blocks_escape())
             .unwrap_or(false)
+    }
+}
+
+/// Refresh-request plumbing shared by the dialog controllers.
+///
+/// Bodies from `ui/dialogs/batch_a.rs:67-95` (the batch files keep their own
+/// copies until W2). `batch_e.rs` uses a different meta key
+/// (`mind_batch_e_request`); the shared key is batch_a's `mind_dialog_request`
+/// because W2 consolidates on that key.
+impl MindDialog {
+    /// Meta key carrying the request `shown` dispatches on.
+    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+    pub(crate) const REQUEST_META: &'static str = "mind_dialog_request";
+
+    /// Request re-running `shown` synchronously with `request` recorded.
+    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+    pub(crate) fn request_refresh(node: &Gd<MindDialog>, request: &str) {
+        let mut target = node.clone();
+        target.set_meta(Self::REQUEST_META, &GString::from(request).to_variant());
+        let _ = target.call("refresh_controller", &[]);
+    }
+
+    /// Deferred [`Self::request_refresh`] for callbacks that run inside a `MindUi` borrow.
+    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+    pub(crate) fn request_refresh_deferred(node: &Gd<MindDialog>, request: &str) {
+        let mut target = node.clone();
+        target.set_meta(Self::REQUEST_META, &GString::from(request).to_variant());
+        let _ = target.call_deferred("refresh_controller", &[]);
+    }
+
+    /// Reads and clears the pending request (`""` when none is queued).
+    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+    pub(crate) fn take_request(dialog: &mut MindDialog) -> String {
+        let mut node = dialog.to_gd();
+        if !node.has_meta(Self::REQUEST_META) {
+            return String::new();
+        }
+        let request = crate::gdutil::variant::to_text_stringify(&node.get_meta(Self::REQUEST_META));
+        node.remove_meta(Self::REQUEST_META);
+        request
     }
 }
 
