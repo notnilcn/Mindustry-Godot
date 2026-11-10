@@ -25,7 +25,7 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::widgets::factory;
 use mind_core::maps::locales::ensure_locale;
 
-use super::util_e::*;
+use super::util::*;
 
 use self::model::{
     LOCALE_APPLY_ALL_META, LOCALE_APPLY_NODE, LOCALE_CARD_WIDTH, LOCALE_COLLAPSED_META,
@@ -68,7 +68,7 @@ impl DialogController for MapLocalesDialog {
         // columns need the whole viewport.
         dialog.fill_panel();
         // `buttons.table(t -> { back; apply; edit })` + the `?` info button.
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         let node = dialog.to_gd();
         let apply = kit::t("@editor.apply").to_string();
         let apply_target = node.clone();
@@ -92,7 +92,7 @@ impl DialogController for MapLocalesDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let request = take_request(dialog);
+        let request = MindDialog::take_request(dialog);
         match request.as_str() {
             LOCALE_REQUEST_MAIN => self.build_main(dialog),
             LOCALE_REQUEST_TABLES => self.build_tables(dialog),
@@ -185,8 +185,7 @@ impl MapLocalesDialog {
         sidebar.add_theme_stylebox_override("panel", &button_nine_patch("button"));
         sidebar.set_custom_minimum_size(Vector2::new(324.0, 0.0));
         sidebar.set_v_size_flags(SizeFlags::EXPAND_FILL);
-        let mut sidebar_column = VBoxContainer::new_alloc();
-        sidebar_column.add_theme_constant_override("separation", 6);
+        let mut sidebar_column = factory::vbox(6);
         sidebar.add_child(&sidebar_column);
         let mut langs_scroll = MindScroll::new_alloc();
         langs_scroll.bind_mut().set_scrolling_disabled(true, false);
@@ -236,7 +235,7 @@ impl MapLocalesDialog {
             );
             let mut glyph = collapse_glyph.clone();
             glyph.set_text(&kit::glyph(if collapsed { "up-open" } else { "down-open" }));
-            request_refresh(&collapse_target, LOCALE_REQUEST_MAIN);
+            MindDialog::request_refresh(&collapse_target, LOCALE_REQUEST_MAIN);
         });
         collapse.connect("pressed", &callable);
         search_row.add_child(&collapse);
@@ -267,7 +266,7 @@ impl MapLocalesDialog {
                 .map(|value| value.to::<GString>().to_string())
                 .unwrap_or_default();
             set_meta_text(&mut search_target.clone(), LOCALE_SEARCH_META, &text);
-            request_refresh(&search_target, LOCALE_REQUEST_MAIN);
+            MindDialog::request_refresh(&search_target, LOCALE_REQUEST_MAIN);
         });
         search.connect("text_changed", &callable);
         self.search = Some(search.clone());
@@ -278,7 +277,7 @@ impl MapLocalesDialog {
             set_meta_text(&mut clear_target.clone(), LOCALE_SEARCH_META, "");
             let mut field = clear_field.clone();
             field.set_text(&GString::from(""));
-            request_refresh(&clear_target, LOCALE_REQUEST_MAIN);
+            MindDialog::request_refresh(&clear_target, LOCALE_REQUEST_MAIN);
         });
         let mut clear = factory::glyph_button("cancel", "", "emptyi");
         clear.set_custom_minimum_size(Vector2::new(35.0, 35.0));
@@ -325,8 +324,7 @@ impl MapLocalesDialog {
         panel.add_theme_stylebox_override("panel", &button_nine_patch("button"));
         panel.set_custom_minimum_size(Vector2::new(380.0, 0.0));
         panel.set_v_size_flags(SizeFlags::SHRINK_BEGIN);
-        let mut column = VBoxContainer::new_alloc();
-        column.add_theme_constant_override("separation", 6);
+        let mut column = factory::vbox(6);
         panel.add_child(&column);
         let mut name_field = factory::field(&kit::t("@locales.property.name").to_string());
         name_field.set_max_length(64);
@@ -359,7 +357,7 @@ impl MapLocalesDialog {
             locale_add_property(&mut state, &selected, &key, &value, apply_all);
             locale_set_state(&add_target, &state);
             locale_mark_dirty(&add_target);
-            request_refresh(&add_target, LOCALE_REQUEST_MAIN);
+            MindDialog::request_refresh(&add_target, LOCALE_REQUEST_MAIN);
         });
         let mut add_property =
             factory::icon_button("add", &add_text, "defaultt", AlignmentMode::CENTER);
@@ -411,7 +409,7 @@ impl MapLocalesDialog {
                     return;
                 }
                 set_meta_text(&mut target.clone(), LOCALE_SELECTED_META, &name);
-                request_refresh(&target, LOCALE_REQUEST_TABLES);
+                MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
             });
             toggle.connect("pressed", &callable);
             langs.bind_mut().add(&toggle).width(200.0).min_height(50.0);

@@ -4,13 +4,16 @@
 //! The schematic info dialog controller.
 //! Upstream: ui/dialogs/SchematicsDialog.java (SchematicInfoDialog, ~:774-834)
 
+use crate::gdutil::variant::{
+    dict_f64_or, dict_i64_or, dict_text_or, parse_object, to_i64_lenient, to_text_lenient,
+};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable, styles};
+use godot::classes::TextureRect;
 use godot::classes::control::{LayoutPreset, SizeFlags};
 use godot::classes::text_server::AutowrapMode;
-use godot::classes::{HBoxContainer, TextureRect};
 use godot::prelude::*;
 
 /// Dispatches this leaf's dialog id to its controller.
@@ -50,7 +53,7 @@ impl SchematicInfoDialog {
         let schematics = dialog.campaign_section("schematics");
         let index = dialog
             .context_value("index")
-            .map(|value| variant_i64(&value))
+            .map(|value| to_i64_lenient(&value))
             .unwrap_or(-1);
         let schematic = find_schematic(&schematics, index);
         if schematic.is_empty() {
@@ -62,7 +65,7 @@ impl SchematicInfoDialog {
         let title = format!(
             "[{}] {}",
             kit::t("@schematic"),
-            dict_string(&schematic, "name")
+            dict_text_or(&schematic, "name")
         );
         dialog.title_text = GString::from(title.as_str());
         dialog.title_color = styles::ACCENT;
@@ -83,8 +86,8 @@ impl SchematicInfoDialog {
         let text = kit::tm_format(
             "@schematic.info",
             &[
-                &dict_i64(&schematic, "width", 0).to_string(),
-                &dict_i64(&schematic, "height", 0).to_string(),
+                &dict_i64_or(&schematic, "width", 0).to_string(),
+                &dict_i64_or(&schematic, "height", 0).to_string(),
                 &tiles.to_string(),
             ],
         )
@@ -105,12 +108,11 @@ impl SchematicInfoDialog {
 
         self.build_requirements(&mut info, &schematic);
 
-        let production = dict_f64(&schematic, "power_production", 0.0) * 60.0;
-        let consumption = dict_f64(&schematic, "power_consumption", 0.0) * 60.0;
+        let production = dict_f64_or(&schematic, "power_production", 0.0) * 60.0;
+        let consumption = dict_f64_or(&schematic, "power_consumption", 0.0) * 60.0;
         if production != 0.0 || consumption != 0.0 {
             // code-instantiated: the schematic's power summary row.
-            let mut row = HBoxContainer::new_alloc();
-            row.add_theme_constant_override("separation", 3);
+            let mut row = factory::hbox(3);
             if production != 0.0 {
                 row.add_child(&factory::glyph_label(
                     "power",
@@ -145,7 +147,7 @@ impl SchematicInfoDialog {
             info.bind_mut().row();
         }
 
-        let description = dict_string(&schematic, "description");
+        let description = dict_text_or(&schematic, "description");
         if !description.is_empty() {
             let mut wrapped = factory::label(&markup(&format!("[lightgray]{description}")));
             wrapped.set_custom_minimum_size(Vector2::new(500.0, 0.0));
@@ -171,8 +173,7 @@ impl SchematicInfoDialog {
         }
         let have = core_items();
         // code-instantiated: one requirement cell per schematic stack.
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 4);
+        let mut row = factory::hbox(4);
         let mut count = 0usize;
         for entry in requirements.iter_shared() {
             let Ok(entry) = entry.try_to::<VarArray>() else {
@@ -181,9 +182,12 @@ impl SchematicInfoDialog {
             let mut values = entry.iter_shared();
             let item = values
                 .next()
-                .map(|value| variant_string(&value))
+                .map(|value| to_text_lenient(&value))
                 .unwrap_or_default();
-            let amount = values.next().map(|value| variant_i64(&value)).unwrap_or(0);
+            let amount = values
+                .next()
+                .map(|value| to_i64_lenient(&value))
+                .unwrap_or(0);
             let mut icon = TextureRect::new_alloc();
             if let Some(texture) = kit::icon_texture(&format!("item-{item}-ui")) {
                 icon.set_texture(&texture);
@@ -195,7 +199,7 @@ impl SchematicInfoDialog {
             let mut label = factory::label(&amount.to_string());
             let available = have
                 .get(item.as_str())
-                .map(|value| variant_i64(&value))
+                .map(|value| to_i64_lenient(&value))
                 .unwrap_or(0);
             if !have.is_empty() && available < amount {
                 label.set_text(&GString::from(
@@ -207,8 +211,7 @@ impl SchematicInfoDialog {
             if count.is_multiple_of(4) {
                 info.bind_mut().add(&row).pad(2.0);
                 info.bind_mut().row();
-                row = HBoxContainer::new_alloc();
-                row.add_theme_constant_override("separation", 4);
+                row = factory::hbox(4);
             }
         }
         if !count.is_multiple_of(4) {
@@ -227,7 +230,7 @@ fn core_items() -> VarDictionary {
         return VarDictionary::new();
     }
     let value = host.call("core_items_json", &[]);
-    parse_json_object(&value.to::<GString>().to_string())
+    parse_object(&value.to::<GString>().to_string())
 }
 
 /// Arc `Strings.autoFixed(value, max)`: truncate to `max` decimals, drop
@@ -255,7 +258,7 @@ fn find_schematic(schematics: &VarArray, index: i64) -> VarDictionary {
         let Ok(row) = row.try_to::<VarDictionary>() else {
             continue;
         };
-        if dict_i64(&row, "index", -1) == index {
+        if dict_i64_or(&row, "index", -1) == index {
             return row;
         }
     }
@@ -269,7 +272,7 @@ fn find_schematic(schematics: &VarArray, index: i64) -> VarDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::dialogs::editor::util_f::tests::engine_available;
+    use crate::ui::dialogs::editor::util::tests::engine_available;
 
     /// PAR-0586: `find_schematic` walks a Godot `VarArray` of `VarDictionary`
     /// rows, so the fallback rule is exercised only in-engine.
@@ -283,6 +286,6 @@ mod tests {
         let mut schematics = VarArray::new();
         schematics.push(&first.to_variant());
         let picked = find_schematic(&schematics, 99);
-        assert_eq!(dict_i64(&picked, "index", -1), 7);
+        assert_eq!(dict_i64_or(&picked, "index", -1), 7);
     }
 }

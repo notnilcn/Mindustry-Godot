@@ -4,8 +4,9 @@
 //! The banned content dialog controller.
 //! Upstream: editor/BannedContentDialog.java
 
+use crate::gdutil::variant::{dict_i64_or, dict_text_or, parse_object, to_text_lenient};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindScroll, styles};
 use godot::classes::box_container::AlignmentMode;
@@ -79,7 +80,7 @@ impl DialogController for BannedContentDialog {
         drop(state);
         dialog.set_title_key(banned_title_key(&kind));
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn context_changed(&mut self, dialog: &mut MindDialog) {
@@ -142,7 +143,7 @@ fn banned_load_content(state: &Rc<RefCell<BannedState>>) {
         "bannable_content_json",
         &[GString::from(kind.as_str()).to_variant()],
     ) {
-        let payload = parse_json_object(&value.to::<GString>().to_string());
+        let payload = parse_object(&value.to::<GString>().to_string());
         if let Some(value) = payload.get("rows")
             && let Ok(array) = value.try_to::<VarArray>()
         {
@@ -156,7 +157,7 @@ fn banned_load_content(state: &Rc<RefCell<BannedState>>) {
         {
             categories = array
                 .iter_shared()
-                .map(|entry| variant_string(&entry))
+                .map(|entry| to_text_lenient(&entry))
                 .collect();
         }
     }
@@ -205,7 +206,7 @@ fn banned_tag_rules() -> VarDictionary {
     let Some(rules) = tags.get("rules") else {
         return VarDictionary::new();
     };
-    parse_json_object(&variant_string(&rules))
+    parse_object(&to_text_lenient(&rules))
 }
 
 /// `_build`: search row, category row, the two panes.
@@ -221,8 +222,7 @@ fn banned_build(dialog: &mut MindDialog, state: &Rc<RefCell<BannedState>>) {
     root.bind_mut().add(&top).pad(4.0);
     root.bind_mut().row();
     // code-instantiated: the search row mirrors Java's label + field + clear.
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 10);
+    let mut search_row = factory::hbox(10);
     search_row.set_h_size_flags(SizeFlags::SHRINK_CENTER);
     search_row.set_alignment(AlignmentMode::CENTER);
     let mut search_label = factory::label(&kit::t("@search").to_string());
@@ -411,14 +411,14 @@ fn banned_rebuild(dialog: &Gd<MindDialog>, state: &Rc<RefCell<BannedState>>) {
     else {
         return;
     };
-    clear_children(&mut selected_grid);
-    clear_children(&mut deselected_grid);
+    kit::clear_children(&mut selected_grid);
+    kit::clear_children(&mut deselected_grid);
     let filtered = banned_filtered_rows(state);
     let banned = state.borrow().banned.clone();
     let mut banned_rows: Vec<VarDictionary> = Vec::new();
     let mut available_rows: Vec<VarDictionary> = Vec::new();
     for row in filtered {
-        if banned.contains(&dict_string(&row, "name")) {
+        if banned.contains(&dict_text_or(&row, "name")) {
             banned_rows.push(row);
         } else {
             available_rows.push(row);
@@ -486,8 +486,8 @@ fn banned_fill_grid(
         return;
     }
     for row in rows {
-        let content_name = dict_string(row, "name");
-        let icon = dict_string(row, "ui_icon");
+        let content_name = dict_text_or(row, "name");
+        let icon = dict_text_or(row, "ui_icon");
         // code-instantiated: one 50px content cell per bannable row.
         let mut button =
             factory::image_button_first(&[icon.as_str(), content_name.as_str()], "clearNonei");
@@ -521,19 +521,19 @@ fn banned_filtered_rows(state: &Rc<RefCell<BannedState>>) -> Vec<VarDictionary> 
     };
     let mut out: Vec<VarDictionary> = Vec::new();
     for row in rows {
-        if !category.is_empty() && dict_string(&row, "category") != category {
+        if !category.is_empty() && dict_text_or(&row, "category") != category {
             continue;
         }
         if !search.is_empty() {
             // `content.localizedName.toLowerCase().contains(contentSearch)`.
-            let localized = banned_localized(state, &dict_string(&row, "name"));
+            let localized = banned_localized(state, &dict_text_or(&row, "name"));
             if !localized.to_lowercase().contains(&search) {
                 continue;
             }
         }
         out.push(row);
     }
-    out.sort_by_key(|row| dict_i64(row, "id", 0));
+    out.sort_by_key(|row| dict_i64_or(row, "id", 0));
     out
 }
 
@@ -582,7 +582,7 @@ fn banned_add_all(
     {
         let mut state = state.borrow_mut();
         for row in &filtered {
-            let name = dict_string(row, "name");
+            let name = dict_text_or(row, "name");
             if banned_pane_selected {
                 if !state.banned.contains(&name) {
                     state.banned.push(name);

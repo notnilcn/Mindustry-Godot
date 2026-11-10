@@ -4,8 +4,9 @@
 //! The map processors dialog controller.
 //! Upstream: editor/MapProcessorsDialog.java
 
+use crate::gdutil::variant::{dict_i64_or, dict_text_or, to_bool_lenient};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindScroll};
 use godot::builtin::Side;
@@ -61,7 +62,7 @@ impl DialogController for MapProcessorsDialog {
         dialog.clear_buttons();
         // `addCloseButton()` then `buttons.button("@add", Icon.add, ...)`
         // (`MapProcessorsDialog.java:32-33`): Back is the first button.
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         let target = dialog.to_gd();
         let state = self.state.clone();
         let add = Callable::from_fn("processors_add", move |_args: &[&Variant]| {
@@ -91,8 +92,7 @@ impl MapProcessorsDialog {
 
         // `cont.table(s -> { s.image(Icon.zoom); s.field(...).growX(); }).width(440f)`.
         // code-instantiated: the zoom glyph + search field row.
-        let mut search_row = HBoxContainer::new_alloc();
-        search_row.add_theme_constant_override("separation", 8);
+        let mut search_row = factory::hbox(8);
         search_row.set_custom_minimum_size(Vector2::new(440.0, 0.0));
         search_row.add_child(&factory::glyph_label("zoom", 20, Color::WHITE));
         let mut field = factory::field(&kit::t("@players.search").to_string());
@@ -163,7 +163,7 @@ impl MapProcessorsDialog {
         let callable = Callable::from_fn("processors_confirm", move |args: &[&Variant]| {
             let confirmed = args
                 .first()
-                .map(|value| variant_bool(value))
+                .map(|value| to_bool_lenient(value))
                 .unwrap_or(false);
             let target_for = target.clone();
             let state_for = state.clone();
@@ -184,7 +184,7 @@ fn processors_confirm_delete(
     entry: &VarDictionary,
 ) {
     let _ = dialog;
-    state.borrow_mut().pending_delete = (dict_i64(entry, "x", 0), dict_i64(entry, "y", 0));
+    state.borrow_mut().pending_delete = (dict_i64_or(entry, "x", 0), dict_i64_or(entry, "y", 0));
     let _ = ui_call(
         "show_confirm",
         &[kit::t("@editor.worldprocessors.delete.confirm").to_variant()],
@@ -198,8 +198,8 @@ fn processors_rename(
     entry: &VarDictionary,
 ) {
     let _ = dialog;
-    let tag = dict_string(entry, "tag");
-    state.borrow_mut().pending_rename = (dict_i64(entry, "x", 0), dict_i64(entry, "y", 0));
+    let tag = dict_text_or(entry, "tag");
+    state.borrow_mut().pending_rename = (dict_i64_or(entry, "x", 0), dict_i64_or(entry, "y", 0));
     let _ = ui_call(
         "show_text_input",
         &[
@@ -219,7 +219,7 @@ fn processors_open_icon_select(
     state: &Rc<RefCell<ProcessorsState>>,
     entry: &VarDictionary,
 ) {
-    state.borrow_mut().pending_icon = (dict_i64(entry, "x", 0), dict_i64(entry, "y", 0));
+    state.borrow_mut().pending_icon = (dict_i64_or(entry, "x", 0), dict_i64_or(entry, "y", 0));
     connect_icon_select(dialog, state);
     let _ = ui_call(
         "open_dialog",
@@ -264,8 +264,8 @@ fn processors_edit(dialog: &Gd<MindDialog>, entry: &VarDictionary) {
     let _ = dialog;
     let mut context = VarDictionary::new();
     context.set(&"editor".to_variant(), &true.to_variant());
-    context.set(&"x".to_variant(), &dict_i64(entry, "x", 0).to_variant());
-    context.set(&"y".to_variant(), &dict_i64(entry, "y", 0).to_variant());
+    context.set(&"x".to_variant(), &dict_i64_or(entry, "x", 0).to_variant());
+    context.set(&"y".to_variant(), &dict_i64_or(entry, "y", 0).to_variant());
     let _ = ui_call(
         "open_dialog",
         &[
@@ -278,7 +278,7 @@ fn processors_edit(dialog: &Gd<MindDialog>, entry: &VarDictionary) {
 /// `buttons.button("@add", Icon.add, ...)`.
 fn processors_add(dialog: &Gd<MindDialog>, state: &Rc<RefCell<ProcessorsState>>) {
     let added = editor_call("add_processor", &[])
-        .map(|value| variant_bool(&value))
+        .map(|value| to_bool_lenient(&value))
         .unwrap_or(false);
     if !added {
         notify_key("@editor.worldprocessors.nospace");
@@ -313,7 +313,7 @@ fn processors_rebuild(dialog: &Gd<MindDialog>, state: &Rc<RefCell<ProcessorsStat
     let Some(mut list) = list else {
         return;
     };
-    clear_children(&mut list);
+    kit::clear_children(&mut list);
     let (entries, search) = {
         let state = state.borrow();
         (state.entries.clone(), state.search.clone())
@@ -326,7 +326,7 @@ fn processors_rebuild(dialog: &Gd<MindDialog>, state: &Rc<RefCell<ProcessorsStat
         return;
     }
     for entry in entries {
-        let tag = dict_string(&entry, "tag");
+        let tag = dict_text_or(&entry, "tag");
         // `text.isEmpty() || (log.tag != null && log.tag.toLowerCase().contains(text))`.
         if !search.is_empty() && !tag.to_lowercase().contains(&search) {
             continue;
@@ -343,8 +343,7 @@ fn processors_row(
     entry: &VarDictionary,
 ) -> Gd<HBoxContainer> {
     // code-instantiated: one scan row (icon + name + actions).
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 4);
+    let mut row = factory::hbox(4);
     row.set_custom_minimum_size(Vector2::new(0.0, PROCESSOR_ROW_HEIGHT + 8.0));
 
     // `t.button(log.iconTag == 0 ? Styles.none : ..., Styles.graySquarei, ...)`.
@@ -352,7 +351,7 @@ fn processors_row(
     let mut icon_button = Button::new_alloc();
     icon_button.set_theme_type_variation("graySquarei");
     icon_button.set_custom_minimum_size(Vector2::new(PROCESSOR_ROW_HEIGHT, PROCESSOR_ROW_HEIGHT));
-    let icon_code = dict_i64(entry, "icon_tag", 0);
+    let icon_code = dict_i64_or(entry, "icon_tag", 0);
     if let Ok(code) = u32::try_from(icon_code)
         && let Some(character) = char::from_u32(code)
     {
@@ -426,7 +425,7 @@ fn processors_row(
 
 /// `(log.tag == null ? "<no name>\n" : "[accent]" + log.tag + "\n") + "[lightgray][[x, y]"`.
 fn processors_entry_markup(entry: &VarDictionary) -> String {
-    let tag = dict_string(entry, "tag");
+    let tag = dict_text_or(entry, "tag");
     let head = if tag.is_empty() {
         String::from("<no name>")
     } else {
@@ -434,8 +433,8 @@ fn processors_entry_markup(entry: &VarDictionary) -> String {
     };
     markup(&format!(
         "{head}\n[lightgray][[{}, {}]",
-        dict_i64(entry, "x", 0),
-        dict_i64(entry, "y", 0)
+        dict_i64_or(entry, "x", 0),
+        dict_i64_or(entry, "y", 0)
     ))
 }
 
@@ -453,7 +452,7 @@ fn processors_on_rename(dialog: &Gd<MindDialog>, state: &Rc<RefCell<ProcessorsSt
             GString::from(text).to_variant(),
         ],
     )
-    .map(|value| variant_bool(&value))
+    .map(|value| to_bool_lenient(&value))
     .unwrap_or(false);
     if updated {
         refresh_processors(state);
@@ -475,7 +474,7 @@ fn processors_on_confirm(
         "delete_processor",
         &[target.0.to_variant(), target.1.to_variant()],
     )
-    .map(|value| variant_bool(&value))
+    .map(|value| to_bool_lenient(&value))
     .unwrap_or(false);
     if updated {
         refresh_processors(state);
@@ -503,7 +502,7 @@ fn processors_on_icon_selected(
             code.to_variant(),
         ],
     )
-    .map(|value| variant_bool(&value))
+    .map(|value| to_bool_lenient(&value))
     .unwrap_or(false);
     if updated {
         refresh_processors(state);
@@ -532,7 +531,7 @@ fn processors_icon_code(region_name: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::dialogs::editor::util_f::tests::engine_available;
+    use crate::ui::dialogs::editor::util::tests::engine_available;
 
     #[test]
     fn processor_markup_matches_java() {

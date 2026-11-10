@@ -19,7 +19,8 @@ use crate::ui::kit;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::super::util_e::*;
+use super::super::util::*;
+use crate::gdutil::variant::to_i64_no_text;
 
 use super::super::map_generate::{find_named, free_named};
 use super::{
@@ -157,7 +158,7 @@ pub(super) fn objective_normalize_positions(node: &Gd<MindDialog>) {
         value
             .try_to::<VarDictionary>()
             .map(|objective| match objective.get("editorPos") {
-                Some(position) => as_int(Some(position)) as i32 == default_pos,
+                Some(position) => to_i64_no_text(Some(position)) as i32 == default_pos,
                 None => true,
             })
             .unwrap_or(true)
@@ -213,7 +214,7 @@ pub(super) fn objective_move(node: &Gd<MindDialog>, direction: i64) {
     set_meta_array(&mut meta, OBJ_OBJECTIVES_META, &objectives);
     set_meta_int(&mut meta, OBJ_SELECTED_META, target);
     objective_commit(node);
-    request_refresh(node, OBJ_REQUEST_BUILD);
+    MindDialog::request_refresh(node, OBJ_REQUEST_BUILD);
 }
 
 /// `_remove_selected()`.
@@ -228,7 +229,7 @@ pub(super) fn objective_remove_selected(node: &Gd<MindDialog>) {
     set_meta_array(&mut meta, OBJ_OBJECTIVES_META, &objectives);
     set_meta_int(&mut meta, OBJ_SELECTED_META, -1);
     objective_commit(node);
-    request_refresh(node, OBJ_REQUEST_BUILD);
+    MindDialog::request_refresh(node, OBJ_REQUEST_BUILD);
 }
 
 /// The `@add` objective type picker (`getProvider(MapObjective.class)`).
@@ -299,7 +300,7 @@ fn objective_pick_class(node: &Gd<MindDialog>, tag: &str) {
         set_meta_int(&mut meta, OBJ_SELECTED_META, pending);
         set_meta_int(&mut meta, OBJ_PENDING_CLASS_META, -1);
         objective_commit(node);
-        request_refresh(node, OBJ_REQUEST_BUILD);
+        MindDialog::request_refresh(node, OBJ_REQUEST_BUILD);
         return;
     }
     set_meta_int(&mut node.clone(), OBJ_PENDING_CLASS_META, -1);
@@ -357,7 +358,7 @@ pub(super) fn objective_show_edit_menu(node: &Gd<MindDialog>) {
         set_meta_int(&mut meta, OBJ_SELECTED_META, -1);
         objective_commit(&target);
         free_named(&target, OBJ_OVERLAY);
-        request_refresh(&target, OBJ_REQUEST_BUILD);
+        MindDialog::request_refresh(&target, OBJ_REQUEST_BUILD);
     });
     load.connect("pressed", &callable);
     rows.add_child(&load);
@@ -427,7 +428,7 @@ pub(super) fn objective_bind_confirm(node: &Gd<MindDialog>) {
         set_meta_array(&mut meta, OBJ_OBJECTIVES_META, &VarArray::new());
         set_meta_int(&mut meta, OBJ_SELECTED_META, -1);
         objective_commit(&target);
-        request_refresh_deferred(&target, OBJ_REQUEST_BUILD);
+        MindDialog::request_refresh_deferred(&target, OBJ_REQUEST_BUILD);
     });
     ui.connect("confirm_result", &callable);
     node.clone()
@@ -445,18 +446,18 @@ pub(super) fn objective_bind_canvas(node: &Gd<MindDialog>, canvas: &Gd<Control>)
     if canvas.has_signal("node_selected") {
         let target = node.clone();
         let callable = Callable::from_fn("objective_selected", move |args: &[&Variant]| {
-            let index = as_int(args.first().map(|value| (*value).clone()));
+            let index = to_i64_no_text(args.first().map(|value| (*value).clone()));
             set_meta_int(&mut target.clone(), OBJ_SELECTED_META, index);
-            request_refresh(&target, OBJ_REQUEST_PANEL);
+            MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
         });
         canvas.connect("node_selected", &callable);
     }
     if canvas.has_signal("node_moved") {
         let target = node.clone();
         let callable = Callable::from_fn("objective_moved", move |args: &[&Variant]| {
-            let index = as_int(args.first().map(|value| (*value).clone()));
-            let x = as_int(args.get(1).map(|value| (*value).clone())) as i32;
-            let y = as_int(args.get(2).map(|value| (*value).clone())) as i32;
+            let index = to_i64_no_text(args.first().map(|value| (*value).clone()));
+            let x = to_i64_no_text(args.get(1).map(|value| (*value).clone())) as i32;
+            let y = to_i64_no_text(args.get(2).map(|value| (*value).clone())) as i32;
             objective_set_field(
                 &target,
                 index,
@@ -469,8 +470,8 @@ pub(super) fn objective_bind_canvas(node: &Gd<MindDialog>, canvas: &Gd<Control>)
     if canvas.has_signal("query_placed") {
         let target = node.clone();
         let callable = Callable::from_fn("objective_placed", move |args: &[&Variant]| {
-            let x = as_int(args.first().map(|value| (*value).clone())) as i32;
-            let y = as_int(args.get(1).map(|value| (*value).clone())) as i32;
+            let x = to_i64_no_text(args.first().map(|value| (*value).clone())) as i32;
+            let y = to_i64_no_text(args.get(1).map(|value| (*value).clone())) as i32;
             let mut pending = meta_dict(&target, OBJ_PENDING_QUERY_META);
             pending.set("editorPos", &i64::from(pack_point2(x, y)).to_variant());
             let mut objectives = meta_array(&target, OBJ_OBJECTIVES_META);
@@ -485,7 +486,7 @@ pub(super) fn objective_bind_canvas(node: &Gd<MindDialog>, canvas: &Gd<Control>)
                 let _ = canvas.call("set_querying", &[false.to_variant()]);
             }
             objective_commit(&target);
-            request_refresh(&target, OBJ_REQUEST_BUILD);
+            MindDialog::request_refresh(&target, OBJ_REQUEST_BUILD);
         });
         canvas.connect("query_placed", &callable);
     }
@@ -524,7 +525,7 @@ pub(super) fn objective_bind_picker(node: &Gd<MindDialog>) {
             .map(|value| value.to::<GString>())
             .unwrap_or_default();
         set_meta_text(&mut target.clone(), OBJ_PICKED_META, &name.to_string());
-        request_refresh_deferred(&target, OBJ_REQUEST_PICKED);
+        MindDialog::request_refresh_deferred(&target, OBJ_REQUEST_PICKED);
     });
     picker.connect("selected", &callable);
     node.clone()
@@ -645,7 +646,7 @@ pub(super) fn objective_bind_color(node: &Gd<MindDialog>) {
             &field,
             GString::from(hex.as_str()).to_variant(),
         );
-        request_refresh(&target, OBJ_REQUEST_PANEL);
+        MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
     });
     picker.connect("color_selected", &callable);
     node.clone()

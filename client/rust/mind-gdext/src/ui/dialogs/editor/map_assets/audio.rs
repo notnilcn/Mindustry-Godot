@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (`MapAudioView`)
 
 use super::*;
+use crate::gdutil::variant::{dict_bool_or, dict_text_or, to_bool_lenient};
 
 pub(super) fn map_assets_build_audio(
     dialog: &Gd<MindDialog>,
@@ -34,13 +35,12 @@ pub(super) fn map_assets_audio_row(
     row: &VarDictionary,
     kind: &str,
 ) -> Gd<HBoxContainer> {
-    let audio_name = dict_string(row, "name");
-    let path = dict_string(row, "path");
+    let audio_name = dict_text_or(row, "name");
+    let path = dict_text_or(row, "path");
     let music = kind == "music";
     let stream_name = map_assets_audio_stream_name(row);
     // code-instantiated: one audio record row (play/export/delete).
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 4);
+    let mut box_ = factory::hbox(4);
     box_.set_alignment(AlignmentMode::CENTER);
 
     let playing = state.borrow().playing_audio == stream_name;
@@ -76,8 +76,7 @@ pub(super) fn map_assets_audio_row(
         ASSET_ROW_HEIGHT,
     ));
     panel.set_h_size_flags(SizeFlags::EXPAND_FILL);
-    let mut lines = VBoxContainer::new_alloc();
-    lines.add_theme_constant_override("separation", 0);
+    let mut lines = factory::vbox(0);
     let mut title = factory::label(&markup(&format!("[accent]{audio_name}")));
     title.set_horizontal_alignment(HorizontalAlignment::LEFT);
     lines.add_child(&title);
@@ -120,7 +119,7 @@ pub(super) fn map_assets_audio_row(
                         GString::from(target.as_str()).to_variant(),
                     ],
                 )
-                .map(|value| variant_bool(&value))
+                .map(|value| to_bool_lenient(&value))
                 .unwrap_or(false);
                 if !exported {
                     map_assets_error(&kit::t("@asset.broken").to_string());
@@ -157,7 +156,7 @@ pub(super) fn map_assets_audio_row(
 
 /// `DataAudioLoader.prefix + asset.name.replace(' ', '_')` (`dp-`).
 pub(super) fn map_assets_audio_stream_name(row: &VarDictionary) -> String {
-    let asset_name = dict_string(row, "name").replace(' ', "_");
+    let asset_name = dict_text_or(row, "name").replace(' ', "_");
     format!("dp-{}", asset_name.to_lowercase())
 }
 
@@ -234,8 +233,8 @@ pub(super) fn map_assets_add_audio(
                 )
                 .and_then(|value| value.try_to::<VarDictionary>().ok())
                 .unwrap_or_default();
-                if !dict_bool(&result, "ok", false) {
-                    map_assets_error(&dict_string(&result, "error"));
+                if !dict_bool_or(&result, "ok", false) {
+                    map_assets_error(&dict_text_or(&result, "error"));
                 }
             }
             map_assets_refetch(&state_for);

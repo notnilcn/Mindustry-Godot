@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (`MapPatchesView`)
 
 use super::*;
+use crate::gdutil::variant::{dict_i64_or, dict_text_or};
 
 pub(super) fn map_assets_build_patches(
     dialog: &Gd<MindDialog>,
@@ -32,9 +33,9 @@ pub(super) fn map_assets_patch_row(
     state: &Rc<RefCell<MapAssetsState>>,
     row: &VarDictionary,
 ) -> Gd<HBoxContainer> {
-    let index = dict_i64(row, "index", 0);
-    let patch_name = dict_string(row, "name");
-    let json = dict_string(row, "data");
+    let index = dict_i64_or(row, "index", 0);
+    let patch_name = dict_text_or(row, "name");
+    let json = dict_text_or(row, "data");
     let label = if patch_name.is_empty() {
         String::from("<unnamed>")
     } else {
@@ -42,8 +43,7 @@ pub(super) fn map_assets_patch_row(
     };
     let fields = map_assets_count_fields(&map_assets_parse_json(&json));
     // code-instantiated: one patch entry row (show/copy/import/delete).
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 4);
+    let mut box_ = factory::hbox(4);
     box_.set_alignment(AlignmentMode::CENTER);
     box_.add_child(&map_assets_empty_cell());
     let width = ASSET_ROW_WIDTH;
@@ -173,7 +173,7 @@ pub(super) fn map_assets_parse_json(text: &str) -> Variant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::dialogs::editor::util_f::tests::engine_available;
+    use crate::ui::dialogs::editor::util::tests::engine_available;
 
     /// PAR-0586: `map_assets_parse_json`/`map_assets_count_fields` are Godot
     /// builtin calls (`Json.parse_string`, `VarDictionary.values_array`), so

@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (shared helpers of the data-asset views)
 
 use super::*;
+use crate::gdutil::variant::{dict_bool_or, dict_text_or, to_bool_lenient};
 
 /// `types.image(Tex.whiteui, Pal.accent).size(4f, 50f)`.
 pub(super) fn map_assets_divider() -> Gd<ColorRect> {
@@ -24,7 +25,7 @@ pub(super) fn map_assets_rows_of(
         .borrow()
         .rows
         .iter()
-        .filter(|row| dict_string(row, "kind") == kind)
+        .filter(|row| dict_text_or(row, "kind") == kind)
         .cloned()
         .collect()
 }
@@ -39,7 +40,7 @@ pub(super) fn map_assets_matches(
     if search.is_empty() {
         return true;
     }
-    dict_string(row, key).to_lowercase().contains(&search)
+    dict_text_or(row, key).to_lowercase().contains(&search)
 }
 
 /// The viewport width from a live dialog handle.
@@ -85,7 +86,7 @@ pub(super) fn map_assets_entry_button(
     label.set_offset(Side::LEFT, 10.0);
     label.set_mouse_filter(MouseFilter::IGNORE);
     button.add_child(&label);
-    button.set_tooltip_text(&dict_string(row, "path"));
+    button.set_tooltip_text(&dict_text_or(row, "path"));
     button.connect("pressed", &handler);
     button
 }
@@ -212,8 +213,8 @@ pub(super) fn map_assets_apply(
     let value = result
         .and_then(|value| value.try_to::<VarDictionary>().ok())
         .unwrap_or_default();
-    if !dict_bool(&value, "ok", false) {
-        let mut message = dict_string(&value, "error");
+    if !dict_bool_or(&value, "ok", false) {
+        let mut message = dict_text_or(&value, "error");
         if let Some(key) = map_assets_error_key(&message) {
             message = kit::t(key).to_string();
         }
@@ -360,8 +361,7 @@ pub(super) fn map_assets_import_choices(
     // code-instantiated: Java's `BaseDialog("@editor.import")` choice menu.
     let mut accept = AcceptDialog::new_alloc();
     accept.set_title(&kit::t("@editor.import"));
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 6);
+    let mut box_ = factory::vbox(6);
     box_.set_custom_minimum_size(Vector2::new(300.0, 120.0));
     let clipboard_text = DisplayServer::singleton().clipboard_get();
     let clipboard_label = kit::t("@load.clipboard").to_string();
@@ -434,8 +434,7 @@ pub(super) fn map_assets_show_edit_menu(
     // code-instantiated: Java builds this `BaseDialog("@edit.menu")` per open.
     let mut accept = AcceptDialog::new_alloc();
     accept.set_title(&kit::t("@edit.menu"));
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 6);
+    let mut box_ = factory::vbox(6);
     box_.set_custom_minimum_size(Vector2::new(300.0, 170.0));
 
     let import_label = kit::t("@asset.importzip").to_string();
@@ -495,7 +494,7 @@ pub(super) fn map_assets_show_edit_menu(
                     "data_export_zip",
                     &[GString::from(path.as_str()).to_variant()],
                 )
-                .map(|value| variant_bool(&value))
+                .map(|value| to_bool_lenient(&value))
                 .unwrap_or(false);
                 if !exported {
                     map_assets_error(&kit::t("@asset.exportzip").to_string());

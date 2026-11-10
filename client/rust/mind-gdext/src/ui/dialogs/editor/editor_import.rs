@@ -21,7 +21,7 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::util_d::*;
+use super::util::*;
 
 // ---------------------------------------------------------------------------
 // EditorImportDialog
@@ -39,7 +39,7 @@ impl DialogController for EditorImportDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@editor.import");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {

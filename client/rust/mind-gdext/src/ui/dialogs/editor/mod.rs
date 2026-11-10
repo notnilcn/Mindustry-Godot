@@ -19,9 +19,7 @@ pub mod map_objectives;
 pub mod map_processors;
 pub mod map_resize;
 pub mod sector_generate;
-pub mod util_d;
-pub mod util_e;
-pub mod util_f;
+pub mod util;
 pub mod wave_info;
 
 use crate::ui::dialog::DialogController;

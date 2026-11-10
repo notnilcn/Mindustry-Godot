@@ -10,7 +10,7 @@ use crate::ui::dialog::DialogController;
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
 
-use super::util_d::*;
+use super::util::*;
 
 use super::editor_import::add_chooser_entry;
 
@@ -26,7 +26,7 @@ impl DialogController for EditorExportDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@editor.export");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
