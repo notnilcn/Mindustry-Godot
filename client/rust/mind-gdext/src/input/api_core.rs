@@ -114,9 +114,7 @@ impl MindInput {
         let any = self.locks.any();
         if self.bridge.locked != any {
             self.bridge.locked = any;
-            if let Some(mut host) = self.bridge.host.clone() {
-                host.bind_mut().set_input_locked(any);
-            }
+            let _ = self.bridge.with_host_mut(|host| host.set_input_locked(any));
         }
     }
 
@@ -132,9 +130,7 @@ impl MindInput {
         let any = self.locks.any();
         if self.bridge.locked != any {
             self.bridge.locked = any;
-            if let Some(mut host) = self.bridge.host.clone() {
-                host.bind_mut().set_input_locked(any);
-            }
+            let _ = self.bridge.with_host_mut(|host| host.set_input_locked(any));
         }
     }
 

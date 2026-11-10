@@ -123,7 +123,7 @@ impl MindInput {
     pub fn configure_building(&mut self, x: i32, y: i32, kind: GString, value: GString) -> bool {
         let kind = kind.to_string();
         let value = value.to_string();
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = tile_i16(x, y) else {
             return false;
         };
         let direct = match kind.as_str() {
@@ -150,16 +150,14 @@ impl MindInput {
             _ => None,
         };
         if let Some(config) = direct {
-            let Some(mut host) = self.bridge.host.clone() else {
-                return false;
-            };
-            host.bind_mut()
-                .submit_player_command(SimCommand::Configure {
+            let submitted = self.bridge.with_host_mut(|host| {
+                host.submit_player_command(SimCommand::Configure {
                     x,
                     y,
                     value: config,
-                });
-            return true;
+                })
+            });
+            return submitted.is_some();
         }
         let config = match kind.as_str() {
             "none" => ConfigValue::None,
@@ -201,7 +199,7 @@ impl MindInput {
     /// length check lives in the block's `configured` (`CanvasBlock.java:48-53`).
     #[func]
     pub fn configure_building_bytes(&mut self, x: i32, y: i32, data: PackedByteArray) -> bool {
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = tile_i16(x, y) else {
             return false;
         };
         let bytes: Vec<u8> = data.to_vec();

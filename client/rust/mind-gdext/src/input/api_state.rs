@@ -14,12 +14,13 @@ impl MindInput {
         let focus = serde_json::to_value(&self.focus).unwrap_or(serde_json::Value::Null);
         let state = &self.bridge.controller.state;
         let block = state.block.and_then(|id| {
-            let host = self.bridge.host.clone()?;
-            let guard = host.bind();
-            guard
-                .content_registry()?
-                .block(id)
-                .map(|def| def.name.clone())
+            self.bridge
+                .with_host(|host| {
+                    host.content_registry()
+                        .and_then(|content| content.block(id))
+                        .map(|def| def.name.clone())
+                })
+                .flatten()
         });
         let line_plans: Vec<serde_json::Value> = state
             .line_plans

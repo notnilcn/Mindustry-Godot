@@ -42,6 +42,7 @@ use mind_core::world::config::ConfigValue;
 use crate::audio::MindAudio;
 use crate::camera::MindCamera2D;
 use crate::campaign::MindCampaign;
+use crate::gdutil::coords::tile_i16;
 use crate::sim_host::MindSimHost;
 use crate::ui::root::MindUiRoot;
 use crate::wiring;
@@ -160,9 +161,9 @@ impl INode for MindInput {
             let locked = self.locks.any();
             if self.bridge.locked != locked {
                 self.bridge.locked = locked;
-                if let Some(mut host) = self.bridge.host.clone() {
-                    host.bind_mut().set_input_locked(locked);
-                }
+                let _ = self
+                    .bridge
+                    .with_host_mut(|host| host.set_input_locked(locked));
             }
         }
         for raw in translated {
@@ -241,9 +242,9 @@ impl INode for MindInput {
         let locked = self.locks.any();
         if self.bridge.locked != locked {
             self.bridge.locked = locked;
-            if let Some(mut host) = self.bridge.host.clone() {
-                host.bind_mut().set_input_locked(locked);
-            }
+            let _ = self
+                .bridge
+                .with_host_mut(|host| host.set_input_locked(locked));
         }
         for event in pending {
             self.refresh_command_mode_hold(&event);
@@ -298,12 +299,16 @@ impl INode for MindInput {
             .iter()
             .copied()
             .collect();
-        if let Some(mut host) = self.bridge.host.clone() {
-            let sat = host.bind().any_unit_has_command(&selected);
-            let current = host.bind().command_mode_satisfied();
-            if current != sat {
-                host.bind_mut().set_command_mode_satisfied(sat);
-            }
+        if let Some((sat, current)) = self.bridge.with_host(|host| {
+            (
+                host.any_unit_has_command(&selected),
+                host.command_mode_satisfied(),
+            )
+        }) && current != sat
+        {
+            let _ = self
+                .bridge
+                .with_host_mut(|host| host.set_command_mode_satisfied(sat));
         }
         self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch

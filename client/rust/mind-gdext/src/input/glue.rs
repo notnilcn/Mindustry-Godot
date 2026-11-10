@@ -62,14 +62,20 @@ impl MindInput {
 
     /// Adopts `MindSimHost.selected_block()` as the live placement block.
     fn sync_selected_block(&mut self) {
-        let Some(host) = self.bridge.host.clone() else {
+        let Some(name) = self
+            .bridge
+            .with_host(|host| host.selected_block().to_string())
+        else {
             return;
         };
-        let name = host.bind().selected_block().to_string();
-        let guard = host.bind();
-        if let Some(content) = guard.content_registry()
-            && let Some(id) = content.block_id(&name)
-        {
+        let id = self
+            .bridge
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.block_id(&name))
+            })
+            .flatten();
+        if let Some(id) = id {
             // `player.block == null` at boot (`BlockId::AIR` is "no selection";
             // the command-mode gate needs it; PAR-0140).
             let selected = if id == mind_core::content::BlockId::AIR {
