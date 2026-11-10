@@ -132,14 +132,12 @@ impl MindEditor {
                     true
                 }
                 Err(error) => {
-                    self.last_error_key = Some("@editor.errorload".to_owned());
-                    self.last_error_message = Some(error.to_string());
+                    self.set_load_error(error);
                     false
                 }
             },
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 false
             }
         }

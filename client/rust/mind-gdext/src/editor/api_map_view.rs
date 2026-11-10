@@ -123,26 +123,11 @@ impl MindEditor {
         if tool == EditorTool::Line {
             return true;
         }
-        let Some(content) = self.content.as_ref() else {
+        let Some(()) = self.with_world(|editor, world, content| {
+            mind_core::editor::tool::touched(editor, tool, world, content, tile_x, tile_y);
+        }) else {
             return false;
         };
-        {
-            let mut world = WorldEditorGrid::new(
-                &mut self.grid,
-                content,
-                &mut self.ecs.0,
-                &self.hooks,
-                &self.render,
-            );
-            mind_core::editor::tool::touched(
-                &mut self.editor,
-                tool,
-                &mut world,
-                content,
-                tile_x,
-                tile_y,
-            );
-        }
         if !tool.draggable() {
             self.editor.flush_op();
         }
@@ -161,26 +146,19 @@ impl MindEditor {
         if tool.drag_resets_saved((x1, y1), (x2, y2)) {
             self.editor.saved = false;
         }
-        let Some(content) = self.content.as_ref() else {
+        if self.content().is_none() {
             return false;
-        };
+        }
         let mut points: Vec<(i32, i32)> = Vec::new();
         mind_core::world::raycast::raycast_each(x1, y1, x2, y2, |x, y| {
             points.push((x, y));
             false
         });
-        {
-            let mut world = WorldEditorGrid::new(
-                &mut self.grid,
-                content,
-                &mut self.ecs.0,
-                &self.hooks,
-                &self.render,
-            );
+        let _ = self.with_world(|editor, world, content| {
             for (x, y) in points {
-                mind_core::editor::tool::touched(&mut self.editor, tool, &mut world, content, x, y);
+                mind_core::editor::tool::touched(editor, tool, world, content, x, y);
             }
-        }
+        });
         true
     }
 

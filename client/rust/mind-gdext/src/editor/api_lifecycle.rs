@@ -14,21 +14,14 @@ impl MindEditor {
     #[func]
     pub fn begin_new(&mut self, width: i32, height: i32) -> bool {
         self.mark_tiles_changed();
-        let Some(content) = self.content.as_ref() else {
-            return false;
-        };
         let width = width.clamp(1, 16_383);
         let height = height.clamp(1, 16_383);
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        self.editor
-            .begin_edit_size(&mut world, content, width, height);
-        self.editor.adopt_world(&mut world);
+        let Some(()) = self.with_world(|editor, world, content| {
+            editor.begin_edit_size(world, content, width, height);
+            editor.adopt_world(world);
+        }) else {
+            return false;
+        };
         self.file = None;
         self.clear_error();
         true
@@ -43,8 +36,7 @@ impl MindEditor {
         let header = match MapIo::create_map(&fs, &path, true) {
             Ok(header) => header,
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 return false;
             }
         };
@@ -87,8 +79,7 @@ impl MindEditor {
         let bytes = match fs.read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 return false;
             }
         };
@@ -128,20 +119,13 @@ impl MindEditor {
     #[func]
     pub fn resize_map(&mut self, width: i32, height: i32, shift_x: i32, shift_y: i32) -> bool {
         self.mark_tiles_changed();
-        let Some(content) = self.content.as_ref() else {
-            return false;
-        };
         let width = width.clamp(1, 16_383);
         let height = height.clamp(1, 16_383);
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        self.editor
-            .resize(&mut world, content, width, height, shift_x, shift_y);
+        let Some(()) = self.with_world(|editor, world, content| {
+            editor.resize(world, content, width, height, shift_x, shift_y);
+        }) else {
+            return false;
+        };
         true
     }
 }

@@ -23,20 +23,17 @@ impl MindEditor {
         let value: serde_json::Value = match serde_json::from_str(&json.to_string()) {
             Ok(value) => value,
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 return false;
             }
         };
         let Some(items) = value.as_array() else {
-            self.last_error_key = Some("@editor.errorload".to_owned());
-            self.last_error_message = Some("spawns must be an array".to_owned());
+            self.set_load_error("spawns must be an array");
             return false;
         };
         for item in items {
             if let Err(error) = mind_core::game::spawn_group::SpawnGroup::from_json(item) {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error);
+                self.set_load_error(error);
                 return false;
             }
         }
@@ -67,14 +64,12 @@ impl MindEditor {
                     true
                 }
                 Err(error) => {
-                    self.last_error_key = Some("@editor.errorload".to_owned());
-                    self.last_error_message = Some(error.to_string());
+                    self.set_load_error(error);
                     false
                 }
             },
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 false
             }
         }
@@ -84,7 +79,7 @@ impl MindEditor {
     /// and the health sort; icons are omitted.
     #[func]
     pub fn wave_units_json(&self) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let rows: Vec<serde_json::Value> = content
@@ -103,7 +98,7 @@ impl MindEditor {
     /// `WaveInfoDialog.showEffects`: the status-effect names (`content.statusEffects()`).
     #[func]
     pub fn wave_effects_json(&self) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let names: Vec<&str> = content
@@ -159,7 +154,7 @@ impl MindEditor {
     #[func]
     pub fn wave_graph(&self, from: i64, to: i64) -> VarDictionary {
         use mind_core::editor::wave_graph::{WaveGraphData, next_step};
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return dict(vec![("from", from.to_variant()), ("to", to.to_variant())]);
         };
         let groups = parse_spawn_groups(self.editor.tags.get("spawns").map(String::as_str));
