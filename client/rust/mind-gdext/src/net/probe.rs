@@ -60,22 +60,22 @@ impl MindNet {
         let Some((name, color)) = self.desired_identity.clone() else {
             return false;
         };
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        if !connector.is_connected() {
-            return false;
-        }
-        let mut ok = true;
-        if let Err(error) = connector.set_username(&name) {
-            log::warn!("MindNet.set_username failed: {error}");
-            ok = false;
-        }
-        if let Err(error) = connector.set_color(color) {
-            log::warn!("MindNet.set_color failed: {error}");
-            ok = false;
-        }
-        ok
+        self.with_connector(|connector| {
+            if !connector.is_connected() {
+                return false;
+            }
+            let mut ok = true;
+            if let Err(error) = connector.set_username(&name) {
+                log::warn!("MindNet.set_username failed: {error}");
+                ok = false;
+            }
+            if let Err(error) = connector.set_color(color) {
+                log::warn!("MindNet.set_color failed: {error}");
+                ok = false;
+            }
+            ok
+        })
+        .unwrap_or(false)
     }
 
     /// Normalizes `address` (`host[:port][/db]`, scheme optional) to the

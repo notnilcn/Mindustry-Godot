@@ -111,24 +111,24 @@ impl MindNet {
         .to_bytes();
         payload.extend_from_slice(&save_bytes);
         let payload_len = payload.len();
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        match connector.publish_snapshot(
-            match_id,
-            SnapshotKind::Dynamic,
-            SNAPSHOT_FORMAT,
-            mind_core::constants::CHECKSUM_VERSION,
-            command_id,
-            sim_tick,
-            checksum,
-            &hosted.map_id,
-            hosted.map_seed,
-            0,
-            &hosted.build_id,
-            hosted.content_hash,
-            payload,
-        ) {
+        self.with_connector(|connector| {
+            connector.publish_snapshot(
+                match_id,
+                SnapshotKind::Dynamic,
+                SNAPSHOT_FORMAT,
+                mind_core::constants::CHECKSUM_VERSION,
+                command_id,
+                sim_tick,
+                checksum,
+                &hosted.map_id,
+                hosted.map_seed,
+                0,
+                &hosted.build_id,
+                hosted.content_hash,
+                payload,
+            )
+        })
+        .map(|result| match result {
             Ok(()) => {
                 log::info!(
                     "MindNet: snapshot published for match {match_id} ({payload_len} bytes)"
@@ -139,7 +139,8 @@ impl MindNet {
                 log::warn!("MindNet.publish_snapshot failed: {error}");
                 false
             }
-        }
+        })
+        .unwrap_or(false)
     }
 
     /// Reads a `GString`-returning method on the scene-wired `MindCampaign`.
