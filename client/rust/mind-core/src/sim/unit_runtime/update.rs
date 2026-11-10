@@ -1106,12 +1106,12 @@ pub(super) fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) 
     use bevy_ecs::query::With;
     let mut query = world
         .query_filtered::<(Entity, Option<&EntitySeq>), With<bullet::spawn::SpawnedByBullet>>();
-    let mut found: Vec<(u64, Entity)> = query
-        .iter(world)
-        .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity))
-        .collect();
-    found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
-    for (_, entity) in found {
+    let found = sorted_by_seq(
+        query
+            .iter(world)
+            .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity)),
+    );
+    for entity in found {
         // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`) for payload/
         // ability spawns (H09 T10); the runtime is out of the world here, so
         // the type name comes from the local one.

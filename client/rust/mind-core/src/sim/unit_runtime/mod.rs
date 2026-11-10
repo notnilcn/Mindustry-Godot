@@ -61,6 +61,7 @@ use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
 
 use super::Sim;
+use super::query::sorted_by_seq;
 use super::runtime::{RuntimeError, load_vanilla_content};
 
 /// First entity sequence allocated to live units/bullets.
@@ -371,24 +372,28 @@ impl UnitRuntime {
         let mut c = Checksummer::new();
         c.part(&self.grid.width());
         c.part(&self.grid.height());
-        let mut units: Vec<(u64, Entity)> = self
-            .units
-            .iter()
-            .copied()
-            .filter(|entity| world.get_entity(*entity).is_ok())
-            .map(|entity| {
-                (
-                    world
-                        .get::<EntitySeq>(entity)
-                        .map(|seq| seq.0)
-                        .unwrap_or(u64::MAX),
-                    entity,
-                )
-            })
-            .collect();
-        units.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in units {
-            c.part(&seq);
+        let units = sorted_by_seq(
+            self.units
+                .iter()
+                .copied()
+                .filter(|entity| world.get_entity(*entity).is_ok())
+                .map(|entity| {
+                    (
+                        world
+                            .get::<EntitySeq>(entity)
+                            .map(|seq| seq.0)
+                            .unwrap_or(u64::MAX),
+                        entity,
+                    )
+                }),
+        );
+        for entity in units {
+            c.part(
+                &world
+                    .get::<EntitySeq>(entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX),
+            );
             if let Some(pos) = world.get::<Pos>(entity) {
                 c.part(&pos.x);
                 c.part(&pos.y);
@@ -404,24 +409,28 @@ impl UnitRuntime {
                 c.part(&team.team);
             }
         }
-        let mut bullets: Vec<(u64, Entity)> = self
-            .bullets
-            .iter()
-            .copied()
-            .filter(|entity| world.get_entity(*entity).is_ok())
-            .map(|entity| {
-                (
-                    world
-                        .get::<EntitySeq>(entity)
-                        .map(|seq| seq.0)
-                        .unwrap_or(u64::MAX),
-                    entity,
-                )
-            })
-            .collect();
-        bullets.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in bullets {
-            c.part(&seq);
+        let bullets = sorted_by_seq(
+            self.bullets
+                .iter()
+                .copied()
+                .filter(|entity| world.get_entity(*entity).is_ok())
+                .map(|entity| {
+                    (
+                        world
+                            .get::<EntitySeq>(entity)
+                            .map(|seq| seq.0)
+                            .unwrap_or(u64::MAX),
+                        entity,
+                    )
+                }),
+        );
+        for entity in bullets {
+            c.part(
+                &world
+                    .get::<EntitySeq>(entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX),
+            );
             if let Some(pos) = world.get::<Pos>(entity) {
                 c.part(&pos.x);
                 c.part(&pos.y);

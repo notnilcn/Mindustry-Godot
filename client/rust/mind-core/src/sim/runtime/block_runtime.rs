@@ -9,6 +9,8 @@
 
 use super::*;
 
+use crate::sim::query::sorted_by_seq;
+
 /// The live building runtime attached to a [`Sim`].
 ///
 /// Owns the content registry (block defs, unlock state) and the per-team block
@@ -342,17 +344,18 @@ impl SimRuntime {
     /// and this is the runtime's own determinism gate.
     pub fn checksum(&self, world: &World) -> Checksum {
         let mut c = Checksummer::new();
-        let mut buildings: Vec<(u64, Entity)> = world
-            .iter_entities()
-            .filter_map(|entity_ref| {
-                entity_ref.get::<crate::entities::comp::Building>()?;
-                let seq = entity_ref.get::<crate::ecs::EntitySeq>()?.0;
-                Some((seq, entity_ref.id()))
-            })
-            .collect();
-        buildings.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in buildings {
-            c.part(&seq);
+        let buildings = sorted_by_seq(world.iter_entities().filter_map(|entity_ref| {
+            entity_ref.get::<crate::entities::comp::Building>()?;
+            let seq = entity_ref.get::<crate::ecs::EntitySeq>()?.0;
+            Some((seq, entity_ref.id()))
+        }));
+        for entity in buildings {
+            c.part(
+                &world
+                    .get::<crate::ecs::EntitySeq>(entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX),
+            );
             if let Some(building) = world.get::<crate::entities::comp::Building>(entity) {
                 c.part(&building.block.raw());
                 c.part(&building.rotation);

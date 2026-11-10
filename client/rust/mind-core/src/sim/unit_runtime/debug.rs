@@ -331,8 +331,7 @@ impl Sim {
                 .map_or(u64::MAX, |seq| seq.0);
             bosses.push((seq, entity));
         }
-        bosses.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        bosses.into_iter().map(|(_, entity)| entity).collect()
+        sorted_by_seq(bosses.into_iter())
     }
 
     /// World-pixel position of the player unit (`Player.x/y` mirror).

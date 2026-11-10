@@ -1,0 +1,24 @@
+// Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Determinism-safe read helpers shared by the opt-in sim runtimes: the
+//! `(EntitySeq, entity.index())` ordering every entity list must use, the
+//! `TeamComp`/`UnitTypeComp` lookups, the tile-to-world-pixel conversion and
+//! the plain squared-distance expression.
+//! Upstream: none (port-only; internal dedupe of existing sim code, so the
+//! bodies copy the original expressions verbatim).
+
+use bevy_ecs::entity::Entity;
+
+/// Sorts the collected `(seq, entity)` pairs by the exact
+/// `(seq, entity.index())` key the sim's determinism sorts use and returns the
+/// sorted entities.
+///
+/// The keys are unique in a world, so this stable `sort_by_key` and an
+/// `sort_unstable_by_key` with the same key produce the same order. Callers
+/// that fold the seq (the runtime checksums) read it back from the entity.
+pub(crate) fn sorted_by_seq(it: impl Iterator<Item = (u64, Entity)>) -> Vec<Entity> {
+    let mut items: Vec<(u64, Entity)> = it.collect();
+    items.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+    items.into_iter().map(|(_, entity)| entity).collect()
+}

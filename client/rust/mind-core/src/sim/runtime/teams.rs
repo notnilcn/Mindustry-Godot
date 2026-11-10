@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::sim::query::sorted_by_seq;
+
 impl Sim {
     /// `BuildingComp.changeTeam` for `Call.setTeams` (`BuildingComp.java`):
     /// sets the ECS team comps, moves the block in the team counter and
@@ -213,21 +215,14 @@ impl Sim {
 
     /// Live plan-07 buildings in `(EntitySeq, entity.index())` order.
     pub(super) fn live_buildings_by_seq(&self) -> Vec<Entity> {
-        let mut buildings: Vec<(u64, Entity)> = self
-            .ecs
-            .0
-            .iter_entities()
-            .filter_map(|entity_ref| {
-                entity_ref.get::<crate::entities::comp::Building>()?;
-                let seq = entity_ref
-                    .get::<crate::ecs::EntitySeq>()
-                    .map(|seq| seq.0)
-                    .unwrap_or(u64::MAX);
-                Some((seq, entity_ref.id()))
-            })
-            .collect();
-        buildings.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        buildings.into_iter().map(|(_, entity)| entity).collect()
+        sorted_by_seq(self.ecs.0.iter_entities().filter_map(|entity_ref| {
+            entity_ref.get::<crate::entities::comp::Building>()?;
+            let seq = entity_ref
+                .get::<crate::ecs::EntitySeq>()
+                .map(|seq| seq.0)
+                .unwrap_or(u64::MAX);
+            Some((seq, entity_ref.id()))
+        }))
     }
 
     /// Marks a building or unit dead; the next `resolve_deaths` pass destroys
