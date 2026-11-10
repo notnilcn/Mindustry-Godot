@@ -52,8 +52,10 @@ tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent 
   wait; `--history` shows recent runs. `MIND_CPU_QUEUE_DIR` overrides the state dir.
 - `tools/ci.sh`, `build.sh`, `pack.sh`, `parity.sh`, `pcam_parity.sh`, `export.sh`,
   `regen_goldens.sh`, `server/build.sh` and `everything_you_need.sh` re-exec through
-  the wrapper, so a direct `bash tools/build.sh` also queues. Nested calls detect
-  `MIND_CPU_QUEUE_HELD` and never take the lock twice.
+  the wrapper, so a direct `bash tools/build.sh` also queues. Nested *scripts*
+  detect `MIND_CPU_QUEUE_HELD` and never take the lock twice; a nested
+  `run-cpu-intensive-task.sh` call still does, and deadlocks (see **Parallel
+  subagents**).
 - Not queued: an interactive `tools/godot.sh` editor/game session (it would hold the
   lock for hours) and `tools/mcp-smoke.sh` (needs the editor). Still do not run
   headless Godot checks or MCP batches alongside a build; stop the editor before a
@@ -64,6 +66,31 @@ tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent 
   [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) and
   [`docs/CI-FIXER-PROMPT.md`](docs/CI-FIXER-PROMPT.md). The opencode agent is
   [`.opencode/agents/ci-fixer.md`](.opencode/agents/ci-fixer.md).
+
+### Parallel subagents: scoped checks, one wave sweep
+
+The lock makes heavy work safe, not free: a fresh worktree has no
+`client/rust/target/`, so its first check compiles the whole dependency graph.
+
+- **Subagents run scoped checks only**, in their own worktree: `--cargo-fmt`,
+  `--cargo-check -p <crate> --all-targets` (or `--workspace` for a mechanical
+  split), scoped clippy, `--cargo-test -p <crate> [filter]`, plus the determinism
+  checks for sim packages. They do not run `--ci`, `--build`, `--pack`,
+  `--export`, `--stdb`, `--bench`, `--parity`, `--godot`, `--goldens` without
+  `--check`, or an unapproved `--cmd`.
+- **The orchestrator runs one wave sweep**, after every package reports and before
+  merging: one `run --cmd` acquisition, one row per worktree (branch, head, stage,
+  rc, log). The row is the attribution — route the failure to the agent that owns
+  that worktree; do not bisect the merged wave and never edit another agent's
+  worktree. A branch with its own commits cannot be fast-forwarded: the owning
+  agent rebases.
+- **Share one `CARGO_TARGET_DIR` across the wave** instead of copying `target/`
+  (24G per worktree, and hardlink clones corrupt cargo's in-place writes). Do not
+  nest `run` calls inside the sweep — the wrapper takes the lock on entry, so a
+  nested call deadlocks; call `cargo` directly under the one acquisition.
+
+Details: [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) "Wave sweeps" and
+[`docs/PLANS/01-RULES.md`](docs/PLANS/01-RULES.md) §2.
 
 ## Close what you open
 

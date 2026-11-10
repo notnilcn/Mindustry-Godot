@@ -24,6 +24,10 @@ cd ../mg-<ID>
 bash tools/sync_scenarios.sh      # client/scenarios/ is a git-ignored mirror; some tests and run-all read it
 ```
 
+- **Pin a branch; never `--detach` a package worktree.** A detached worktree has no branch for
+  the orchestrator to merge or fast-forward, and its commits survive only in the reflog. If a
+  worktree already exists detached (the earlier `mg-w*` ones do), pin it before use:
+  `git -C ../mg-<ID> branch refactor/<ID> HEAD`, and name that branch in your report.
 - Do all work in `$WT`. Never edit `$MAIN`, except that the orchestrator merges.
 - Commit at least once per destination file group (small commits make review and bisect easy).
   Message format: `refactor(<area>): <what> [<ID>]`, for example
@@ -34,15 +38,61 @@ bash tools/sync_scenarios.sh      # client/scenarios/ is a git-ignored mirror; s
 - If `main` moved and your package's files changed upstream, rebase onto `main` before you
   report: `git fetch` is not needed (same repo), use `git rebase main`. Re-run your checks after.
 
+**Shared artifact cache (orchestrator, once per wave).** A fresh worktree has no
+`client/rust/target/`, so its first `cargo` call compiles the whole dependency graph — 123 crates
+for `mind-core` alone, ~24G of artifacts once warm. Point every worktree of the wave at one target
+directory before dispatching the packages:
+
+```bash
+export CARGO_TARGET_DIR="$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/mindustry-wave-target"
+```
+
+Each agent prefixes its queued commands with the same value (`CARGO_TARGET_DIR=… run --cargo-test …`),
+because a fresh shell drops the orchestrator's export; `run` forwards the environment. The first
+check pays the cold build once for the whole campaign, and every later check reuses the dependency
+graph and recompiles only the workspace crates, whose build cargo keys to the checkout path
+(measured: 3 crates in 26 s in a second worktree, with sources identical to `main`). Never copy or
+hardlink-clone another checkout's `target/`: ext4 has no reflink on this volume, so a copy is a real
+24G write per worktree, and cargo rewrites artifact and fingerprint files in place, so a hardlinked
+inode can corrupt the tree it was cloned from. Give parity stages their own `PARITY_OUT_DIR`,
+because the default lives inside the target dir. Delete the shared directory when the campaign
+ends; it sits outside every checkout, so removing a worktree does not reclaim it.
+
 ## §2 One heavy job at a time, and close what you open
 
-- Run every `cargo`, Godot, pack or golden command through `run` (see the root `AGENTS.md`).
-  Never call `cargo` directly. A second agent's build will wait for yours; that is expected.
-- **Scoped clippy.** `run --cargo-clippy` always lints the whole workspace. For a one-crate lint use
-  `run --cmd -- cargo clippy --manifest-path client/rust/Cargo.toml -p <crate> --all-targets -- -D warnings`.
-- **Do not run** `--ci` and do not run Godot gates in your worktree. Generated assets are
-  git-ignored, so a fresh worktree cannot run them. The orchestrator runs the Godot gates
-  after merging.
+The queue serializes heavy work; it does not make it free, and it does not by itself say which
+agent broke a build. Two rules give both.
+
+**Run only the checks your package needs, from your worktree.** Your worktree is the attribution
+boundary: the orchestrator routes a red result back to the worktree it came from, so a red result
+you report is one you own.
+
+| You may run, from `$WT` | Form |
+|---|---|
+| format | `run --cargo-fmt`, then `run --cargo-fmt -- --check` |
+| compile | `run --cargo-check -p <crate> --all-targets` |
+| cross-crate compile (mechanical splits) | `run --cargo-check --workspace --all-targets` |
+| lint | `run --cmd -- cargo clippy --manifest-path client/rust/Cargo.toml -p <crate> --all-targets -- -D warnings` |
+| tests | `run --cargo-test -p <crate> [filter]` (mind-gdext: `-p mind-gdext --lib`) |
+| determinism (§5 packages, once at the end) | `run --cargo-run -q -p mind-headless -- parity goldens`, `… -- run-all --tier T0`, `run --goldens --check` |
+
+- Run every `cargo`, Godot, pack or golden command through `run` (see the root `AGENTS.md`),
+  from `$WT`. Never call `cargo` directly. A second agent's build will wait for yours; that is
+  expected.
+- **Workspace check is allowed; workspace lint and workspace test are not.** A moved or narrowed
+  item breaks importers in other crates, so `--cargo-check --workspace --all-targets` is part of a
+  mechanical split (the packages that need it say so). Clippy and test stay per-crate: workspace
+  clippy and workspace tests are the sweep's job, and running them here moves a failure after the
+  merge, where no worktree owns it.
+- **Scoped clippy.** `run --cargo-clippy` lints the whole workspace. For a one-crate lint use the
+  `--cmd` form in the table; that line is the only `--cmd` a package runs.
+- **Do not run** `--ci`, `--build`, `--pack`, `--export`, `--stdb`, `--bench`, `--parity`,
+  `--pcam-parity`, `--godot`, `--goldens` without `--check`, or any other `--cmd`. Those belong to
+  the **wave sweep**: the orchestrator runs them once per wave, after every package has reported
+  and before merging, so a failure arrives with a worktree attached to it. The queue decides *when*
+  a job runs, not *who owns* its failure.
+- **Do not run Godot gates in your worktree at all.** Generated assets are git-ignored, so a fresh
+  worktree cannot run them; the orchestrator runs them in `$MAIN` after the merge.
 - Close everything you start (root `AGENTS.md` "Close what you open"). A turn that leaves a
   process running is incomplete.
 

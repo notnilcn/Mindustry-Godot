@@ -109,8 +109,10 @@ wrapper when they are not already under the lock:
 
 So `bash tools/build.sh` is safe too — it waits like any other task. Nested
 calls (`ci.sh` → `build.sh` → `pack.sh`) inherit `MIND_CPU_QUEUE_HELD` and do
-not try to take the lock again, which would deadlock. `--help` bypasses the
-queue.
+not try to take the lock again, which would deadlock. That re-entrancy lives in
+`cpu-guard.sh`, not in the wrapper: `run-cpu-intensive-task.sh` itself always
+takes the lock, so a nested wrapper call hangs (see **Wave sweeps**). `--help`
+bypasses the queue.
 
 `MIND_CPU_QUEUE_DISABLE=1` runs a task without the lock. It exists only to debug
 the queue itself; it does not excuse parallel heavy work.
@@ -126,6 +128,128 @@ the queue itself; it does not excuse parallel heavy work.
 
 If a heavy task is not in the list above, add the guard and a wrapper task
 rather than running it bare (see **Extending this**).
+
+## Wave sweeps (parallel subagents)
+
+A refactor wave dispatches 4–6 package agents, each in its own worktree
+([`docs/PLANS/00-README.md`](PLANS/00-README.md)). The queue stops them from competing; it does
+not make them cheap, and it does not by itself say *which* agent broke a build. Two rules give
+both.
+
+### Agents stay scoped, the orchestrator sweeps
+
+A package agent runs only the checks its package needs — per-crate compile, lint and tests, plus the
+cross-crate `--cargo-check --workspace` a mechanical split requires — in its own worktree, through
+the wrapper ([`docs/PLANS/01-RULES.md`](PLANS/01-RULES.md) §2). The broad, expensive and
+asset-dependent stages are the **wave sweep**: one `run --cmd` call that takes the lock once,
+walks the wave's worktrees in ID order, and prints one result row per worktree.
+
+One acquisition, not six, for two reasons. The queue is a plain `flock` with no priority and no
+reservation: six independent orchestrator calls compete with the agents still looping, and
+`--timeout` turns a long wait into exit `75`, which reads as "busy" rather than "queued". And a
+single acquisition has a deterministic order, so the rows are comparable.
+
+**Nested `run` calls deadlock; do not "fix" the driver that way.** The wrapper always takes the
+flock on entry. `MIND_CPU_QUEUE_HELD` only stops `cpu-guard.sh` from re-execing a heavy script —
+`run-cpu-intensive-task.sh` itself never checks it, so a second `run` inside `--cmd` waits for the
+lock its own parent holds (verified: the inner call exits `75` on its timeout while the outer holds
+the lock). Inside the single acquisition, call `cargo` directly: the lock is already held, and the
+wrapper has exported `PATH` and `MIND_CPU_QUEUE_HELD`.
+
+```bash
+# orchestrator, from $MAIN, after every package of the wave has reported
+tools/run-cpu-intensive-task.sh --cmd -- bash -c '
+set -u
+mkdir -p /tmp/wave-sweep
+run_stage() {
+  label=$1; shift
+  if ( cd "$wt" && "$@" ) >>"$log" 2>&1; then
+    printf "%-6s %-12s pass\n" "$id" "$label"
+  else
+    printf "%-6s %-12s FAIL   %s\n" "$id" "$label" "$log"
+  fi
+}
+for wt in ../mg-*; do
+  id=${wt##*/}; log=/tmp/wave-sweep/$id.log; : >"$log"
+  printf "== %s %s %s\n" "$id" \
+    "$(git -C "$wt" rev-parse --abbrev-ref HEAD)" "$(git -C "$wt" rev-parse --short HEAD)"
+  run_stage sync          bash tools/sync_scenarios.sh
+  run_stage fmt           cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check
+  run_stage check         cargo check --manifest-path client/rust/Cargo.toml --workspace --all-targets
+  run_stage test-core     cargo test --manifest-path client/rust/Cargo.toml -p mind-core
+  run_stage test-headless cargo test --manifest-path client/rust/Cargo.toml -p mind-headless
+  run_stage test-gdext    cargo test --manifest-path client/rust/Cargo.toml -p mind-gdext --lib
+done'
+```
+
+With the shared `CARGO_TARGET_DIR` from **Warm artifact caches** exported in the same shell, the
+first worktree pays the cold dependency build and the rest reuse it; without it, every row starts
+from an empty target dir.
+
+| Stage | Catches | Cost |
+|---|---|---|
+| `sync` | a stale `client/scenarios/` mirror (git-ignored, per worktree) | cheap |
+| `fmt` | formatting drift | cheap |
+| `clippy` (opt-in) | lint fallout in crates the package did not touch | the slowest stage by far; add it only when the wave is large or lint fallout is the known risk — otherwise the post-merge wave gate runs it once in `main` |
+| `check` | cross-crate compile breakage from moved or narrowed items | the main reason the sweep exists |
+| `test-core` / `test-headless` / `test-gdext` | behaviour and regressions outside the package's own filter | the three crates the wave gate tests, run pre-merge and per worktree |
+
+**Clippy is opt-in for a reason.** It is the one stage whose cost is dominated by the per-checkout
+rebuild (its artifacts are keyed to the checkout path like the workspace crates), so sweeping it
+across six worktrees can cost more than every other stage together. Without it the sweep still
+attributes compile and test breaks; lint fallout lands in the post-merge wave gate, where the crate
+and file are named and one run covers the whole wave.
+
+For a package that touches `mind-core/src/{sim,game,world,combat,ai}`, add the determinism stages
+to the same loop: `cargo run -q -p mind-headless -- parity goldens`,
+`cargo run -q -p mind-headless -- run-all --tier T0`, and `bash tools/regen_goldens.sh --check`. For
+S11/H07/H08 add `cargo test -p mind-core --features msav-import`.
+
+### The row is the attribution
+
+The sweep turns "the wave is broken" into "`mg-S07`, stage `test`, see
+`/tmp/wave-sweep/mg-S07.log`". Merge the passing rows; route a failing row to the agent that owns
+that worktree.
+
+- **Do not bisect or replay the wave.** The worktree identity is the attribution; bisecting a
+  merged wave costs `log2(N)` toolchain runs and lands on the same commit.
+- **Do not fix another agent's worktree.** It may hold uncommitted work, a running job or a live
+  agent. Send the agent its base sha, the failing stage, the log tail and the repro command; it
+  rebases onto `main`, fixes, re-runs and reports. `git merge --ff-only` does not apply to a branch
+  that has its own commits, so "fast-forward the worktree" in practice means "the owning agent
+  rebases".
+- **Do not merge a failing package and fix forward**, unless the failure is a merge interaction
+  between two packages: then no single worktree owns it, and the fix belongs in a follow-up commit
+  on `main` with its own CI entry.
+
+### Warm artifact caches
+
+A fresh worktree has no `client/rust/target/`, so its first check compiles the whole dependency
+graph: 123 crates for `mind-core` alone, ~24G of artifacts once warm. Point every worktree of a
+wave at one target directory instead:
+
+```bash
+export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/mindustry-wave-target"
+```
+
+Measured on this checkout: a second worktree sharing that cache compiled 3 crates in 26 s, because
+every dependency artifact was reused. The workspace crates still recompile — cargo keys their build
+to the checkout path, not just the sources — but that is the per-package work you wanted anyway.
+
+- **Prefix the variable on every command** (`CARGO_TARGET_DIR=… run --cargo-test …`). A fresh
+  shell drops the export, and the wrapper forwards the environment. Cargo's own build lock is a
+  second guard; the queue already serializes the writes.
+- **`unset CARGO_TARGET_DIR` before the post-merge gate.** `tools/ci.sh` and its cargo stages
+  inherit the variable, so a gate started from the wave shell builds into the wave cache instead of
+  `main`'s warm `client/rust/target`. `tools/build.sh` is unaffected: it passes `--target-dir
+  client/bin/rust` explicitly.
+- **Never copy or hardlink-clone a `target/`.** There is no reflink on this ext4 volume, so a copy
+  is a real 24G write per worktree; and cargo rewrites artifact and fingerprint files in place, so
+  a hardlinked inode can corrupt the checkout it was cloned from.
+- **Give parity stages their own `PARITY_OUT_DIR`.** The default lives inside the target directory
+  and would otherwise be shared by every worktree.
+- **Delete the shared directory when the campaign ends.** It sits under `<git-common-dir>/`,
+  outside every checkout, so removing a worktree does not reclaim it.
 
 ## Batch model
 

@@ -20,9 +20,16 @@ agent that follows instructions literally: they name each file, item and check.
 A wave starts only after **every** package of the previous wave has merged into `main`.
 Exceptions are noted per package. The packages inside one wave own **disjoint files**, so any
 subset of a wave can run concurrently and merge in any order. The CPU queue
-(`tools/run-cpu-intensive-task.sh`) serializes builds across worktrees anyway. Run **at most 4–6
-agents at once**; more agents just queue behind the lock. Start with the campaign packages
-(listed first in each wave).
+(`tools/run-cpu-intensive-task.sh`) serializes builds across worktrees, so concurrency only buys
+wall clock while the checks stay scoped. Run **at most 4–6 agents at once**; more agents just queue
+behind the lock. Start with the campaign packages (listed first in each wave).
+
+**A wave closes with a sweep, not with a merge.** The orchestrator runs the broad gates over the
+wave's worktrees — one queue acquisition, one row per worktree — and merges only the rows that
+pass. A failing row goes back to the agent that owns that worktree, with the stage and the log; the
+row *is* the attribution, so nobody bisects a merged wave to find the same answer later. Rules:
+[`01-RULES.md`](01-RULES.md) §2. Mechanics: [`docs/CI-WORKFLOW.md`](../CI-WORKFLOW.md)
+"Wave sweeps".
 
 | Wave | Kind | Packages | Parallel? |
 |---|---|---|---|
@@ -132,15 +139,24 @@ touched: they are ABI.
 1. **Before W0:** make sure the user's in-flight work is committed or stashed by the user. Do
    not stash it yourself. Make sure `main` builds: run
    `tools/run-cpu-intensive-task.sh --cargo-check --workspace`.
-2. For each package: create its worktree (rules §1). Give the agent `01-RULES.md` plus the
-   package file. Wait for its report in `docs/PLANS/reports/<ID>.md`.
-3. Merge the branch into `main`: `git merge --no-ff refactor/<ID>`. On a conflict, a package
+2. For each package: create its worktree (rules §1), pin its branch, and point the wave at the
+   shared artifact cache (rules §1). Give the agent `01-RULES.md` plus the package file. Wait for
+   its report in `docs/PLANS/reports/<ID>.md`.
+3. **Wave sweep, before any merge.** Once every package in the wave has reported, run the broad
+   gates over the wave's worktrees in one queue acquisition and record one row per worktree
+   (branch, head, stage, pass/fail, log); the canonical loop is in
+   [`docs/CI-WORKFLOW.md`](../CI-WORKFLOW.md) "Wave sweeps". Merge only the rows that pass. Send a
+   failing row back to its agent with the stage and the log: do not fix another agent's worktree,
+   and do not bisect the wave. A branch with its own commits cannot be fast-forwarded — the owning
+   agent rebases onto `main` and re-runs its checks.
+4. Merge the green branch into `main`: `git merge --no-ff refactor/<ID>`. On a conflict, a package
    broke the ownership matrix; send it back, do not hand-resolve. After the merge, run
-   `tools/run-cpu-intensive-task.sh --cargo-check --workspace`.
-4. Add the report's CI entry: `python3 tools/ci_pending.py add …`, copied from the report's
+   `tools/run-cpu-intensive-task.sh --cargo-check --workspace` to catch merge interactions.
+5. Add the report's CI entry: `python3 tools/ci_pending.py add …`, copied from the report's
    "CI_PENDING entry" block.
-5. After the **last merge of each wave**, run the wave gate in the main checkout, then remove the
-   worktrees (`git worktree remove ../mg-<ID>`):
+6. After the **last merge of each wave**, run the wave gate in the main checkout, then remove the
+   worktrees (`git worktree remove ../mg-<ID>`) and the shared wave target directory
+   (`<git-common-dir>/mindustry-wave-target`):
    ```bash
    tools/run-cpu-intensive-task.sh --cargo-fmt -- --check
    tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings
