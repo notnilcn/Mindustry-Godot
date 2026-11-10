@@ -4,6 +4,7 @@
 //! The map play dialog controller. Filled by S03 (docs/PLANS).
 //! Upstream: ui/dialogs/MapPlayDialog.java
 
+use crate::gdutil::variant::parse_object;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit::widgets::factory;

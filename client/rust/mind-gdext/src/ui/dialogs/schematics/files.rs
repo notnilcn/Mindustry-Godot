@@ -6,6 +6,7 @@
 
 use super::schematics_dialog::*;
 use crate::MindSimHost;
+use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit;
@@ -232,7 +233,7 @@ pub(super) fn schematic_label_lists(dialog: &MindDialog) -> Vec<Vec<String>> {
         .map(|row| {
             row_arr(row, "labels")
                 .iter_shared()
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
                 .collect()
         })
         .collect()

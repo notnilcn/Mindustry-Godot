@@ -5,9 +5,10 @@
 //! Upstream: none (port-only; shared helpers of the old batch_campaign2)
 
 use crate::MindPreview;
+use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit::widgets::factory;
-use crate::ui::kit::{self, MindLabel, styles};
+use crate::ui::kit::{self, styles};
 use godot::builtin::{Side, VarArray, VarDictionary, VariantType};
 use godot::classes::control::{MouseFilter, SizeFlags};
 use godot::classes::{
@@ -15,8 +16,6 @@ use godot::classes::{
     StyleBoxEmpty, StyleBoxFlat, Texture2D, TextureRect,
 };
 use godot::prelude::*;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -40,9 +39,7 @@ pub(in crate::ui::dialogs) const PREVIEW_PATH: &str = "/root/Spine/MindPreview";
 pub(in crate::ui::dialogs) const UI_ROOT_PATH: &str = "/root/Spine/Ui/UiRoot";
 
 /// A rich label's engine handle (text/color/alignment live on `RichTextLabel`).
-pub(in crate::ui::dialogs) fn rich(label: &Gd<MindLabel>) -> Gd<RichTextLabel> {
-    label.clone().upcast()
-}
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::rich;
 
 /// Reads a JSON string field (`""` when missing or null).
 pub(in crate::ui::dialogs) fn row_str(row: &VarDictionary, key: &str) -> String {
@@ -53,7 +50,7 @@ pub(in crate::ui::dialogs) fn row_str(row: &VarDictionary, key: &str) -> String 
 pub(in crate::ui::dialogs) fn row_opt_str(row: &VarDictionary, key: &str) -> Option<String> {
     row.get(key)
         .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| text_of(&value))
+        .map(|value| to_text_godot(&value))
 }
 
 /// Reads a JSON boolean field (`false` when missing).
@@ -78,7 +75,7 @@ pub(in crate::ui::dialogs) fn row_i64(row: &VarDictionary, key: &str) -> i64 {
 pub(in crate::ui::dialogs) fn row_i64_or(row: &VarDictionary, key: &str, default: i64) -> i64 {
     row.get(key)
         .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| int_of(&value))
+        .map(|value| to_i64_typed(&value))
         .unwrap_or(default)
 }
 
@@ -104,26 +101,6 @@ pub(in crate::ui::dialogs) fn row_rows(row: &VarDictionary, key: &str) -> Vec<Va
         .collect()
 }
 
-/// Parses a JSON object (`{}` on any other JSON shape).
-pub(in crate::ui::dialogs) fn parse_object(text: &str) -> VarDictionary {
-    if text.is_empty() {
-        return VarDictionary::new();
-    }
-    Json::parse_string(&gs(text))
-        .try_to::<VarDictionary>()
-        .unwrap_or_default()
-}
-
-/// Parses a JSON array (`[]` on any other JSON shape).
-pub(in crate::ui::dialogs) fn parse_array(text: &str) -> VarArray {
-    if text.is_empty() {
-        return VarArray::new();
-    }
-    Json::parse_string(&gs(text))
-        .try_to::<VarArray>()
-        .unwrap_or_default()
-}
-
 /// `JSON.stringify(object)`.
 pub(in crate::ui::dialogs) fn json_stringify(object: &VarDictionary) -> String {
     Json::stringify(&object.to_variant()).to_string()
@@ -139,76 +116,8 @@ pub(in crate::ui::dialogs) fn gs(text: impl AsRef<str>) -> GString {
     GString::from(text.as_ref())
 }
 
-/// GDScript `str(value)`.
-pub(in crate::ui::dialogs) fn text_of(value: &Variant) -> String {
-    match value.get_type() {
-        VariantType::NIL => String::new(),
-        VariantType::BOOL => {
-            if value.to::<bool>() {
-                String::from("true")
-            } else {
-                String::from("false")
-            }
-        }
-        VariantType::STRING => value
-            .try_to::<GString>()
-            .map(|text| text.to_string())
-            .unwrap_or_default(),
-        VariantType::STRING_NAME => value
-            .try_to::<StringName>()
-            .map(|text| text.to_string())
-            .unwrap_or_default(),
-        VariantType::INT => value
-            .try_to::<i64>()
-            .map(|number| number.to_string())
-            .unwrap_or_default(),
-        VariantType::FLOAT => value
-            .try_to::<f64>()
-            .map(format_godot_float)
-            .unwrap_or_default(),
-        _ => format!("{value}"),
-    }
-}
-
-/// GDScript `str(float)`: whole numbers keep the `.0` suffix.
-pub(in crate::ui::dialogs) fn format_godot_float(value: f64) -> String {
-    if value.is_finite() && value.fract() == 0.0 {
-        format!("{value:.1}")
-    } else {
-        format!("{value}")
-    }
-}
-
-/// GDScript `int(value)`: numbers, bools and numeric strings convert.
-pub(in crate::ui::dialogs) fn int_of(value: &Variant) -> i64 {
-    match value.get_type() {
-        VariantType::INT => value.try_to::<i64>().unwrap_or_default(),
-        VariantType::FLOAT => value
-            .try_to::<f64>()
-            .map(|number| number as i64)
-            .unwrap_or_default(),
-        VariantType::BOOL => {
-            if value.to::<bool>() {
-                1
-            } else {
-                0
-            }
-        }
-        VariantType::STRING | VariantType::STRING_NAME => {
-            text_of(value).trim().parse().unwrap_or_default()
-        }
-        _ => 0,
-    }
-}
-
 /// Calls a `MindUi` method when both the autoload and the method exist.
-pub(in crate::ui::dialogs) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
-    let mut ui = kit::ui()?;
-    if !ui.has_method(method) {
-        return None;
-    }
-    Some(ui.call(method, args))
-}
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::ui_call;
 
 /// Calls a `MindUi` method returning a bool (`false` when absent).
 pub(in crate::ui::dialogs) fn ui_bool(method: &str, args: &[Variant]) -> bool {
@@ -275,6 +184,23 @@ pub(in crate::ui::dialogs) fn open_dialog(name: &str, context: &VarDictionary) {
     );
 }
 
+/// Live `universe.getLaunchResources()` as `{item: amount}`.
+///
+/// Reads `MindCampaign.get_launch_resource_stacks` (the name-keyed stacks
+/// endpoint) and parses its JSON; `{}` when the facade is absent.
+pub(in crate::ui::dialogs) fn launch_resource_stacks(dialog: &mut MindDialog) -> VarDictionary {
+    let Some(mut campaign) = dialog.campaign_node() else {
+        return VarDictionary::new();
+    };
+    if !campaign.has_method("get_launch_resource_stacks") {
+        return VarDictionary::new();
+    }
+    let text = campaign
+        .call("get_launch_resource_stacks", &[])
+        .to::<GString>();
+    crate::gdutil::variant::parse_object(&text.to_string())
+}
+
 /// The live map registry node (`None` outside the game scene).
 pub(in crate::ui::dialogs) fn preview_node() -> Option<Gd<MindPreview>> {
     kit::node(PREVIEW_PATH)?.try_cast::<MindPreview>().ok()
@@ -306,6 +232,32 @@ pub(in crate::ui::dialogs) fn in_game() -> bool {
         return false;
     }
     host.call("get_state", &[]).to::<GString>() != "menu"
+}
+
+/// `Sector.isBeingPlayed`: the campaign's live sector is `planet_name`/`sector_id`.
+///
+/// Reads `MindCampaign.get_sector_state` and compares the campaign flag plus the
+/// planet/sector pair (`PlanetDialog` showStats / `playSelected` paths).
+pub(in crate::ui::dialogs) fn campaign_sector_is_playing(
+    dialog: &mut MindDialog,
+    planet_name: &str,
+    sector_id: i64,
+) -> bool {
+    let Some(mut campaign) = dialog.campaign_node() else {
+        return false;
+    };
+    if !campaign.has_method("get_sector_state") {
+        return false;
+    }
+    let Ok(state) = campaign
+        .call("get_sector_state", &[])
+        .try_to::<VarDictionary>()
+    else {
+        return false;
+    };
+    row_bool(&state, "campaign")
+        && row_str(&state, "planet") == planet_name
+        && row_i64_or(&state, "sector", -1) == sector_id
 }
 
 /// `control.input.useSchematic(s)` through `MindInput` (G08 T6b).
@@ -380,7 +332,22 @@ pub(in crate::ui::dialogs) fn connect_once(
     signal: &str,
     callable: &Callable,
 ) {
-    let meta = format!("_campaign2_{key}");
+    connect_once_prefixed(dialog, "_campaign2_", key, target, signal, callable);
+}
+
+/// [`connect_once`] with the dialog family's original meta-key prefix.
+///
+/// The prefix is part of each batch's UI ABI (`_campaign2_` here, `_batch_c_`
+/// for the planet page), so it stays a parameter instead of being unified.
+pub(in crate::ui::dialogs) fn connect_once_prefixed(
+    dialog: &mut MindDialog,
+    meta_prefix: &str,
+    key: &str,
+    target: &Gd<Node>,
+    signal: &str,
+    callable: &Callable,
+) {
+    let meta = format!("{meta_prefix}{key}");
     if dialog.base().has_meta(&meta) {
         return;
     }
@@ -396,60 +363,27 @@ pub(in crate::ui::dialogs) fn connect_once(
 ///
 /// The queue is drained from a `SceneTree.process_frame` connection installed
 /// by [`install_frame_tick`]; `MindDialog` owns no `_process` of its own.
-// A boxed one-shot closure; naming the alias would not make the type simpler.
-#[allow(clippy::type_complexity)]
-#[derive(Clone, Default)]
-pub(crate) struct Deferred(Rc<RefCell<Vec<Box<dyn FnMut()>>>>);
-
-impl Deferred {
-    pub(in crate::ui::dialogs) fn push(&self, action: impl FnMut() + 'static) {
-        self.0.borrow_mut().push(Box::new(action));
-    }
-
-    pub(in crate::ui::dialogs) fn drain(&self) {
-        let queued: Vec<Box<dyn FnMut()>> = self.0.borrow_mut().drain(..).collect();
-        for mut action in queued {
-            action();
-        }
-    }
-}
+pub(crate) use crate::ui::dialogs::common::defer::Deferred;
 
 /// Installs the per-frame hook once (deferred queue drain + `tick`).
+///
+/// Keeps the campaign batch's original meta key (`_campaign2_frame_<key>`) and
+/// callable name (`campaign2_frame`); `batch_campaign2.rs` re-exports this and
+/// `editor/editor_maps.rs` / `logic/canvas_edit.rs` call it (RULES §4).
 pub(crate) fn install_frame_tick(
     dialog: &mut MindDialog,
     key: &str,
     deferred: Deferred,
-    mut tick: impl FnMut() + 'static,
+    tick: impl FnMut() + 'static,
 ) {
-    let mut tree = dialog.base().get_tree();
-    let meta = format!("_campaign2_frame_{key}");
-    if dialog.base().has_meta(&meta) {
-        return;
-    }
-    // The connection outlives a dialog freed while the tree is alive (editor
-    // dialogs, teardown), so it must never touch the node again: the guard runs
-    // before the queued actions and the tick, and drops the connection.
-    let dialog_gd = dialog.to_gd();
-    let tree_for = tree.clone();
-    let callable_slot: Rc<RefCell<Option<Callable>>> = Rc::new(RefCell::new(None));
-    let slot_for = callable_slot.clone();
-    let callable = Callable::from_fn("campaign2_frame", move |_args: &[&Variant]| {
-        if !dialog_gd.is_instance_valid() {
-            if let Some(entry) = slot_for.borrow_mut().take() {
-                let mut tree = tree_for.clone();
-                if tree.is_connected("process_frame", &entry) {
-                    tree.disconnect("process_frame", &entry);
-                }
-            }
-            return Variant::nil();
-        }
-        deferred.drain();
-        tick();
-        Variant::nil()
-    });
-    *callable_slot.borrow_mut() = Some(callable.clone());
-    let _ = tree.connect("process_frame", &callable);
-    dialog.base_mut().set_meta(&meta, &true.to_variant());
+    crate::ui::dialogs::common::defer::install_frame_tick(
+        dialog,
+        "_campaign2_frame_",
+        "campaign2_frame",
+        key,
+        deferred,
+        tick,
+    );
 }
 
 /// `_t("@key")` with a fallback when the bundle has no entry.

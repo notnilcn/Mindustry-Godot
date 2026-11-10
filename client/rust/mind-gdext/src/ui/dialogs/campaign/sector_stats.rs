@@ -5,6 +5,7 @@
 //! Upstream: ui/dialogs/PlanetDialog.java (showStats)
 
 use super::util::*;
+use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
@@ -94,7 +95,7 @@ impl DialogController for SectorStatsDialog {
         let planet = dialog.context_string("planet").to_string();
         let sector_id = dialog
             .context_value("sector")
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(-1);
         let row = sector_stats_find_row(dialog, &planet, sector_id);
         {
@@ -173,7 +174,7 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         let mut resource_row = HBoxContainer::new_alloc();
         resource_row.add_theme_constant_override("separation", 3);
         for resource in resources.iter_shared() {
-            let name = text_of(&resource);
+            let name = to_text_godot(&resource);
             let Some(texture) = content_texture(&name) else {
                 continue;
             };
@@ -237,9 +238,9 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
             let mut values = entry.iter_shared();
             let content_name = values
                 .next()
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
                 .unwrap_or_default();
-            let amount = values.next().map(|value| int_of(&value)).unwrap_or(0);
+            let amount = values.next().map(|value| to_i64_typed(&value)).unwrap_or(0);
             let cell = sector_stats_stored_cell(&content_name, amount);
             stored_grid.bind_mut().add(&cell);
             index += 1;
@@ -250,7 +251,7 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         root.bind_mut().add(&stored_grid).pad_left(10.0).left();
         root.bind_mut().row();
     }
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     // `abandonSectorConfirm` button, shown for sectors with a base.
     if row_bool(&data, "has_base") {
         let mut abandon = factory::icon_button(
@@ -318,12 +319,12 @@ fn sector_stats_stat_section(
             let content_name = cell
                 .iter_shared()
                 .next()
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
                 .unwrap_or_default();
             let amount = cell
                 .iter_shared()
                 .nth(1)
-                .map(|value| int_of(&value))
+                .map(|value| to_i64_typed(&value))
                 .unwrap_or(0);
             if let Some(texture) = content_texture(&content_name) {
                 // code-instantiated: one icon per rate row.
@@ -478,17 +479,5 @@ fn sector_stats_is_played(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStat
         let st = state.borrow();
         (st.planet.clone(), st.sector_id)
     };
-    let Some(mut campaign) = dialog.campaign_node() else {
-        return false;
-    };
-    if !campaign.has_method("get_sector_state") {
-        return false;
-    }
-    let value = campaign.call("get_sector_state", &[]);
-    let Ok(sector_state) = value.try_to::<VarDictionary>() else {
-        return false;
-    };
-    row_bool(&sector_state, "campaign")
-        && row_str(&sector_state, "planet") == planet
-        && row_i64_or(&sector_state, "sector", -1) == sector_id
+    campaign_sector_is_playing(dialog, &planet, sector_id)
 }
