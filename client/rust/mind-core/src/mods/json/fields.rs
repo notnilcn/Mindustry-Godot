@@ -31,7 +31,7 @@ pub(super) fn field_bool(object: &Map<String, Value>, key: &str) -> Option<bool>
 /// Applies the present `f32` fields to their targets, in array order.
 pub(super) fn set_f32s(object: &Map<String, Value>, fields: &mut [(&str, &mut f32)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_f32(object, *field) {
+        if let Some(value) = field_f32(object, field) {
             **target = value;
         }
     }
@@ -40,7 +40,7 @@ pub(super) fn set_f32s(object: &Map<String, Value>, fields: &mut [(&str, &mut f3
 /// Applies the present `i32` fields to their targets, in array order.
 pub(super) fn set_i32s(object: &Map<String, Value>, fields: &mut [(&str, &mut i32)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_i32(object, *field) {
+        if let Some(value) = field_i32(object, field) {
             **target = value;
         }
     }
@@ -49,7 +49,7 @@ pub(super) fn set_i32s(object: &Map<String, Value>, fields: &mut [(&str, &mut i3
 /// Applies the present boolean fields to their targets, in array order.
 pub(super) fn set_bools(object: &Map<String, Value>, fields: &mut [(&str, &mut bool)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_bool(object, *field) {
+        if let Some(value) = field_bool(object, field) {
             **target = value;
         }
     }
@@ -58,7 +58,7 @@ pub(super) fn set_bools(object: &Map<String, Value>, fields: &mut [(&str, &mut b
 /// Applies the present `f32` fields to their `Option` targets, in array order.
 pub(super) fn set_opt_f32s(object: &Map<String, Value>, fields: &mut [(&str, &mut Option<f32>)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_f32(object, *field) {
+        if let Some(value) = field_f32(object, field) {
             **target = Some(value);
         }
     }
@@ -67,7 +67,7 @@ pub(super) fn set_opt_f32s(object: &Map<String, Value>, fields: &mut [(&str, &mu
 /// Applies the present `i32` fields to their `Option` targets, in array order.
 pub(super) fn set_opt_i32s(object: &Map<String, Value>, fields: &mut [(&str, &mut Option<i32>)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_i32(object, *field) {
+        if let Some(value) = field_i32(object, field) {
             **target = Some(value);
         }
     }
@@ -76,7 +76,7 @@ pub(super) fn set_opt_i32s(object: &Map<String, Value>, fields: &mut [(&str, &mu
 /// Applies the present boolean fields to their `Option` targets, in array order.
 pub(super) fn set_opt_bools(object: &Map<String, Value>, fields: &mut [(&str, &mut Option<bool>)]) {
     for (field, target) in fields.iter_mut() {
-        if let Some(value) = field_bool(object, *field) {
+        if let Some(value) = field_bool(object, field) {
             **target = Some(value);
         }
     }
