@@ -5,6 +5,7 @@
 //! Upstream: none (port-only test support).
 
 use super::targeting::{block_targetable, target_flag_active};
+use super::update::apply_movement_damage;
 
 use super::*;
 use crate::content::BlockId;
