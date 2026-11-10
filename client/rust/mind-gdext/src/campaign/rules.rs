@@ -20,7 +20,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return rules_json;
         };
-        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+        let Some(def) = planet_def(registry, &planet.to_string()) else {
             return rules_json;
         };
         let record = mind_core::game::planet::Planet::from_def(registry, def, 0.0);
@@ -39,8 +39,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return 0;
         };
-        registry
-            .planet_by_name(&planet.to_string())
+        planet_def(registry, &planet.to_string())
             .map(|def| {
                 i64::from(mind_core::game::planet::Planet::from_def(registry, def, 0.0).default_env)
             })
@@ -84,11 +83,7 @@ impl MindCampaign {
     /// Current rules as JSON.
     #[func]
     pub fn get_rules_json(&self) -> GString {
-        GString::from(
-            serde_json::to_string(&self.session.rules)
-                .unwrap_or_else(|_| "{}".to_owned())
-                .as_str(),
-        )
+        to_gstring(&self.session.rules, "{}")
     }
 
     /// Applies a rules JSON blob; campaign edits require `allowEditRules`.
@@ -123,31 +118,27 @@ impl MindCampaign {
         }
         // Mirror into the runtime copy (`Call.setRules`); the facade session is
         // refreshed by the next pump.
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let runtime_is_campaign = runtime.session.is_campaign();
-                let accepted = match apply_set_rules(
-                    &mut runtime.session.rules,
-                    incoming,
-                    runtime_is_campaign,
-                    None,
-                    &mut self.epoch,
-                ) {
-                    Ok(_) => true,
-                    Err(error) => {
-                        log::warn!("set_rules_json: runtime rejected: {error}");
-                        false
-                    }
-                };
-                if accepted {
-                    runtime.rules_world_dirty = true;
+        let accepted = with_host_runtime(self.host(), |runtime| {
+            let runtime_is_campaign = runtime.session.is_campaign();
+            let accepted = match apply_set_rules(
+                &mut runtime.session.rules,
+                incoming,
+                runtime_is_campaign,
+                None,
+                &mut self.epoch,
+            ) {
+                Ok(_) => true,
+                Err(error) => {
+                    log::warn!("set_rules_json: runtime rejected: {error}");
+                    false
                 }
-                host.bind_mut().put_campaign_runtime(runtime);
-                return accepted;
+            };
+            if accepted {
+                runtime.rules_world_dirty = true;
             }
-        }
-        true
+            accepted
+        });
+        accepted.unwrap_or(true)
     }
 
     /// Writes one `CampaignRules` field for a planet and persists it
@@ -215,13 +206,7 @@ impl MindCampaign {
                 if applied.rts_swapped {
                     log::info!("campaign rule `{key}` triggered the RTS-AI swap");
                 }
-                if let Some(mut host) = self.host() {
-                    let taken = host.bind_mut().take_campaign_runtime();
-                    if let Some(mut runtime) = taken {
-                        runtime.session.rules = self.session.rules.clone();
-                        host.bind_mut().put_campaign_runtime(runtime);
-                    }
-                }
+                self.push_session_rules_to_runtime();
             }
             self.registry = Some(registry);
         }
@@ -241,11 +226,7 @@ impl MindCampaign {
             })
             .map(|planet| planet.campaign_rules.clone())
             .unwrap_or_default();
-        GString::from(
-            serde_json::to_string(&rules)
-                .unwrap_or_else(|_| "{}".to_owned())
-                .as_str(),
-        )
+        to_gstring(&rules, "{}")
     }
 
     /// Applies a `CampaignRules` JSON blob to the active planet, folds it into
@@ -296,13 +277,7 @@ impl MindCampaign {
             log::info!("campaign rules RTS-AI swap (controller reset is plan-11)");
         }
         // Mirror into the live runtime session; `runtime.campaign` stays as-is.
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                runtime.session.rules = self.session.rules.clone();
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-        }
+        self.push_session_rules_to_runtime();
         self.registry = Some(registry);
         self.persist();
         true

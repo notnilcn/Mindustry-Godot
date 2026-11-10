@@ -16,7 +16,7 @@ impl MindCampaign {
         // `GameStats::context_json` owns the key names + the `rules.waves` gate
         // (`GameOverDialog.java:78-84`); the dialog's `STAT_ROWS` mirror them.
         let value = self.session.stats.context_json(self.session.rules.waves);
-        GString::from(value.to_string().as_str())
+        value_gstring(&value)
     }
 
     /// `state.isCampaign()`: a live campaign sector is loaded (the same

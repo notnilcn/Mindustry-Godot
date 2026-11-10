@@ -5,7 +5,6 @@
 //! Upstream: core/src/mindustry/core/Control.java (update); core/src/mindustry/core/Logic.java (sectorCapture, runWave); game/Universe.java (runTurn); ui/fragments/HudFragment.java (toasts)
 
 use super::events::dispatch_event_rows;
-use super::service::save_service;
 use super::*;
 
 #[godot_api(secondary)]
@@ -14,41 +13,29 @@ impl MindCampaign {
     /// runtime when one is installed so events and bookkeeping stay in sync.
     #[func]
     pub fn capture_sector(&mut self) -> bool {
-        let captured = if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                // `SectorCaptureEvent` listener inputs: Java fires the event
-                // inside `Logic.sectorCapture` before `rules.attackMode =
-                // false`, so snapshot the attacking flag and the pre-capture
-                // loss counter first (finding #2).
-                let was_attack_mode = runtime.session.rules.attack_mode;
-                let buildings_destroyed = runtime.session.stats.buildings_destroyed;
-                let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
-                let ok = !events.is_empty();
-                for event in events {
-                    // Shared with `game_state_tick_system` (GAPS #68 /
-                    // finding #2): the `GameService` capture hooks
-                    // (`on_sector_capture`) and the `Logic.java:117-121`
-                    // derelict-wave-team queue now run on this path too, so a
-                    // capture here counts for achievements.
-                    if let mind_core::game::play::PlayEvent::SectorCapture { planet, .. } = &event {
-                        on_captured_sector(
-                            &mut runtime,
-                            *planet,
-                            was_attack_mode,
-                            buildings_destroyed,
-                        );
-                    }
-                    runtime.events.push(event);
+        let captured = with_host_runtime(self.host(), |runtime| {
+            // `SectorCaptureEvent` listener inputs: Java fires the event
+            // inside `Logic.sectorCapture` before `rules.attackMode =
+            // false`, so snapshot the attacking flag and the pre-capture
+            // loss counter first (finding #2).
+            let was_attack_mode = runtime.session.rules.attack_mode;
+            let buildings_destroyed = runtime.session.stats.buildings_destroyed;
+            let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
+            let ok = !events.is_empty();
+            for event in events {
+                // Shared with `game_state_tick_system` (GAPS #68 /
+                // finding #2): the `GameService` capture hooks
+                // (`on_sector_capture`) and the `Logic.java:117-121`
+                // derelict-wave-team queue now run on this path too, so a
+                // capture here counts for achievements.
+                if let mind_core::game::play::PlayEvent::SectorCapture { planet, .. } = &event {
+                    on_captured_sector(runtime, *planet, was_attack_mode, buildings_destroyed);
                 }
-                host.bind_mut().put_campaign_runtime(runtime);
-                ok
-            } else {
-                false
+                runtime.events.push(event);
             }
-        } else {
-            false
-        };
+            ok
+        })
+        .unwrap_or(false);
         if captured {
             self.pump_runtime();
             // `Logic.sectorCapture`'s "save, just in case": the capture
@@ -76,24 +63,15 @@ impl MindCampaign {
             return false;
         };
         // `ctx` reads the live session (runtime copy while a sector runs).
-        let ctx = if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            let ctx = taken.as_ref().map(|runtime| TurnContext {
-                current_planet: runtime.session.sector.map(|(planet, _)| planet),
-                current_sector: runtime.session.sector,
-                playing_rules: Some((
-                    runtime.session.rules.waves,
-                    runtime.session.rules.attack_mode,
-                )),
-                current_wave: runtime.session.wave,
-            });
-            if let Some(runtime) = taken {
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-            ctx
-        } else {
-            None
-        }
+        let ctx = with_host_runtime(self.host(), |runtime| TurnContext {
+            current_planet: runtime.session.sector.map(|(planet, _)| planet),
+            current_sector: runtime.session.sector,
+            playing_rules: Some((
+                runtime.session.rules.waves,
+                runtime.session.rules.attack_mode,
+            )),
+            current_wave: runtime.session.wave,
+        })
         .unwrap_or_default();
         let Some(report) = self.with_campaign_mut(|campaign, settings| {
             let turn = campaign.universe.turn;
@@ -113,14 +91,11 @@ impl MindCampaign {
                 event,
                 mind_core::game::universe::CampaignEvent::SectorInvasion { played: true, .. }
             )
-        }) && let Some(mut host) = self.host()
-        {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                mind_core::game::runtime::apply_played_invasions(&mut runtime, &report.events);
+        }) {
+            let _ = with_host_runtime(self.host(), |runtime| {
+                mind_core::game::runtime::apply_played_invasions(runtime, &report.events);
                 self.session.rules = runtime.session.rules.clone();
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
+            });
         }
         // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
         self.toast_campaign_events(&report.events);
@@ -135,13 +110,11 @@ impl MindCampaign {
     #[func]
     pub fn run_wave(&mut self) -> bool {
         let _ = run_wave_campaign(&mut self.session);
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let (_, spawn_index) = run_wave_campaign(&mut runtime.session);
-                host.bind_mut().put_campaign_runtime(runtime);
-                host.bind_mut().request_wave_spawn(spawn_index);
-            }
+        if let Some((_, spawn_index)) = with_host_runtime(self.host(), |runtime| {
+            run_wave_campaign(&mut runtime.session)
+        }) && let Some(mut host) = self.host()
+        {
+            host.bind_mut().request_wave_spawn(spawn_index);
         }
         true
     }
@@ -228,17 +201,16 @@ impl MindCampaign {
             // `GameService.storeStats` at the autosave boundary: the tracker's
             // stats/achievements land in the settings store alongside the
             // sector record (the exit persist flushes the file).
-            settings_hub::with_settings(|settings| {
-                let mut store = SettingsUnlockStore::new(settings);
-                save_service(&mut self.service, &mut store);
-            });
+            self.store_service();
             // `Saves.SaveSlot.save` -> `savePreview()` (autosave path).
-            self.write_live_slot_preview(&file);
-            host.bind_mut()
-                .request_save(GString::from(file.to_string_lossy().as_ref()), false);
-            self.saving_finish_tick = Some(tick.saturating_add(3));
+            self.queue_slot_save(
+                &mut host,
+                &file,
+                Some(tick.saturating_add(3)),
+                false,
+                "autosave queued",
+            );
             dirty = true;
-            log::info!("autosave queued (`{}`)", file.display());
         }
         if self.saving_finish_tick.is_some_and(|finish| tick >= finish) {
             self.saves.finish_saving();
@@ -274,11 +246,13 @@ impl MindCampaign {
                     // `control.saves.saveSector(state.rules.sector)` — the
                     // captured world is saved immediately, like the GameOver arm.
                     if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
-                        self.write_live_slot_preview(&file);
-                        host.bind_mut()
-                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
-                        self.saving_finish_tick = Some(tick.saturating_add(3));
-                        log::info!("capture save queued (`{}`)", file.display());
+                        self.queue_slot_save(
+                            &mut host,
+                            &file,
+                            Some(tick.saturating_add(3)),
+                            false,
+                            "capture save queued",
+                        );
                     }
                     self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
                 }
@@ -300,11 +274,13 @@ impl MindCampaign {
                     // game-over state immediately, so a later re-attack loads
                     // the destroyed base (PAR-0084).
                     if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
-                        self.write_live_slot_preview(&file);
-                        host.bind_mut()
-                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
-                        self.saving_finish_tick = Some(tick.saturating_add(3));
-                        log::info!("game-over save queued (`{}`)", file.display());
+                        self.queue_slot_save(
+                            &mut host,
+                            &file,
+                            Some(tick.saturating_add(3)),
+                            false,
+                            "game-over save queued",
+                        );
                     }
                     // `SaveVersion.writeMeta` persists the sector record next to
                     // the save (spawn position + prepared core state), which the
@@ -411,9 +387,7 @@ impl MindCampaign {
         if let Some(registry) = self.registry.as_ref() {
             // `Control.java:160-165`: each drained unlock shows the toast when
             // `showUnlock()` is true.
-            for content in &unlocked_content {
-                self.push_unlock_toast(registry, *content);
-            }
+            self.push_unlock_toasts(registry, &unlocked_content);
         }
 
         if !replacements.is_empty() {
@@ -523,18 +497,11 @@ impl MindCampaign {
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());
         }
-        for content in &unlocked {
-            // `Control.java:160-165` (`UnlockEvent`) half.
-            self.push_unlock_toast(registry, *content);
-        }
-        if unlocked
-            .iter()
-            .any(|content| content.type_ == ContentType::Block)
-        {
-            // `UnlockEvent` with a block: the palette rebuilds on capture
-            // unlocks (`PlacementFragment.java:92-96`).
-            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
-        }
+        // `Control.java:160-165` (`UnlockEvent`) half.
+        self.push_unlock_toasts(registry, &unlocked);
+        // `UnlockEvent` with a block: the palette rebuilds on capture unlocks
+        // (`PlacementFragment.java:92-96`).
+        self.emit_block_unlocked_if_any(&unlocked);
     }
 
     /// `HudFragment.showToast` for `CampaignEvent`s (`HudFragment.java:261-275`):
@@ -568,26 +535,18 @@ impl MindCampaign {
                 .map(|(planet, record)| record.display_name(planet))
                 .unwrap_or_else(|| sector.to_string());
             log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
-            let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+            let Some(mut hud) = self.autoload("MindHud") else {
                 continue;
             };
             let text = self
-                .base()
-                .get_node_or_null("/root/MindAssets")
-                .and_then(|mut assets| {
-                    assets
-                        .call(
-                            "bundle_format",
-                            &[
-                                GString::from("sector.attacked").to_variant(),
-                                PackedStringArray::from(vec![GString::from(name.as_str())])
-                                    .to_variant(),
-                            ],
-                        )
-                        .try_to::<GString>()
-                        .ok()
-                })
-                .unwrap_or_else(|| GString::from(format!("Sector {name} under attack!").as_str()));
+                .assets_string(
+                    "bundle_format",
+                    &[
+                        GString::from("sector.attacked").to_variant(),
+                        PackedStringArray::from(vec![GString::from(name.as_str())]).to_variant(),
+                    ],
+                )
+                .unwrap_or_else(|| format!("Sector {name} under attack!"));
             let _ = hud.call(
                 "push_toast",
                 &[text.to_variant(), GString::from("warning").to_variant()],

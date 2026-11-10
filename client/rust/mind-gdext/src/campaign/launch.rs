@@ -43,7 +43,7 @@ impl MindCampaign {
             })
             .unwrap_or_default();
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let mut out = serde_json::Map::new();
         for (index, item) in registry.items().iter().enumerate() {
@@ -54,7 +54,7 @@ impl MindCampaign {
                 out.insert(item.name.clone(), serde_json::json!(amount));
             }
         }
-        GString::from(serde_json::Value::Object(out).to_string().as_str())
+        value_gstring(&serde_json::Value::Object(out))
     }
 
     /// `Universe.updateLaunchResources` from the loadout editor's
@@ -134,18 +134,18 @@ impl MindCampaign {
         loadout_index: i32,
     ) -> GString {
         if launcher < 0 || destination < 0 {
-            return GString::from("{}");
+            return empty_object();
         }
         let planet_name = planet.to_string();
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let Some(planet_id) = self
             .campaign
             .as_ref()
             .and_then(|campaign| campaign.planet_id_by_name(&planet_name))
         else {
-            return GString::from("{}");
+            return empty_object();
         };
 
         // Snapshot the sector reads before the `universe` mutable borrow.
@@ -160,19 +160,19 @@ impl MindCampaign {
             from_preset,
         ) = {
             let Some(campaign) = self.campaign.as_ref() else {
-                return GString::from("{}");
+                return empty_object();
             };
             let Some(planet_record) = campaign.planet(planet_id) else {
-                return GString::from("{}");
+                return empty_object();
             };
             let Some(planet_def) = registry.planet(planet_id) else {
-                return GString::from("{}");
+                return empty_object();
             };
             let (Some(launcher_sector), Some(destination_sector)) = (
                 planet_record.sector(launcher as u16),
                 planet_record.sector(destination as u16),
             ) else {
-                return GString::from("{}");
+                return empty_object();
             };
             // `Core.bundle.format("launch.from", sector.name())`
             // (`LaunchLoadoutDialog.java:165`): one display-name implementation.
@@ -223,7 +223,7 @@ impl MindCampaign {
             .or(default_index)
             .unwrap_or(0);
         let Some(selected) = schematics.all.get(selected_index) else {
-            return GString::from("{}");
+            return empty_object();
         };
 
         // `cap = (int)(sector.planet.launchCapacityMultiplier *
@@ -248,7 +248,7 @@ impl MindCampaign {
         let mut resources: indexmap::IndexMap<String, i32> = indexmap::IndexMap::new();
         {
             let Some(campaign) = self.campaign.as_mut() else {
-                return GString::from("{}");
+                return empty_object();
             };
             let launch_seq = settings_hub::with_settings(|settings| {
                 campaign.universe.get_launch_resources(settings)
@@ -303,22 +303,21 @@ impl MindCampaign {
                     *slot = *amount;
                 }
             }
-            let mut updated = false;
-            if let Some(mut host) = self.host() {
-                let taken = host.bind_mut().take_campaign_runtime();
-                if let Some(mut runtime) = taken {
-                    persist_resources = settings_hub::with_settings(|settings| {
-                        runtime
-                            .campaign
-                            .universe
-                            .update_launch_resources(settings, std::mem::take(&mut dense))
-                            .is_ok()
-                    });
-                    host.bind_mut().put_campaign_runtime(runtime);
-                    updated = true;
-                }
+            let updated = with_host_runtime(self.host(), |runtime| {
+                settings_hub::with_settings(|settings| {
+                    runtime
+                        .campaign
+                        .universe
+                        .update_launch_resources(settings, std::mem::take(&mut dense))
+                        .is_ok()
+                })
+            });
+            if let Some(updated) = updated {
+                persist_resources = updated;
             }
-            if !updated && let Some(campaign) = self.campaign.as_mut() {
+            if updated.is_none()
+                && let Some(campaign) = self.campaign.as_mut()
+            {
                 persist_resources = settings_hub::with_settings(|settings| {
                     campaign
                         .universe
@@ -344,7 +343,7 @@ impl MindCampaign {
             .planet(planet_id)
             .map(|planet| mind_core::game::planet::env_mask(&planet.default_env))
             .unwrap_or(0);
-        let sun = registry.planet_by_name("sun").map(|planet| planet.id);
+        let sun = planet_def(registry, "sun").map(|planet| planet.id);
         let mut loadout_rows: Vec<serde_json::Value> = Vec::new();
         if destination_allow_schematics {
             for index in 0..schematics.all.len() {
@@ -416,7 +415,7 @@ impl MindCampaign {
         if persist_resources {
             self.persist();
         }
-        GString::from(value.to_string().as_str())
+        value_gstring(&value)
     }
 
     /// `Universe.getLastLoadout` (selected schematic file name).
@@ -470,9 +469,9 @@ impl MindCampaign {
         sector: i32,
         stacks_json: GString,
     ) -> bool {
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         let Ok(stacks) = serde_json::from_str::<
             Vec<mind_core::io::json::content_serde::JsonItemStack>,
         >(&stacks_json.to_string()) else {
@@ -491,7 +490,7 @@ impl MindCampaign {
             let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
                 return false;
             };
-            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
                 return false;
             };
             record.remove_items(stacks.iter().cloned());

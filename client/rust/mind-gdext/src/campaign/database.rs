@@ -16,11 +16,11 @@ impl MindCampaign {
     #[func]
     pub fn content_info_json(&self, name: GString) -> GString {
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let name = name.to_string();
         let Some(content) = registry.by_name(&name) else {
-            return GString::from("{}");
+            return empty_object();
         };
         let type_name = content.type_.name();
         // The family stats read the runtime block table (kind data + behavior
@@ -93,7 +93,7 @@ impl MindCampaign {
             "hide_details": hide_details,
             "categories": categories,
         });
-        GString::from(view.to_string().as_str())
+        value_gstring(&view)
     }
 
     /// Placement-palette catalog JSON (`PlacementFragment.getUnlockedByCategory`).
@@ -159,11 +159,7 @@ impl MindCampaign {
                 }
             }
         };
-        GString::from(
-            serde_json::to_string(&catalog)
-                .unwrap_or_else(|_| String::from("{}"))
-                .as_str(),
-        )
+        to_gstring(&catalog, "{}")
     }
 
     /// Core Database view JSON (`DatabaseDialog` planet tabs + content grid).
@@ -174,7 +170,7 @@ impl MindCampaign {
     #[func]
     pub fn database_json(&self) -> GString {
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let unlocked_override = mind_core::ui::database::custom_game_unlock_override(&self.session);
         // `Block.isBanned()`: `state.isGame() && rules.bannedBlocks.contains`
@@ -185,11 +181,7 @@ impl MindCampaign {
             .is_game()
             .then_some(&self.session.rules.banned_blocks);
         let view = mind_core::ui::database::database_view(registry, unlocked_override, banned);
-        GString::from(
-            serde_json::to_string(&view)
-                .unwrap_or_else(|_| String::from("{}"))
-                .as_str(),
-        )
+        to_gstring(&view, "{}")
     }
 }
 
