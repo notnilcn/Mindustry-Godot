@@ -73,6 +73,7 @@ pub(super) fn run_shoot_on_death(world: &mut World, runtime: &mut UnitRuntime, e
 }
 
 impl Sim {
+    /// Death resolution after the entity pass (`HealthComp.damage` ->
     /// `kill()`): live units at zero health are killed through their death
     /// abilities (`UnitComp.killed`/`destroy`), and buildings at zero health
     /// are destroyed through the tile ops (`Building.kill` ->
