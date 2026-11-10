@@ -1,0 +1,220 @@
+client/rust/mind-core/src/content/registries/blocks/mod.rs	62	356	BlockKind	client/rust/mind-core/src/content/registries/blocks/kind.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	358	677	impl BlockKind	client/rust/mind-core/src/content/registries/blocks/kind.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	679	707	BuildVisibility	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	709	727	impl BuildVisibility	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	729	757	BlockGroup	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	759	792	impl BlockGroup	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	794	833	BlockFlag	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	835	859	impl BlockFlag	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	861	868	EnvMask	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	870	898	impl EnvMask	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	900	907	StackSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	909	912	stack	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	914	923	UnitPlanSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	925	932	unit_plan	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	934	943	PayloadStackSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	945	952	payload_block	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	954	961	payload_unit	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	963	972	AssemblerUnitPlanSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	974	985	assembler_plan	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	987	996	UnitPlanDef	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	998	1007	AssemblerUnitPlanDef	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1009	1016	LiquidStackSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1018	1021	liquid_stack	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1023	1082	ConsumeDef	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1084	1098	impl ConsumeDef	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1100	1111	ConsumeSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1113	1143	Consume	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1145	1194	StatSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1196	1216	BarSpec	client/rust/mind-core/src/content/registries/blocks/types.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1218	1594	BlockSpec	client/rust/mind-core/src/content/registries/blocks/spec.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1596	1760	impl Default for BlockSpec	client/rust/mind-core/src/content/registries/blocks/spec.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	1762	2167	impl BlockSpec	client/rust/mind-core/src/content/registries/blocks/spec.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2169	2170	pub const TARGET_PRIORITY_WALL: f32 = -3.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2171	2172	pub const TARGET_PRIORITY_UNDER: f32 = -2.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2173	2174	pub const TARGET_PRIORITY_TRANSPORT: f32 = -1.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2175	2176	pub const TARGET_PRIORITY_BASE: f32 = 0.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2177	2178	pub const TARGET_PRIORITY_TURRET: f32 = 1.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2179	2180	pub const TARGET_PRIORITY_CORE: f32 = 2.0;	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2182	2226	block_under_bullets	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2228	2233	spec	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2235	2236	const COLOR_CYAN: Rgba = Rgba::new(0.0, 1.0, 1.0, 1.0);	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2237	2238	const COLOR_ORANGE: Rgba = Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0);	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2239	2240	const PAL_ACCENT: Rgba = Rgba::new(1.0, 211.0 / 255.0, 127.0 / 255.0, 1.0);	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2241	2242	const TEAM_CRUX: Rgba = Rgba::new(242.0 / 255.0, 85.0 / 255.0, 85.0 / 255.0, 1.0);	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2244	2263	java_floor_light	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2265	2298	java_light_defaults	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2300	2308	consume_item	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2310	2318	consume_items	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2320	2328	consume_liquid	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2330	2337	consume_liquids	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2339	2346	consume_power	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2348	2355	consume_power_buffered	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2357	2366	consume_coolant	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2368	2378	consume_optional	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2380	2383	rgba_hex	client/rust/mind-core/src/content/registries/blocks/consume.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2385	2808	BlockDef	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2810	2833	is_floor_kind	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2835	2849	is_overlay_floor_kind	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2851	2867	kind_ignores_resize_config	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	2869	3429	impl BlockDef	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3431	3437	resolve_item	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3439	3524	resolve_consume	client/rust/mind-core/src/content/registries/blocks/def.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3526	3794	impl Content for BlockDef	client/rust/mind-core/src/content/registries/blocks/traits.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3796	3800	impl Mappable for BlockDef	client/rust/mind-core/src/content/registries/blocks/traits.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3802	3810	impl Unlockable for BlockDef	client/rust/mind-core/src/content/registries/blocks/traits.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3812	3833	ui_round_amount	client/rust/mind-core/src/content/registries/blocks/traits.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3835	3839	round_to	client/rust/mind-core/src/content/registries/blocks/traits.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3841	3845	BlockSink	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3847	3850	NamesSink	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3852	3857	impl BlockSink for NamesSink<'_>	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3859	3864	RegistrySink	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3866	3883	impl BlockSink for RegistrySink<'_>	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3885	3894	Blocks	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3896	3974	impl Blocks	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	3976	3999	load	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	4001	4006	load_names	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	4008	4020	load_into	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	4022	4065	post_init_link	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	4067	4116	kind_rotates	client/rust/mind-core/src/content/registries/blocks/loader.rs
+client/rust/mind-core/src/content/registries/blocks/mod.rs	4118	4798	tests	client/rust/mind-core/src/content/registries/blocks/tests.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	73	86	LiquidAmmo	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	88	99	PayloadAmmo	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	101	108	PayloadContent	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	110	122	impl PayloadContent	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	124	131	PayloadStack	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	133	146	TurretAmmo	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	148	157	PowerAmmo	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	159	181	TurretKind	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	183	344	TurretConfig	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	346	358	impl TurretConfig	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	360	451	TurretState	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	453	466	BeamEntry	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	468	482	PendingShot	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	484	493	AmmoEntry	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	495	564	impl TurretState	client/rust/mind-core/src/world/blocks/defense/turrets/types.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	568	630	register_bullets	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	632	663	const VANILLA_TURRETS: &[&str] = &[	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	665	726	rebalance_erekir_turret_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	728	750	const LIMIT_RANGE_MARGINS: &[(&str, f32)] = &[	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	752	755	const EXTRA_RANGE_MARGINS: &[(&str, f32)] =	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	757	798	limit_range	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	800	813	install_turret_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	815	836	config_for	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	838	852	coolant_filter	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	854	872	const COOLANT_MULTIPLIERS: &[(&str, f32)] = &[	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	874	911	const TURRET_SOUNDS: &[(&str, &str, f32, &str, &str, f32)] = &[	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	913	924	apply_turret_sounds	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	926	968	apply_block_coolant	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	970	1317	config_for_inner	client/rust/mind-core/src/world/blocks/defense/turrets/config.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1321	1324	trnsx	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1326	1329	trnsy	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1331	1333	angle_to	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1335	1338	angle_dist	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1340	1346	move_toward	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1348	1350	approach_delta	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1352	1354	lerp_delta	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1356	1361	efficiency	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1363	1370	cheating	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1372	1374	position	client/rust/mind-core/src/world/blocks/defense/turrets/math.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1378	1382	peek_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1384	1405	peek_ammo_state	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1407	1418	peek_ammo_range_change	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1420	1449	peek_ammo_range_change_of	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1451	1480	peek_ammo_min_range_change_of	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1482	1490	turret_range	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1492	1495	turret_range_of	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1497	1498	pub const LOGIC_CONTROL_COOLDOWN: f32 = 120.0;	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1500	1549	logic_target_position	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1551	1557	has_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1559	1592	has_ammo_state	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1594	1604	current_liquid_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1606	1616	current_ammo_liquid	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1618	1637	consumed_ammo_liquid	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1639	1652	can_consume	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1654	1666	accept_item	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1668	1695	handle_item	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1697	1725	accept_liquid	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1727	1755	handle_liquid	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1757	1768	accept_payload	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1770	1790	handle_payload	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1792	1804	add_build_plan	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1806	1871	use_ammo	client/rust/mind-core/src/world/blocks/defense/turrets/ammo.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1875	1907	update_turrets	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	1909	2149	update_turret	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2151	2168	update_efficiency_multiplier	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2170	2218	handle_reload	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2220	2224	charging	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2226	2230	should_turn	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2232	2255	update_pending_shots	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2257	2269	update_shooting	client/rust/mind-core/src/world/blocks/defense/turrets/update.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2271	2280	build_turret_efficiency	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2282	2283	const BUILD_TARGET_INTERVAL: f32 = 15.0;	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2284	2285	const BUILD_BREAK_CHECK_INTERVAL: f32 = 30.0;	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2287	2295	build_plan_within	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2297	2335	build_valid_place	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2337	2351	build_valid_break	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2353	2371	build_economy	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2373	2393	build_requirements_met	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2395	2406	unit_can_build	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2408	2424	unit_actively_building	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2426	2470	scan_follow_unit	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2472	2483	unit_plan_to_build_plan	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2485	2524	player_breaking_plan	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2526	2538	remove_team_plan	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2540	2802	update_build	client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2804	2853	shoot	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2855	2992	bullet	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	2994	3049	nearest_fire	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3051	3151	find_target	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3153	3162	can_heal	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3164	3168	min_range_of	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3170	3174	tracking_range_of	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3176	3189	ammo_unit_sort	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3191	3248	target_position	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3250	3273	within_target_range	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3275	3290	validate_target	client/rust/mind-core/src/world/blocks/defense/turrets/targeting.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3292	3951	tests	client/rust/mind-core/src/world/blocks/defense/turrets/tests.rs
+client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs	3953	4697	find_target_tests	client/rust/mind-core/src/world/blocks/defense/turrets/find_target_tests.rs
+client/rust/mind-core/src/io/sim_io.rs	45	51	pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	53	62	pub const SIM_UNIT_REVISION: u16 = 4;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	64	65	pub const SIM_FIRE_CLASS_ID: u8 = 0xF1;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	67	68	pub const SIM_FIRE_REVISION: u16 = 1;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	70	71	pub const SIM_PUDDLE_CLASS_ID: u8 = 0xF2;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	73	74	pub const SIM_PUDDLE_REVISION: u16 = 1;	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	76	84	SavePlaytime	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	86	103	impl Sim	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	105	149	DecodedUnit	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	151	160	DecodedFire	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	162	171	DecodedPuddle	client/rust/mind-core/src/io/sim_io/mod.rs
+client/rust/mind-core/src/io/sim_io.rs	173	179	LiveEntitySink	client/rust/mind-core/src/io/sim_io/entities.rs
+client/rust/mind-core/src/io/sim_io.rs	181	293	impl EntitySink for LiveEntitySink	client/rust/mind-core/src/io/sim_io/entities.rs
+client/rust/mind-core/src/io/sim_io.rs	295	298	LiveEntitySource	client/rust/mind-core/src/io/sim_io/entities.rs
+client/rust/mind-core/src/io/sim_io.rs	300	410	impl EntitySource for LiveEntitySource<'_>	client/rust/mind-core/src/io/sim_io/entities.rs
+client/rust/mind-core/src/io/sim_io.rs	412	529	write_unit_fields	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	531	628	read_unit_fields	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	630	654	ai_kind_code	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	656	679	ai_kind_from_code	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	681	696	unit_plan_from_wire	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	698	710	unit_plan_to_wire	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	712	743	live_unit_rows	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	745	764	apply_team_plans	client/rust/mind-core/src/io/sim_io/unit_codec.rs
+client/rust/mind-core/src/io/sim_io.rs	766	790	DecodedSave	client/rust/mind-core/src/io/sim_io/decode.rs
+client/rust/mind-core/src/io/sim_io.rs	792	804	decode_save_bytes	client/rust/mind-core/src/io/sim_io/decode.rs
+client/rust/mind-core/src/io/sim_io.rs	806	820	decode_map_bytes	client/rust/mind-core/src/io/sim_io/decode.rs
+client/rust/mind-core/src/io/sim_io.rs	822	904	decode_bytes_inner	client/rust/mind-core/src/io/sim_io/decode.rs
+client/rust/mind-core/src/io/sim_io.rs	906	914	meta_tick	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	916	931	SectorResumeMeta	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	933	1130	impl Sim	client/rust/mind-core/src/io/sim_io/apply.rs
+client/rust/mind-core/src/io/sim_io.rs	1132	1241	apply_unit_record	client/rust/mind-core/src/io/sim_io/apply.rs
+client/rust/mind-core/src/io/sim_io.rs	1243	1297	live_meta_tags	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1299	1308	SimMapSource	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1310	1321	impl <'a> SimMapSource<'a>	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1323	1378	impl MapSource for SimMapSource<'_>	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1380	1389	SimIoHandler	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1391	1397	impl Default for SimIoHandler	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1399	1549	impl SimIoHandler	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1551	1583	impl IoHandler for SimIoHandler	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1585	1593	boot_registry	client/rust/mind-core/src/io/sim_io/handler.rs
+client/rust/mind-core/src/io/sim_io.rs	1595	3426	tests	client/rust/mind-core/src/io/sim_io/tests.rs
+client/rust/mind-core/src/io/sim_io.rs	3428	3662	map_filter_tests	client/rust/mind-core/src/io/sim_io/map_filter_tests.rs
