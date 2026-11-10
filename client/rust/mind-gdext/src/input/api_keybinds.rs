@@ -11,12 +11,7 @@ impl MindInput {
     /// Rebinds a single key by registry name and persists it.
     #[func]
     pub fn rebind(&mut self, name: GString, code: GString) -> bool {
-        if bindings::rebind(&mut self.bindings, &name.to_string(), &code.to_string()) {
-            bindings::save(&self.bindings);
-            true
-        } else {
-            false
-        }
+        self.rebind_and_save(|state| bindings::rebind(state, &name.to_string(), &code.to_string()))
     }
 
     /// Rebinds `name` from a Godot key display string (`OS.get_keycode_string`),
@@ -24,12 +19,7 @@ impl MindInput {
     #[func]
     pub fn rebind_key(&mut self, name: GString, godot_text: GString) -> bool {
         let code = events::normalize_key_name(&godot_text.to_string());
-        if bindings::rebind(&mut self.bindings, &name.to_string(), &code) {
-            bindings::save(&self.bindings);
-            true
-        } else {
-            false
-        }
+        self.rebind_and_save(|state| bindings::rebind(state, &name.to_string(), &code))
     }
 
     /// Rebinds an axis binding to a negative/positive key pair (PAR-0102,
@@ -40,12 +30,9 @@ impl MindInput {
     pub fn rebind_axis(&mut self, name: GString, negative: GString, positive: GString) -> bool {
         let negative = events::normalize_key_name(&negative.to_string());
         let positive = events::normalize_key_name(&positive.to_string());
-        if bindings::rebind_axis(&mut self.bindings, &name.to_string(), &negative, &positive) {
-            bindings::save(&self.bindings);
-            true
-        } else {
-            false
-        }
+        self.rebind_and_save(|state| {
+            bindings::rebind_axis(state, &name.to_string(), &negative, &positive)
+        })
     }
 
     /// Resets one binding to its upstream default and persists it.
@@ -107,6 +94,16 @@ impl MindInput {
 }
 
 impl MindInput {
+    /// Applies one binding-table change and persists the table when it reports
+    /// success (`KeyBinds.rebind`/`rebindAxis` + `bindings::save`).
+    fn rebind_and_save(&mut self, apply: impl FnOnce(&mut BindingState) -> bool) -> bool {
+        let changed = apply(&mut self.bindings);
+        if changed {
+            bindings::save(&self.bindings);
+        }
+        changed
+    }
+
     /// Numeric id for a registry binding name.
     fn bind_id(&self, name: &str) -> Option<u16> {
         KeyBindTable::all()
