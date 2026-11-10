@@ -36,17 +36,11 @@ impl MindUiRoot {
             let Ok(row) = row.try_to::<VarDictionary>() else {
                 continue;
             };
-            let key = row
-                .get("key")
-                .and_then(|value| value.try_to::<GString>().ok())
-                .unwrap_or_default();
+            let key = dict_text_try_or(&row, "key");
             if key != "uiscale" {
                 continue;
             }
-            let value = row
-                .get("value")
-                .and_then(|value| value.try_to_relaxed::<f64>().ok())
-                .unwrap_or(100.0);
+            let value = dict_f64_relaxed_or(&row, "value", 100.0);
             let ui_scale = (value.max(25.0) / 100.0) as f32;
             if let Some(mut window) = self.base().get_window() {
                 window.set_content_scale_factor(ui_scale);
