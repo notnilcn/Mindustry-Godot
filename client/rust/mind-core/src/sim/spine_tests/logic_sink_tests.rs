@@ -6,13 +6,11 @@
 //!
 //! Upstream: none (port-only tests).
 
+use crate::sim::test_support::stone_sim;
 use crate::sim::*;
 
 fn sink_sim() -> Sim {
-    let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
-    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
-    sim.grid.fill(stone, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
+    let mut sim = stone_sim(32);
     sim.ecs
         .0
         .insert_resource(crate::logic::world::LogicWorldState {

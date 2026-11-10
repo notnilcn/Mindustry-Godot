@@ -15,6 +15,8 @@ use crate::game::play::PlaySession;
 use crate::game::rules::Rules;
 use crate::game::runtime::sync_session_with_sim;
 use crate::sim::Sim;
+#[cfg(feature = "msav-import")]
+use crate::sim::test_support::tick_n;
 use crate::world::TilePos;
 use crate::world::building_io::DecodedBase;
 use crate::world::limits::BuildRules;
@@ -318,9 +320,7 @@ fn ground_zero_drill_feeds_the_materialized_core() {
     // (`CoreBlock.java:764-780`), not the core entity's own `ItemModule`.
     // Let the drill warm up and mine (mechanical drill + 4-ore footprint is
     // roughly one copper per 650 ticks), then read the team pool.
-    for _ in 0..1800 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1800);
     let stored =
         crate::world::blocks::storage::team_items::core_item_count(&sim.ecs.0, core_entity, copper);
     assert!(

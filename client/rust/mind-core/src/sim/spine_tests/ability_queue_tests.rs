@@ -7,14 +7,8 @@
 
 use crate::content::Rgba;
 use crate::entities::comp::unit::comp::UnitTypeComp;
+use crate::sim::test_support::live_sim_seeded;
 use crate::sim::*;
-
-fn live_sim() -> Sim {
-    let mut sim = Sim::new(7, 24, 24, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
-    sim
-}
 
 /// Item 4 (`shootStatus`): a bare harness world has no `StatusApplier`, while
 /// the live sim installs the content-backed one
@@ -45,7 +39,7 @@ fn live_sim_installs_the_status_applier() {
 #[test]
 fn pending_move_lightning_becomes_a_real_branch() {
     use crate::combat::abilities::{PendingLightningStrike, PendingMoveLightning};
-    let mut sim = live_sim();
+    let mut sim = live_sim_seeded(7, 24);
     sim.ecs
         .0
         .insert_resource(PendingMoveLightning(vec![PendingLightningStrike {
@@ -76,7 +70,7 @@ fn pending_move_lightning_becomes_a_real_branch() {
 #[test]
 fn pending_ability_spawn_uses_the_runtime_sequencer() {
     use crate::combat::abilities::{PendingAbilityUnitSpawn, PendingAbilityUnitSpawns};
-    let mut sim = live_sim();
+    let mut sim = live_sim_seeded(7, 24);
     let dagger = sim
         .block_runtime()
         .expect("block runtime")
@@ -132,7 +126,7 @@ fn pending_ability_spawn_respects_the_unit_cap() {
     use crate::game::runtime::CampaignRuntime;
     use crate::game::universe::Campaign;
 
-    let mut sim = live_sim();
+    let mut sim = live_sim_seeded(7, 24);
     let content = sim
         .block_runtime()
         .expect("block runtime")

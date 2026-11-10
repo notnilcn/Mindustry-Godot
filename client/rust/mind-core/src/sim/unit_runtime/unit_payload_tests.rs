@@ -7,31 +7,11 @@
 
 use super::*;
 use crate::content::BlockId;
-use crate::determinism::SimCommand;
-
-fn install(sim: &mut Sim) {
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
-}
+use crate::sim::test_support::{install_live_runtimes, place_team1};
 
 // ------------------------------------------------------------------
 // Unit payloads (GAPS #23 / PAR-0518)
 // ------------------------------------------------------------------
-
-/// Places `name` through the live command path and returns its entity.
-fn place_block(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
-    let block = sim.world_block_id(name).expect("block exists");
-    sim.command(SimCommand::Place {
-        x,
-        y,
-        block,
-        rotation: 0,
-        team: 1,
-        player: None,
-    })
-    .expect("placed");
-    sim.grid.entity_at(TilePos::new(x, y)).expect("entity")
-}
 
 fn add_item(sim: &mut Sim, e: Entity, name: &str, amount: i32) {
     let id = sim
@@ -58,9 +38,9 @@ fn carried_unit_entity(sim: &Sim, holder: Entity) -> Option<Entity> {
 #[test]
 fn unit_factory_output_is_carried_then_dumped() {
     let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
-    let factory = place_block(&mut sim, "ground-factory", 5, 5);
-    let _power = place_block(&mut sim, "power-source", 3, 5);
+    install_live_runtimes(&mut sim);
+    let factory = place_team1(&mut sim, "ground-factory", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 3, 5);
     add_item(&mut sim, factory, "silicon", 10);
     add_item(&mut sim, factory, "lead", 10);
     let dagger = sim
@@ -161,7 +141,7 @@ fn unit_factory_output_is_carried_then_dumped() {
 #[test]
 fn unit_payload_dump_gates_solid_and_overlap() {
     let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    install_live_runtimes(&mut sim);
     let dagger = sim
         .unit_runtime()
         .expect("runtime")
@@ -232,7 +212,7 @@ fn unit_payload_dump_gates_solid_and_overlap() {
 #[test]
 fn unit_payload_body_round_trips() {
     let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    install_live_runtimes(&mut sim);
     let dagger = sim
         .unit_runtime()
         .expect("runtime")

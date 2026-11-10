@@ -10,11 +10,10 @@ use super::checks::team_core;
 use super::update::chain_bridge;
 use super::*;
 use crate::determinism::SimCommand;
+use crate::sim::test_support::{live_sim_seeded, tick_n};
 
 fn sim_with_player() -> (Sim, Entity, u16, BlockId) {
-    let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim_seeded(7, 64);
     let core_id = sim.world_block_id("core-shard").expect("core");
     sim.command(SimCommand::Place {
         x: 10,
@@ -116,9 +115,7 @@ fn team_ghosts(sim: &Sim, team: u8) -> Vec<crate::game::teams::BlockPlan> {
 /// finish branch runs) and returns its entity.
 fn build_wall(sim: &mut Sim, x: i16, y: i16, wall: BlockId) -> Entity {
     assert!(sim.queue_player_place(x, y, wall, 0));
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(sim, 60);
     assert_eq!(
         sim.grid.block_at(TilePos::new(x, y)),
         Some(wall),
@@ -161,9 +158,7 @@ fn player_place_builds_over_time_and_spends_core_items() {
     assert!(progress > 0.0 && progress < 1.0, "progress {progress}");
     // copper-wall: 6 copper, buildTime = 6 * 0.5 = 3 ticks... alpha 0.5
     // speed -> ~6 ticks.
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(wall),
@@ -189,9 +184,7 @@ fn player_plan_config_applies_on_finish() {
         .item_id("copper")
         .expect("copper");
     assert!(sim.queue_player_place_config(14, 10, sorter, 0, ConfigValue::Item(copper)));
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(sorter),
@@ -215,9 +208,7 @@ fn plan_without_config_keeps_default() {
     let (mut sim, _unit, _core, wall) = sim_with_player();
     set_core_copper(&mut sim, 100);
     assert!(sim.queue_player_place(14, 10, wall, 0));
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
     let entity = sim
         .grid
@@ -231,9 +222,7 @@ fn plan_without_config_keeps_default() {
 /// no-op; `BuilderComp.addBuild` returns at `if(!canBuild()) return;`).
 #[test]
 fn player_place_without_unit_is_dropped_when_team_has_core() {
-    let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim_seeded(7, 64);
     let core_id = sim.world_block_id("core-shard").expect("core");
     sim.command(SimCommand::Place {
         x: 10,
@@ -255,9 +244,7 @@ fn player_place_without_unit_is_dropped_when_team_has_core() {
         player: Some(0),
     })
     .expect("dropped");
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert_eq!(sim.grid.entity_at(TilePos::new(20, 20)), None);
     assert!(sim.player_build_plans().is_empty(), "no plan queued");
     assert_eq!(core_copper(&sim), 100, "no spend, no refund");
@@ -267,9 +254,7 @@ fn player_place_without_unit_is_dropped_when_team_has_core() {
 /// no build-capable unit is dropped when the player team owns a core.
 #[test]
 fn player_break_without_unit_is_dropped_when_team_has_core() {
-    let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim_seeded(7, 64);
     let core_id = sim.world_block_id("core-shard").expect("core");
     let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
     sim.command(SimCommand::Place {
@@ -297,9 +282,7 @@ fn player_break_without_unit_is_dropped_when_team_has_core() {
         player: Some(0),
     })
     .expect("dropped");
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert_eq!(
         sim.grid.block_at(TilePos::new(20, 20)),
         Some(wall),
@@ -311,9 +294,7 @@ fn player_break_without_unit_is_dropped_when_team_has_core() {
 /// instant placement affordance (no Java counterpart).
 #[test]
 fn player_place_without_core_stays_instant() {
-    let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim_seeded(7, 64);
     let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
     sim.command(SimCommand::Place {
         x: 20,
@@ -347,9 +328,7 @@ fn rebuild_select_queues_ghost() {
     assert_eq!(plans.len(), 1);
     assert_eq!((plans[0].x, plans[0].y, plans[0].block), (14, 10, wall));
 
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(wall),
@@ -494,9 +473,7 @@ fn out_of_range_plans_wait_for_the_builder() {
         player: Some(0),
     })
     .expect("queued");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert!(sim.construct_progress(50, 50).is_none());
     assert_eq!(sim.player_build_plans().len(), 1);
 }
@@ -547,9 +524,7 @@ fn pausing_building_holds_construct_progress() {
         player: Some(0),
     })
     .expect("queued");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert!(
         sim.construct_progress(14, 10).is_none(),
         "no construction while paused"
@@ -557,9 +532,7 @@ fn pausing_building_holds_construct_progress() {
     assert_eq!(sim.player_build_plans().len(), 1, "plan waits");
     // Resume: the plan completes.
     sim.set_player_building_paused(false);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(wall),
@@ -605,9 +578,7 @@ fn unit_overlap_delays_construction() {
         player: Some(0),
     })
     .expect("queued");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert!(
         sim.construct_progress(14, 10).is_none(),
         "unit blocks the plan"
@@ -619,9 +590,7 @@ fn unit_overlap_delays_construction() {
         pos.x = 20.0 * 8.0;
         pos.y = 20.0 * 8.0;
     }
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(wall),
@@ -665,9 +634,7 @@ fn legged_unit_does_not_block_construction() {
         player: Some(0),
     })
     .expect("queued");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(
         sim.grid.block_at(TilePos::new(14, 10)),
         Some(wall),
@@ -688,9 +655,7 @@ fn no_items_means_no_construction() {
         player: Some(0),
     })
     .expect("queued");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert_ne!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
     assert_eq!(sim.player_build_plans().len(), 1, "plan stays queued");
 }
@@ -837,9 +802,7 @@ fn queue_player_place_keeps_rotation() {
     assert!(sim.queue_player_place(14, 10, wall, 1), "plan queued");
     let plans = sim.player_build_plans();
     assert_eq!(plans.first().map(|plan| plan.rotation), Some(1));
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let entity = sim
         .grid
         .entity_at(TilePos::new(14, 10))
@@ -886,9 +849,7 @@ fn player_break_deconstructs_and_refunds() {
         Some(wall),
         "not instant"
     );
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(BlockId::AIR));
     // 6 copper * 0.5 refund.
     assert_eq!(core_copper(&sim), 13);
@@ -933,9 +894,7 @@ fn construct_finish_emits_place_fx() {
         .default_team = 1;
 
     assert!(sim.queue_player_place(20, 20, wall, 1), "wall queued");
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     {
         let events = sink.0.lock().expect("lock");
         let place = events
@@ -953,9 +912,7 @@ fn construct_finish_emits_place_fx() {
             player: Some(0),
         }) == Ok(())
     );
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let events = sink.0.lock().expect("lock");
     let count = events
         .iter()
@@ -1290,9 +1247,7 @@ fn construct_finish_calls_place_ended() {
         ),
         "wall queued"
     );
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let placed = sim
         .grid
         .entity_at(TilePos::new(20, 20))

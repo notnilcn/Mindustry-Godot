@@ -10,30 +10,16 @@ use super::update::apply_movement_damage;
 use super::*;
 use crate::content::BlockId;
 use crate::determinism::SimCommand;
-
-fn install(sim: &mut Sim) {
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
-}
-
-fn block_id(sim: &Sim, name: &str) -> u16 {
-    sim.unit_runtime()
-        .expect("runtime")
-        .content
-        .block_id(name)
-        .expect("block exists")
-        .get()
-}
+use crate::sim::test_support::{live_sim, live_sim_seeded, tick_n, unit_content_block};
 
 /// The evaluator repro at the core level: request a wave on a live world
 /// with a player core and a `spawn` overlay; units must spawn, move and
 /// fire bullets at the core.
 #[test]
 fn run_wave_spawns_moving_firing_units() {
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
-    let core = block_id(&sim, "core-shard");
-    let spawn = block_id(&sim, "spawn");
+    let mut sim = live_sim(64);
+    let core = unit_content_block(&sim, "core-shard");
+    let spawn = unit_content_block(&sim, "spawn");
     assert!(
         sim.command(SimCommand::Place {
             x: 52,
@@ -69,9 +55,7 @@ fn run_wave_spawns_moving_firing_units() {
     // 1200 ticks: the spawn `unmoving` (30, disarmed) + `invincible` (60)
     // effects and the 40/90-tick retarget cadence delay the first shots
     // (G01 T7).
-    for _ in 0..1200 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1200);
     let runtime = sim.unit_runtime().expect("runtime");
     assert!(runtime.bullets_created > 0, "wave unit fired bullets");
     assert!(
@@ -101,8 +85,7 @@ fn wave_shockwave_destroys_drop_zone_building() {
     use crate::game::runtime::CampaignRuntime;
     use crate::game::universe::Campaign;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(64);
     let campaign = {
         let content = &sim.unit_runtime().expect("runtime").content;
         Campaign::from_registry(content, &EmptyNeighborhood)
@@ -115,8 +98,8 @@ fn wave_shockwave_destroys_drop_zone_building() {
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
-    let spawn = block_id(&sim, "spawn");
-    let wall = block_id(&sim, "copper-wall");
+    let spawn = unit_content_block(&sim, "spawn");
+    let wall = unit_content_block(&sim, "copper-wall");
     let index = sim.grid.tiles.index(10, 10);
     sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
     // 2 tiles from the spawn corner (inside the 300 px drop zone) and far.
@@ -152,9 +135,8 @@ fn wave_shockwave_destroys_drop_zone_building() {
 fn spawned_wave_unit_is_invincible() {
     use crate::entities::comp::unit::comp::StatusComp;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
-    let spawn = block_id(&sim, "spawn");
+    let mut sim = live_sim(64);
+    let spawn = unit_content_block(&sim, "spawn");
     let index = sim.grid.tiles.index(10, 10);
     sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
     sim.set_unit_wave_team(2);
@@ -203,10 +185,9 @@ fn no_runtime_is_a_noop() {
 #[test]
 fn live_units_are_deterministic() {
     fn run() -> String {
-        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
-        install(&mut sim);
-        let core = block_id(&sim, "core-shard");
-        let spawn = block_id(&sim, "spawn");
+        let mut sim = live_sim_seeded(7, 64);
+        let core = unit_content_block(&sim, "core-shard");
+        let spawn = unit_content_block(&sim, "spawn");
         assert!(
             sim.command(SimCommand::Place {
                 x: 50,
@@ -222,9 +203,7 @@ fn live_units_are_deterministic() {
         sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
         sim.set_unit_wave_team(2);
         sim.request_wave_spawn(0);
-        for _ in 0..300 {
-            sim.tick().expect("tick");
-        }
+        tick_n(&mut sim, 300);
         sim.unit_runtime_checksum().to_hex()
     }
     assert_eq!(run(), run());
@@ -233,8 +212,7 @@ fn live_units_are_deterministic() {
 /// `SimCommand::SpawnUnit` spawns through the live runtime when installed.
 #[test]
 fn spawn_unit_command_uses_the_live_runtime() {
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(32);
     let dagger = sim
         .unit_runtime()
         .expect("runtime")
@@ -260,8 +238,7 @@ fn spawn_unit_command_uses_the_live_runtime() {
 /// default-team unit; other teams and the relay path stay untouched.
 #[test]
 fn live_unit_command_sets_a_move_target() {
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(32);
     if let Some(mut rules) = sim
         .ecs
         .0
@@ -336,9 +313,7 @@ fn live_unit_command_sets_a_move_target() {
 
     // The order drives movement.
     let before = sim.ecs.0.get::<Pos>(friendly).expect("pos").x;
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let after = sim.ecs.0.get::<Pos>(friendly).expect("pos").x;
     assert!(
         after > before,
@@ -354,8 +329,7 @@ fn live_unit_command_sets_a_move_target() {
 fn queued_orders_execute_in_sequence() {
     use crate::ai::types::command::CommandQueueEntry;
 
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(32);
     if let Some(mut rules) = sim
         .ecs
         .0
@@ -465,8 +439,7 @@ fn queued_orders_execute_in_sequence() {
 /// the player-team `commandable` flag.
 #[test]
 fn selectable_units_json_lists_live_units() {
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(32);
     if let Some(mut rules) = sim
         .ecs
         .0
@@ -569,8 +542,7 @@ fn selectable_rows_carry_payload_and_select_global() {
 /// Live world with a block runtime and `defaultTeam = 1`; returns the
 /// dagger content id.
 fn player_team_world(size: i32) -> (Sim, u16) {
-    let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
+    let mut sim = live_sim(size);
     if let Some(mut rules) = sim
         .ecs
         .0
@@ -636,9 +608,7 @@ fn player_team_units_get_command_ai_and_idle() {
     assert_eq!(kind(&sim, enemy), AiKind::Ground, "AI team keeps GroundAI");
 
     let before = *sim.ecs.0.get::<Pos>(friendly).expect("pos");
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let after = *sim.ecs.0.get::<Pos>(friendly).expect("pos");
     assert_eq!(
         (before.x, before.y),
@@ -678,9 +648,7 @@ fn command_ai_move_order_arrives_and_clears() {
         dist <= crate::ai::types::command::command_arrival_radius(8.0, false) + 1e-3,
         "arrived within the arrival radius ({dist})"
     );
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let rest = *sim.ecs.0.get::<Pos>(unit).expect("pos");
     assert_eq!((pos.x, pos.y), (rest.x, rest.y), "idles after arrival");
 }
@@ -690,7 +658,7 @@ fn command_ai_move_order_arrives_and_clears() {
 #[test]
 fn command_ai_ground_order_routes_around_walls() {
     let (mut sim, dagger) = player_team_world(48);
-    let wall = block_id(&sim, "copper-wall");
+    let wall = unit_content_block(&sim, "copper-wall");
     // A vertical wall at x = 20 spanning y = 4..=28, open above.
     for y in 4..=28 {
         assert!(
@@ -741,7 +709,7 @@ fn command_ai_ground_order_routes_around_walls() {
 #[test]
 fn command_ai_ground_order_around_wall_mid_row() {
     let (mut sim, dagger) = player_team_world(48);
-    let wall = block_id(&sim, "copper-wall");
+    let wall = unit_content_block(&sim, "copper-wall");
     for y in 4..=28 {
         assert!(
             sim.command(SimCommand::Place {
@@ -853,9 +821,8 @@ fn campaign_wave_timer_spawns_live_units() {
         .teams
         .register_core(core_entity, crate::ecs::TeamId(1), &session.rules);
 
-    let mut sim = Sim::new(1, 48, 48, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
-    let spawn = block_id(&sim, "spawn");
+    let mut sim = live_sim(48);
+    let spawn = unit_content_block(&sim, "spawn");
     let index = sim.grid.tiles.index(5, 5);
     sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
     sim.set_unit_wave_team(2);
@@ -864,9 +831,7 @@ fn campaign_wave_timer_spawns_live_units() {
         .insert_resource(CampaignRuntime::new(session, campaign));
     sim.refresh_unit_runtime();
 
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let runtime = sim
         .ecs
         .0
@@ -913,9 +878,7 @@ fn attack_mode_waves_spawn_near_enemy_cores() {
     });
     session.phase = State::Playing;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim(64);
 
     // Materialize a player core and the wave team's core (the spawn anchor).
     let table: Table = sim.ecs.0.get_resource::<Table>().expect("table").clone();
@@ -954,9 +917,7 @@ fn attack_mode_waves_spawn_near_enemy_cores() {
     sim.set_unit_wave_team(2);
     sim.refresh_unit_runtime();
     sim.request_wave_spawn(0);
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
 
     let ts = crate::config::TILESIZE as f32;
     let runtime = sim.unit_runtime().expect("runtime");
@@ -988,9 +949,8 @@ fn attack_mode_waves_spawn_near_enemy_cores() {
 fn target_flag_active_uses_java_block_status() {
     use crate::entities::comp::Building;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    install(&mut sim);
-    let vault = block_id(&sim, "vault");
+    let mut sim = live_sim(64);
+    let vault = unit_content_block(&sim, "vault");
     assert!(
         sim.command(SimCommand::Place {
             x: 20,
