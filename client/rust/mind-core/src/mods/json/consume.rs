@@ -33,21 +33,15 @@ impl<'a> ContentJsonParser<'a> {
         value: &Value,
     ) -> Result<Vec<ConsumeDef>, ContentParseError> {
         let Value::Array(entries) = value else {
-            return Err(ContentParseError::new(format!(
-                "{file}: `consumes` must be an array"
-            )));
+            parse_err!("{file}: `consumes` must be an array");
         };
         let mut out = Vec::new();
         for entry in entries {
             let Value::Object(map) = entry else {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `consumes` entries must be objects"
-                )));
+                parse_err!("{file}: `consumes` entries must be objects");
             };
             let Some(class) = map.get("type").and_then(Value::as_str) else {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `consumes` entry missing `type`"
-                )));
+                parse_err!("{file}: `consumes` entry missing `type`");
             };
             let tag = self
                 .classmap
@@ -74,9 +68,7 @@ impl<'a> ContentJsonParser<'a> {
                 // `ConsumeLiquidBase.java:8` `float amount`).
                 "ConsumeLiquid" => {
                     let Some(raw) = map.get("liquid").and_then(Value::as_str) else {
-                        return Err(ContentParseError::new(format!(
-                            "{file}: ConsumeLiquid requires `liquid`"
-                        )));
+                        parse_err!("{file}: ConsumeLiquid requires `liquid`");
                     };
                     let liquid = resolve_name(registry, raw).ok_or_else(|| {
                         ContentParseError::new(format!("{file}: unknown liquid `{raw}`"))
@@ -158,17 +150,13 @@ impl<'a> ContentJsonParser<'a> {
             Value::Array(items) => items.iter().collect(),
             Value::Object(map) => map.values().collect(),
             _ => {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `liquids` must be an array or object"
-                )));
+                parse_err!("{file}: `liquids` must be an array or object");
             }
         };
         let mut out = Vec::new();
         for entry in entries {
             let Value::Object(map) = entry else {
-                return Err(ContentParseError::new(format!(
-                    "{file}: invalid liquid entry"
-                )));
+                parse_err!("{file}: invalid liquid entry");
             };
             let raw = map.get("liquid").and_then(Value::as_str).ok_or_else(|| {
                 ContentParseError::new(format!("{file}: liquid stack missing `liquid`"))
@@ -194,9 +182,7 @@ impl<'a> ContentJsonParser<'a> {
             Value::Array(items) => items.iter().collect(),
             Value::Object(map) => map.values().collect(),
             _ => {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `requirements` must be an array or object"
-                )));
+                parse_err!("{file}: `requirements` must be an array or object");
             }
         };
         for entry in entries {
@@ -223,9 +209,7 @@ impl<'a> ContentJsonParser<'a> {
                     (item.to_owned(), amount as i32)
                 }
                 _ => {
-                    return Err(ContentParseError::new(format!(
-                        "{file}: invalid requirement entry"
-                    )));
+                    parse_err!("{file}: invalid requirement entry");
                 }
             };
             let resolved = resolve_name(registry, &raw_name).ok_or_else(|| {

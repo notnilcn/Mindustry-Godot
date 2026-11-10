@@ -105,29 +105,27 @@ impl<'a> ContentJsonParser<'a> {
                 if let Some(color) = object.get("sparkColor").and_then(parse_color) {
                     effect.spark_color = Some(color);
                 }
-                for (field, target) in [
-                    ("waveLife", &mut effect.wave_life),
-                    ("waveStroke", &mut effect.wave_stroke),
-                    ("waveRad", &mut effect.wave_rad),
-                    ("waveRadBase", &mut effect.wave_rad_base),
-                    ("sparkStroke", &mut effect.spark_stroke),
-                    ("sparkRad", &mut effect.spark_rad),
-                    ("sparkLen", &mut effect.spark_len),
-                    ("smokeSize", &mut effect.smoke_size),
-                    ("smokeSizeBase", &mut effect.smoke_size_base),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
-                for (field, target) in [
-                    ("smokes", &mut effect.smokes),
-                    ("sparks", &mut effect.sparks),
-                ] {
-                    if let Some(value) = field_i32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_f32s(
+                    object,
+                    &mut [
+                        ("waveLife", &mut effect.wave_life),
+                        ("waveStroke", &mut effect.wave_stroke),
+                        ("waveRad", &mut effect.wave_rad),
+                        ("waveRadBase", &mut effect.wave_rad_base),
+                        ("sparkStroke", &mut effect.spark_stroke),
+                        ("sparkRad", &mut effect.spark_rad),
+                        ("sparkLen", &mut effect.spark_len),
+                        ("smokeSize", &mut effect.smoke_size),
+                        ("smokeSizeBase", &mut effect.smoke_size_base),
+                    ],
+                );
+                set_i32s(
+                    object,
+                    &mut [
+                        ("smokes", &mut effect.smokes),
+                        ("sparks", &mut effect.sparks),
+                    ],
+                );
                 effect
             }
             "WaveEffect" => {
@@ -139,16 +137,15 @@ impl<'a> ContentJsonParser<'a> {
                 if let Some(color) = object.get("colorTo").and_then(parse_color) {
                     effect.color_to = Some(color);
                 }
-                for (field, target) in [
-                    ("sizeFrom", &mut effect.size_from),
-                    ("sizeTo", &mut effect.size_to),
-                    ("strokeFrom", &mut effect.stroke_from),
-                    ("strokeTo", &mut effect.stroke_to),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_f32s(
+                    object,
+                    &mut [
+                        ("sizeFrom", &mut effect.size_from),
+                        ("sizeTo", &mut effect.size_to),
+                        ("strokeFrom", &mut effect.stroke_from),
+                        ("strokeTo", &mut effect.stroke_to),
+                    ],
+                );
                 effect
             }
             "WrapEffect" => {
@@ -182,16 +179,15 @@ impl<'a> ContentJsonParser<'a> {
                 {
                     effect.children.push(child);
                 }
-                for (field, target) in [
-                    ("rotationSpacing", &mut effect.rotation_spacing),
-                    ("rotationOffset", &mut effect.rotation_offset),
-                    ("effectRotationOffset", &mut effect.effect_rotation_offset),
-                    ("lengthOffset", &mut effect.length_offset),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_f32s(
+                    object,
+                    &mut [
+                        ("rotationSpacing", &mut effect.rotation_spacing),
+                        ("rotationOffset", &mut effect.rotation_offset),
+                        ("effectRotationOffset", &mut effect.effect_rotation_offset),
+                        ("lengthOffset", &mut effect.length_offset),
+                    ],
+                );
                 if let Some(value) = field_i32(object, "amount") {
                     effect.amount = value;
                 }
@@ -238,16 +234,15 @@ impl<'a> ContentJsonParser<'a> {
                     }
                     effect.children.push(child);
                 }
-                for (field, target) in [
-                    ("minPitch", &mut effect.min_pitch),
-                    ("maxPitch", &mut effect.max_pitch),
-                    ("minVolume", &mut effect.min_volume),
-                    ("maxVolume", &mut effect.max_volume),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_f32s(
+                    object,
+                    &mut [
+                        ("minPitch", &mut effect.min_pitch),
+                        ("maxPitch", &mut effect.max_pitch),
+                        ("minVolume", &mut effect.min_volume),
+                        ("maxVolume", &mut effect.max_volume),
+                    ],
+                );
                 effect
             }
             "NoiseEffect" => {
@@ -258,22 +253,21 @@ impl<'a> ContentJsonParser<'a> {
                 if let Some(color) = object.get("color").and_then(parse_color) {
                     effect.color = Some(color);
                 }
-                for (field, target) in [
-                    ("noiseScl", &mut effect.noise_scl),
-                    ("opacity", &mut effect.opacity),
-                    ("baseSpeed", &mut effect.base_speed),
-                    ("intensity", &mut effect.intensity),
-                    ("windX", &mut effect.wind_x),
-                    ("windY", &mut effect.wind_y),
-                    ("layerSpeedMul", &mut effect.layer_speed_mul),
-                    ("layerAlphaMul", &mut effect.layer_alpha_mul),
-                    ("layerSclMul", &mut effect.layer_scl_mul),
-                    ("layerColorMul", &mut effect.layer_color_mul),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_f32s(
+                    object,
+                    &mut [
+                        ("noiseScl", &mut effect.noise_scl),
+                        ("opacity", &mut effect.opacity),
+                        ("baseSpeed", &mut effect.base_speed),
+                        ("intensity", &mut effect.intensity),
+                        ("windX", &mut effect.wind_x),
+                        ("windY", &mut effect.wind_y),
+                        ("layerSpeedMul", &mut effect.layer_speed_mul),
+                        ("layerAlphaMul", &mut effect.layer_alpha_mul),
+                        ("layerSclMul", &mut effect.layer_scl_mul),
+                        ("layerColorMul", &mut effect.layer_color_mul),
+                    ],
+                );
                 if let Some(value) = field_i32(object, "layers") {
                     effect.layers = value;
                 }
@@ -322,48 +316,46 @@ impl<'a> ContentJsonParser<'a> {
         object: &Map<String, Value>,
         effect: &mut EffectSpec,
     ) {
-        for (field, target) in [
-            ("cone", &mut effect.cone),
-            ("length", &mut effect.length),
-            ("baseLength", &mut effect.base_length),
-            ("offsetX", &mut effect.offset_x),
-            ("offsetY", &mut effect.offset_y),
-            ("lightScl", &mut effect.light_scl),
-            ("lightOpacity", &mut effect.light_opacity),
-            ("spin", &mut effect.particle_spin),
-            ("sizeFrom", &mut effect.size_from),
-            ("sizeTo", &mut effect.size_to),
-            ("sizeChangeStart", &mut effect.size_change_start),
-            ("widthChangeStart", &mut effect.width_change_start),
-            ("heightChangeStart", &mut effect.height_change_start),
-            ("offset", &mut effect.particle_offset),
-            ("widthFrom", &mut effect.width_from),
-            ("widthTo", &mut effect.width_to),
-            ("heightFrom", &mut effect.height_from),
-            ("heightTo", &mut effect.height_to),
-            ("strokeFrom", &mut effect.stroke_from),
-            ("strokeTo", &mut effect.stroke_to),
-            ("lenFrom", &mut effect.len_from),
-            ("lenTo", &mut effect.len_to),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
+        set_f32s(
+            object,
+            &mut [
+                ("cone", &mut effect.cone),
+                ("length", &mut effect.length),
+                ("baseLength", &mut effect.base_length),
+                ("offsetX", &mut effect.offset_x),
+                ("offsetY", &mut effect.offset_y),
+                ("lightScl", &mut effect.light_scl),
+                ("lightOpacity", &mut effect.light_opacity),
+                ("spin", &mut effect.particle_spin),
+                ("sizeFrom", &mut effect.size_from),
+                ("sizeTo", &mut effect.size_to),
+                ("sizeChangeStart", &mut effect.size_change_start),
+                ("widthChangeStart", &mut effect.width_change_start),
+                ("heightChangeStart", &mut effect.height_change_start),
+                ("offset", &mut effect.particle_offset),
+                ("widthFrom", &mut effect.width_from),
+                ("widthTo", &mut effect.width_to),
+                ("heightFrom", &mut effect.height_from),
+                ("heightTo", &mut effect.height_to),
+                ("strokeFrom", &mut effect.stroke_from),
+                ("strokeTo", &mut effect.stroke_to),
+                ("lenFrom", &mut effect.len_from),
+                ("lenTo", &mut effect.len_to),
+            ],
+        );
         if let Some(value) = field_i32(object, "particles") {
             effect.particles = value;
         }
-        for (field, target) in [
-            ("randLength", &mut effect.rand_length),
-            ("casingFlip", &mut effect.casing_flip),
-            ("useRotation", &mut effect.use_rotation),
-            ("line", &mut effect.line),
-            ("cap", &mut effect.cap),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_bools(
+            object,
+            &mut [
+                ("randLength", &mut effect.rand_length),
+                ("casingFlip", &mut effect.casing_flip),
+                ("useRotation", &mut effect.use_rotation),
+                ("line", &mut effect.line),
+                ("cap", &mut effect.cap),
+            ],
+        );
         if let Some(color) = object.get("colorFrom").and_then(parse_color) {
             effect.particle_color_from = Some(color);
         }

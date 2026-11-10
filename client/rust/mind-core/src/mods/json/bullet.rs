@@ -32,50 +32,46 @@ impl<'a> ContentJsonParser<'a> {
             kind,
             ..BulletSpec::default()
         };
-        for (field, target) in [
-            ("damage", &mut spec.damage),
-            ("speed", &mut spec.speed),
-            ("lifetime", &mut spec.lifetime),
-            ("hitSize", &mut spec.hit_size),
-            ("drawSize", &mut spec.draw_size),
-            ("splashDamage", &mut spec.splash_damage),
-            ("splashDamageRadius", &mut spec.splash_damage_radius),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = Some(value);
-            }
-        }
-        for (field, target) in [
-            ("lightning", &mut spec.lightning),
-            ("lightningLength", &mut spec.lightning_length),
-            ("lightningLengthRand", &mut spec.lightning_length_rand),
-        ] {
-            if let Some(value) = field_i32(object, field) {
-                *target = Some(value);
-            }
-        }
-        for (field, target) in [
-            ("pierce", &mut spec.pierce),
-            ("pierceBuilding", &mut spec.pierce_building),
-            ("keepVelocity", &mut spec.keep_velocity),
-            ("collides", &mut spec.collides),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = Some(value);
-            }
-        }
-        for (field, target) in [
-            ("width", &mut spec.width),
-            ("height", &mut spec.height),
-            ("length", &mut spec.length),
-            ("ammoMultiplier", &mut spec.ammo_multiplier),
-            ("reloadMultiplier", &mut spec.reload_multiplier),
-            ("pierceDamageFactor", &mut spec.pierce_damage_factor),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = Some(value);
-            }
-        }
+        set_opt_f32s(
+            object,
+            &mut [
+                ("damage", &mut spec.damage),
+                ("speed", &mut spec.speed),
+                ("lifetime", &mut spec.lifetime),
+                ("hitSize", &mut spec.hit_size),
+                ("drawSize", &mut spec.draw_size),
+                ("splashDamage", &mut spec.splash_damage),
+                ("splashDamageRadius", &mut spec.splash_damage_radius),
+            ],
+        );
+        set_opt_i32s(
+            object,
+            &mut [
+                ("lightning", &mut spec.lightning),
+                ("lightningLength", &mut spec.lightning_length),
+                ("lightningLengthRand", &mut spec.lightning_length_rand),
+            ],
+        );
+        set_opt_bools(
+            object,
+            &mut [
+                ("pierce", &mut spec.pierce),
+                ("pierceBuilding", &mut spec.pierce_building),
+                ("keepVelocity", &mut spec.keep_velocity),
+                ("collides", &mut spec.collides),
+            ],
+        );
+        set_opt_f32s(
+            object,
+            &mut [
+                ("width", &mut spec.width),
+                ("height", &mut spec.height),
+                ("length", &mut spec.length),
+                ("ammoMultiplier", &mut spec.ammo_multiplier),
+                ("reloadMultiplier", &mut spec.reload_multiplier),
+                ("pierceDamageFactor", &mut spec.pierce_damage_factor),
+            ],
+        );
         if let Some(value) = field_i32(object, "pierceCap") {
             spec.pierce_cap = Some(value);
         }
@@ -123,172 +119,168 @@ impl<'a> ContentJsonParser<'a> {
                 *target = Some(sound);
             }
         }
-        for (field, target) in [
-            ("hitSoundVolume", &mut spec.hit_sound_volume),
-            ("hitSoundPitch", &mut spec.hit_sound_pitch),
-            ("hitSoundPitchRange", &mut spec.hit_sound_pitch_range),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = Some(value);
-            }
-        }
+        set_opt_f32s(
+            object,
+            &mut [
+                ("hitSoundVolume", &mut spec.hit_sound_volume),
+                ("hitSoundPitch", &mut spec.hit_sound_pitch),
+                ("hitSoundPitchRange", &mut spec.hit_sound_pitch_range),
+            ],
+        );
         // Remaining `BulletType` scalar fields (`BulletType.java:55-230`).
-        for (field, target) in [
-            ("rangeOverride", &mut spec.range_override),
-            ("maxRange", &mut spec.max_range),
-            ("homingPower", &mut spec.homing_power),
-            ("homingRange", &mut spec.homing_range),
-            ("homingDelay", &mut spec.homing_delay),
-            ("followAimSpeed", &mut spec.follow_aim_speed),
-            ("weaveScale", &mut spec.weave_scale),
-            ("weaveMag", &mut spec.weave_mag),
-            ("optimalLifeFract", &mut spec.optimal_life_fract),
-            ("maxDamageFraction", &mut spec.max_damage_fraction),
-            ("armorMultiplier", &mut spec.armor_multiplier),
-            ("blockArmorMultiplier", &mut spec.block_armor_multiplier),
-            (
-                "buildingDamageMultiplier",
-                &mut spec.building_damage_multiplier,
-            ),
-            ("shieldDamageMultiplier", &mut spec.shield_damage_multiplier),
-            ("statusDuration", &mut spec.status_duration),
-            ("statusChance", &mut spec.status_chance),
-            ("stickyExtraLifetime", &mut spec.sticky_extra_lifetime),
-            ("inaccuracy", &mut spec.inaccuracy),
-            ("hitShake", &mut spec.hit_shake),
-            ("despawnShake", &mut spec.despawn_shake),
-            ("trailWidth", &mut spec.trail_width),
-            ("trailChance", &mut spec.trail_chance),
-            ("trailInterval", &mut spec.trail_interval),
-            ("trailParam", &mut spec.trail_param),
-            ("trailSpread", &mut spec.trail_spread),
-            ("fragRandomSpread", &mut spec.frag_random_spread),
-            ("fragSpread", &mut spec.frag_spread),
-            ("fragAngle", &mut spec.frag_angle),
-            ("fragVelocityMin", &mut spec.frag_velocity_min),
-            ("fragVelocityMax", &mut spec.frag_velocity_max),
-            ("fragLifeMin", &mut spec.frag_life_min),
-            ("fragLifeMax", &mut spec.frag_life_max),
-            ("fragOffsetMin", &mut spec.frag_offset_min),
-            ("fragOffsetMax", &mut spec.frag_offset_max),
-            ("bulletInterval", &mut spec.bullet_interval),
-            ("intervalRandomSpread", &mut spec.interval_random_spread),
-            ("intervalSpread", &mut spec.interval_spread),
-            ("intervalAngle", &mut spec.interval_angle),
-            ("intervalDelay", &mut spec.interval_delay),
-            ("lightningDamage", &mut spec.lightning_damage),
-            ("lightningCone", &mut spec.lightning_cone),
-            ("lightningAngle", &mut spec.lightning_angle),
-            (
-                "spawnBulletRandomSpread",
-                &mut spec.spawn_bullet_random_spread,
-            ),
-            ("puddleRange", &mut spec.puddle_range),
-            ("puddleAmount", &mut spec.puddle_amount),
-            ("suppressionRange", &mut spec.suppression_range),
-            ("suppressionDuration", &mut spec.suppression_duration),
-            (
-                "suppressionEffectChance",
-                &mut spec.suppression_effect_chance,
-            ),
-            ("shrinkX", &mut spec.shrink_x),
-            ("shrinkY", &mut spec.shrink_y),
-            ("spin", &mut spec.spin),
-            ("rotationOffset", &mut spec.rotation_offset),
-            ("damageInterval", &mut spec.damage_interval),
-            ("shake", &mut spec.shake),
-            ("sideLength", &mut spec.side_length),
-            ("sideWidth", &mut spec.side_width),
-            ("sideAngle", &mut spec.side_angle),
-            ("lightningSpacing", &mut spec.lightning_spacing),
-            ("lightningDelay", &mut spec.lightning_delay),
-            ("lightningAngleRand", &mut spec.lightning_angle_rand),
-            ("serrationLenScl", &mut spec.serration_len_scl),
-            ("serrationWidth", &mut spec.serration_width),
-            ("serrationSpacing", &mut spec.serration_spacing),
-            ("serrationSpaceOffset", &mut spec.serration_space_offset),
-            ("serrationFadeOffset", &mut spec.serration_fade_offset),
-            ("sapStrength", &mut spec.sap_strength),
-            ("lengthRand", &mut spec.length_rand),
-            ("empRadius", &mut spec.emp_radius),
-            ("timeIncrease", &mut spec.time_increase),
-            ("timeDuration", &mut spec.time_duration),
-            ("powerDamageScl", &mut spec.power_damage_scl),
-            ("powerSclDecrease", &mut spec.power_scl_decrease),
-            ("unitDamageScl", &mut spec.unit_damage_scl),
-            ("pointEffectSpace", &mut spec.point_effect_space),
-            ("layer", &mut spec.layer),
-            ("trailMult", &mut spec.trail_mult),
-            ("trailSize", &mut spec.trail_size),
-            ("explodeRange", &mut spec.explode_range),
-            ("explodeDelay", &mut spec.explode_delay),
-            ("flakDelay", &mut spec.flak_delay),
-            ("flakInterval", &mut spec.flak_interval),
-            ("recoil", &mut spec.recoil),
-            ("rangeChange", &mut spec.range_change),
-            ("minRangeChange", &mut spec.min_range_change),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = Some(value);
-            }
-        }
-        for (field, target) in [
-            ("fragBullets", &mut spec.frag_bullets),
-            ("pierceFragCap", &mut spec.pierce_frag_cap),
-            ("intervalBullets", &mut spec.interval_bullets),
-            ("multiRepeat", &mut spec.multi_repeat),
-            ("puddles", &mut spec.puddles),
-            ("trailLength", &mut spec.trail_length),
-            ("serrations", &mut spec.serrations),
-            ("despawnUnitCount", &mut spec.despawn_unit_count),
-        ] {
-            if let Some(value) = field_i32(object, field) {
-                *target = Some(value);
-            }
-        }
-        for (field, target) in [
-            ("removeAfterPierce", &mut spec.remove_after_pierce),
-            ("laserAbsorb", &mut spec.laser_absorb),
-            ("laserBullet", &mut spec.laser_bullet),
-            ("displayAmmoMultiplier", &mut spec.display_ammo_multiplier),
-            ("killShooter", &mut spec.kill_shooter),
-            ("instantDisappear", &mut spec.instant_disappear),
-            ("splashDamagePierce", &mut spec.splash_damage_pierce),
-            ("scaledSplashDamage", &mut spec.scaled_splash_damage),
-            ("impact", &mut spec.impact),
-            ("pierceArmor", &mut spec.pierce_armor),
-            ("hittable", &mut spec.hittable),
-            ("targetBlocks", &mut spec.target_blocks),
-            ("targetMissiles", &mut spec.target_missiles),
-            ("reflectable", &mut spec.reflectable),
-            ("absorbable", &mut spec.absorbable),
-            ("collidesAir", &mut spec.collides_air),
-            ("collidesGround", &mut spec.collides_ground),
-            ("collidesTiles", &mut spec.collides_tiles),
-            ("collidesTeam", &mut spec.collides_team),
-            ("collideFloor", &mut spec.collide_floor),
-            ("collideTerrain", &mut spec.collide_terrain),
-            ("sticky", &mut spec.sticky),
-            ("despawnHit", &mut spec.despawn_hit),
-            ("fragOnHit", &mut spec.frag_on_hit),
-            ("fragOnDespawn", &mut spec.frag_on_despawn),
-            ("fragOnAbsorb", &mut spec.frag_on_absorb),
-            ("delayFrags", &mut spec.delay_frags),
-            ("trailRotation", &mut spec.trail_rotation),
-            ("underwater", &mut spec.underwater),
-            ("weaveRandom", &mut spec.weave_random),
-            ("largeHit", &mut spec.large_hit),
-            ("hitUnits", &mut spec.hit_units),
-            ("faceOutwards", &mut spec.face_outwards),
-            ("hitUnder", &mut spec.hit_under),
-            ("ignoreSpawnAngle", &mut spec.ignore_spawn_angle),
-            ("scaleKeepVelocity", &mut spec.scale_keep_velocity),
-            ("scaleLife", &mut spec.scale_life),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = Some(value);
-            }
-        }
+        set_opt_f32s(
+            object,
+            &mut [
+                ("rangeOverride", &mut spec.range_override),
+                ("maxRange", &mut spec.max_range),
+                ("homingPower", &mut spec.homing_power),
+                ("homingRange", &mut spec.homing_range),
+                ("homingDelay", &mut spec.homing_delay),
+                ("followAimSpeed", &mut spec.follow_aim_speed),
+                ("weaveScale", &mut spec.weave_scale),
+                ("weaveMag", &mut spec.weave_mag),
+                ("optimalLifeFract", &mut spec.optimal_life_fract),
+                ("maxDamageFraction", &mut spec.max_damage_fraction),
+                ("armorMultiplier", &mut spec.armor_multiplier),
+                ("blockArmorMultiplier", &mut spec.block_armor_multiplier),
+                (
+                    "buildingDamageMultiplier",
+                    &mut spec.building_damage_multiplier,
+                ),
+                ("shieldDamageMultiplier", &mut spec.shield_damage_multiplier),
+                ("statusDuration", &mut spec.status_duration),
+                ("statusChance", &mut spec.status_chance),
+                ("stickyExtraLifetime", &mut spec.sticky_extra_lifetime),
+                ("inaccuracy", &mut spec.inaccuracy),
+                ("hitShake", &mut spec.hit_shake),
+                ("despawnShake", &mut spec.despawn_shake),
+                ("trailWidth", &mut spec.trail_width),
+                ("trailChance", &mut spec.trail_chance),
+                ("trailInterval", &mut spec.trail_interval),
+                ("trailParam", &mut spec.trail_param),
+                ("trailSpread", &mut spec.trail_spread),
+                ("fragRandomSpread", &mut spec.frag_random_spread),
+                ("fragSpread", &mut spec.frag_spread),
+                ("fragAngle", &mut spec.frag_angle),
+                ("fragVelocityMin", &mut spec.frag_velocity_min),
+                ("fragVelocityMax", &mut spec.frag_velocity_max),
+                ("fragLifeMin", &mut spec.frag_life_min),
+                ("fragLifeMax", &mut spec.frag_life_max),
+                ("fragOffsetMin", &mut spec.frag_offset_min),
+                ("fragOffsetMax", &mut spec.frag_offset_max),
+                ("bulletInterval", &mut spec.bullet_interval),
+                ("intervalRandomSpread", &mut spec.interval_random_spread),
+                ("intervalSpread", &mut spec.interval_spread),
+                ("intervalAngle", &mut spec.interval_angle),
+                ("intervalDelay", &mut spec.interval_delay),
+                ("lightningDamage", &mut spec.lightning_damage),
+                ("lightningCone", &mut spec.lightning_cone),
+                ("lightningAngle", &mut spec.lightning_angle),
+                (
+                    "spawnBulletRandomSpread",
+                    &mut spec.spawn_bullet_random_spread,
+                ),
+                ("puddleRange", &mut spec.puddle_range),
+                ("puddleAmount", &mut spec.puddle_amount),
+                ("suppressionRange", &mut spec.suppression_range),
+                ("suppressionDuration", &mut spec.suppression_duration),
+                (
+                    "suppressionEffectChance",
+                    &mut spec.suppression_effect_chance,
+                ),
+                ("shrinkX", &mut spec.shrink_x),
+                ("shrinkY", &mut spec.shrink_y),
+                ("spin", &mut spec.spin),
+                ("rotationOffset", &mut spec.rotation_offset),
+                ("damageInterval", &mut spec.damage_interval),
+                ("shake", &mut spec.shake),
+                ("sideLength", &mut spec.side_length),
+                ("sideWidth", &mut spec.side_width),
+                ("sideAngle", &mut spec.side_angle),
+                ("lightningSpacing", &mut spec.lightning_spacing),
+                ("lightningDelay", &mut spec.lightning_delay),
+                ("lightningAngleRand", &mut spec.lightning_angle_rand),
+                ("serrationLenScl", &mut spec.serration_len_scl),
+                ("serrationWidth", &mut spec.serration_width),
+                ("serrationSpacing", &mut spec.serration_spacing),
+                ("serrationSpaceOffset", &mut spec.serration_space_offset),
+                ("serrationFadeOffset", &mut spec.serration_fade_offset),
+                ("sapStrength", &mut spec.sap_strength),
+                ("lengthRand", &mut spec.length_rand),
+                ("empRadius", &mut spec.emp_radius),
+                ("timeIncrease", &mut spec.time_increase),
+                ("timeDuration", &mut spec.time_duration),
+                ("powerDamageScl", &mut spec.power_damage_scl),
+                ("powerSclDecrease", &mut spec.power_scl_decrease),
+                ("unitDamageScl", &mut spec.unit_damage_scl),
+                ("pointEffectSpace", &mut spec.point_effect_space),
+                ("layer", &mut spec.layer),
+                ("trailMult", &mut spec.trail_mult),
+                ("trailSize", &mut spec.trail_size),
+                ("explodeRange", &mut spec.explode_range),
+                ("explodeDelay", &mut spec.explode_delay),
+                ("flakDelay", &mut spec.flak_delay),
+                ("flakInterval", &mut spec.flak_interval),
+                ("recoil", &mut spec.recoil),
+                ("rangeChange", &mut spec.range_change),
+                ("minRangeChange", &mut spec.min_range_change),
+            ],
+        );
+        set_opt_i32s(
+            object,
+            &mut [
+                ("fragBullets", &mut spec.frag_bullets),
+                ("pierceFragCap", &mut spec.pierce_frag_cap),
+                ("intervalBullets", &mut spec.interval_bullets),
+                ("multiRepeat", &mut spec.multi_repeat),
+                ("puddles", &mut spec.puddles),
+                ("trailLength", &mut spec.trail_length),
+                ("serrations", &mut spec.serrations),
+                ("despawnUnitCount", &mut spec.despawn_unit_count),
+            ],
+        );
+        set_opt_bools(
+            object,
+            &mut [
+                ("removeAfterPierce", &mut spec.remove_after_pierce),
+                ("laserAbsorb", &mut spec.laser_absorb),
+                ("laserBullet", &mut spec.laser_bullet),
+                ("displayAmmoMultiplier", &mut spec.display_ammo_multiplier),
+                ("killShooter", &mut spec.kill_shooter),
+                ("instantDisappear", &mut spec.instant_disappear),
+                ("splashDamagePierce", &mut spec.splash_damage_pierce),
+                ("scaledSplashDamage", &mut spec.scaled_splash_damage),
+                ("impact", &mut spec.impact),
+                ("pierceArmor", &mut spec.pierce_armor),
+                ("hittable", &mut spec.hittable),
+                ("targetBlocks", &mut spec.target_blocks),
+                ("targetMissiles", &mut spec.target_missiles),
+                ("reflectable", &mut spec.reflectable),
+                ("absorbable", &mut spec.absorbable),
+                ("collidesAir", &mut spec.collides_air),
+                ("collidesGround", &mut spec.collides_ground),
+                ("collidesTiles", &mut spec.collides_tiles),
+                ("collidesTeam", &mut spec.collides_team),
+                ("collideFloor", &mut spec.collide_floor),
+                ("collideTerrain", &mut spec.collide_terrain),
+                ("sticky", &mut spec.sticky),
+                ("despawnHit", &mut spec.despawn_hit),
+                ("fragOnHit", &mut spec.frag_on_hit),
+                ("fragOnDespawn", &mut spec.frag_on_despawn),
+                ("fragOnAbsorb", &mut spec.frag_on_absorb),
+                ("delayFrags", &mut spec.delay_frags),
+                ("trailRotation", &mut spec.trail_rotation),
+                ("underwater", &mut spec.underwater),
+                ("weaveRandom", &mut spec.weave_random),
+                ("largeHit", &mut spec.large_hit),
+                ("hitUnits", &mut spec.hit_units),
+                ("faceOutwards", &mut spec.face_outwards),
+                ("hitUnder", &mut spec.hit_under),
+                ("ignoreSpawnAngle", &mut spec.ignore_spawn_angle),
+                ("scaleKeepVelocity", &mut spec.scale_keep_velocity),
+                ("scaleLife", &mut spec.scale_life),
+            ],
+        );
         for (field, target) in [
             ("trailColor", &mut spec.trail_color),
             ("lightningColor", &mut spec.lightning_color),

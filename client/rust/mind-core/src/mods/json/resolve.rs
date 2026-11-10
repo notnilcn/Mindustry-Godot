@@ -24,9 +24,7 @@ impl<'a> ContentJsonParser<'a> {
         {
             // `ControlBlock`/`UnitTetherBlock` are interfaces upstream; naming
             // them as a block `type` fails there too.
-            return Err(ContentParseError::new(format!(
-                "{file}: `{class}` is not a concrete block class"
-            )));
+            parse_err!("{file}: `{class}` is not a concrete block class");
         }
         if !self.allow_class_resolution && !self.classmap.is_known(class) {
             self.warn(

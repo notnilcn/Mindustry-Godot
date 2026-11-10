@@ -14,6 +14,13 @@
 //! like upstream `ignoreUnknownFields = true`; the accepted vocabulary per kind
 //! is tracked in `parity/ledgers/mod_fields.md`.
 
+/// Returns a formatted [`ContentParseError`] from the enclosing function.
+macro_rules! parse_err {
+    ($($t:tt)*) => {
+        return Err(ContentParseError::new(format!($($t)*)))
+    };
+}
+
 pub mod classmap;
 pub mod classmap_gen;
 
@@ -232,9 +239,7 @@ impl<'a> ContentJsonParser<'a> {
                 object.get("objectives").cloned(),
             ),
             _ => {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `research` must be a parent name string or an object"
-                )));
+                parse_err!("{file}: `research` must be a parent name string or an object");
             }
         };
 
@@ -546,9 +551,7 @@ impl<'a> ContentJsonParser<'a> {
             ContentType::Planet => self.parse_planet(registry, file, stem, object)?,
             ContentType::Team => self.parse_team(registry, file, stem, object)?,
             other => {
-                return Err(ContentParseError::new(format!(
-                    "{file}: content type `{other}` is not supported yet (plan 20 M2)"
-                )));
+                parse_err!("{file}: content type `{other}` is not supported yet (plan 20 M2)");
             }
         };
         // `UnlockableContent` `research` key (`ContentParser.readFields`
@@ -590,9 +593,7 @@ impl<'a> ContentJsonParser<'a> {
         };
         for field in non_nullable {
             if matches!(object.get(*field), Some(Value::Null)) {
-                return Err(ContentParseError::new(format!(
-                    "{file}: Field '{field}' cannot be null."
-                )));
+                parse_err!("{file}: Field '{field}' cannot be null.");
             }
         }
         Ok(())
@@ -626,18 +627,17 @@ impl<'a> ContentJsonParser<'a> {
         object: &Map<String, Value>,
         unlock: &mut UnlockFields,
     ) {
-        for (field, target) in [
-            ("alwaysUnlocked", &mut unlock.always_unlocked),
-            ("inlineDescription", &mut unlock.inline_description),
-            ("hideDetails", &mut unlock.hide_details),
-            ("hideDatabase", &mut unlock.hide_database),
-            ("generateIcons", &mut unlock.generate_icons),
-            ("allDatabaseTabs", &mut unlock.all_database_tabs),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_bools(
+            object,
+            &mut [
+                ("alwaysUnlocked", &mut unlock.always_unlocked),
+                ("inlineDescription", &mut unlock.inline_description),
+                ("hideDetails", &mut unlock.hide_details),
+                ("hideDatabase", &mut unlock.hide_database),
+                ("generateIcons", &mut unlock.generate_icons),
+                ("allDatabaseTabs", &mut unlock.all_database_tabs),
+            ],
+        );
         if let Some(value) = field_f32(object, "selectionSize") {
             unlock.selection_size = value;
         }
