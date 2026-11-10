@@ -24,7 +24,12 @@ use super::math::{position, trnsx, trnsy};
 use super::{PendingShot, TurretKind, TurretState};
 
 /// `TurretBuild.shoot`.
-pub(super) fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet_type: BulletId) {
+pub(super) fn shoot(
+    ctx: &mut CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    bullet_type: BulletId,
+) {
     let config = state.config.clone();
     let (x, y) = position(ctx.world, e).unwrap_or((0.0, 0.0));
     let rotation = state.rotation;
@@ -374,7 +379,12 @@ pub(super) fn find_target(
 
 /// `TurretBuild.canHeal` (`Turret.java:634-636`): `targetHealing && hasAmmo()
 /// && peekAmmo().collidesTeam && peekAmmo().heals()`.
-pub(super) fn can_heal(state: &TurretState, world: &World, content: &ContentRegistry, e: Entity) -> bool {
+pub(super) fn can_heal(
+    state: &TurretState,
+    world: &World,
+    content: &ContentRegistry,
+    e: Entity,
+) -> bool {
     if !state.config.target_healing || !has_ammo_state(state, world, e) {
         return false;
     }
@@ -473,7 +483,13 @@ pub(super) fn target_position(
 /// (`Turret.java:587`): the fire gate uses the TARGET'S position, not the
 /// intercept point. Buildings use `BuildingComp.hitSize() = size * tilesize`
 /// (`BuildingComp.java:2054`).
-pub(super) fn within_target_range(ctx: &CombatCtx<'_>, target: Entity, x: f32, y: f32, range: f32) -> bool {
+pub(super) fn within_target_range(
+    ctx: &CombatCtx<'_>,
+    target: Entity,
+    x: f32,
+    y: f32,
+    range: f32,
+) -> bool {
     let Some((tx, ty)) = position(ctx.world, target) else {
         return false;
     };

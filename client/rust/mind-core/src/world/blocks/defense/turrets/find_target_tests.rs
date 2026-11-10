@@ -391,8 +391,7 @@ fn limit_range_recomputes_ammo_lifetime() {
     // `Blocks.java:5054` disperse `limitRange(16f)` + `extraRangeMargin 32`
     // (`Blocks.java:4922`): rangeChange -120 → (310 - 120 + 16 + 32 + 10) / 9.5.
     assert!(
-        (lifetime("disperse_thorium") - (310.0 - 120.0 + 16.0 + 32.0 + 10.0) / 9.5).abs()
-            < 1e-4,
+        (lifetime("disperse_thorium") - (310.0 - 120.0 + 16.0 + 32.0 + 10.0) / 9.5).abs() < 1e-4,
         "disperse thorium lifetime {}",
         lifetime("disperse_thorium")
     );
@@ -561,8 +560,7 @@ fn liquid_turret_targets_fires() {
         liquids.current_liquid = water;
     }
     // A fire on the turret's right, inside `range` (110).
-    let fire =
-        crate::combat::fires::create(&mut h.build.world, 10, 8, &mut h.rng).expect("fire");
+    let fire = crate::combat::fires::create(&mut h.build.world, 10, 8, &mut h.rng).expect("fire");
     // A fire on an enemy block must be ignored (`other.team() == team` gate).
     let wall = h.content().block_id("copper-wall").expect("wall");
     assert!(h.place(3, 8, wall, 0, true));

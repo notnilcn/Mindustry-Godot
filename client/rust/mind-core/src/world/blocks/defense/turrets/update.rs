@@ -18,7 +18,9 @@ use crate::world::modules::LiquidModule;
 
 use super::ammo::{can_consume, has_ammo_state, peek_ammo_state, turret_range_of};
 use super::build_turret::update_build;
-use super::math::{angle_dist, angle_to, approach_delta, cheating, efficiency, lerp_delta, move_toward, position};
+use super::math::{
+    angle_dist, angle_to, approach_delta, cheating, efficiency, lerp_delta, move_toward, position,
+};
 use super::targeting::{
     bullet, find_target, shoot, target_position, validate_target, within_target_range,
 };

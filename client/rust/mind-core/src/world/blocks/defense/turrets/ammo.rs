@@ -13,7 +13,10 @@ use crate::world::modules::{LiquidModule, PowerModule};
 use crate::world::plan::BuildPlan;
 
 use super::math::{cheating, position};
-use super::{AmmoEntry, LiquidAmmo, PayloadContent, PayloadStack, TurretAmmo, TurretConfig, TurretKind, TurretState};
+use super::{
+    AmmoEntry, LiquidAmmo, PayloadContent, PayloadStack, TurretAmmo, TurretConfig, TurretKind,
+    TurretState,
+};
 
 // ---- ammo ----
 
@@ -280,7 +283,12 @@ pub(super) fn consumed_ammo_liquid(
 
 /// `TurretBuild.canConsume`: power/heat gates (item/liquid gate handled by
 /// `has_ammo`).
-pub(super) fn can_consume(state: &TurretState, world: &World, e: Entity, config: &TurretConfig) -> bool {
+pub(super) fn can_consume(
+    state: &TurretState,
+    world: &World,
+    e: Entity,
+    config: &TurretConfig,
+) -> bool {
     if config.heat_requirement > 0.0 && state.heat_req <= 0.0 {
         return false;
     }

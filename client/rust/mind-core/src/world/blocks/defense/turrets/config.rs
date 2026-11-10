@@ -15,7 +15,6 @@ use crate::world::blocks::defense::turrets::advanced;
 
 use super::{ItemAmmo, LiquidAmmo, PowerAmmo, TurretAmmo, TurretConfig, TurretKind};
 
-
 /// Registers the plan-10 turret-ammo fixture bullets (`Blocks.java`
 /// `ammoTypes`) used by the M5 oracle. Only the `duo` ammo set is ported so
 /// far; the remaining vanilla turret ammo is a tracked M5/M6 content delta.
@@ -126,7 +125,10 @@ pub(super) const VANILLA_TURRETS: &[&str] = &[
 /// precedes tech-tree construction. The port's turret ammo is installed after
 /// content boot (`install_turret_ammo`, GAPS #11), so the equivalent pass runs
 /// at that point; `content::tech::ekir::rebalance` keeps owning part (a).
-pub(super) fn rebalance_erekir_turret_ammo(content: &mut ContentRegistry, names: &BTreeMap<String, BulletId>) {
+pub(super) fn rebalance_erekir_turret_ammo(
+    content: &mut ContentRegistry,
+    names: &BTreeMap<String, BulletId>,
+) {
     let serpulo = content.serpulo_items().to_vec();
     let mut balanced: std::collections::BTreeSet<BulletId> = std::collections::BTreeSet::new();
     let mut updates: Vec<(BulletId, f32)> = Vec::new();
@@ -288,7 +290,11 @@ pub fn config_for(
 
 /// `ConsumeCoolant.filter`: `coolant && (allowLiquid && !gas || allowGas &&
 /// gas) && temperature <= maxTemp(0.5) && flammability < maxFlammability(0.1)`.
-pub(super) fn coolant_filter(content: &ContentRegistry, allow_liquid: bool, allow_gas: bool) -> Vec<LiquidId> {
+pub(super) fn coolant_filter(
+    content: &ContentRegistry,
+    allow_liquid: bool,
+    allow_gas: bool,
+) -> Vec<LiquidId> {
     content
         .liquids()
         .iter()
@@ -378,7 +384,11 @@ pub(super) fn apply_turret_sounds(name: &str, config: &mut TurretConfig) {
 /// spec (`coolant = consumeCoolant(x)` / `consume(new ConsumeLiquid(water,
 /// x))`, both made optional), so the config mirrors the content data
 /// (PAR-0087).
-pub(super) fn apply_block_coolant(content: &ContentRegistry, name: &str, config: &mut TurretConfig) {
+pub(super) fn apply_block_coolant(
+    content: &ContentRegistry,
+    name: &str,
+    config: &mut TurretConfig,
+) {
     use crate::content::Consume;
     let Some(def) = content.block_id(name).and_then(|id| content.block(id)) else {
         return;

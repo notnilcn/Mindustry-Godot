@@ -34,10 +34,10 @@ mod config;
 mod find_target_tests;
 mod math;
 mod targeting;
-mod types;
-mod update;
 #[cfg(test)]
 mod tests;
+mod types;
+mod update;
 
 pub use ammo::*;
 pub use build_turret::*;
