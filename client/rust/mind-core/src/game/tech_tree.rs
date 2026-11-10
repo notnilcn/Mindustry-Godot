@@ -22,8 +22,11 @@ use crate::content::{
 };
 use crate::world::modules::ItemModule;
 
-use super::objectives::ObjectiveContext;
+use super::objectives::{CampaignObjectiveContext, ObjectiveContext};
+use super::play::SectorRef;
 use super::rules::Rules;
+use super::runtime::UnlockRef;
+use super::universe::Campaign;
 use crate::io::settings::SettingsStore;
 
 /// [`UnlockStore`] over the persistent [`SettingsStore`] (`Core.settings`).
@@ -444,6 +447,308 @@ pub fn check_auto_unlocks(
     unlocked
 }
 
+/// Result of [`apply_pending_unlocks`]: the content the host must announce and
+/// add to the live runtime's unlocked-content cache.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct UnlockOutcome {
+    /// Newly unlocked content names, in unlock order (produced refs first, then
+    /// the campaign auto-unlocks; `Control.java:160-174` toast input).
+    pub names: Vec<String>,
+    /// Newly unlocked content refs, in unlock order (`UnlockEvent` input).
+    pub contents: Vec<ContentRef>,
+    /// Whether an auto-unlock added a block (the palette rebuild signal,
+    /// `PlacementFragment.java:92-96`).
+    pub any_block: bool,
+}
+
+/// Applies the queued production/liquid/unit unlocks
+/// (`UnlockableContent.unlock()` -> `UnlockEvent` -> `Control.java:160-174`):
+/// resolves each [`UnlockRef`], persists its `<name>-unlocked` key through
+/// `store`, then runs the campaign auto-unlock pass.
+///
+/// `set_unlocked_content` stays with the caller (it is a `CampaignRuntime`
+/// method); pass [`unlocked_content_names`] to it. The caller also owns the
+/// toast/palette signals and the `unlocked_since_last_take` buffer.
+///
+/// Extracted from `mind-gdext` `campaign.rs:1103-1167` at `291e30a8` (adopted
+/// by X01).
+pub fn apply_pending_unlocks(
+    registry: &mut ContentRegistry,
+    store: &mut dyn UnlockStore,
+    campaign: &Campaign,
+    unlocks: Vec<UnlockRef>,
+) -> UnlockOutcome {
+    let mut outcome = UnlockOutcome::default();
+    let mut newly: Vec<String> = Vec::new();
+    for unlock in unlocks {
+        let (content, name) = match unlock {
+            UnlockRef::Item(id) => (
+                ContentRef::of(ContentType::Item, id),
+                registry.item(id).map(|item| item.name.clone()),
+            ),
+            UnlockRef::Liquid(id) => (
+                ContentRef::of(ContentType::Liquid, id),
+                registry.liquid(id).map(|liquid| liquid.name.clone()),
+            ),
+            UnlockRef::Unit(id) => (
+                ContentRef::of(ContentType::Unit, id),
+                registry.unit(id).map(|unit| unit.name.clone()),
+            ),
+        };
+        let Some(name) = name else {
+            continue;
+        };
+        let unlocked =
+            unlock_fields_mut(registry, content).is_some_and(|fields| fields.unlock(&name, store));
+        if unlocked {
+            outcome.contents.push(content);
+            newly.push(name);
+        }
+    }
+    if !newly.is_empty() {
+        let auto = check_campaign_auto_unlocks(registry, store, campaign);
+        for content in auto {
+            if content.type_ == ContentType::Block {
+                outcome.any_block = true;
+            }
+            outcome.contents.push(content);
+            if let Some(name) = content_name(registry, content) {
+                newly.push(name);
+            }
+        }
+        outcome.names = newly;
+    }
+    outcome
+}
+
+/// `Control.checkAutoUnlocks` over a live campaign: the shared
+/// `CampaignObjectiveContext::new` + [`check_auto_unlocks`] block.
+///
+/// The three facade copies (`pump_runtime` 1136-1143, the capture listener
+/// 1295-1299 and `research` 2955-2965 at `291e30a8`) are identical.
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn check_campaign_auto_unlocks(
+    registry: &mut ContentRegistry,
+    store: &mut dyn UnlockStore,
+    campaign: &Campaign,
+) -> Vec<ContentRef> {
+    let ctx = CampaignObjectiveContext::new(registry, campaign);
+    check_auto_unlocks(registry, store, &ctx)
+}
+
+/// Unlocked content names of the registry, in tech-node order (the
+/// `CampaignRuntime::set_unlocked_content` input; map objective
+/// `Research`/`Produce` predicates).
+///
+/// Extracted from the free `collect_unlocked` (`mind-gdext`
+/// `campaign.rs:7291-7300` at `291e30a8`; adopted by X01).
+pub fn unlocked_content_names(registry: &ContentRegistry) -> Vec<String> {
+    registry
+        .tech()
+        .nodes
+        .iter()
+        .filter_map(|node| node.content)
+        .filter(|content| content_unlocked(registry, *content))
+        .filter_map(|content| content_name(registry, content))
+        .collect()
+}
+
+/// Java `rootPlanets` for a tree root (`ResearchDialog.rebuildItems`): planets
+/// whose `techTree == lastNode` or `lastNode.planet == planet`; vanilla trees
+/// carry the planet on the root, fallback serpulo.
+///
+/// Extracted from the free `root_planets` (`mind-gdext` `campaign.rs:7305-7318`
+/// at `291e30a8`; adopted by X01).
+pub fn root_planets(registry: &ContentRegistry, root: TechNodeRef) -> Vec<PlanetId> {
+    let mut planets: Vec<PlanetId> = registry
+        .tech()
+        .node(root)
+        .and_then(|node| node.planet)
+        .into_iter()
+        .collect();
+    if planets.is_empty()
+        && let Some(serpulo) = registry.planet_id("serpulo")
+    {
+        planets.push(serpulo);
+    }
+    planets
+}
+
+/// Tech node for a content name (`ResearchDialog`'s `find(content.name)`):
+/// the content ref plus the node that carries it.
+///
+/// The facade's `research` (2801-2821 at `291e30a8`) scans the nodes twice:
+/// first for the name (the node's `content_name` is not the display name), then
+/// for the node whose `content` matches. Both scans keep node order.
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn node_for_content_name(
+    registry: &ContentRegistry,
+    name: &str,
+) -> Option<(ContentRef, TechNodeRef)> {
+    let content_ref = registry.tech().nodes.iter().find_map(|node| {
+        let content = node.content?;
+        (content_name(registry, content).as_deref() == Some(name)).then_some(content)
+    })?;
+    let node_ref = registry
+        .tech()
+        .nodes
+        .iter()
+        .position(|node| node.content == Some(content_ref))
+        .map(|index| TechNodeRef(index as u32))?;
+    Some((content_ref, node_ref))
+}
+
+/// `ResearchDialog.rebuildItems` inventory: the global item pool, the other
+/// based sectors' stored rows and the sector being played.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResearchInventory {
+    /// The global pool (`rebuildItems`' `items`): played-core items plus every
+    /// other based sector's stored items.
+    pub pool: ItemModule,
+    /// Per-other-sector rows `(sector, [(item, amount)])` in planet order, then
+    /// sector id; the played sector is excluded.
+    pub sectors: Vec<(SectorRef, Vec<(String, i32)>)>,
+    /// The sector being played (`None` outside a campaign sector).
+    pub played: Option<SectorRef>,
+    /// The played sector's live core rows (read from the host by the facade).
+    pub played_items: Vec<(String, i32)>,
+}
+
+/// `ResearchDialog.rebuildItems` inventory for `planets`
+/// (`research_inventory`, 3014-3070 at `291e30a8`).
+///
+/// The facade reads `played_items` from the live core through the host; that
+/// read stays in the facade and this takes the slice. `played` is
+/// `session.sector`; the played sector is skipped in `sectors` (its items are
+/// the `played_items` rows).
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn research_inventory(
+    registry: &ContentRegistry,
+    campaign: &Campaign,
+    planets: &[PlanetId],
+    played: Option<SectorRef>,
+    played_items: &[(String, i32)],
+) -> ResearchInventory {
+    let mut pool = ItemModule::with_items(registry.items().len());
+    for (name, amount) in played_items {
+        if let Some(id) = registry.item_id(name) {
+            pool.add(id, (*amount).max(0), i32::MAX);
+        }
+    }
+    let mut sectors: Vec<(SectorRef, Vec<(String, i32)>)> = Vec::new();
+    for planet in campaign.planets.values() {
+        if !planets.contains(&planet.id) {
+            continue;
+        }
+        for sector in &planet.sectors {
+            if !sector.has_base() || sector.is_frozen(None) {
+                continue;
+            }
+            if played == Some((planet.id, sector.id)) {
+                continue;
+            }
+            let entry: Vec<(String, i32)> = sector
+                .info
+                .info
+                .items
+                .iter()
+                .map(|(name, amount)| (name.clone(), *amount))
+                .collect();
+            for (name, amount) in &entry {
+                if let Some(id) = registry.item_id(name) {
+                    pool.add(id, (*amount).max(0), i32::MAX);
+                }
+            }
+            sectors.push(((planet.id, sector.id), entry));
+        }
+    }
+    ResearchInventory {
+        pool,
+        sectors,
+        played,
+        played_items: played_items.to_vec(),
+    }
+}
+
+/// `ResearchDialog.rebuildItems`'s `ItemSeq.add(item, -amount)` deduction
+/// loop (2872-2933 at `291e30a8`): distribute each spent stack over the other
+/// sectors by percentage, then take the remainder from the played sector last.
+///
+/// Returns the per-sector record updates `(planet, sector, item, new amount)`
+/// in loop order, and the played-core removals `(item, amount)` for the facade
+/// to apply through `remove_player_core_items`.
+///
+/// The iteration order is the original loop's: one pass per spent stack, over
+/// `inv.sectors` in stored order. `spent` stacks are unique per item upstream
+/// (`ResearchDialog.spend` walks one `ItemSeq`), so the local copy only matters
+/// for a duplicate stack.
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+#[allow(clippy::type_complexity)]
+pub fn plan_research_removal(
+    inv: &ResearchInventory,
+    spent: &[ItemStack],
+    registry: &ContentRegistry,
+) -> (Vec<(PlanetId, u16, String, i32)>, Vec<(String, i32)>) {
+    let mut sector_entries = inv.sectors.clone();
+    let mut played_items = inv.played_items.clone();
+    let mut record_updates: Vec<(PlanetId, u16, String, i32)> = Vec::new();
+    let mut core_removals: Vec<(String, i32)> = Vec::new();
+    for spent in spent {
+        let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
+            continue;
+        };
+        let others: Vec<i32> = sector_entries
+            .iter()
+            .map(|(_, entry)| {
+                entry
+                    .iter()
+                    .find(|(entry_name, _)| entry_name == &name)
+                    .map(|(_, amount)| *amount)
+                    .unwrap_or(0)
+            })
+            .collect();
+        let current = inv.played.map(|_| {
+            played_items
+                .iter()
+                .find(|(entry_name, _)| entry_name == &name)
+                .map(|(_, amount)| *amount)
+                .unwrap_or(0)
+        });
+        let (removals, current_removal) = distribute_removal(spent.amount, current, &others);
+        for (index, to_remove) in removals.iter().enumerate() {
+            if *to_remove <= 0 {
+                continue;
+            }
+            let ((planet, sector), entry) = &mut sector_entries[index];
+            let (planet, sector) = (*planet, *sector);
+            if let Some((_, amount)) = entry.iter_mut().find(|(entry_name, _)| entry_name == &name)
+            {
+                *amount -= *to_remove;
+            }
+            let updated = entry
+                .iter()
+                .find(|(entry_name, _)| entry_name == &name)
+                .map(|(_, amount)| *amount)
+                .unwrap_or(0);
+            record_updates.push((planet, sector, name.clone(), updated));
+        }
+        if current_removal > 0 {
+            if let Some((_, amount)) = played_items
+                .iter_mut()
+                .find(|(entry_name, _)| entry_name == &name)
+            {
+                *amount -= current_removal;
+            }
+            core_removals.push((name, current_removal));
+        }
+    }
+    (record_updates, core_removals)
+}
+
 /// `node.reset()` for every node (new-profile reset).
 pub fn reset_all(registry: &mut ContentRegistry) {
     for node in &mut registry.tech.nodes {
@@ -624,7 +929,7 @@ mod tests {
 
     use super::*;
     use crate::content::settings_store::MemoryUnlockStore;
-    use crate::content::{MemoryBundle, create_base_content};
+    use crate::game::test_support::raw_registry;
     use crate::world::modules::ItemModule;
 
     struct AllowAll;
@@ -640,11 +945,10 @@ mod tests {
         }
     }
 
+    /// The `(registry, store)` pair: the shared raw registry plus the unlock
+    /// store the tests write through.
     fn registry() -> (ContentRegistry, MemoryUnlockStore) {
-        let bundle = MemoryBundle::new();
-        let store = MemoryUnlockStore::new();
-        let registry = create_base_content(&bundle, &store, true).unwrap();
-        (registry, store)
+        (raw_registry(), MemoryUnlockStore::new())
     }
 
     #[test]
@@ -1080,6 +1384,238 @@ mod tests {
 
         registry.clear_unlocks(&mut store, Some(planet));
         assert!(!content_unlocked(&registry, content));
+    }
+
+    // --- campaign API (W2-H02) ---
+
+    #[test]
+    fn unlocked_content_names_matches_the_unlocked_tech_nodes() {
+        let (registry, _store) = registry();
+        let expected: Vec<String> = registry
+            .tech()
+            .nodes
+            .iter()
+            .filter_map(|node| node.content)
+            .filter(|content| content_unlocked(&registry, *content))
+            .filter_map(|content| content_name(&registry, content))
+            .collect();
+        assert!(
+            !expected.is_empty(),
+            "vanilla content unlocks at least one tech node"
+        );
+        assert_eq!(unlocked_content_names(&registry), expected);
+    }
+
+    #[test]
+    fn apply_pending_unlocks_unlocks_and_is_idempotent() {
+        let (mut registry, mut store) = registry();
+        let campaign = crate::game::test_support::campaign(&registry);
+        let (item, name) = registry
+            .items()
+            .iter()
+            .find_map(|item| (!item.unlock.unlocked()).then(|| (item.id, item.name.clone())))
+            .expect("a genuinely locked item");
+        let content = ContentRef::of(ContentType::Item, item);
+        let outcome = apply_pending_unlocks(
+            &mut registry,
+            &mut store,
+            &campaign,
+            vec![UnlockRef::Item(item)],
+        );
+        assert_eq!(
+            outcome.names.first().map(String::as_str),
+            Some(name.as_str())
+        );
+        assert!(outcome.contents.contains(&content));
+        assert!(
+            unlock_fields(&registry, content).is_some_and(|fields| fields.unlocked()),
+            "the item is unlocked in the registry"
+        );
+        // A second pass has nothing to unlock and does not run the auto sweep.
+        let again = apply_pending_unlocks(
+            &mut registry,
+            &mut store,
+            &campaign,
+            vec![UnlockRef::Item(item)],
+        );
+        assert!(again.names.is_empty());
+        assert!(again.contents.is_empty());
+        assert!(!again.any_block);
+    }
+
+    #[test]
+    fn apply_pending_unlocks_ignores_always_unlocked_content() {
+        let (mut registry, mut store) = registry();
+        let campaign = crate::game::test_support::campaign(&registry);
+        let copper = registry.item_id("copper").expect("copper");
+        let outcome = apply_pending_unlocks(
+            &mut registry,
+            &mut store,
+            &campaign,
+            vec![UnlockRef::Item(copper)],
+        );
+        assert_eq!(outcome, UnlockOutcome::default());
+    }
+
+    #[test]
+    fn campaign_auto_unlocks_are_idempotent() {
+        let (mut registry, mut store) = registry();
+        let campaign = crate::game::test_support::campaign(&registry);
+        let first = check_campaign_auto_unlocks(&mut registry, &mut store, &campaign);
+        for content in &first {
+            assert!(
+                content_unlocked(&registry, *content),
+                "every auto-unlocked content is persisted"
+            );
+        }
+        let again = check_campaign_auto_unlocks(&mut registry, &mut store, &campaign);
+        assert!(again.is_empty(), "a second pass unlocks nothing new");
+    }
+
+    #[test]
+    fn root_planets_uses_the_root_planet_or_falls_back_to_serpulo() {
+        let (registry, _store) = registry();
+        let serpulo = registry.planet_id("serpulo").expect("serpulo");
+        for root in &registry.tech().roots {
+            let planets = root_planets(&registry, *root);
+            assert!(!planets.is_empty(), "every root resolves a planet");
+            let node_planet = registry.tech().node(*root).and_then(|node| node.planet);
+            assert_eq!(
+                planets,
+                node_planet.map_or_else(|| vec![serpulo], |planet| vec![planet])
+            );
+        }
+    }
+
+    #[test]
+    fn node_for_content_name_finds_the_content_and_node() {
+        let (registry, _store) = registry();
+        let (name, content, node_ref) = registry
+            .tech()
+            .nodes
+            .iter()
+            .enumerate()
+            .find_map(|(index, node)| {
+                let content = node.content?;
+                let name = content_name(&registry, content)?;
+                Some((name, content, TechNodeRef(index as u32)))
+            })
+            .expect("a named tech node");
+        assert_eq!(
+            node_for_content_name(&registry, &name),
+            Some((content, node_ref))
+        );
+        assert_eq!(node_for_content_name(&registry, "no-such-content"), None);
+    }
+
+    #[test]
+    fn research_inventory_sums_based_sectors_and_skips_the_played_one() {
+        let (registry, _store) = registry();
+        let mut campaign = crate::game::test_support::campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let ids: Vec<u16> = campaign
+            .planet(planet)
+            .expect("serpulo record")
+            .sectors
+            .iter()
+            .map(|sector| sector.id)
+            .collect();
+        assert!(ids.len() >= 2, "serpulo has at least two sectors");
+        let (first, second) = (ids[0], ids[1]);
+        for (id, amount) in [(first, 7), (second, 3)] {
+            let sector = campaign.sector_mut(planet, id).expect("sector");
+            sector.save = Some(format!("sector-test-{id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+            sector.info.info.items.insert("copper".to_owned(), amount);
+        }
+        let copper = registry.item_id("copper").expect("copper");
+        let planets = vec![planet];
+        let inv = research_inventory(
+            &registry,
+            &campaign,
+            &planets,
+            Some((planet, first)),
+            &[("copper".to_owned(), 5)],
+        );
+        assert_eq!(
+            inv.sectors,
+            vec![((planet, second), vec![("copper".to_owned(), 3)])]
+        );
+        assert_eq!(
+            inv.pool.get(copper),
+            8,
+            "played core 5 + the other sector 3"
+        );
+        assert_eq!(inv.played, Some((planet, first)));
+        assert_eq!(inv.played_items, vec![("copper".to_owned(), 5)]);
+
+        // An attacked, non-played sector is frozen and excluded.
+        campaign
+            .sector_mut(planet, second)
+            .expect("sector")
+            .info
+            .info
+            .waves = true;
+        let inv = research_inventory(&registry, &campaign, &planets, None, &[]);
+        assert_eq!(
+            inv.sectors,
+            vec![((planet, first), vec![("copper".to_owned(), 7)])],
+            "only the based, non-frozen sector remains"
+        );
+    }
+
+    #[test]
+    fn plan_research_removal_distributes_then_takes_the_played_core() {
+        let (registry, _store) = registry();
+        let planet = registry.planet_id("serpulo").expect("serpulo");
+        let copper = registry.item_id("copper").expect("copper");
+        let mut pool = ItemModule::with_items(registry.items().len());
+        pool.add(copper, 35, i32::MAX);
+        let inv = ResearchInventory {
+            pool,
+            sectors: vec![
+                ((planet, 1), vec![("copper".to_owned(), 10)]),
+                ((planet, 2), vec![("copper".to_owned(), 5)]),
+            ],
+            played: Some((planet, 3)),
+            played_items: vec![("copper".to_owned(), 20)],
+        };
+        // 10 copper: the other sectors pay by percentage (7 + 3), the played
+        // core keeps its 20.
+        let (updates, core) = plan_research_removal(&inv, &[ItemStack::new(copper, 10)], &registry);
+        assert_eq!(
+            updates,
+            vec![
+                (planet, 1, "copper".to_owned(), 3),
+                (planet, 2, "copper".to_owned(), 2),
+            ]
+        );
+        assert!(core.is_empty());
+        // 100 copper: the others drain, then the played core pays the rest.
+        let (updates, core) =
+            plan_research_removal(&inv, &[ItemStack::new(copper, 100)], &registry);
+        assert_eq!(
+            updates,
+            vec![
+                (planet, 1, "copper".to_owned(), 0),
+                (planet, 2, "copper".to_owned(), 0),
+            ]
+        );
+        assert_eq!(core, vec![("copper".to_owned(), 20)]);
+        // No played sector: the core list stays empty.
+        let unplayed = ResearchInventory {
+            played: None,
+            ..inv.clone()
+        };
+        let (_, core) = plan_research_removal(&unplayed, &[ItemStack::new(copper, 100)], &registry);
+        assert!(core.is_empty());
+        // Unknown items are skipped.
+        let unknown = ItemStack::new(ItemId::new(60_000), 1);
+        let (updates, core) = plan_research_removal(&inv, &[unknown], &registry);
+        assert!(updates.is_empty());
+        assert!(core.is_empty());
     }
 
     // --- helpers ---
