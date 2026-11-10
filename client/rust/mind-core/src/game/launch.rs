@@ -16,6 +16,11 @@ use indexmap::IndexMap;
 /// `item.isOnPlanet(planet)` (`UnlockableContent.shownPlanets`): whether the
 /// item appears in the launch dialog on `planet`.
 ///
+/// **Divergence (kept verbatim from the facade):** Java also accepts an empty
+/// `shownPlanets` and the `null`/`sun` planet (`UnlockableContent.java:132-134`);
+/// this checks `contains` only, so items with no planet assigned are filtered
+/// out. Behaviour-preserving copy — see the H02 report follow-up; fix separately.
+///
 /// Extracted from `MindCampaign::item_on_planet` (`mind-gdext`
 /// `campaign.rs:817` at `291e30a8`; adopted by X01).
 pub fn item_on_planet(registry: &ContentRegistry, name: &str, planet: PlanetId) -> bool {
