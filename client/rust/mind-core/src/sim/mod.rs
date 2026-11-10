@@ -3199,6 +3199,8 @@ mod logic_campaign_tests;
 #[cfg(test)]
 mod production_tests;
 #[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
 mod tests;
 
 /// Local sinks for the privileged logic event log (#27): `sync` (server-target
