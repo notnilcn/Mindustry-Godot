@@ -14,25 +14,25 @@ use crate::entities::comp::{Health, Pos, Vel};
 
 use super::Sim;
 
-mod turrets_bullets;
-mod motion_payload;
-mod deaths;
+mod ai_kinds;
+mod assist_cargo_control;
+mod building_explosions;
+mod command_explosion;
 mod commands_ai;
+mod deaths;
+mod defense_blocks;
+mod environment;
 mod fire_weather;
-mod payload_weapons;
+mod fog;
+mod motion_payload;
 mod multipliers_player;
 mod pathing_mining;
-mod environment;
-mod command_explosion;
-mod defense_blocks;
-mod targeting;
-mod fog;
-mod building_explosions;
-mod player_campaign;
+mod payload_weapons;
 mod physics;
-mod ai_kinds;
+mod player_campaign;
+mod targeting;
+mod turrets_bullets;
 mod walls;
-mod assist_cargo_control;
 
 pub(super) fn live_sim(size: i32) -> Sim {
     let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
