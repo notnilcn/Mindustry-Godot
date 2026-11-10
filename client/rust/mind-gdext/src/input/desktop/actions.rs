@@ -49,9 +49,7 @@ impl DesktopBridge {
                 self.controller.state.override_line_rotation = false;
                 self.controller.state.select_plans.clear();
                 self.refresh_select_preview();
-                if let Some(mut host) = self.host.clone() {
-                    host.bind_mut().clear_player_build_plans();
-                }
+                let _ = self.with_host_mut(|host| host.clear_player_build_plans());
                 self.fire_hotkey(name);
             }
             "schematic_select" | "rebuild_select" => {
@@ -83,10 +81,9 @@ impl DesktopBridge {
                 if self.controller.state.is_building {
                     self.shooting = false;
                 }
-                if let Some(mut host) = self.host.clone() {
-                    host.bind_mut()
-                        .set_player_building_paused(!self.controller.state.is_building);
-                }
+                let _ = self.with_host_mut(|host| {
+                    host.set_player_building_paused(!self.controller.state.is_building)
+                });
                 self.fire_hotkey(name);
             }
             "block_select_01" | "block_select_02" | "block_select_03" | "block_select_04"
@@ -314,11 +311,13 @@ impl DesktopBridge {
                 // `state.is(State.paused) || state.is(State.playing)`
                 // (`Control.java:735`): the menu phase (after
                 // `MindCampaign.reset_to_menu`, L02 T2) ignores the key.
-                if !cutscene && let Some(mut host) = self.host.clone() {
-                    let state = host.bind().get_state().to_string();
+                if !cutscene {
+                    let state = self
+                        .with_host(|host| host.get_state().to_string())
+                        .unwrap_or_default();
                     if state == "paused" || state == "playing" {
-                        let paused = host.bind().is_paused();
-                        host.bind_mut().set_paused(!paused);
+                        let paused = self.with_host(|host| host.is_paused()).unwrap_or(false);
+                        let _ = self.with_host_mut(|host| host.set_paused(!paused));
                     }
                 }
                 self.fire_hotkey(name);

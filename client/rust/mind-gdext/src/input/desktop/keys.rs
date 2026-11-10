@@ -251,9 +251,8 @@ impl DesktopBridge {
         let shared = bindings.value(ids::COMMAND_MODE) == bindings.value(ids::BOOST);
         let boost_guard = shared
             && self
-                .host
-                .as_ref()
-                .is_some_and(|host| host.bind().player_unit_can_boost());
+                .with_host(|host| host.player_unit_can_boost())
+                .unwrap_or(false);
         self.in_game
             && !self.locked
             && self.controller.state.block.is_none()
@@ -309,19 +308,18 @@ impl DesktopBridge {
         if !self.build_autopause {
             return;
         }
-        let Some(mut host) = self.host.clone() else {
+        let Some(plans) = self.with_host(|host| host.player_plan_count()) else {
             return;
         };
-        let plans = host.bind().player_plan_count();
         if self.controller.state.is_building && plans == 0 {
             // `isBuilding = false; buildWasAutoPaused = true;`
             self.controller.state.is_building = false;
             self.build_was_auto_paused = true;
-            host.bind_mut().set_player_building_paused(true);
+            let _ = self.with_host_mut(|host| host.set_player_building_paused(true));
         } else if self.build_was_auto_paused && !self.controller.state.is_building && plans > 0 {
             self.controller.state.is_building = true;
             self.build_was_auto_paused = false;
-            host.bind_mut().set_player_building_paused(false);
+            let _ = self.with_host_mut(|host| host.set_player_building_paused(false));
         }
     }
 

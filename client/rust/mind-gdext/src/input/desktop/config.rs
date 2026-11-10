@@ -11,14 +11,13 @@ impl DesktopBridge {
 
     /// Block kind at a tile (`None` out of bounds/unloaded).
     pub fn block_kind_at(&self, x: i32, y: i32) -> Option<BlockKind> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
-        let block = guard.grid().block_at(TilePos::new(tx, ty))?;
-        content.block(block).map(|def| def.kind)
+        self.with_host(|host| {
+            let content = host.content_registry()?;
+            let (tx, ty) = tile_i16(x, y)?;
+            let block = host.grid().block_at(TilePos::new(tx, ty))?;
+            content.block(block).map(|def| def.kind)
+        })
+        .flatten()
     }
 
     /// Builds the config-spec JSON for a configurable block.
@@ -29,9 +28,7 @@ impl DesktopBridge {
         let campaign = self.campaign.clone();
         let guard = host.bind();
         let content = guard.content_registry()?;
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
+        let (tx, ty) = tile_i16(x, y)?;
         let block = guard.grid().block_at(TilePos::new(tx, ty))?;
         let def = content.block(block)?;
         let rules = guard.live_rules();
@@ -529,12 +526,10 @@ impl DesktopBridge {
         if commands.is_empty() {
             return;
         }
-        let Some(mut host) = self.host.clone() else {
-            return;
-        };
-        let mut guard = host.bind_mut();
-        for command in commands {
-            guard.submit_player_command(command.clone());
-        }
+        let _ = self.with_host_mut(|host| {
+            for command in commands {
+                host.submit_player_command(command.clone());
+            }
+        });
     }
 }

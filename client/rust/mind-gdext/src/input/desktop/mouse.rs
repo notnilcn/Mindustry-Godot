@@ -107,16 +107,16 @@ impl DesktopBridge {
         // selected for a repeat paste (`validPlace` filters inside).
         if !self.controller.state.select_plans.is_empty() {
             let plans = self.controller.state.select_plans.clone();
-            if let Some(mut host) = self.host.clone() {
-                for plan in plans {
-                    let _ = host.bind_mut().queue_player_place_config(
+            for plan in plans {
+                let _ = self.with_host_mut(|host| {
+                    host.queue_player_place_config(
                         plan.x as i16,
                         plan.y as i16,
                         plan.block,
                         plan.rotation,
                         plan.config,
-                    );
-                }
+                    )
+                });
             }
             return;
         }
@@ -125,9 +125,7 @@ impl DesktopBridge {
             // !tryRepairDerelict(selected)`; H08 T11): a derelict building
             // under the cursor queues its repair before the
             // tap-player/tile-tap chain.
-            if let Some(mut host) = self.host.clone()
-                && host.bind_mut().try_repair_derelict(x, y)
-            {
+            if let Some(true) = self.with_host_mut(|host| host.try_repair_derelict(x, y)) {
                 return;
             }
             // `DesktopInput.java:701-721` order: `tryTapPlayer`, `tileTapped`,
@@ -215,61 +213,63 @@ impl DesktopBridge {
     /// (`DesktopInput.java:656/710`). The config is carried from
     /// [`MindSimHost::player_plan_at_world`].
     fn queued_plan_at(&self, wx: f32, wy: f32) -> Option<ClientPlan> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let json = guard.player_build_plans_json();
-        let plans: Vec<serde_json::Value> = serde_json::from_str(&json.to_string()).ok()?;
-        for entry in &plans {
-            // `!plan.breaking && !plan.initialized && plan.progress <= 0f`.
-            if entry.get("breaking").and_then(serde_json::Value::as_bool) != Some(false) {
-                continue;
+        self.with_host(|guard| {
+            let content = guard.content_registry()?;
+            let json = guard.player_build_plans_json();
+            let plans: Vec<serde_json::Value> = serde_json::from_str(&json.to_string()).ok()?;
+            for entry in &plans {
+                // `!plan.breaking && !plan.initialized && plan.progress <= 0f`.
+                if entry.get("breaking").and_then(serde_json::Value::as_bool) != Some(false) {
+                    continue;
+                }
+                if entry
+                    .get("progress")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+                    > 0.0
+                {
+                    continue;
+                }
+                let Some(block_name) = entry.get("block").and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+                let Some(block) = content.block_id(block_name) else {
+                    continue;
+                };
+                let Some(def) = content.block(block) else {
+                    continue;
+                };
+                let (Some(x), Some(y), Some(rotation)) = (
+                    entry.get("x").and_then(serde_json::Value::as_i64),
+                    entry.get("y").and_then(serde_json::Value::as_i64),
+                    entry.get("rotation").and_then(serde_json::Value::as_i64),
+                ) else {
+                    continue;
+                };
+                // `Block.bounds` (`Block.java:1591-1594`; same derivation as
+                // `player_plan_at_world`): even-size blocks centre on the cursor.
+                let offset = ((def.size + 1) % 2) as f32 * 4.0;
+                let half = def.size as f32 * 4.0;
+                let cx = x as f32 * 8.0 + offset;
+                let cy = y as f32 * 8.0 + offset;
+                if wx < cx - half || wx >= cx + half || wy < cy - half || wy >= cy + half {
+                    continue;
+                }
+                let (_, config) = guard.player_plan_at_world(wx, wy)?;
+                return Some(ClientPlan {
+                    x: x as i32,
+                    y: y as i32,
+                    rotation: rotation as u8,
+                    block,
+                    config,
+                    breaking: false,
+                    anim_scale: 1.0,
+                });
             }
-            if entry
-                .get("progress")
-                .and_then(serde_json::Value::as_f64)
-                .unwrap_or(0.0)
-                > 0.0
-            {
-                continue;
-            }
-            let Some(block_name) = entry.get("block").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let Some(block) = content.block_id(block_name) else {
-                continue;
-            };
-            let Some(def) = content.block(block) else {
-                continue;
-            };
-            let (Some(x), Some(y), Some(rotation)) = (
-                entry.get("x").and_then(serde_json::Value::as_i64),
-                entry.get("y").and_then(serde_json::Value::as_i64),
-                entry.get("rotation").and_then(serde_json::Value::as_i64),
-            ) else {
-                continue;
-            };
-            // `Block.bounds` (`Block.java:1591-1594`; same derivation as
-            // `player_plan_at_world`): even-size blocks centre on the cursor.
-            let offset = ((def.size + 1) % 2) as f32 * 4.0;
-            let half = def.size as f32 * 4.0;
-            let cx = x as f32 * 8.0 + offset;
-            let cy = y as f32 * 8.0 + offset;
-            if wx < cx - half || wx >= cx + half || wy < cy - half || wy >= cy + half {
-                continue;
-            }
-            let (_, config) = guard.player_plan_at_world(wx, wy)?;
-            return Some(ClientPlan {
-                x: x as i32,
-                y: y as i32,
-                rotation: rotation as u8,
-                block,
-                config,
-                breaking: false,
-                anim_scale: 1.0,
-            });
-        }
-        None
+            None
+        })
+        .flatten()
     }
 
     /// `DesktopInput.java:710-717`: latch a queued plan under the cursor
@@ -340,17 +340,14 @@ impl DesktopBridge {
     /// in-place move, so the origin plan is dropped from its rect and re-queued
     /// at the new tile (queue position moves to the tail; Java keeps it).
     fn move_queued_plan(&mut self, plan: &ClientPlan, from: (i32, i32)) {
-        let Some(mut host) = self.host.clone() else {
-            return;
-        };
-        let (Ok(x), Ok(y)) = (i16::try_from(plan.x), i16::try_from(plan.y)) else {
+        let Some((x, y)) = tile_i16(plan.x, plan.y) else {
             return;
         };
         let config = plan.config.clone();
-        host.bind_mut()
-            .remove_plans_in(from.0, from.1, from.0, from.1, 1);
-        host.bind_mut()
-            .queue_player_place_config(x, y, plan.block, plan.rotation, config);
+        let _ = self.with_host_mut(|host| host.remove_plans_in(from.0, from.1, from.0, from.1, 1));
+        let _ = self.with_host_mut(|host| {
+            host.queue_player_place_config(x, y, plan.block, plan.rotation, config)
+        });
     }
 
     /// `PlanConfigFragment.showConfig`'s option source:
@@ -359,42 +356,43 @@ impl DesktopBridge {
     /// `PayloadSource`/`PayloadRouter` overrides, resolved on the runtime
     /// [`mind_core::world::block::BlockInstance`] with the live rules filters.
     fn plan_config_spec(&self, plan: &ClientPlan) -> Option<String> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let def = content.block(plan.block)?;
-        // `PlanConfigFragment.showConfig`: `if(!block.configurable) return;`.
-        if !def.configurable {
-            return None;
-        }
-        let rules = guard.live_rules();
-        // The overrides read the runtime instance (the `Constructor` size range
-        // lives on the behavior, `UnitFactory.plans` on the block); the table is
-        // only built when the popup actually opens (Ctrl-release of a plan).
-        let table = mind_core::world::block::BlockTable::build_default(content).ok()?;
-        let instance = table.instance(plan.block)?;
-        let options = instance.plan_configs(content, rules.as_ref());
-        // `ItemSelection` checked entry (`selected.config`).
-        let current = match &plan.config {
-            mind_core::world::config::ConfigValue::Item(id) => {
-                content.item(*id).map(|item| item.name.clone())
+        self.with_host(|guard| {
+            let content = guard.content_registry()?;
+            let def = content.block(plan.block)?;
+            // `PlanConfigFragment.showConfig`: `if(!block.configurable) return;`.
+            if !def.configurable {
+                return None;
             }
-            mind_core::world::config::ConfigValue::Liquid(id) => {
-                content.liquid(*id).map(|liquid| liquid.name.clone())
-            }
-            mind_core::world::config::ConfigValue::Unit(id) => {
-                content.unit(*id).map(|unit| unit.name.clone())
-            }
-            mind_core::world::config::ConfigValue::Block(id) => {
-                content.block(*id).map(|block| block.name.clone())
-            }
-            _ => None,
-        };
-        plan_config_spec_json(
-            &format!("block.{}.name", def.name),
-            &options,
-            current.as_deref(),
-        )
+            let rules = guard.live_rules();
+            // The overrides read the runtime instance (the `Constructor` size range
+            // lives on the behavior, `UnitFactory.plans` on the block); the table is
+            // only built when the popup actually opens (Ctrl-release of a plan).
+            let table = mind_core::world::block::BlockTable::build_default(content).ok()?;
+            let instance = table.instance(plan.block)?;
+            let options = instance.plan_configs(content, rules.as_ref());
+            // `ItemSelection` checked entry (`selected.config`).
+            let current = match &plan.config {
+                mind_core::world::config::ConfigValue::Item(id) => {
+                    content.item(*id).map(|item| item.name.clone())
+                }
+                mind_core::world::config::ConfigValue::Liquid(id) => {
+                    content.liquid(*id).map(|liquid| liquid.name.clone())
+                }
+                mind_core::world::config::ConfigValue::Unit(id) => {
+                    content.unit(*id).map(|unit| unit.name.clone())
+                }
+                mind_core::world::config::ConfigValue::Block(id) => {
+                    content.block(*id).map(|block| block.name.clone())
+                }
+                _ => None,
+            };
+            plan_config_spec_json(
+                &format!("block.{}.name", def.name),
+                &options,
+                current.as_deref(),
+            )
+        })
+        .flatten()
     }
 
     /// `PlanConfigFragment`'s `selected.config = content` then
@@ -428,7 +426,7 @@ impl DesktopBridge {
             }
         };
         self.last_config.insert(plan.block.raw(), config.clone());
-        let (Ok(x), Ok(y)) = (i16::try_from(plan.x), i16::try_from(plan.y)) else {
+        let Some((x, y)) = tile_i16(plan.x, plan.y) else {
             return false;
         };
         host.bind_mut()
@@ -444,21 +442,19 @@ impl DesktopBridge {
         if self.controller.state.block.is_some() {
             return false;
         }
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let guard = host.bind();
-        let Some((px, py)) = guard.player_unit_position() else {
-            return false;
-        };
-        let dx = px - wx;
-        let dy = py - wy;
-        if dx * dx + dy * dy > PLAYER_SELECT_RANGE * PLAYER_SELECT_RANGE {
-            return false;
-        }
-        guard
-            .player_unit_stack()
-            .is_some_and(|(_, amount)| amount > 0)
+        self.with_host(|host| {
+            let Some((px, py)) = host.player_unit_position() else {
+                return false;
+            };
+            let dx = px - wx;
+            let dy = py - wy;
+            if dx * dx + dy * dy > PLAYER_SELECT_RANGE * PLAYER_SELECT_RANGE {
+                return false;
+            }
+            host.player_unit_stack()
+                .is_some_and(|(_, amount)| amount > 0)
+        })
+        .unwrap_or(false)
     }
 
     /// `InputHandler.tryDropItems` (`InputHandler.java:2286-2308`): a pending
@@ -469,13 +465,14 @@ impl DesktopBridge {
             return;
         }
         self.dropping_item = false;
-        let Some(host) = self.host.clone() else {
+        let Some(paused) = self.with_host(|host| host.is_paused()) else {
             return;
         };
-        if host.bind().is_paused() {
+        if paused {
             return;
         }
-        let Some((item_name, amount)) = host.bind().player_unit_stack() else {
+        let Some((item_name, amount)) = self.with_host(|host| host.player_unit_stack()).flatten()
+        else {
             return;
         };
         if amount <= 0 {
@@ -490,10 +487,11 @@ impl DesktopBridge {
         }
         let (tx, ty) = (WorldGrid::to_tile(wx), WorldGrid::to_tile(wy));
         let now_ms = Time::singleton().get_ticks_msec();
-        // Bind the probe to a local: a `match host.bind()...` scrutinee keeps
-        // the shared guard alive through the arms, and `transfer_item` needs
-        // `bind_mut`.
-        let accepts = host.bind().player_can_deposit_at(tx, ty);
+        // Probe in its own bind window: `transfer_item` needs `bind_mut`, so the
+        // read guard must drop before the arms run.
+        let accepts = self
+            .with_host(|host| host.player_can_deposit_at(tx, ty))
+            .flatten();
         match accepts {
             Some(true) => {
                 if now_ms.saturating_sub(self.last_deposit_ms) >= ITEM_DEPOSIT_COOLDOWN_MS {
@@ -504,7 +502,7 @@ impl DesktopBridge {
             // Accepting building on cooldown: Java neither deposits nor drops.
             Some(_) => {}
             None => {
-                let (Ok(x), Ok(y)) = (i16::try_from(tx), i16::try_from(ty)) else {
+                let Some((x, y)) = tile_i16(tx, ty) else {
                     return;
                 };
                 self.emit_action(RemoteAction::Inventory {
@@ -522,72 +520,67 @@ impl DesktopBridge {
     /// `InputHandler.tryStopMine`/`tryBeginMine`: toggles the player unit's
     /// mine order for a no-selection left press. Returns `true` when consumed.
     fn try_mine_at(&self, x: i32, y: i32) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = tile_i16(x, y) else {
             return false;
         };
-        let Some(mut host) = self.host.clone() else {
-            return false;
-        };
-        let mut guard = host.bind_mut();
-        if !guard.player_can_mine(tx, ty) {
-            return false;
-        }
-        if guard.player_mine_target() == Some((tx, ty)) {
-            guard.set_player_mine(None);
-        } else {
-            guard.set_player_mine(Some((tx, ty)));
-        }
-        true
+        self.with_host_mut(|host| {
+            if !host.player_can_mine(tx, ty) {
+                return false;
+            }
+            if host.player_mine_target() == Some((tx, ty)) {
+                host.set_player_mine(None);
+            } else {
+                host.set_player_mine(Some((tx, ty)));
+            }
+            true
+        })
+        .unwrap_or(false)
     }
 
     /// `build.interactable(player.team())` (`Tile.interactable`,
     /// `Tile.java:576-578`): own team or derelict.
     fn tile_interactable(&self, x: i32, y: i32) -> bool {
         let team = self.player_team();
-        self.host.as_ref().is_some_and(|host| {
-            host.bind()
-                .building_team(x, y)
+        self.with_host(|host| {
+            host.building_team(x, y)
                 .is_some_and(|tile_team| tile_team == team || tile_team == 0)
         })
+        .unwrap_or(false)
     }
 
     /// `build.block.configurable` for the tap dispatch (H02 T6): whether the
     /// panel may switch to the tapped building.
     fn block_configurable_at(&self, x: i32, y: i32) -> bool {
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let guard = host.bind();
-        let Some(content) = guard.content_registry() else {
-            return false;
-        };
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return false;
-        };
-        guard
-            .grid()
-            .block_at(TilePos::new(tx, ty))
-            .and_then(|block| content.block(block))
-            .is_some_and(|def| def.configurable)
+        self.with_host(|host| {
+            let Some(content) = host.content_registry() else {
+                return false;
+            };
+            let Some((tx, ty)) = tile_i16(x, y) else {
+                return false;
+            };
+            host.grid()
+                .block_at(TilePos::new(tx, ty))
+                .and_then(|block| content.block(block))
+                .is_some_and(|def| def.configurable)
+        })
+        .unwrap_or(false)
     }
 
     /// `build.block.synthetic()` (`Block.synthetic()` = `update || destructible`).
     fn block_synthetic_at(&self, x: i32, y: i32) -> bool {
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let guard = host.bind();
-        let Some(content) = guard.content_registry() else {
-            return false;
-        };
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return false;
-        };
-        guard
-            .grid()
-            .block_at(TilePos::new(tx, ty))
-            .and_then(|block| content.block(block))
-            .is_some_and(mind_core::maps::filters::block_info::synthetic)
+        self.with_host(|host| {
+            let Some(content) = host.content_registry() else {
+                return false;
+            };
+            let Some((tx, ty)) = tile_i16(x, y) else {
+                return false;
+            };
+            host.grid()
+                .block_at(TilePos::new(tx, ty))
+                .and_then(|block| content.block(block))
+                .is_some_and(mind_core::maps::filters::block_info::synthetic)
+        })
+        .unwrap_or(false)
     }
 
     /// `tileTapped` (`InputHandler.java:1973-2030`): a left tap on a placed
@@ -611,33 +604,29 @@ impl DesktopBridge {
         // runs this for configurable and non-configurable buildings alike, before
         // any `tapped()` handling.
         if let Some((sx, sy)) = self.config_selected {
-            let (Ok(sx16), Ok(sy16), Ok(other_x), Ok(other_y)) = (
-                i16::try_from(sx),
-                i16::try_from(sy),
-                i16::try_from(x),
-                i16::try_from(y),
-            ) else {
+            let (Some((sx16, sy16)), Some((other_x, other_y))) = (tile_i16(sx, sy), tile_i16(x, y))
+            else {
                 self.config_selected = None;
                 return false;
             };
-            let Some(mut host) = self.host.clone() else {
+            // Read-only preview (the guard drops at the end of the call).
+            let Some(preview) = self
+                .with_host(|host| host.preview_config_tap(i32::from(sx16), i32::from(sy16), x, y))
+            else {
                 return false;
             };
-            // Read-only preview (the guard drops at the end of the statement).
-            let preview = host
-                .bind()
-                .preview_config_tap(i32::from(sx16), i32::from(sy16), x, y);
             if preview < 0 {
                 // The selected building is gone: forget the stale selection.
                 self.config_selected = None;
             } else {
-                host.bind_mut()
-                    .submit_player_command(SimCommand::ConfigTap {
+                let _ = self.with_host_mut(|host| {
+                    host.submit_player_command(SimCommand::ConfigTap {
                         x: sx16,
                         y: sy16,
                         other_x,
                         other_y,
-                    });
+                    })
+                });
                 match preview {
                     0 => {
                         // Java `return false`: consumed, the panel stays on the
@@ -675,10 +664,7 @@ impl DesktopBridge {
         // `configure()`/`deselect()` opens the planet launch page, never the
         // generic item panel (PAR-0296).
         if self.block_kind_at(x, y) == Some(BlockKind::Accelerator) {
-            let Some(mut host) = self.host.clone() else {
-                return false;
-            };
-            host.bind_mut().accelerator_tapped(x, y);
+            let _ = self.with_host_mut(|host| host.accelerator_tapped(x, y));
             self.effects.push(Effect::HideInventory);
             return true;
         }
@@ -686,7 +672,7 @@ impl DesktopBridge {
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
         if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
-            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            let Some((tx, ty)) = tile_i16(x, y) else {
                 return false;
             };
             let Some(host) = self.host.clone() else {
@@ -720,19 +706,26 @@ impl DesktopBridge {
             self.block_kind_at(x, y),
             Some(BlockKind::Door | BlockKind::AutoDoor)
         ) {
-            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            let Some((tx, ty)) = tile_i16(x, y) else {
                 return false;
             };
-            let Some(mut host) = self.host.clone() else {
+            let Some(open) = self.with_host(|host| host.building_config_json(x, y) == "true")
+            else {
                 return false;
             };
-            let open = host.bind().building_config_json(x, y) == "true";
-            if open && host.bind().building_has_unit_overlap(x, y) {
+            if open
+                && self
+                    .with_host(|host| host.building_has_unit_overlap(x, y))
+                    .unwrap_or(false)
+            {
                 // `Door.tapped` returns without toggling: the tap is not consumed.
                 self.effects.push(Effect::HideInventory);
                 return false;
             }
-            if !host.bind_mut().door_tap_allowed(x, y) {
+            if !self
+                .with_host_mut(|host| host.door_tap_allowed(x, y))
+                .unwrap_or(false)
+            {
                 // Throttled tap: no toggle, but `consumesTap` still consumes it
                 // (`InputHandler.java:2015-2017`).
                 self.effects.push(Effect::HideInventory);
@@ -760,10 +753,9 @@ impl DesktopBridge {
         // `build.interactable(team) && build.block.synthetic() &&
         // build.block.hasItems && build.items.total() > 0` (IH:1998-2004).
         if self.block_synthetic_at(x, y) {
-            let Some(host) = self.host.clone() else {
+            let Some(items) = self.with_host(|host| host.block_items_json(x, y)) else {
                 return false;
             };
-            let items = host.bind().block_items_json(x, y);
             if let Some(items) = items {
                 self.effects.push(Effect::OpenBlockInventory {
                     x,
@@ -787,18 +779,13 @@ impl DesktopBridge {
         // right tap clears `mineTile` when no placement mode, unit plans or
         // command mode owns the tap. Do not return: the break drag still
         // starts (`DI:740-748`).
-        let plans = self
-            .host
-            .as_ref()
-            .map(|host| host.bind().player_plan_count())
-            .unwrap_or(0);
+        let plans = self.with_host(|host| host.player_plan_count()).unwrap_or(0);
         if mind_core::input::desktop::deselect_stops_mining(
             self.controller.state.block.is_some(),
             self.controller.state.command_mode,
             plans,
-        ) && let Some(mut host) = self.host.clone()
-        {
-            host.bind_mut().set_player_mine(None);
+        ) {
+            let _ = self.with_host_mut(|host| host.set_player_mine(None));
         }
         if self.controller.state.command_mode {
             self.command_tap(bindings);
@@ -812,9 +799,9 @@ impl DesktopBridge {
         if self.controller.state.block.is_some() {
             self.controller.state.select_block(None);
             self.controller.state.override_line_rotation = false;
-            if let Some(mut host) = self.host.clone() {
-                host.bind_mut().select_block(GString::from("air"));
-            }
+            let _ = self.with_host_mut(|host| {
+                host.select_block(GString::from("air"));
+            });
             return;
         }
         // `DesktopInput.java:741-744`: the deselect tap clears copied plans
@@ -894,7 +881,7 @@ impl DesktopBridge {
                     if world.block_at(x, y) == BlockId::AIR {
                         continue;
                     }
-                    let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+                    let Some((x, y)) = tile_i16(x, y) else {
                         continue;
                     };
                     // `player: Some` routes to the player unit's build queue
@@ -911,15 +898,15 @@ impl DesktopBridge {
         self.controller.state.place_mode = PlaceMode::None;
         // `removeSelection` plan half (`InputHandler.java:1905-1935`): drop the
         // player's queued plans and the team ghosts inside the rect.
-        if let Some(mut host) = self.host.clone() {
-            host.bind_mut().remove_plans_in(
+        let _ = self.with_host_mut(|host| {
+            host.remove_plans_in(
                 drag.start.0,
                 drag.start.1,
                 drag.last.0,
                 drag.last.1,
                 max_length,
-            );
-        }
+            )
+        });
         if let Some((end, plans)) = cut {
             self.adopt_select_plans(plans, end);
         }

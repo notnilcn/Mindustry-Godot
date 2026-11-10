@@ -106,7 +106,7 @@ impl DesktopBridge {
             // `displayBlock = input.block ?? hovering` (`:263-266`).
             let hovering = self
                 .cursor_tile()
-                .and_then(|(x, y)| self.host.clone()?.bind().pick_target_at(x, y))
+                .and_then(|(x, y)| self.with_host(|host| host.pick_target_at(x, y)).flatten())
                 .map(|(block, _)| block);
             let display = self
                 .selected_block_name()
@@ -123,9 +123,11 @@ impl DesktopBridge {
 
     /// Content id for a block name (`content.block_id`).
     fn block_id_by_name(&self, name: &str) -> Option<mind_core::content::BlockId> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        guard.content_registry()?.block_id(name)
+        self.with_host(|host| {
+            host.content_registry()
+                .and_then(|content| content.block_id(name))
+        })
+        .flatten()
     }
 
     pub(super) fn open_dialog(&mut self, name: &str, ctx: &str) {
@@ -200,26 +202,28 @@ impl DesktopBridge {
     /// (`PlacementFragment.unlocked`'s static half: visible, player-placeable).
     fn placeable_block_name(&self, block: BlockId) -> Option<String> {
         use mind_core::content::registries::blocks::BuildVisibility;
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let def = content.block(block)?;
-        if def.removed
-            || !def.placeable_player
-            || matches!(
-                def.build_visibility,
-                BuildVisibility::Hidden | BuildVisibility::DebugOnly | BuildVisibility::EditorOnly
-            )
-        {
-            return None;
-        }
-        Some(def.name.clone())
+        self.with_host(|host| {
+            let content = host.content_registry()?;
+            let def = content.block(block)?;
+            if def.removed
+                || !def.placeable_player
+                || matches!(
+                    def.build_visibility,
+                    BuildVisibility::Hidden
+                        | BuildVisibility::DebugOnly
+                        | BuildVisibility::EditorOnly
+                )
+            {
+                return None;
+            }
+            Some(def.name.clone())
+        })
+        .flatten()
     }
 
     /// The block name under the cursor (`""` for air/unset).
     fn selected_block_name(&self) -> Option<String> {
-        let host = self.host.clone()?;
-        let name = host.bind().selected_block().to_string();
+        let name = self.with_host(|host| host.selected_block().to_string())?;
         (!name.is_empty() && name != "air").then_some(name)
     }
 
@@ -229,8 +233,7 @@ impl DesktopBridge {
     fn hovered_unit_name(&self) -> Option<String> {
         let (wx, wy) = self.aim_world()?;
         let team = self.player_team();
-        let host = self.host.clone()?;
-        let json = host.bind().selectable_units_json();
+        let json = self.with_host(|host| host.selectable_units_json())?;
         let rows = serde_json::from_str::<serde_json::Value>(json.to_string().as_str()).ok()?;
         let mut best: Option<(f32, i32)> = None;
         for row in rows.as_array()? {
@@ -256,11 +259,12 @@ impl DesktopBridge {
             }
         }
         let (_, kind) = best?;
-        let guard = host.bind();
-        let def = guard
-            .content_registry()?
-            .unit(mind_core::content::UnitTypeId::new(kind as u16))?;
-        Some(def.name.clone())
+        self.with_host(|host| {
+            host.content_registry()?
+                .unit(mind_core::content::UnitTypeId::new(kind as u16))
+                .map(|def| def.name.clone())
+        })
+        .flatten()
     }
 
     /// One `Effect::Hotkey` for the fired binding (probe/UI signal).
@@ -306,8 +310,9 @@ impl DesktopBridge {
         // (derelict counts as an enemy target, as in Java).
         let player_team = self.player_team();
         let enemy_building = self.cursor_tile().and_then(|(tx, ty)| {
-            let host = self.host.clone()?;
-            let team = host.bind().building_team(tx, ty)?;
+            let team = self
+                .with_host(|host| host.building_team(tx, ty))
+                .flatten()?;
             (team != player_team).then_some(mind_core::world::TilePos::new(tx as i16, ty as i16))
         });
         let actions =
@@ -327,15 +332,13 @@ impl DesktopBridge {
                 return;
             }
         };
-        let Some(mut host) = self.host.clone() else {
-            return;
-        };
-        let mut guard = host.bind_mut();
-        for batch in batches {
-            for command in batch.commands {
-                guard.submit_player_command(command);
+        let _ = self.with_host_mut(|host| {
+            for batch in batches {
+                for command in batch.commands {
+                    host.submit_player_command(command);
+                }
             }
-        }
+        });
     }
 
     /// `InputHandler.pingLocation(player, x, y, text)`
@@ -392,14 +395,12 @@ impl DesktopBridge {
             return self.cursor_tile();
         }
         let offset = self
-            .host
-            .clone()
-            .and_then(|host| {
-                host.bind()
-                    .content_registry()
+            .with_host(|host| {
+                host.content_registry()
                     .and_then(|content| content.block(block))
                     .map(|def| def.offset)
             })
+            .flatten()
             .unwrap_or(0.0);
         let (wx, wy) = self.aim_world()?;
         Some(mind_core::input::cursor::placement_tile(wx, wy, offset))
