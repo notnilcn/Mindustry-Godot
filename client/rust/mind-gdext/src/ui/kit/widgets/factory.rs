@@ -11,7 +11,8 @@
 use godot::builtin::Side;
 use godot::classes::control::{GrowDirection, LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::{
-    Button, Control, Font, HBoxContainer, HSlider, Label, LineEdit, RichTextLabel, TextureRect,
+    BaseButton, Button, Control, Font, HBoxContainer, HSlider, Label, LineEdit, RichTextLabel,
+    TextureRect, VBoxContainer,
 };
 use godot::obj::NewAlloc;
 use godot::prelude::*;
@@ -31,6 +32,26 @@ pub fn table() -> Gd<MindTable> {
 #[allow(dead_code)] // ported surface; not reachable from the native call graph (kept for parity)
 pub fn stack() -> Gd<MindStack> {
     MindStack::new_alloc()
+}
+
+/// A horizontal row with the given `separation` theme constant.
+///
+/// Mirrors the hand-built `HBoxContainer::new_alloc()` +
+/// `add_theme_constant_override("separation", sep)` sites (e.g.
+/// `ui/dialogs/batch_h.rs:566-567`).
+#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+pub fn hbox(separation: i32) -> Gd<HBoxContainer> {
+    let mut row = HBoxContainer::new_alloc();
+    row.add_theme_constant_override("separation", separation);
+    row
+}
+
+/// A vertical column with the given `separation` theme constant.
+#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+pub fn vbox(separation: i32) -> Gd<VBoxContainer> {
+    let mut column = VBoxContainer::new_alloc();
+    column.add_theme_constant_override("separation", separation);
+    column
 }
 
 /// A `MindScroll` with its content table created.
@@ -400,6 +421,44 @@ pub fn slider(minimum: f64, maximum: f64, step: f64) -> Gd<HSlider> {
     // surrounding pane and never moves a slider.
     result.set_scrollable(false);
     result
+}
+
+/// Connects `action` to `pressed` with the standard `Callable::from_fn`
+/// closure (args ignored, `Variant::nil` returned).
+///
+/// The named closure is the form used by the 194 existing
+/// `connect("pressed", …)` sites.
+#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+pub fn on_pressed(
+    button: &mut Gd<impl Inherits<BaseButton>>,
+    name: &'static str,
+    mut action: impl FnMut() + 'static,
+) {
+    let mut button: Gd<BaseButton> = button.clone().upcast();
+    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
+        action();
+        Variant::nil()
+    });
+    button.connect("pressed", &callable);
+}
+
+/// Connects `action` to `text_changed`, extracting the new text from the
+/// emission arguments (Godot passes the field's current text).
+#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
+pub fn on_text_changed(
+    field: &mut Gd<LineEdit>,
+    name: &'static str,
+    mut action: impl FnMut(String) + 'static,
+) {
+    let callable = Callable::from_fn(name, move |args: &[&Variant]| {
+        let text = args
+            .first()
+            .map(|value| (*value).to::<GString>().to_string())
+            .unwrap_or_default();
+        action(text);
+        Variant::nil()
+    });
+    field.connect("text_changed", &callable);
 }
 
 /// A sizing-only spacer.
