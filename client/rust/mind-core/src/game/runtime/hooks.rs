@@ -7,7 +7,7 @@
 //! hooks), core/src/mindustry/game/EventType.java
 
 use super::*;
-use crate::content::{ItemId, LiquidId, UnitTypeId};
+use crate::content::{ContentRef, ContentType, ItemId, LiquidId, UnitTypeId};
 use crate::event::EventContent;
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +22,20 @@ pub enum UnlockRef {
     Liquid(LiquidId),
     /// A unit was produced (`UnitTypeId`; H01 T3 pushes this).
     Unit(UnitTypeId),
+}
+
+impl UnlockRef {
+    /// The typed content identity of this queued unlock (`ContentRef::of`),
+    /// i.e. the registry half of the facade's unlock loop
+    /// (`pump_runtime` 1103-1167 at `291e30a8`; adopted by X01 through
+    /// `game::tech_tree::apply_pending_unlocks`).
+    pub fn content_ref(self) -> ContentRef {
+        match self {
+            UnlockRef::Item(id) => ContentRef::of(ContentType::Item, id),
+            UnlockRef::Liquid(id) => ContentRef::of(ContentType::Liquid, id),
+            UnlockRef::Unit(id) => ContentRef::of(ContentType::Unit, id),
+        }
+    }
 }
 
 /// Shared campaign hook state: the live session snapshot plus the deferred

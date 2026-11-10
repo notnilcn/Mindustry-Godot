@@ -113,3 +113,22 @@ fn produced_unlocks_queue_an_unlock_event_row() {
         runtime.session.event_rows()
     );
 }
+
+/// The queued unlock's typed identity (`ContentRef::of`): items, liquids and
+/// units map to their content kinds.
+#[test]
+fn unlock_ref_content_ref_matches_the_typed_kind() {
+    use crate::content::{ContentRef, ContentType};
+    assert_eq!(
+        UnlockRef::Item(crate::content::ItemId::new(3)).content_ref(),
+        ContentRef::of(ContentType::Item, crate::content::ItemId::new(3))
+    );
+    assert_eq!(
+        UnlockRef::Liquid(crate::content::LiquidId::new(2)).content_ref(),
+        ContentRef::of(ContentType::Liquid, crate::content::LiquidId::new(2))
+    );
+    assert_eq!(
+        UnlockRef::Unit(crate::content::UnitTypeId::new(5)).content_ref(),
+        ContentRef::of(ContentType::Unit, crate::content::UnitTypeId::new(5))
+    );
+}
