@@ -11,3 +11,11 @@
             None => panic!("missing {what}"),
         }
     }
+
+/// Test-only `expect` for fallible setup (`clippy::expect_used` is denied).
+    pub(super) fn require_ok<T, E: std::fmt::Display>(value: Result<T, E>, what: &str) -> T {
+        match value {
+            Ok(value) => value,
+            Err(error) => panic!("{what}: {error}"),
+        }
+    }
