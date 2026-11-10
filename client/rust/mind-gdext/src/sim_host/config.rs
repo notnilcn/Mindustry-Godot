@@ -46,9 +46,7 @@ pub(super) fn block_items_json(
     x: i32,
     y: i32,
 ) -> Option<String> {
-    let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
-        return None;
-    };
+    let (tx, ty) = crate::gdutil::coords::tile_i16(x, y)?;
     let pos = mind_core::world::TilePos::new(tx, ty);
     let def = content.block(sim.grid.block_at(pos)?)?;
     if !def.has_items {
@@ -102,9 +100,7 @@ impl MindSimHost {
     /// T2): the selected plan index (`-1` = none) and the queued command
     /// override (`UnitFactory.java:227`).
     pub fn unit_factory_config(&self, x: i32, y: i32) -> Option<(i32, Option<u16>)> {
-        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
-            return None;
-        };
+        let (tx, ty) = crate::gdutil::coords::tile_i16(x, y)?;
         let entity = self.sim.grid.entity_at(TilePos::new(tx, ty))?;
         let state = self
             .world()

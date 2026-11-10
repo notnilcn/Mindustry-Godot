@@ -396,9 +396,7 @@ impl MindSimHost {
 
     /// The accelerator building at tile `(x, y)` (any tile of its footprint).
     pub(super) fn accelerator_at(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
-        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
-            return None;
-        };
+        let (tx, ty) = crate::gdutil::coords::tile_i16(x, y)?;
         let entity = self
             .sim
             .grid

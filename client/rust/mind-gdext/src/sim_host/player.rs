@@ -115,9 +115,7 @@ impl MindSimHost {
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.
     pub fn player_can_deposit_at(&self, x: i32, y: i32) -> Option<bool> {
-        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
-            return None;
-        };
+        let (x, y) = crate::gdutil::coords::tile_i16(x, y)?;
         (self
             .sim
             .player_deposit_accepted(mind_core::world::TilePos::new(x, y))

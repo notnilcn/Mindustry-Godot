@@ -370,8 +370,6 @@ fn push_drill_rows(rows: &mut Vec<BarRow>, extras: &BarExtras) {
     }
 }
 
-/// `WallCrafter.setBars` (`WallCrafter.java:68-72`).
-
 // `WallCrafter.setBars` (`WallCrafter.java:68-72`):
 // `lastEfficiency * 60 / drillTime` (no `timeScale` factor — it is
 // already folded into `lastEfficiency`).
