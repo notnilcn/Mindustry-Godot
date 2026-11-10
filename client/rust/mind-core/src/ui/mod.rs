@@ -8,6 +8,7 @@
 //! lives in `mind-gdext::ui` plus GDScript under `client/ui` and
 //! `client/scenes/ui`.
 
+pub mod block_catalog;
 pub mod builder;
 pub mod campaign;
 pub mod chat;
