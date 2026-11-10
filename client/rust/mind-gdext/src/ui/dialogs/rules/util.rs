@@ -5,72 +5,23 @@
 //! Upstream: none (port-only; shared helpers of the old batch_i)
 
 use crate::ui::dialog::MindDialog;
-use crate::ui::kit::{self, MindLabel};
-use godot::builtin::{VarDictionary, VariantType};
-use godot::classes::{Json, LineEdit, Node, RichTextLabel};
+use crate::ui::kit;
+use godot::builtin::VarDictionary;
+use godot::classes::{Json, LineEdit, Node};
 use godot::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// `str()`-style text for one variant (empty when unconvertible).
-pub(in crate::ui::dialogs) fn variant_text(value: &Variant) -> String {
-    match value.get_type() {
-        VariantType::STRING | VariantType::STRING_NAME => value.to::<GString>().to_string(),
-        VariantType::INT => value.to::<i64>().to_string(),
-        VariantType::FLOAT => value.to::<f64>().to_string(),
-        VariantType::BOOL => value.to::<bool>().to_string(),
-        _ => String::new(),
-    }
-}
-
-/// GDScript `bool(value)`.
-pub(in crate::ui::dialogs) fn variant_bool(value: &Variant) -> bool {
-    match value.get_type() {
-        VariantType::BOOL => value.to::<bool>(),
-        VariantType::INT => value.to::<i64>() != 0,
-        VariantType::FLOAT => value.to::<f64>() != 0.0,
-        VariantType::STRING | VariantType::STRING_NAME => !value.to::<GString>().is_empty(),
-        _ => false,
-    }
-}
-
-/// GDScript `float(value)`.
-pub(in crate::ui::dialogs) fn variant_f64(value: &Variant) -> f64 {
-    match value.get_type() {
-        VariantType::FLOAT => value.to::<f64>(),
-        VariantType::INT => value.to::<i64>() as f64,
-        VariantType::BOOL => {
-            if value.to::<bool>() {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        VariantType::STRING | VariantType::STRING_NAME => value
-            .to::<GString>()
-            .to_string()
-            .trim()
-            .parse()
-            .unwrap_or(0.0),
-        _ => 0.0,
-    }
-}
-
-/// GDScript `int(value)`.
-pub(in crate::ui::dialogs) fn variant_i64(value: &Variant) -> i64 {
-    match value.get_type() {
-        VariantType::INT => value.to::<i64>(),
-        VariantType::FLOAT => value.to::<f64>() as i64,
-        VariantType::BOOL => i64::from(value.to::<bool>()),
-        VariantType::STRING | VariantType::STRING_NAME => value
-            .to::<GString>()
-            .to_string()
-            .trim()
-            .parse()
-            .unwrap_or(0),
-        _ => 0,
-    }
-}
+// Coercions and the facade/deferred helpers are shared (adopted from F1/F2);
+// the old `variant_*`/`rich` names stay as re-exports because the rules
+// children and `editor/editor_maps.rs` (H05c) import them through
+// `rules::util::*`.
+pub(in crate::ui::dialogs) use crate::gdutil::variant::{
+    to_bool_typed as variant_bool, to_f64_typed as variant_f64, to_i64_typed as variant_i64,
+    to_text_typed as variant_text,
+};
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::defer::defer_action;
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::{rich, ui_call};
 
 /// One dictionary value as text (`str(dict.get(key, ""))`).
 pub(in crate::ui::dialogs) fn dict_text(dict: &VarDictionary, key: &str) -> String {
@@ -89,11 +40,6 @@ pub(in crate::ui::dialogs) fn dict_i64(dict: &VarDictionary, key: &str, default:
 /// `JSON.stringify(dictionary)`.
 pub(in crate::ui::dialogs) fn json_stringify(dict: &VarDictionary) -> String {
     Json::stringify(&dict.to_variant()).to_string()
-}
-
-/// A rich label's engine handle (text/color/alignment).
-pub(in crate::ui::dialogs) fn rich(label: &Gd<MindLabel>) -> Gd<RichTextLabel> {
-    label.clone().upcast()
 }
 
 /// `dict.get(key, default)` on a captured dictionary.
@@ -145,15 +91,6 @@ pub(in crate::ui::dialogs) fn set_at(dict: &Rc<RefCell<VarDictionary>>, key: &st
     dict.borrow_mut().set(key, &value);
 }
 
-/// Calls a `MindUi` facade method (`None` when the facade/method is absent).
-pub(in crate::ui::dialogs) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
-    let mut ui = kit::ui()?;
-    if !ui.has_method(method) {
-        return None;
-    }
-    Some(ui.call(method, args))
-}
-
 /// Calls a `MindCampaign` facade method (`None` when the facade/method is absent).
 pub(in crate::ui::dialogs) fn campaign_call(method: &str, args: &[Variant]) -> Option<Variant> {
     let mut campaign = kit::campaign()?;
@@ -192,24 +129,6 @@ pub(in crate::ui::dialogs) fn connect_prompt_once(
     }
     let _ = ui.connect(signal, callable);
     dialog.base_mut().set_meta(&meta, &true.to_variant());
-}
-
-/// A queued one-shot action (`Callable.call_deferred` payload).
-pub(in crate::ui::dialogs) type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
-
-/// Queues `action` for the idle phase: a prompt is emitted from inside a bound
-/// `MindUi` method, and re-entering a bound GDExtension object panics
-/// (`PAR-0066`).
-pub(in crate::ui::dialogs) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
-    let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
-    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
-        let queued = slot.borrow_mut().take();
-        if let Some(action) = queued {
-            action();
-        }
-        Variant::nil()
-    });
-    callable.call_deferred(&[]);
 }
 
 /// Runs `action` on a freshly bound dialog during the idle phase.
