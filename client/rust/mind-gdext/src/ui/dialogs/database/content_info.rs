@@ -15,6 +15,7 @@ use godot::global::VerticalAlignment;
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
+use crate::gdutil::variant::{dict_bool_try_or, to_text_stringify};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::{factory, tooltip};
 use crate::ui::kit::{self, MindLabel, MindTable, styles};
@@ -62,7 +63,7 @@ impl DialogController for ContentController {
         // `table.margin(10)` (+ room for the pane's scroll bar).
         table.bind_mut().margin(10.0);
         self.table = Some(table);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
@@ -76,7 +77,7 @@ impl DialogController for ContentController {
             body.set_v_scroll(0);
         }
         let content_name = match dialog.context_value("content") {
-            Some(value) => variant_text(&value),
+            Some(value) => to_text_stringify(&value),
             None => dialog.context_string("name").to_string(),
         };
         if content_name.is_empty() {
@@ -92,7 +93,7 @@ impl DialogController for ContentController {
             info = content_bundle_info(&content_name);
         }
         content_show_header(&mut table, &info, &content_name);
-        if dict_bool(&info, "patched") {
+        if dict_bool_try_or(&info, "patched", false) {
             let label = factory::label(&kit::tm("@database.patched").to_string());
             table.bind_mut().add(&label).pad(4.0).left();
             table.bind_mut().row();
@@ -100,7 +101,7 @@ impl DialogController for ContentController {
         let categories = dict_array(&info, "categories");
         let stats = dict_array(&info, "stats");
         let has_stats = !categories.is_empty() || !stats.is_empty();
-        let use_categories = dict_bool(&info, "use_categories");
+        let use_categories = dict_bool_try_or(&info, "use_categories", false);
         let description = dict_text(&info, "description");
         if !description.is_empty() {
             if has_stats {
@@ -142,8 +143,8 @@ impl DialogController for ContentController {
             content_render_stats(&node, &mut table, &stats);
         }
         let details = dict_text(&info, "details");
-        let hide_details = dict_bool(&info, "hide_details");
-        let locked = dict_bool(&info, "locked");
+        let hide_details = dict_bool_try_or(&info, "hide_details", false);
+        let locked = dict_bool_try_or(&info, "locked", false);
         if !details.is_empty() {
             let mut text = kit::markup_text(&format!("[gray]{details}")).to_string();
             if locked && hide_details {
@@ -185,7 +186,7 @@ impl DialogController for ContentController {
 /// `Dictionary.get(key, fallback)` with GDScript `str()` coercion.
 fn dict_text_or(dict: &VarDictionary, key: &str, fallback: &str) -> String {
     match dict.get(key) {
-        Some(value) => variant_text(&value),
+        Some(value) => to_text_stringify(&value),
         None => fallback.to_string(),
     }
 }
@@ -193,8 +194,7 @@ fn dict_text_or(dict: &VarDictionary, key: &str, fallback: &str) -> String {
 /// Header row: `title1.image(content.uiIcon).size(iconXLarge)` + `[accent]` name.
 fn content_show_header(table: &mut Gd<MindTable>, info: &VarDictionary, content_name: &str) {
     // code-instantiated: the icon/name header is parameterized by the content.
-    let mut header = HBoxContainer::new_alloc();
-    header.add_theme_constant_override("separation", 5);
+    let mut header = factory::hbox(5);
     let icon_region = dict_text_or(info, "icon", content_name);
     let mut icon = factory::image(&icon_region);
     icon.set_custom_minimum_size(Vector2::new(INFO_HEADER_ICON, INFO_HEADER_ICON));
@@ -271,8 +271,7 @@ fn content_render_stats(_dialog: &Gd<MindDialog>, table: &mut Gd<MindTable>, sta
             table.bind_mut().row();
         }
         // code-instantiated: one label/value row per computed stat.
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 8);
+        let mut row = factory::hbox(8);
         let label = factory::label(
             &kit::markup_text(&format!(
                 "[lightgray]{}:[] ",
@@ -294,12 +293,10 @@ fn content_render_stat(dialog: &Gd<MindDialog>, table: &mut Gd<MindTable>, stat_
         return;
     };
     // code-instantiated: one stat row per computed stat (data-driven).
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 2);
+    let mut column = factory::vbox(2);
     // Arc cells have no spacing: the label carries its own trailing space and
     // values are split by the explicit 10 px cells.
-    let mut line = HBoxContainer::new_alloc();
-    line.add_theme_constant_override("separation", 0);
+    let mut line = factory::hbox(0);
     column.add_child(&line);
     let label = factory::label(
         &kit::markup_text(&format!("[lightgray]{}:[] ", dict_text(&stat, "label"))).to_string(),
@@ -309,7 +306,7 @@ fn content_render_stat(dialog: &Gd<MindDialog>, table: &mut Gd<MindTable>, stat_
         rich_label.set_vertical_alignment(VerticalAlignment::TOP);
     }
     if let Some(tooltip_value) = stat.get("tooltip").filter(|value| !value.is_nil()) {
-        let provider = kit::t(&format!("@{}", variant_text(&tooltip_value))).to_variant();
+        let provider = kit::t(&format!("@{}", to_text_stringify(&tooltip_value))).to_variant();
         let mut control: Gd<Control> = label.clone().upcast();
         tooltip::attach(&mut control, &provider, false);
     }
@@ -366,8 +363,7 @@ fn content_add_cell(
         }
         "row" => {
             // code-instantiated: multi-line stat values split into extra lines.
-            let mut next = HBoxContainer::new_alloc();
-            next.add_theme_constant_override("separation", 0);
+            let next = factory::hbox(0);
             column.add_child(&next);
             return next;
         }
@@ -417,7 +413,7 @@ fn content_icon_cell(cell: &VarDictionary) -> Gd<Control> {
     // `Cell::Icon.amount` serializes `None` as JSON null; `str(null)` is the
     // literal "<null>", so read the value and skip null explicitly.
     let amount = match cell.get("amount") {
-        Some(value) if !value.is_nil() => variant_text(&value),
+        Some(value) if !value.is_nil() => to_text_stringify(&value),
         _ => String::new(),
     };
     if !amount.is_empty() {
@@ -447,11 +443,9 @@ fn content_panel_cell(dialog: &Gd<MindDialog>, cell: &VarDictionary) -> Gd<Contr
     panel.add_theme_stylebox_override("panel", &box_);
     // Nested cells may start their own rows (`Cell::Row`): the panel is a VBox
     // of HBox lines so a row cell lands below, not beside.
-    let mut inner = VBoxContainer::new_alloc();
-    inner.add_theme_constant_override("separation", 2);
+    let mut inner = factory::vbox(2);
     panel.add_child(&inner);
-    let mut line = HBoxContainer::new_alloc();
-    line.add_theme_constant_override("separation", 4);
+    let mut line = factory::hbox(4);
     inner.add_child(&line);
     for nested in dict_array(cell, "cells").iter_shared() {
         line = content_add_cell(dialog, &mut inner, &line, &nested);

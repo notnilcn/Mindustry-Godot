@@ -8,7 +8,7 @@ use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::{FocusMode, LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::{
     CenterContainer, ColorRect, Control, HBoxContainer, InputEvent, InputEventKey,
-    InputEventMouseButton, LineEdit, Os, PanelContainer, RichTextLabel, VBoxContainer,
+    InputEventMouseButton, LineEdit, Os, PanelContainer, RichTextLabel,
 };
 use godot::global::{HorizontalAlignment, MouseButton};
 use godot::obj::{NewAlloc, Singleton};
@@ -17,6 +17,7 @@ use godot::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::gdutil::variant::{dict_bool_try_or, parse_array, to_text_stringify};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, Align, MindLabel, MindTable, styles};
@@ -73,7 +74,7 @@ impl DialogController for ControlsController {
         dialog.clear_content();
         let state = self.state.clone();
         keybind_build(dialog, &state);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 }
 
@@ -86,7 +87,7 @@ fn keybind_entries() -> Vec<VarDictionary> {
         return Vec::new();
     }
     let text = input.call("keybinds_json", &[]).to::<GString>();
-    json_array(&text)
+    parse_array(&text.to_string())
         .iter_shared()
         .filter_map(|value| value.try_to::<VarDictionary>().ok())
         .collect()
@@ -100,8 +101,7 @@ fn keybind_build(dialog: &mut MindDialog, state: &Rc<RefCell<KeybindState>>) {
         root_control.add_theme_constant_override("separation", 4);
     }
     // code-instantiated: the search icon+field row is a per-dialog control.
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 6);
+    let mut search_row = factory::hbox(6);
     search_row.add_child(&factory::glyph_label("zoom", 22, Color::WHITE));
     let mut search = factory::field("");
     search.set_h_size_flags(SizeFlags::EXPAND_FILL);
@@ -124,7 +124,7 @@ fn keybind_build(dialog: &mut MindDialog, state: &Rc<RefCell<KeybindState>>) {
 
     // code-instantiated: the binding list is data-driven from `MindInput` and
     // rebuilt on every search/reassign; the row count is unknown at build time.
-    let list = MindTable::new_alloc();
+    let list = factory::table();
     {
         let mut control: Gd<Control> = list.clone().upcast();
         let mut min = control.get_custom_minimum_size();
@@ -169,7 +169,7 @@ fn keybind_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<KeybindState>>) {
         let category = entry
             .get("category")
             .filter(|value| !value.is_nil())
-            .map(|value| variant_text(&value));
+            .map(|value| to_text_stringify(&value));
         if let Some(category) = category
             && last_category.as_deref() != Some(category.as_str())
         {
@@ -257,7 +257,7 @@ fn keybind_add_row(
         let target = dialog.clone();
         let state_for_rebind = state.clone();
         let name_for_rebind = name.clone();
-        let axis = dict_bool(entry, "axis");
+        let axis = dict_bool_try_or(entry, "axis", false);
         let callable = Callable::from_fn("keybind_start_capture", move |_args: &[&Variant]| {
             if !target.is_instance_valid() {
                 return;
@@ -277,7 +277,7 @@ fn keybind_add_row(
         let mut reset = factory::button(&kit::t("@settings.resetKey").to_string());
         reset.set_theme_type_variation("grayt");
         reset.set_custom_minimum_size(KEYBIND_BUTTON_SIZE);
-        reset.set_disabled(dict_bool(entry, "default"));
+        reset.set_disabled(dict_bool_try_or(entry, "default", false));
         {
             let target = dialog.clone();
             let state_for_reset = state.clone();
@@ -342,20 +342,20 @@ fn keybind_add_reset_all(
 fn keybind_key_text(entry: &VarDictionary) -> String {
     let negative = entry.get("negativeDisplay");
     let positive = entry.get("display");
-    let axis = dict_bool(entry, "axis");
+    let axis = dict_bool_try_or(entry, "axis", false);
     if axis && negative.as_ref().is_some_and(|value| !value.is_nil()) {
         let negative_text = negative
-            .map(|value| variant_text(&value))
+            .map(|value| to_text_stringify(&value))
             .unwrap_or_default();
         let positive_text = positive
             .filter(|value| !value.is_nil())
-            .map(|value| variant_text(&value))
+            .map(|value| to_text_stringify(&value))
             .unwrap_or_else(|| KEYBIND_UNSET_TEXT.to_string());
         return format!("{negative_text} [red]/[] {positive_text}");
     }
     positive
         .filter(|value| !value.is_nil())
-        .map(|value| variant_text(&value))
+        .map(|value| to_text_stringify(&value))
         .unwrap_or_else(|| KEYBIND_UNSET_TEXT.to_string())
 }
 
@@ -419,8 +419,7 @@ fn keybind_start_capture(
     panel.set_theme_type_variation("defaultDialog");
     center.add_child(&panel);
 
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 12);
+    let mut box_ = factory::vbox(12);
     panel.add_child(&box_);
 
     let prompt_key = if axis {

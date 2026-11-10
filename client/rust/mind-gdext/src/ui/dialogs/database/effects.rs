@@ -86,7 +86,7 @@ impl DialogController for EffectsController {
         dialog.should_pause = false;
         // `makeButtonOverlay()` (`EffectsDialog.java:34`): padded title cell.
         dialog.apply_button_overlay(true);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {

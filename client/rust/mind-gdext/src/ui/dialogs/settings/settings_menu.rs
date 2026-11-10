@@ -18,6 +18,7 @@ use godot::global::{HorizontalAlignment, VerticalAlignment};
 use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
+use crate::gdutil::variant::{dict_bool_try_or, to_f64_boolish, to_i64_no_text};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit;
 use crate::ui::kit::widgets::check::MindCheck;
@@ -135,7 +136,7 @@ impl DialogController for SettingsController {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let request = take_request(dialog);
+        let request = MindDialog::take_request(dialog);
         match request.as_str() {
             SETTINGS_REQUEST_BACK => back(dialog),
             SETTINGS_REQUEST_CONFIRM => confirm(dialog),
@@ -198,7 +199,7 @@ fn add_back_button(dialog: &mut MindDialog) {
     }
     let target = dialog.to_gd();
     let callable = Callable::from_fn("settings_back", move |_args: &[&Variant]| {
-        request_refresh(&target, SETTINGS_REQUEST_BACK);
+        MindDialog::request_refresh(&target, SETTINGS_REQUEST_BACK);
     });
     button.connect("pressed", &callable);
 }
@@ -228,7 +229,7 @@ fn connect_confirm(node: &Gd<MindDialog>) {
         let mut dialog = target.clone();
         dialog.set_meta(CONFIRM_META, &confirmed.to_variant());
         // The signal is emitted inside a `MindUi` mutable borrow.
-        request_refresh_deferred(&target, SETTINGS_REQUEST_CONFIRM);
+        MindDialog::request_refresh_deferred(&target, SETTINGS_REQUEST_CONFIRM);
     });
     ui.connect("confirm_result", &callable);
     node.clone()
@@ -299,8 +300,7 @@ fn set_page(dialog: &mut MindDialog, page_id: &str, title_key: &str, page: Gd<Co
 /// `back()` + `rebuildMenu()`: the category menu (`SettingsMenuDialog.java:336-365`).
 fn show_menu(dialog: &mut MindDialog) {
     // code-instantiated: menu rows follow the model categories.
-    let mut rows = VBoxContainer::new_alloc();
-    rows.add_theme_constant_override("separation", 0);
+    let mut rows = factory::vbox(0);
     for category in load_categories() {
         let icon = dict_text(&category, "icon");
         let key = dict_text(&category, "key");
@@ -345,8 +345,7 @@ fn on_category_pressed(dialog: &mut MindDialog, action: &str, id: &str) {
 fn show_table(dialog: &mut MindDialog, category_id: &str) {
     // code-instantiated: setting rows are data-driven from the model and the
     // shared store; the row count and keys are not known at scene build time.
-    let mut table = VBoxContainer::new_alloc();
-    table.add_theme_constant_override("separation", 0);
+    let mut table = factory::vbox(0);
     table.set_custom_minimum_size(Vector2::new(row_width(dialog), 0.0));
     for row in load_rows(category_id) {
         add_row(dialog, &mut table, &row, category_id);
@@ -388,7 +387,7 @@ fn add_row(
             // `CheckSetting.add`: `minWidth(min(500, w/1.2)).fillX()
             // .height(45f).left().padTop(7f)`.
             table.add_child(&factory::space(0.0, 7.0));
-            let checked = dict_bool(row, "value");
+            let checked = dict_bool_try_or(row, "value", false);
             let key_for_toggle = key.clone();
             let sync_audio = category_id == "sound";
             let callable = Callable::from_fn("settings_check", move |args: &[&Variant]| {
@@ -472,7 +471,7 @@ fn add_slider_row(
     let sync_audio = category_id == "sound";
     let is_uiscale = key == "uiscale";
     let callable = Callable::from_fn("settings_slider", move |args: &[&Variant]| {
-        let number = as_float(args.first().map(|entry| (*entry).clone())) as i64;
+        let number = to_f64_boolish(args.first().map(|entry| (*entry).clone())) as i64;
         let mut label = label_for_change.clone();
         label.set_text(&GString::from(
             format_value(&row_for_label, number).as_str(),
@@ -514,7 +513,7 @@ fn add_reset_button(dialog: &mut MindDialog, table: &mut Gd<VBoxContainer>, cate
         }
         let mut node = target.clone();
         set_meta_text(&mut node, SETTINGS_PAGE_META, &category);
-        request_refresh(&target, SETTINGS_REQUEST_RENDER);
+        MindDialog::request_refresh(&target, SETTINGS_REQUEST_RENDER);
     });
     button.connect("pressed", &callable);
     table.add_child(&button);
@@ -530,7 +529,7 @@ fn sync_audio_defaults() {
     for row in load_rows("sound") {
         let mut value = row.get("value").unwrap_or_else(Variant::nil);
         if dict_text(&row, "kind") == "slider" {
-            value = as_int(Some(value)).to_variant();
+            value = to_i64_no_text(Some(value)).to_variant();
         }
         let _ = audio.call(
             "set_setting",
@@ -545,8 +544,7 @@ fn sync_audio_defaults() {
 /// `dataDialog` (`SettingsMenuDialog.java:172-292`), shown in place.
 fn show_data(dialog: &mut MindDialog) {
     // code-instantiated: data actions are a data-driven list.
-    let mut rows = VBoxContainer::new_alloc();
-    rows.add_theme_constant_override("separation", 0);
+    let mut rows = factory::vbox(0);
     for (id, text, icon) in DATA_ACTIONS {
         let mut button = flat_button(
             icon,
@@ -644,8 +642,7 @@ fn show_planet_data(dialog: &mut MindDialog) {
         set_meta_text(&mut node, SETTINGS_PLANET_META, &planet_name);
     }
     // code-instantiated: planet entries are runtime content data, not scene nodes.
-    let mut rows = VBoxContainer::new_alloc();
-    rows.add_theme_constant_override("separation", 0);
+    let mut rows = factory::vbox(0);
     let mut select = flat_button(
         "planet",
         &planet_select_text(&planets, &planet_name),
@@ -704,7 +701,7 @@ fn open_planet_menu(dialog: &mut MindDialog) {
     let target = dialog.to_gd();
     let planets_for_pick = planets.clone();
     let callable = Callable::from_fn("settings_planet_picked", move |args: &[&Variant]| {
-        let index = as_int(args.first().map(|entry| (*entry).clone()));
+        let index = to_i64_no_text(args.first().map(|entry| (*entry).clone()));
         let Some(row) = planets_for_pick.get(index.max(0) as usize) else {
             return;
         };
@@ -861,10 +858,9 @@ fn flat_button(
     button.add_theme_stylebox_override("hover_pressed", &over);
     button.add_theme_stylebox_override("disabled", &up);
     button.add_theme_stylebox_override("focus", &StyleBoxEmpty::new_gd());
-    let mut row = HBoxContainer::new_alloc();
+    let mut row = factory::hbox(0);
     row.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
     row.set_offset(Side::LEFT, margin_left);
-    row.add_theme_constant_override("separation", 0);
     row.set_mouse_filter(MouseFilter::IGNORE);
     button.add_child(&row);
     let mut icon = factory::glyph_label(icon_name, ICON_FONT_SIZE, Color::WHITE);

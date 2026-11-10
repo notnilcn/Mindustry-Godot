@@ -11,7 +11,8 @@ use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::kit::{self, MindScroll, MindTable, styles};
+use crate::ui::kit::widgets::factory;
+use crate::ui::kit::{self, MindScroll, styles};
 
 use super::util::*;
 
@@ -216,7 +217,7 @@ fn language_build(dialog: &mut MindDialog) {
         content.set_v_size_flags(SizeFlags::EXPAND_FILL);
     }
     // code-instantiated: the locale table is filled from the runtime locale set.
-    let mut list = MindTable::new_alloc();
+    let mut list = factory::table();
     {
         let mut control: Gd<Control> = list.clone().upcast();
         control.set_h_size_flags(SizeFlags::EXPAND_FILL);
