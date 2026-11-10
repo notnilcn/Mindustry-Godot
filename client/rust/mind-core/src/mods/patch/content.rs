@@ -447,12 +447,11 @@ impl DataPatcher {
                     };
                     if self.mark_used(reference, "team") {
                         let raw = id.raw();
-                        self.resetters
-                            .push(Box::new(move |r: &mut ContentRegistry| {
-                                if let Some(t) = r.team_mut(crate::content::TeamEntryId::new(raw)) {
-                                    t.team = original.clone();
-                                }
-                            }));
+                        self.push_reset(move |r: &mut ContentRegistry| {
+                            if let Some(t) = r.team_mut(crate::content::TeamEntryId::new(raw)) {
+                                t.team = original.clone();
+                            }
+                        });
                     }
                     if let Some(t) = registry.team_mut(id) {
                         t.team = new.to_owned();
