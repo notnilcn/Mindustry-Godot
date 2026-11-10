@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{configure, item, place_team1, runtime_sim, stored_item, tick_n};
 
 /// PAR-0190: wire `ContentId`/`Bool` configs reach `configured()` — sorter,
 /// door (with Java's 60-tick toggle throttle) and switch.
@@ -14,9 +15,9 @@ fn configure_reaches_sorter_door_switch() {
     use crate::entities::comp::{Building, DoorState};
 
     let mut sim = runtime_sim();
-    let sorter = place(&mut sim, "sorter", 5, 5);
-    let door = place(&mut sim, "door", 8, 5);
-    let switch = place(&mut sim, "switch", 11, 5);
+    let sorter = place_team1(&mut sim, "sorter", 5, 5);
+    let door = place_team1(&mut sim, "door", 8, 5);
+    let switch = place_team1(&mut sim, "switch", 11, 5);
     let copper = item(&sim, "copper");
 
     configure(
@@ -45,9 +46,7 @@ fn configure_reaches_sorter_door_switch() {
             .is_some_and(|state| state.open),
         "door opened"
     );
-    for _ in 0..61 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 61);
     configure(&mut sim, 8, 5, crate::determinism::ConfigValue::Bool(false));
     assert!(
         sim.ecs
@@ -78,9 +77,9 @@ fn bridge_configure_int_absolute_links_and_ticks() {
     use crate::world::modules::ItemModule;
 
     let mut sim = runtime_sim();
-    let from = place(&mut sim, "bridge-conveyor", 5, 5);
-    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
-    let belt = place(&mut sim, "conveyor", 9, 5);
+    let from = place_team1(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place_team1(&mut sim, "bridge-conveyor", 8, 5);
+    let belt = place_team1(&mut sim, "conveyor", 9, 5);
     let copper = item(&sim, "copper");
     if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(from) {
         items.add(copper, 10, 10);
@@ -97,9 +96,7 @@ fn bridge_configure_int_absolute_links_and_ticks() {
         "absolute packed int links the bridge"
     );
     // Must terminate: the G03 hang was on the next step after this configure.
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let dest = sim.grid.entity_at(TilePos::new(8, 5)).expect("dest bridge");
     let belt_items = sim
         .ecs
@@ -122,8 +119,8 @@ fn bridge_configure_point_relative() {
     use crate::world::blocks::distribution::ItemBridgeBuild;
 
     let mut sim = runtime_sim();
-    let from = place(&mut sim, "bridge-conveyor", 5, 5);
-    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    let from = place_team1(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place_team1(&mut sim, "bridge-conveyor", 8, 5);
     configure(
         &mut sim,
         5,
@@ -143,9 +140,9 @@ fn node_configure_point_array() {
     use crate::world::modules::PowerModule;
 
     let mut sim = runtime_sim();
-    let node = place(&mut sim, "power-node", 5, 5);
-    let _battery_a = place(&mut sim, "battery", 8, 5);
-    let _battery_b = place(&mut sim, "battery", 5, 8);
+    let node = place_team1(&mut sim, "power-node", 5, 5);
+    let _battery_a = place_team1(&mut sim, "battery", 8, 5);
+    let _battery_b = place_team1(&mut sim, "battery", 5, 8);
     configure(
         &mut sim,
         5,
@@ -172,8 +169,8 @@ fn sim_config_tap_command_applies() {
     use crate::world::blocks::distribution::ItemBridgeBuild;
 
     let mut sim = runtime_sim();
-    let from = place(&mut sim, "bridge-conveyor", 5, 5);
-    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    let from = place_team1(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place_team1(&mut sim, "bridge-conveyor", 8, 5);
     sim.command(SimCommand::ConfigTap {
         x: 5,
         y: 5,

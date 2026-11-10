@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{configure, item, place_team1, runtime_sim, stored_item, tick_n};
 
 /// T2: a live-placed power node keeps its behavior knobs
 /// (`Blocks.java:2483-2505`): power-node-large 15/15, surge-tower 2/40.
@@ -14,8 +15,8 @@ use super::*;
 fn large_node_keeps_knobs_on_live_place() {
     use crate::world::blocks::power::PowerNodeConfig;
     let mut sim = runtime_sim();
-    let large = place(&mut sim, "power-node-large", 5, 5);
-    let surge = place(&mut sim, "surge-tower", 10, 5);
+    let large = place_team1(&mut sim, "power-node-large", 5, 5);
+    let surge = place_team1(&mut sim, "surge-tower", 10, 5);
     let large_config = sim
         .ecs
         .0
@@ -45,13 +46,11 @@ fn large_node_keeps_knobs_on_live_place() {
 fn node_configure_toggles_link() {
     use crate::world::blocks::power::PowerNodeConfig;
     let mut sim = runtime_sim();
-    let _battery = place(&mut sim, "battery", 10, 5);
-    let node = place(&mut sim, "power-node", 5, 5);
+    let _battery = place_team1(&mut sim, "battery", 10, 5);
+    let node = place_team1(&mut sim, "power-node", 5, 5);
     assert!(sim.ecs.0.get::<PowerNodeConfig>(node).is_some());
     let pack = TilePos::new(10, 5).pack();
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let linked = |sim: &Sim| {
         sim.ecs
             .0
@@ -91,21 +90,17 @@ fn node_configure_toggles_link() {
 #[test]
 fn diode_moves_power_forward() {
     let mut sim = runtime_sim();
-    let a = place(&mut sim, "battery", 2, 5);
-    let diode = place(&mut sim, "diode", 3, 5);
-    let b = place(&mut sim, "battery", 4, 5);
+    let a = place_team1(&mut sim, "battery", 2, 5);
+    let diode = place_team1(&mut sim, "diode", 3, 5);
+    let b = place_team1(&mut sim, "battery", 4, 5);
     let _ = diode;
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     sim.ecs
         .0
         .get_mut::<crate::world::modules::PowerModule>(a)
         .expect("battery a module")
         .status = 1.0;
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let status = |sim: &Sim, e: Entity| {
         sim.ecs
             .0
@@ -127,9 +122,9 @@ fn diode_moves_power_forward() {
 #[test]
 fn mender_heals_only_own_team() {
     let mut sim = runtime_sim();
-    let _mender = place(&mut sim, "mender", 5, 5);
-    let _power = place(&mut sim, "power-source", 5, 6);
-    let own = place(&mut sim, "copper-wall", 6, 5);
+    let _mender = place_team1(&mut sim, "mender", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 5, 6);
+    let own = place_team1(&mut sim, "copper-wall", 6, 5);
     let wall = sim.world_block_id("copper-wall").expect("wall");
     sim.command(SimCommand::Place {
         x: 5,
@@ -153,9 +148,7 @@ fn mender_heals_only_own_team() {
                 .health = 10.0;
         }
     }
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let health_of = |sim: &Sim, entity: Entity| {
         sim.ecs
             .0
@@ -178,8 +171,8 @@ fn mender_heals_only_own_team() {
 #[test]
 fn mender_silicon_boost_consumed() {
     let mut sim = runtime_sim();
-    let mender = place(&mut sim, "mender", 5, 5);
-    let _power = place(&mut sim, "power-source", 5, 6);
+    let mender = place_team1(&mut sim, "mender", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 5, 6);
     let silicon = item(&sim, "silicon");
     {
         let world = &mut sim.ecs.0;
@@ -189,17 +182,13 @@ fn mender_silicon_boost_consumed() {
     // The power graph settles a few ticks in; `optionalEfficiency` is capped by
     // the required (power) efficiency, so `consume()` starts once powered.
     // `timer()`'s first call is true: that first useTime tick consumes one.
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     assert_eq!(
         stored_item(&sim, mender, silicon),
         1,
         "one silicon consumed on the first powered useTime tick"
     );
-    for _ in 0..51 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 51);
     let phase_heat = sim
         .ecs
         .0
@@ -207,9 +196,7 @@ fn mender_silicon_boost_consumed() {
         .map(|state| state.phase_heat)
         .unwrap_or(0.0);
     assert!(phase_heat > 0.9, "phaseHeat warmed up: {phase_heat}");
-    for _ in 0..349 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 349);
     assert_eq!(
         stored_item(&sim, mender, silicon),
         0,
@@ -225,9 +212,9 @@ fn overdrive_does_not_boost_enemy() {
     let mut sim = runtime_sim();
     // The overdrive is 2x2 at (5,5) (footprint 5..6, 5..6); the source sits
     // outside the footprint at (4,5).
-    let _overdrive = place(&mut sim, "overdrive-projector", 5, 5);
-    let _power = place(&mut sim, "power-source", 4, 5);
-    let own = place(&mut sim, "graphite-press", 8, 5);
+    let _overdrive = place_team1(&mut sim, "overdrive-projector", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 4, 5);
+    let own = place_team1(&mut sim, "graphite-press", 8, 5);
     let press = sim.world_block_id("graphite-press").expect("press");
     sim.command(SimCommand::Place {
         x: 5,
@@ -242,9 +229,7 @@ fn overdrive_does_not_boost_enemy() {
         .grid
         .entity_at(TilePos::new(5, 9))
         .expect("enemy press entity");
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let time_scale = |sim: &Sim, entity: Entity| {
         sim.ecs
             .0
@@ -275,7 +260,7 @@ fn placing_emits_construct_place_sound() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    place(&mut sim, "copper-wall", 5, 5);
+    place_team1(&mut sim, "copper-wall", 5, 5);
     sim.tick().expect("tick");
     let events = log.events();
     let placed: Vec<&AudioEvent> = events
@@ -312,7 +297,7 @@ fn breaking_emits_break_not_destroy() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    place(&mut sim, "copper-wall", 5, 5);
+    place_team1(&mut sim, "copper-wall", 5, 5);
     sim.tick().expect("tick");
     log.clear();
     sim.command(SimCommand::Break {
@@ -362,7 +347,7 @@ fn large_wall_place_sound_is_size_2() {
             .expect("copper-wall-large")
             .offset
     };
-    place(&mut sim, "copper-wall-large", 8, 8);
+    place_team1(&mut sim, "copper-wall-large", 8, 8);
     sim.tick().expect("tick");
     let events = log.events();
     let placed = events

@@ -5,6 +5,10 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    campaign_runtime, campaign_runtime_mut, install_campaign_session, item, place_team1,
+    runtime_sim, stored_item, tick_n,
+};
 
 /// H09 T8: `TeamRule.fillItems` refills the first core of every active team
 /// (`Logic.java:552-561`): with `coreIncinerates` the max accepted is
@@ -57,9 +61,7 @@ fn fill_items_fills_ai_core() {
         let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
         sim.ecs.0.insert_resource(runtime);
     }
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
     let copper = item(&sim, "copper");
     assert_eq!(
@@ -122,9 +124,7 @@ fn fill_items_fills_ai_core() {
         let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
         sim.ecs.0.insert_resource(runtime);
     }
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
     let capacity = sim
         .ecs
@@ -185,9 +185,7 @@ fn fill_items_gate_skips_other_teams() {
         sim.ecs.0.insert_resource(runtime);
     }
     let copper = item(&sim, "copper");
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
     assert_eq!(
         stored_item(&sim, entity, copper),
@@ -195,17 +193,12 @@ fn fill_items_gate_skips_other_teams() {
         "team 2 leaves fillItems off: the core is untouched"
     );
     // Flip the rule: the same core is refilled.
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("runtime")
+    campaign_runtime_mut(&mut sim)
         .session
         .rules
         .team_rule_mut(2)
         .fill_items = true;
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     assert_eq!(
         stored_item(&sim, entity, copper),
         i32::MAX / 2,
@@ -265,9 +258,7 @@ fn fill_items_does_not_fill_player_core() {
         let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
         sim.ecs.0.insert_resource(runtime);
     }
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let copper = item(&sim, "copper");
     let player_core = sim.grid.entity_at(TilePos::new(5, 5)).expect("player core");
     let enemy_core = sim
@@ -335,13 +326,7 @@ fn game_stats_count_build_break_destroy() {
     sim.tick().expect("tick");
     sim.tick().expect("tick");
 
-    let stats = &sim
-        .ecs
-        .0
-        .get_resource::<CampaignRuntime>()
-        .expect("runtime")
-        .session
-        .stats;
+    let stats = &campaign_runtime(&sim).session.stats;
     assert_eq!(stats.buildings_built, 2, "two walls built");
     assert_eq!(stats.buildings_deconstructed, 1, "one wall deconstructed");
     assert_eq!(stats.buildings_destroyed, 1, "one player wall destroyed");
@@ -378,7 +363,7 @@ fn game_stats_count_units_created() {
     {
         runtime.session.phase = crate::game::State::Playing;
     }
-    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let factory = place_team1(&mut sim, "ground-factory", 5, 5);
     let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
     {
         let world = &mut sim.ecs.0;
@@ -387,7 +372,7 @@ fn game_stats_count_units_created() {
             items.add(lead, 10, 60);
         }
     }
-    let _source = place(&mut sim, "power-source", 3, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
     let dagger = sim
         .block_runtime()
         .expect("runtime")
@@ -401,12 +386,6 @@ fn game_stats_count_units_created() {
         }
     }
     assert!(spawned_unit(&sim, dagger), "factory produced a dagger");
-    let stats = &sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime")
-        .session
-        .stats;
+    let stats = &campaign_runtime(&sim).session.stats;
     assert_eq!(stats.units_created, 1, "one unit created");
 }

@@ -7,11 +7,11 @@
 use bevy_ecs::entity::Entity;
 
 use crate::content::BlockId;
+use crate::determinism::SimCommand;
 use crate::world::TilePos;
+use crate::world::blocks::distribution::transfer;
 
 use super::Sim;
-use crate::determinism::SimCommand;
-use crate::world::blocks::distribution::transfer;
 
 mod campaign_accelerator;
 mod configure;
@@ -31,68 +31,9 @@ mod wall_crafters;
 mod world_processor_a;
 mod world_processor_b;
 
-pub(super) fn place(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
-    let id = sim.world_block_id(name).expect("block");
-    sim.command(SimCommand::Place {
-        x,
-        y,
-        block: id,
-        rotation: 0,
-        team: 1,
-        player: None,
-    })
-    .expect("placed");
-    sim.grid.entity_at(TilePos::new(x, y)).expect("entity")
-}
-
-pub(super) fn item(sim: &Sim, name: &str) -> crate::content::ItemId {
-    sim.block_runtime()
-        .expect("runtime")
-        .content()
-        .item_id(name)
-        .expect("item")
-}
-
-pub(super) fn liquid(sim: &Sim, name: &str) -> crate::content::LiquidId {
-    sim.block_runtime()
-        .expect("runtime")
-        .content()
-        .liquid_id(name)
-        .expect("liquid")
-}
-
 pub(super) fn set_floor(sim: &mut Sim, x: i32, y: i32, name: &str) {
     let floor = BlockId::new(sim.world_block_id(name).expect("floor"));
     sim.grid.tiles.get_mut(x, y).floor = floor;
-}
-
-pub(super) fn stored_liquid(sim: &Sim, e: Entity, liquid: crate::content::LiquidId) -> f32 {
-    sim.ecs
-        .0
-        .get::<crate::world::modules::LiquidModule>(e)
-        .map(|m| m.get(liquid))
-        .unwrap_or(0.0)
-}
-
-pub(super) fn runtime_sim() -> Sim {
-    let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
-    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
-    sim.grid.fill(stone, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim
-}
-
-pub(super) fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
-    sim.command(SimCommand::Configure { x, y, value })
-        .expect("configure");
-}
-
-pub(super) fn stored_item(sim: &Sim, e: Entity, item: crate::content::ItemId) -> i32 {
-    sim.ecs
-        .0
-        .get::<crate::world::modules::ItemModule>(e)
-        .map(|module| module.get(item))
-        .unwrap_or(0)
 }
 
 pub(super) fn emitted(sim: &Sim, e: Entity) -> u32 {
@@ -152,17 +93,6 @@ pub(super) fn tick_until_efficient(sim: &mut Sim, e: Entity) {
     panic!("building never reached a live power graph");
 }
 
-/// Builds a runtime over a caller-patched content registry (the liquid-booster
-/// case has no vanilla block, so the test injects the consumer itself).
-pub(super) fn runtime_sim_with_content(content: crate::content::ContentRegistry) -> Sim {
-    let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
-    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
-    sim.grid.fill(stone, BlockId::AIR);
-    sim.install_block_runtime_from(crate::sim::runtime::SimRuntimeConfig::default(), content)
-        .expect("runtime");
-    sim
-}
-
 /// `BlockId` of a content block by name through the live runtime table.
 pub(super) fn crusher_block_id(sim: &Sim, name: &str) -> crate::content::BlockId {
     sim.block_runtime()
@@ -183,64 +113,6 @@ pub(super) fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool 
 }
 
 // ---- G06 T4 (PAR-0104): live world-processor bridge ----
-
-/// Installs a campaign session (the live rules/markers/wave source) on `sim`.
-pub(super) fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
-    use crate::game::planet::EmptyNeighborhood;
-    use crate::game::play::PlaySession;
-    use crate::game::runtime::CampaignRuntime;
-    use crate::game::universe::Campaign;
-    let content = crate::world::harness::BuildHarness::load_content();
-    let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
-    sim.ecs
-        .0
-        .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
-}
-
-/// Live-client logic resources (what `gdext` `install_sim_seams` inserts).
-pub(super) fn install_logic_world(sim: &mut Sim) {
-    sim.ecs
-        .0
-        .insert_resource(crate::logic::world::LogicWorldState {
-            headless: false,
-            ..crate::logic::world::LogicWorldState::new()
-        });
-    sim.ecs
-        .0
-        .insert_resource(crate::logic::world::MessageState::default());
-    let content = crate::world::harness::BuildHarness::load_content();
-    sim.ecs
-        .0
-        .insert_resource(crate::logic::world::LogicContentIndex::from_content(
-            &content,
-        ));
-}
-
-/// Places a configurable world processor running `code`.
-pub(super) fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
-    let id = sim
-        .world_block_id("world-processor")
-        .expect("world-processor");
-    sim.command(SimCommand::Place {
-        x,
-        y,
-        block: id,
-        rotation: 0,
-        team: 1,
-        player: None,
-    })
-    .expect("placed");
-    let bytes = crate::logic::blocks::logic_block::compress(code, &[]);
-    configure(sim, x, y, crate::determinism::ConfigValue::Bytes(bytes));
-}
-
-pub(super) fn test_rules() -> crate::game::rules::Rules {
-    crate::game::rules::Rules {
-        default_team: 1,
-        allow_edit_world_processors: true,
-        ..Default::default()
-    }
-}
 
 /// H02 T3: a placement query with the full flag set for the live world.
 #[cfg(test)]

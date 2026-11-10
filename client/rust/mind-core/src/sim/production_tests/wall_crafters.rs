@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    item, liquid, place_team1, runtime_sim, runtime_sim_with_content, stored_item, tick_n,
+};
 
 /// PAR-0079: a plasma bore mines the Erekir wall ore in front of it
 /// (`BeamDrill.updateFacing` + `canPlaceOn` scan the facing edge, not the
@@ -27,8 +30,8 @@ fn plasma_bore_mines_wall_ore() {
         tile.block = wall;
         tile.overlay = ore;
     }
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let bore = place_team1(&mut sim, "plasma-bore", 5, 5);
     {
         let crate::sim::Sim {
             grid,
@@ -50,9 +53,7 @@ fn plasma_bore_mines_wall_ore() {
     );
 
     let beryllium = item(&sim, "beryllium");
-    for _ in 0..400 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 400);
     assert!(
         stored_item(&sim, bore, beryllium) > 0,
         "plasma bore produced beryllium"
@@ -69,8 +70,8 @@ fn cliff_crusher_makes_sand_from_sand_walls() {
     let wall = crate::content::BlockId::new(sim.world_block_id("sand-wall").expect("sand-wall"));
     sim.grid.tiles.get_mut(7, 5).block = wall;
     sim.grid.tiles.get_mut(7, 6).block = wall;
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let crusher = place_team1(&mut sim, "cliff-crusher", 5, 5);
     {
         let crate::sim::Sim {
             grid,
@@ -90,12 +91,8 @@ fn cliff_crusher_makes_sand_from_sand_walls() {
     assert_eq!(eff, 4.0, "two facing edges * sand 2");
 
     let sand = item(&sim, "sand");
-    for _ in 0..40 {
-        sim.tick().expect("tick");
-    }
-    for _ in 0..400 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 40);
+    tick_n(&mut sim, 400);
     assert!(
         stored_item(&sim, crusher, sand) > 0,
         "cliff crusher produced sand"
@@ -113,8 +110,8 @@ fn wall_crafter_sums_facing_attributes_and_tracks_last_efficiency() {
     // Facing row of the rotation-0 size-2 crusher at (5,5): (7,5) and (7,6).
     set_block(&mut sim, 7, 5, "sand-wall");
     set_block(&mut sim, 7, 6, "stone-wall");
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let crusher = place_team1(&mut sim, "cliff-crusher", 5, 5);
     refresh_wall_crafter(&mut sim, crusher);
     assert_eq!(
         wall_crafter_state(&sim, crusher).facing_amount,
@@ -188,8 +185,8 @@ fn wall_crafter_liquid_booster_scales_efficiency() {
     let mut sim = runtime_sim_with_content(content);
     set_block(&mut sim, 7, 5, "sand-wall");
     sim.grid.tiles.get_mut(7, 6).block = BlockId::AIR;
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let crusher = place_team1(&mut sim, "cliff-crusher", 5, 5);
     let has_booster = sim
         .ecs
         .0
@@ -242,8 +239,8 @@ fn large_cliff_crusher_consumes_graphite_for_the_item_boost() {
     for (x, y) in [(7, 4), (7, 5), (7, 6)] {
         set_block(&mut sim, x, y, "sand-wall");
     }
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let crusher = place(&mut sim, "large-cliff-crusher", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let crusher = place_team1(&mut sim, "large-cliff-crusher", 5, 5);
     let hydrogen = liquid(&sim, "hydrogen");
     let graphite = item(&sim, "graphite");
     // `consumeLiquid(hydrogen, 1f / 60f)` is a *required* consumer, so the
@@ -308,8 +305,8 @@ fn wall_crafter_without_boosters_gets_no_boost() {
     let mut sim = runtime_sim();
     set_block(&mut sim, 7, 5, "sand-wall");
     set_block(&mut sim, 7, 6, "sand-wall");
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let crusher = place_team1(&mut sim, "cliff-crusher", 5, 5);
     let graphite = item(&sim, "graphite");
     {
         let mut items = sim

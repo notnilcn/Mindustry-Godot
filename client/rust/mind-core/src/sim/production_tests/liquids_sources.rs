@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    configure, item, liquid, place_team1, runtime_sim, stored_item, stored_liquid, tick_n,
+};
 
 /// PAR-0078: a mechanical pump needs a liquid floor, pumps that floor's
 /// liquid (tar -> oil) and dumps it into an adjacent conduit.
@@ -27,12 +30,10 @@ fn pumps_read_the_floor_liquid_and_feed_conduits() {
         sim.grid.entity_at(TilePos::new(12, 12)).is_none(),
         "pump rejected on a dry floor"
     );
-    let oil_pump = place(&mut sim, "mechanical-pump", 5, 5);
-    let water_pump = place(&mut sim, "mechanical-pump", 9, 5);
-    let conduit = place(&mut sim, "conduit", 10, 5);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let oil_pump = place_team1(&mut sim, "mechanical-pump", 5, 5);
+    let water_pump = place_team1(&mut sim, "mechanical-pump", 9, 5);
+    let conduit = place_team1(&mut sim, "conduit", 10, 5);
+    tick_n(&mut sim, 60);
     let (oil, water) = (liquid(&sim, "oil"), liquid(&sim, "water"));
     assert!(stored_liquid(&sim, oil_pump, oil) > 0.0, "tar pumps oil");
     assert_eq!(stored_liquid(&sim, oil_pump, water), 0.0);
@@ -48,11 +49,9 @@ fn pumps_read_the_floor_liquid_and_feed_conduits() {
 fn conduit_feeds_a_liquid_consumer() {
     let mut sim = runtime_sim();
     set_floor(&mut sim, 5, 5, "shallow-water");
-    let _pump = place(&mut sim, "mechanical-pump", 5, 5);
-    let generator = place(&mut sim, "steam-generator", 6, 5);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let _pump = place_team1(&mut sim, "mechanical-pump", 5, 5);
+    let generator = place_team1(&mut sim, "steam-generator", 6, 5);
+    tick_n(&mut sim, 60);
     let water = liquid(&sim, "water");
     assert!(
         stored_liquid(&sim, generator, water) > 0.0,
@@ -66,18 +65,16 @@ fn conduit_feeds_a_liquid_consumer() {
 fn item_source_feeds_conveyor_into_void() {
     let mut sim = runtime_sim();
     let copper = item(&sim, "copper");
-    let source = place(&mut sim, "item-source", 5, 5);
-    let conveyor = place(&mut sim, "conveyor", 6, 5);
-    let sink = place(&mut sim, "item-void", 7, 5);
+    let source = place_team1(&mut sim, "item-source", 5, 5);
+    let conveyor = place_team1(&mut sim, "conveyor", 6, 5);
+    let sink = place_team1(&mut sim, "item-void", 7, 5);
     configure(
         &mut sim,
         5,
         5,
         crate::determinism::ConfigValue::Content("copper".to_owned()),
     );
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let count = emitted(&sim, source);
     let belt_heat = sim
         .ecs
@@ -124,11 +121,9 @@ fn item_source_feeds_conveyor_into_void() {
 fn unconfigured_item_source_emits_nothing() {
     let mut sim = runtime_sim();
     let copper = item(&sim, "copper");
-    let source = place(&mut sim, "item-source", 5, 5);
-    let conveyor = place(&mut sim, "conveyor", 6, 5);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let source = place_team1(&mut sim, "item-source", 5, 5);
+    let conveyor = place_team1(&mut sim, "conveyor", 6, 5);
+    tick_n(&mut sim, 60);
     assert_eq!(
         emitted(&sim, source),
         0,
@@ -148,25 +143,21 @@ fn unconfigured_item_source_emits_nothing() {
 fn liquid_source_fills_conduit() {
     let mut sim = runtime_sim();
     let water = liquid(&sim, "water");
-    let source = place(&mut sim, "liquid-source", 5, 5);
-    let conduit = place(&mut sim, "conduit", 6, 5);
+    let source = place_team1(&mut sim, "liquid-source", 5, 5);
+    let conduit = place_team1(&mut sim, "conduit", 6, 5);
     configure(
         &mut sim,
         5,
         5,
         crate::determinism::ConfigValue::Content("water".to_owned()),
     );
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert!(
         stored_liquid(&sim, conduit, water) > 0.0,
         "conduit carried water"
     );
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::None);
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     assert_eq!(
         stored_liquid(&sim, source, water),
         0.0,
@@ -182,7 +173,7 @@ fn deconstructing_tank_drops_non_incinerable_puddles() {
     let mut sim = runtime_sim();
     sim.install_unit_runtime().expect("unit runtime");
     let neph = liquid(&sim, "neoplasm");
-    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    let tank = place_team1(&mut sim, "liquid-tank", 6, 6);
     {
         let mut liquids = sim
             .ecs
@@ -228,7 +219,7 @@ fn deconstructing_tank_drops_non_incinerable_puddles() {
     let mut sim = runtime_sim();
     sim.install_unit_runtime().expect("unit runtime");
     let slag = liquid(&sim, "slag");
-    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    let tank = place_team1(&mut sim, "liquid-tank", 6, 6);
     {
         let mut liquids = sim
             .ecs
@@ -263,11 +254,9 @@ fn deconstructing_tank_drops_non_incinerable_puddles() {
 fn power_source_powers_consumer() {
     let mut sim = runtime_sim();
     set_floor(&mut sim, 7, 5, "ore-copper");
-    let source = place(&mut sim, "power-source", 5, 5);
-    let drill = place(&mut sim, "laser-drill", 7, 5);
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    let source = place_team1(&mut sim, "power-source", 5, 5);
+    let drill = place_team1(&mut sim, "laser-drill", 7, 5);
+    tick_n(&mut sim, 30);
     let production = sim
         .ecs
         .0
@@ -310,12 +299,10 @@ fn power_source_replacement_keeps_consumer_powered() {
     let mut sim = runtime_sim();
     set_floor(&mut sim, 8, 5, "ore-copper");
     // Report staging order: machine -> power-node -> power-source.
-    let drill = place(&mut sim, "laser-drill", 8, 5);
-    let _node = place(&mut sim, "power-node", 6, 5);
-    let _source = place(&mut sim, "power-source", 5, 5);
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    let drill = place_team1(&mut sim, "laser-drill", 8, 5);
+    let _node = place_team1(&mut sim, "power-node", 6, 5);
+    let _source = place_team1(&mut sim, "power-source", 5, 5);
+    tick_n(&mut sim, 30);
     let satisfaction = |sim: &Sim, entity| -> f32 {
         let graph = sim
             .ecs
@@ -334,10 +321,8 @@ fn power_source_replacement_keeps_consumer_powered() {
 
     // A large multiblock (adjacent to the drill) breaks and is re-placed: it
     // must rejoin the powered graph.
-    let battery = place(&mut sim, "battery-large", 6, 8);
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    let battery = place_team1(&mut sim, "battery-large", 6, 8);
+    tick_n(&mut sim, 2);
     assert_eq!(
         satisfaction(&sim, battery),
         1.0,
@@ -350,10 +335,8 @@ fn power_source_replacement_keeps_consumer_powered() {
     })
     .expect("break battery");
     sim.tick().expect("tick");
-    let battery = place(&mut sim, "battery-large", 6, 8);
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    let battery = place_team1(&mut sim, "battery-large", 6, 8);
+    tick_n(&mut sim, 2);
     assert_eq!(
         satisfaction(&sim, battery),
         1.0,
@@ -368,10 +351,8 @@ fn power_source_replacement_keeps_consumer_powered() {
     })
     .expect("break source");
     sim.tick().expect("tick");
-    let _replacement = place(&mut sim, "power-source", 5, 5);
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    let _replacement = place_team1(&mut sim, "power-source", 5, 5);
+    tick_n(&mut sim, 2);
     assert_eq!(
         satisfaction(&sim, drill),
         1.0,
@@ -392,7 +373,7 @@ fn laser_drill_counts_centered_footprint() {
     }
     // Outside the footprint; the old `x..x+size` scan would have counted it.
     set_floor(&mut sim, 10, 8, "ore-copper");
-    let drill = place(&mut sim, "laser-drill", 8, 8);
+    let drill = place_team1(&mut sim, "laser-drill", 8, 8);
     let (dominant, count) = sim
         .ecs
         .0
@@ -409,8 +390,8 @@ fn laser_drill_counts_centered_footprint() {
 #[test]
 fn generator_dumps_output_liquid() {
     let mut sim = runtime_sim();
-    let generator = place(&mut sim, "pyrolysis-generator", 5, 5);
-    let conduit = place(&mut sim, "conduit", 7, 5);
+    let generator = place_team1(&mut sim, "pyrolysis-generator", 5, 5);
+    let conduit = place_team1(&mut sim, "conduit", 7, 5);
     let (slag, arkycite, water) = (
         liquid(&sim, "slag"),
         liquid(&sim, "arkycite"),
@@ -423,9 +404,7 @@ fn generator_dumps_output_liquid() {
             module.add(arkycite, 50.0, 150.0);
         }
     }
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert!(
         stored_liquid(&sim, conduit, water) > 0.0,
         "conduit received the dumped output liquid"

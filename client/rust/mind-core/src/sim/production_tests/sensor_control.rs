@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{configure, item, place_team1, runtime_sim, tick_n};
 
 // ---- G06 T7 (sensor/control coverage) ----
 
@@ -13,7 +14,7 @@ use super::*;
 #[test]
 fn duo_ammo_sensed() {
     let mut sim = runtime_sim();
-    let duo = place(&mut sim, "duo", 20, 20);
+    let duo = place_team1(&mut sim, "duo", 20, 20);
     let copper = item(&sim, "copper");
     let world = &mut sim.ecs.0;
     assert!(transfer::dispatch_accept_item(world, duo, duo, copper));
@@ -55,9 +56,9 @@ fn duo_ammo_sensed() {
 #[test]
 fn building_xy_tiles() {
     let mut sim = runtime_sim();
-    let hyper = place(&mut sim, "hyper-processor", 10, 10);
-    let logic = place(&mut sim, "logic-processor", 20, 20);
-    let micro = place(&mut sim, "micro-processor", 3, 4);
+    let hyper = place_team1(&mut sim, "hyper-processor", 10, 10);
+    let logic = place_team1(&mut sim, "logic-processor", 20, 20);
+    let micro = place_team1(&mut sim, "micro-processor", 3, 4);
     use crate::logic::LAccess;
     use crate::logic::access::{Sensed, sense};
     use crate::logic::value::LogicObject;
@@ -102,9 +103,7 @@ fn lookup_resolves_content_from_logic_ids() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let state = sim
         .ecs
         .0

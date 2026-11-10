@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{item, liquid, place_team1, runtime_sim, stored_item, tick_n};
 
 /// L06 stretch (PAR-0437): the unit repair tower heals damaged friendly
 /// units in range by `healAmount * edelta()` (RepairTower.java:57-86;
@@ -17,9 +18,9 @@ fn repair_tower_heals_units_and_respects_suppression() {
 
     let mut sim = runtime_sim();
     sim.install_unit_runtime().expect("unit runtime");
-    let tower = place(&mut sim, "unit-repair-tower", 10, 10);
+    let tower = place_team1(&mut sim, "unit-repair-tower", 10, 10);
     // Size 2 covers tiles 10..11 (`offset`), so the source sits at x = 9.
-    let _source = place(&mut sim, "power-source", 9, 10);
+    let _source = place_team1(&mut sim, "power-source", 9, 10);
     let (dagger, ozone) = {
         let content = sim.block_runtime().expect("runtime").content();
         (
@@ -47,9 +48,7 @@ fn repair_tower_heals_units_and_respects_suppression() {
         .expect("spawned");
     let max = sim.ecs.0.get::<Health>(unit).expect("health").max_health;
     sim.ecs.0.get_mut::<Health>(unit).expect("health").health = max - 60.0;
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
     let healed = sim.ecs.0.get::<Health>(unit).expect("health").health;
     assert!(
         healed > max - 60.0 + 10.0,
@@ -67,9 +66,7 @@ fn repair_tower_heals_units_and_respects_suppression() {
         40.0,
         600.0,
     );
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
     assert_eq!(
         sim.ecs.0.get::<Health>(unit).expect("health").health,
         max - 60.0,
@@ -116,7 +113,7 @@ fn attribute_crafter_boosts_progress_from_footprint_attributes() {
             set_floor(&mut sim, x, y, "spore-moss");
         }
     }
-    let boosted = place(&mut sim, "cultivator", 5, 5);
+    let boosted = place_team1(&mut sim, "cultivator", 5, 5);
     let attr = sim
         .ecs
         .0
@@ -140,7 +137,7 @@ fn attribute_crafter_boosts_progress_from_footprint_attributes() {
         .get_resource_mut::<crate::world::limits::BuildRules>()
         .expect("rules")
         .cheat = true;
-    let control = place(&mut plain, "cultivator", 5, 5);
+    let control = place_team1(&mut plain, "cultivator", 5, 5);
     let attr = plain
         .ecs
         .0
@@ -173,7 +170,7 @@ fn fracker_consumes_items_on_its_use_timer_and_resets_last_pump() {
             set_floor(&mut sim, x, y, "darksand");
         }
     }
-    let fracker = place(&mut sim, "oil-extractor", 5, 5);
+    let fracker = place_team1(&mut sim, "oil-extractor", 5, 5);
     let sand = item(&sim, "sand");
     sim.ecs
         .0
@@ -181,9 +178,7 @@ fn fracker_consumes_items_on_its_use_timer_and_resets_last_pump() {
         .expect("items")
         .add(sand, 10, 100);
 
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert_eq!(
         stored_item(&sim, fracker, sand),
         10,
@@ -218,9 +213,7 @@ fn fracker_consumes_items_on_its_use_timer_and_resets_last_pump() {
         .get_mut::<crate::world::modules::LiquidModule>(fracker)
         .expect("liquids")
         .add(oil, 40.0, 40.0);
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     let idle = state(&sim);
     assert_eq!(idle.last_pump, 0.0, "lastPump reset while idle");
     assert!(
@@ -248,7 +241,7 @@ fn silicon_crucible_output_scales_with_heat_attribute() {
             set_floor(&mut sim, x, y, "magmarock");
         }
     }
-    let crucible = place(&mut sim, "silicon-crucible", 5, 5);
+    let crucible = place_team1(&mut sim, "silicon-crucible", 5, 5);
     let attr = sim
         .ecs
         .0
@@ -269,9 +262,7 @@ fn silicon_crucible_output_scales_with_heat_attribute() {
     }
     // Speed multiplier 2: the first craft lands at ~45 ticks (craftTime 90);
     // at the unboosted 1x rate 50 ticks would still be 0.55 progress.
-    for _ in 0..50 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 50);
     let silicon = stored_item(&sim, crucible, item(&sim, "silicon"));
     // 8 output * outputMultiplier(2) = 16 for the first craft.
     assert!(
