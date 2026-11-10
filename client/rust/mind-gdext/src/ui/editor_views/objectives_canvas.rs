@@ -70,7 +70,7 @@ impl IControl for MindMapObjectivesCanvas {
     }
 
     fn ready(&mut self) {
-        self.editor = self.resolve_editor();
+        self.editor = self.editor();
         self.base_mut().set_mouse_filter(MouseFilter::STOP);
     }
 
@@ -262,20 +262,14 @@ impl MindMapObjectivesCanvas {
 }
 
 impl MindMapObjectivesCanvas {
-    /// The live `MindEditor` facade from the exported path.
-    fn resolve_editor(&self) -> Option<Gd<Node>> {
-        let path = self.editor_path.clone();
-        self.base().get_node_or_null(&path)
-    }
-
-    /// The stored facade, re-resolved when the exported path changed.
+    /// The stored `MindEditor` facade, re-resolved through the exported path
+    /// when it went invalid.
     fn editor(&self) -> Option<Gd<Node>> {
-        if let Some(editor) = &self.editor
-            && editor.is_instance_valid()
-        {
-            return Some(editor.clone());
-        }
-        self.resolve_editor()
+        cached_editor(
+            &self.editor,
+            &self.to_gd().upcast::<Node>(),
+            &self.editor_path,
+        )
     }
 
     /// One mouse-button branch of `_gui_input`.

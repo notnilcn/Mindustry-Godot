@@ -102,6 +102,32 @@ fn editor_call(editor: &Gd<Node>, method: &str, args: &[Variant]) -> Option<Vari
     Some(editor.call(method, args))
 }
 
+/// The cached `/root/Spine/MindEditor` facade re-resolved through `path` when
+/// it went invalid (the shape all four editor views share; `cached` is the
+/// field `ready()` filled).
+fn cached_editor(cached: &Option<Gd<Node>>, base: &Gd<Node>, path: &NodePath) -> Option<Gd<Node>> {
+    if let Some(editor) = cached
+        && editor.is_instance_valid()
+    {
+        return Some(editor.clone());
+    }
+    base.get_node_or_null(path)
+}
+
+/// [`cached_editor`] then [`editor_call`]: the shared `_call(method, ...)`.
+fn call_cached_editor(
+    cached: &Option<Gd<Node>>,
+    base: &Gd<Node>,
+    path: &NodePath,
+    method: &str,
+    args: &[Variant],
+) {
+    let Some(editor) = cached_editor(cached, base, path) else {
+        return;
+    };
+    let _ = editor_call(&editor, method, args);
+}
+
 /// GDScript `float(value)` coercion for JSON numbers.
 fn variant_f64(value: &Variant) -> f64 {
     match value.get_type() {
