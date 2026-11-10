@@ -175,18 +175,34 @@ impl MindSimHost {
     /// (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
     /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
     pub fn light_sources(&self, rect: (f32, f32, f32, f32)) -> Vec<LightSource> {
-        use mind_core::combat::bullet::Bullet;
-        use mind_core::entities::comp::Pos;
-        use mind_core::entities::comp::unit::comp::UnitTypeComp;
-        use mind_core::render::drawf::pal;
-        use mind_core::world::behavior::light::LightState;
         let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let rules = self.render_rules_or_default();
         let view = self.grown_view(rect, LIGHT_GROW);
         let mut out = Vec::new();
-        for tile in visible_blocks(&self.sim.grid, content, &view) {
+        self.block_lights(content, &view, &mut out);
+        // `BlockRenderer.java:846-855`: floor/overlay environment lights for
+        // tiles whose block does not obstruct light (PAR-0467).
+        out.extend(floor_light_sources(&self.sim.grid, content, &view));
+        self.hazard_lights(rect, &mut out);
+        self.unit_lights(content, &rules, &mut out);
+        self.bullet_lights(content, &mut out);
+        out
+    }
+
+    /// Block light sources: cores (`CoreBlock.java:158,739-741`), illuminators
+    /// (`LightBlock.java:40,105,126-129`) and static `emitLight` blocks
+    /// (`Block.lightRadius` default 60), in `visible_blocks` order.
+    fn block_lights(
+        &self,
+        content: &ContentRegistry,
+        view: &CameraView,
+        out: &mut Vec<LightSource>,
+    ) {
+        use mind_core::render::drawf::pal;
+        use mind_core::world::behavior::light::LightState;
+        for tile in visible_blocks(&self.sim.grid, content, view) {
             let Some(def) = content.block(tile.block) else {
                 continue;
             };
@@ -238,11 +254,12 @@ impl MindSimHost {
                 _ => {}
             }
         }
-        // `BlockRenderer.java:846-855`: floor/overlay environment lights for
-        // tiles whose block does not obstruct light (PAR-0467).
-        out.extend(floor_light_sources(&self.sim.grid, content, &view));
-        // Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
-        // `Liquid.drawPuddle`; H03 T7).
+    }
+
+    /// Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
+    /// `Liquid.drawPuddle`; H03 T7).
+    fn hazard_lights(&self, rect: (f32, f32, f32, f32), out: &mut Vec<LightSource>) {
+        use mind_core::render::drawf::pal;
         let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
         for fire in self.fire_draws(rect) {
             out.push(LightSource {
@@ -264,6 +281,12 @@ impl MindSimHost {
                 });
             }
         }
+    }
+
+    /// Unit lights when `rules.unitLight` (`UnitType.java:954,1800-1804`).
+    fn unit_lights(&self, content: &ContentRegistry, rules: &Rules, out: &mut Vec<LightSource>) {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
         if rules.unit_light
             && let Some(runtime) = self.sim.unit_runtime()
         {
@@ -297,6 +320,13 @@ impl MindSimHost {
                 });
             }
         }
+    }
+
+    /// Bullet lights (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
+    /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
+    fn bullet_lights(&self, content: &ContentRegistry, out: &mut Vec<LightSource>) {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::entities::comp::Pos;
         if let Some(runtime) = self.sim.unit_runtime() {
             for &entity in &runtime.bullets {
                 let Some(pos) = self.world().get::<Pos>(entity) else {
@@ -327,7 +357,6 @@ impl MindSimHost {
                 });
             }
         }
-        out
     }
 
     /// `rules.borderDarkness` for the darkness/minimap passes (G03 T11):
