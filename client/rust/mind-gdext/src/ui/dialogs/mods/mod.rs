@@ -5,7 +5,10 @@
 //! Upstream: none (group module; see the leaves)
 
 pub mod mod_browser;
+pub mod mods_detail;
 pub mod mods_dialog;
+pub mod mods_import;
+pub mod mods_list;
 pub mod util;
 
 use crate::ui::dialog::DialogController;
