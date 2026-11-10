@@ -309,7 +309,7 @@ pub(super) fn cmd_mods_patch(
             if pass { "PASS" } else { "FAIL" }
         );
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 20 M4 (`mods assets`): load a fixture mod's data assets headlessly and
@@ -552,7 +552,7 @@ pub(super) fn cmd_mods_error_isolation(
             if pass { "PASS" } else { "FAIL" }
         );
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 20 M9 (`mods bench`): times one pipeline scene (§7d).
@@ -678,13 +678,12 @@ pub(super) fn cmd_mods_bench(
             let fs = MockFs::new();
             let mut cache = DataAssetCache::load("/cache");
             let payload = vec![0xABu8; 1024 * 1024];
-            for _ in 0..runs {
-                let start = Instant::now();
+            samples = time_runs(runs, || {
                 cache
                     .add(&fs, &payload)
                     .map_err(|e| anyhow!("cache add: {e}"))?;
-                samples.push(start.elapsed().as_nanos() as u64);
-            }
+                Ok(())
+            })?;
             detail.insert("bytes".into(), serde_json::json!(payload.len()));
         }
         "overlay" => {
@@ -857,7 +856,7 @@ pub(super) fn cmd_mods_overlay(
             println!("{probe}");
         }
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Normalizes a mod report to the stable `expected_list.json` fields.

@@ -75,7 +75,7 @@ pub(super) fn cmd_sim_core_reset_play_cycle(
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 pub(super) fn cmd_sim(
@@ -260,7 +260,7 @@ pub(super) fn cmd_replay(
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 pub(super) fn cmd_bench(
@@ -298,11 +298,7 @@ pub(super) fn cmd_bench(
             },
         };
         println!("{}", serde_json::to_string(&report)?);
-        return Ok(if p99_ns <= P99_BUDGET_NS {
-            EXIT_PASS
-        } else {
-            EXIT_FAIL
-        });
+        return Ok(exit_code(p99_ns <= P99_BUDGET_NS));
     }
     // Plan 21 §7d: network-free `mp_*` bench mirrors (no sim scenario file).
     if let Some((p50_ns, p99_ns, checksum)) = crate::mp_scenarios::bench(scenario_name, ticks) {
@@ -328,12 +324,10 @@ pub(super) fn cmd_bench(
         sim.tick()?;
     }
 
-    let mut samples: Vec<u64> = Vec::with_capacity(ticks_usize);
-    for _ in 0..ticks {
-        let start = Instant::now();
+    let mut samples = time_runs(ticks_usize, || {
         sim.tick()?;
-        samples.push(start.elapsed().as_nanos() as u64);
-    }
+        Ok(())
+    })?;
     samples.sort_unstable();
     let p50_ns = percentile(&samples, 50);
     let p99_ns = percentile(&samples, 99);
@@ -491,7 +485,7 @@ pub(super) fn cmd_bench_sim_core(
         println!("bench checksum: {}", report.checksum);
     }
     println!("{}", serde_json::to_string(&report)?);
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 pub(super) fn cmd_dump(

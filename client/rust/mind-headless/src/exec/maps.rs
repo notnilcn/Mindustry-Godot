@@ -72,7 +72,6 @@ pub(super) fn preview_image_checksum(image: &mind_core::io::map::PreviewImage) -
 /// `maps fix` (plan 19 M8 §3.13/§7b): build a deterministic fixture dir, run the
 /// MapFixer checks (dry-run then write), and assert the second write is a no-op.
 pub(super) fn cmd_maps_fix(dir: Option<&Path>, dry_run: bool, json: bool) -> anyhow::Result<i32> {
-    use bevy_ecs::world::World;
     use mind_core::editor::MapEditor;
     use mind_core::editor::grid::WorldEditorGrid;
     use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
@@ -80,10 +79,15 @@ pub(super) fn cmd_maps_fix(dir: Option<&Path>, dry_run: bool, json: bool) -> any
     use mind_core::io::json::JsonIo;
     use mind_core::io::json::rules::Rules;
     use mind_core::maps::fix::fix_dir;
-    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
     let fs = NativeFs;
-    let mut content = boot_content()?;
+    let EditorWorld {
+        mut content,
+        mut grid,
+        mut ecs,
+        hooks,
+        render,
+    } = editor_world(0, 0)?;
     let root = match dir {
         Some(path) if path.is_absolute() => path.to_path_buf(),
         Some(path) => std::env::current_dir()?.join(path),
@@ -95,10 +99,6 @@ pub(super) fn cmd_maps_fix(dir: Option<&Path>, dry_run: bool, json: bool) -> any
 
     // Deterministic fixture: a 16×16 editor map with fixable rules + wave 5.
     let mut editor = MapEditor::new();
-    let mut grid = WorldGrid::new(0, 0);
-    let mut ecs = World::new();
-    let hooks = NoopWorldHooks;
-    let render = NoopRenderHooks;
     {
         let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
         editor.begin_edit_size(&mut world, &content, 16, 16);
@@ -143,11 +143,7 @@ pub(super) fn cmd_maps_fix(dir: Option<&Path>, dry_run: bool, json: bool) -> any
             "ok": dry_changes > 0,
         });
         println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(if dry_changes > 0 {
-            EXIT_PASS
-        } else {
-            EXIT_FAIL
-        });
+        return Ok(exit_code(dry_changes > 0));
     }
 
     let first = fix_dir(&fs, &mut content, &root, false)?;
@@ -175,7 +171,7 @@ pub(super) fn cmd_maps_fix(dir: Option<&Path>, dry_run: bool, json: bool) -> any
     } else {
         println!("maps fix: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `maps save-load-save` (plan 19 M2 §5/§7b): save → load → save byte-stable.
@@ -271,11 +267,7 @@ pub(super) fn cmd_maps_save_load_save(map_name: &str, json: bool) -> anyhow::Res
             bytes_a.len()
         );
     }
-    Ok(if idempotent && rules_equal {
-        EXIT_PASS
-    } else {
-        EXIT_FAIL
-    })
+    Ok(exit_code(idempotent && rules_equal))
 }
 
 /// `maps roundtrip` (plan 06 M4 / plan 19 M7 §3.8): save a live grid through
@@ -377,7 +369,7 @@ pub(super) fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("maps roundtrip: {checksum_save} -> {checksum_import} ok={ok}");
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `maps preview-tiles` (plan 19 M2 §5/§7b): deterministic preview pixels +
@@ -426,7 +418,7 @@ pub(super) fn cmd_maps_preview_tiles(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("preview {pixel_checksum} png_round_trip={png_ok}");
     }
-    Ok(if png_ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(png_ok))
 }
 
 /// `maps image-roundtrip` (plan 19 M2 §5/§7b): PNG → `read_image` → `write_image`
@@ -495,7 +487,7 @@ pub(super) fn cmd_maps_image_roundtrip(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("image round-trip: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `maps registry-shuffle` (plan 06 §7b, verified by 19 M2): registry ordering
@@ -567,5 +559,5 @@ pub(super) fn cmd_maps_registry_shuffle(seeds: u32, json: bool) -> anyhow::Resul
     } else {
         println!("registry-shuffle: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }

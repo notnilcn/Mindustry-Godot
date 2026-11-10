@@ -194,7 +194,7 @@ pub(super) fn cmd_content_audit(
             println!("  error: {error}");
         }
     }
-    Ok(if report.pass() { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(report.pass()))
 }
 
 pub(super) fn cmd_content_load(json: bool) -> anyhow::Result<i32> {

@@ -33,7 +33,7 @@ use mind_core::determinism::{CommandError, CommandLog, LogHeader, SimCommand};
 use mind_core::scenario::{Scenario, ScenarioPlayer, write_command_log};
 use mind_core::sim::{Sim, StateDump};
 use mind_core::util::alloc::{alloc_count, enabled as alloc_audit_enabled};
-use mind_core::world::TilePos;
+use mind_core::world::{NoopRenderHooks, NoopWorldHooks, TilePos, WorldGrid};
 
 use crate::cli::{
     AssetsCommand, Cli, Command, ContentCommand, EditorCommand, IoCommand, MapsCommand,
@@ -58,8 +58,8 @@ use assets::{
 };
 use bench::{cmd_bench, cmd_dump, cmd_replay, cmd_sim, cmd_sim_core_reset_play_cycle};
 use content::{
-    cmd_content_audit, cmd_content_bench, cmd_content_dump, cmd_content_ids, cmd_content_load,
-    cmd_content_load_order_bad, cmd_content_seed,
+    boot_content, cmd_content_audit, cmd_content_bench, cmd_content_dump, cmd_content_ids,
+    cmd_content_load, cmd_content_load_order_bad, cmd_content_seed,
 };
 use editor::{
     cmd_editor_assets, cmd_editor_banned, cmd_editor_bench, cmd_editor_gen_preview,
@@ -92,6 +92,11 @@ const EXIT_PASS: i32 = 0;
 const EXIT_FAIL: i32 = 1;
 /// Exit code: usage/IO error.
 const EXIT_USAGE: i32 = 2;
+
+/// Maps a pass/fail predicate to the process exit code.
+fn exit_code(pass: bool) -> i32 {
+    if pass { EXIT_PASS } else { EXIT_FAIL }
+}
 
 /// When set, scenario runners in `run_suite` suppress their per-scenario
 /// reports so the suite can emit one clean `format: 1` JSON document.
@@ -583,4 +588,37 @@ pub(crate) fn sample_checksums(per_tick: &[String], every: u64) -> Vec<String> {
         out.push(last.clone());
     }
     out
+}
+
+/// Runs `f` `runs` times, returning the elapsed nanoseconds of each run.
+fn time_runs(runs: usize, mut f: impl FnMut() -> anyhow::Result<()>) -> anyhow::Result<Vec<u64>> {
+    let mut samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let start = Instant::now();
+        f()?;
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    Ok(samples)
+}
+
+/// The headless editor fixture: base content, a fresh grid, the ECS world and
+/// the no-op hooks that [`WorldEditorGrid`](mind_core::editor::grid::WorldEditorGrid)
+/// borrows.
+struct EditorWorld {
+    content: ContentRegistry,
+    grid: WorldGrid,
+    ecs: bevy_ecs::world::World,
+    hooks: NoopWorldHooks,
+    render: NoopRenderHooks,
+}
+
+/// Builds the editor fixture with a `width`×`height` grid.
+fn editor_world(width: i32, height: i32) -> anyhow::Result<EditorWorld> {
+    Ok(EditorWorld {
+        content: boot_content()?,
+        grid: WorldGrid::new(width, height),
+        ecs: bevy_ecs::world::World::new(),
+        hooks: NoopWorldHooks,
+        render: NoopRenderHooks,
+    })
 }

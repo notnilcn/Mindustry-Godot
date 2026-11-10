@@ -76,7 +76,6 @@ pub(super) fn cmd_editor_ops(fixture: &Path, json: bool) -> anyhow::Result<i32> 
     use mind_core::editor::draw_op::DrawOperation;
     use mind_core::editor::grid::WorldEditorGrid;
     use mind_core::editor::stack::OperationStack;
-    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
     let text = std::fs::read_to_string(fixture)
         .with_context(|| format!("reading editor fixture `{}`", fixture.display()))?;
@@ -96,17 +95,18 @@ pub(super) fn cmd_editor_ops(fixture: &Path, json: bool) -> anyhow::Result<i32> 
         ));
     }
 
-    let content = boot_content()?;
+    let EditorWorld {
+        content,
+        mut grid,
+        mut ecs,
+        hooks,
+        render,
+    } = editor_world(data.width, data.height)?;
     let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
-
-    let mut grid = WorldGrid::new(data.width, data.height);
     // `begin_edit_size` base: every tile is stone-floored air.
     for index in 0..grid.tiles.len() {
         grid.tiles.geti_mut(index).floor = stone;
     }
-    let mut ecs = bevy_ecs::world::World::new();
-    let hooks = NoopWorldHooks;
-    let render = NoopRenderHooks;
 
     let mut stack = OperationStack::new();
     let mut op_count = 0usize;
@@ -205,7 +205,6 @@ pub(super) fn cmd_editor_roundtrip(
     _seed: u64,
     json: bool,
 ) -> anyhow::Result<i32> {
-    use bevy_ecs::world::World;
     use mind_core::content::BlockId;
     use mind_core::editor::grid::WorldEditorGrid;
     use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
@@ -213,15 +212,17 @@ pub(super) fn cmd_editor_roundtrip(
     use mind_core::io::fs::NativeFs;
     use mind_core::io::map::MapIo;
     use mind_core::maps::Map;
-    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+    use mind_core::world::WorldGrid;
 
-    let mut content = boot_content()?;
+    let EditorWorld {
+        mut content,
+        mut grid,
+        mut ecs,
+        hooks,
+        render,
+    } = editor_world(0, 0)?;
     let fs = NativeFs;
     let mut editor = MapEditor::new();
-    let mut grid = WorldGrid::new(0, 0);
-    let mut ecs = World::new();
-    let hooks = NoopWorldHooks;
-    let render = NoopRenderHooks;
 
     if let Some(file) = map {
         let header = MapIo::create_map(&fs, file, true)?;
@@ -337,23 +338,23 @@ pub(super) fn cmd_editor_roundtrip(
         println!("loaded: {checksum_loaded}");
         println!("round trip: {}", if round_trip_ok { "ok" } else { "FAIL" });
     }
-    Ok(if round_trip_ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(round_trip_ok))
 }
 
 /// `editor resize-shift` (plan 19 M1 §5/§7b): in-bounds tiles/data survive a
 /// resize with a ±10 shift; out-of-bounds tiles become the default stone floor.
 pub(super) fn cmd_editor_resize_shift(json: bool) -> anyhow::Result<i32> {
-    use bevy_ecs::world::World;
     use mind_core::editor::grid::WorldEditorGrid;
     use mind_core::editor::{EditorGrid, MapEditor};
-    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
-    let content = boot_content()?;
+    let EditorWorld {
+        content,
+        mut grid,
+        mut ecs,
+        hooks,
+        render,
+    } = editor_world(0, 0)?;
     let mut editor = MapEditor::new();
-    let mut grid = WorldGrid::new(0, 0);
-    let mut ecs = World::new();
-    let hooks = NoopWorldHooks;
-    let render = NoopRenderHooks;
     let wall = content
         .block_id("copper-wall")
         .ok_or_else(|| anyhow!("content is missing `copper-wall`"))?;
@@ -407,7 +408,7 @@ pub(super) fn cmd_editor_resize_shift(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor resize-shift: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor gen-preview` (plan 19 M4 §5/§7b): a fixed filter stack over a
@@ -489,11 +490,7 @@ pub(super) fn cmd_editor_gen_preview(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor gen-preview: {checksum} deterministic={deterministic}");
     }
-    Ok(if deterministic && png_round_trip_ok {
-        EXIT_PASS
-    } else {
-        EXIT_FAIL
-    })
+    Ok(exit_code(deterministic && png_round_trip_ok))
 }
 
 /// `editor playtest` (plan 19 M7 §3.11): `edit_in_game` → `resume_editing` →
@@ -598,7 +595,7 @@ pub(super) fn cmd_editor_playtest(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor playtest: {checksum} mode={mode} ok={ok}");
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor objectives` (plan 19 M5 §5/§7b): parse → serialize → parse the golden
@@ -681,7 +678,7 @@ pub(super) fn cmd_editor_objectives(fixture: &Path, json: bool) -> anyhow::Resul
     } else {
         println!("editor objectives: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor wave-graph` (plan 19 M5 §5/§7b): compute the counts/health series for
@@ -748,7 +745,7 @@ pub(super) fn cmd_editor_wave_graph(fixture: &Path, json: bool) -> anyhow::Resul
     } else {
         println!("editor wave-graph: {checksum} ok={ok}");
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// FNV-1a checksum of a [`WaveGraphData`] series.
@@ -832,7 +829,7 @@ pub(super) fn cmd_editor_locales(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor locales: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor banned` (plan 19 M6 §5): the banned sets mutate `Rules` JSON.
@@ -893,7 +890,7 @@ pub(super) fn cmd_editor_banned(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor banned: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor assets` (plan 19 M6 §5/§3.12): asset zip import/export round-trip.
@@ -930,7 +927,7 @@ pub(super) fn cmd_editor_assets(json: bool) -> anyhow::Result<i32> {
     } else {
         println!("editor assets: {}", if ok { "ok" } else { "FAIL" });
     }
-    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(ok))
 }
 
 /// `editor bench` (plan 19 M7 §7d): median timings for op recording, undo, fill
@@ -1113,5 +1110,5 @@ pub(super) fn cmd_editor_bench(
     } else {
         println!("editor bench {suite}: p50 {median:.1} us");
     }
-    Ok(if alloc_ok { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(alloc_ok))
 }
