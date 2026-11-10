@@ -29,11 +29,7 @@ impl MindCampaign {
     pub fn service_completion_json(&mut self) -> GString {
         self.sync_service();
         let (unlocked, total) = self.service.service().completion();
-        GString::from(
-            serde_json::json!({ "unlocked": unlocked, "total": total })
-                .to_string()
-                .as_str(),
-        )
+        value_gstring(&serde_json::json!({ "unlocked": unlocked, "total": total }))
     }
 
     /// The unlocked achievement names as JSON (`KEY_ACHIEVEMENTS` payload;
@@ -41,7 +37,7 @@ impl MindCampaign {
     #[func]
     pub fn service_unlocked_json(&mut self) -> GString {
         self.sync_service();
-        GString::from(self.service.service().unlocked_json().to_string().as_str())
+        value_gstring(&self.service.service().unlocked_json())
     }
 }
 
@@ -66,6 +62,13 @@ impl MindCampaign {
     /// half: the values land in the settings store; the caller flushes it).
     pub(super) fn persist_service(&mut self) {
         self.sync_service();
+        self.store_service();
+    }
+
+    /// The store half of [`Self::persist_service`]: the tracker's stats and
+    /// achievements land in the shared settings store (no runtime sync, no
+    /// flush — the caller owns both).
+    pub(super) fn store_service(&mut self) {
         settings_hub::with_settings(|settings| {
             let mut store = SettingsUnlockStore::new(settings);
             save_service(&mut self.service, &mut store);

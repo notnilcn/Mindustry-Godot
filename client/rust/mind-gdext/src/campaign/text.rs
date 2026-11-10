@@ -54,7 +54,7 @@ impl MindCampaign {
     }
 
     fn show_error_text(&self, text: &str) {
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+        let Some(mut ui) = self.autoload("MindUi") else {
             log::warn!("error shown with no UI available: {text}");
             return;
         };
@@ -62,15 +62,7 @@ impl MindCampaign {
         // `Dialog.add(text)` parses markup upstream; the prompt labels take
         // BBCode, so render both through `UI.formatIcons` first.
         let render = |raw: &str| -> String {
-            self.base()
-                .get_node_or_null("/root/MindAssets")
-                .and_then(|mut assets| {
-                    assets
-                        .call("markup_text", &[GString::from(raw).to_variant()])
-                        .try_to::<GString>()
-                        .ok()
-                })
-                .map(|rendered| rendered.to_string())
+            self.assets_string("markup_text", &[GString::from(raw).to_variant()])
                 .unwrap_or_else(|| raw.to_owned())
         };
         let title = render(&title);
@@ -106,7 +98,7 @@ impl MindCampaign {
         let Some(name) = tech_tree::content_name(registry, content) else {
             return;
         };
-        let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+        let Some(mut hud) = self.autoload("MindHud") else {
             return;
         };
         if hud.has_method("push_unlock") {
@@ -117,11 +109,9 @@ impl MindCampaign {
     /// `<type>.<name>.name` through the live bundle, falling back to `name`.
     pub(super) fn localized_content_name(&self, type_name: &str, name: &str) -> String {
         let key = format!("{type_name}.{name}.name");
-        let value = self.bundle.get(&key);
-        if value == key {
-            name.to_owned()
-        } else {
-            value.to_owned()
+        match self.bundle_lookup(&key) {
+            Some(value) => value.to_owned(),
+            None => name.to_owned(),
         }
     }
 
@@ -138,24 +128,15 @@ impl MindCampaign {
         field: &str,
     ) -> String {
         let key = format!("{type_name}.{name}.{field}");
-        let value = self.bundle.get(&key);
-        if value == key {
-            String::new()
-        } else {
-            value.to_owned()
-        }
+        self.bundle_lookup(&key)
+            .map(str::to_owned)
+            .unwrap_or_default()
     }
 
     /// `UnlockableContent.emoji()` through the `MindAssets` `Iconc` table
     /// (`Fonts.getUnicodeStr`); empty when the content has no icon.
     fn content_emoji(&self, name: &str) -> String {
-        let Some(mut assets) = self.base().get_node_or_null("/root/MindAssets") else {
-            return String::new();
-        };
-        assets
-            .call("unicode_str", &[GString::from(name).to_variant()])
-            .try_to::<GString>()
-            .map(|value| value.to_string())
+        self.assets_string("unicode_str", &[GString::from(name).to_variant()])
             .unwrap_or_default()
     }
 
@@ -194,10 +175,35 @@ impl MindCampaign {
         self.localized_content_name("planet", &name)
     }
 
+    /// A `/root` autoload node by name (`Core.scene`-style singleton lookup;
+    /// these are autoloads, not scene-spine deps).
+    pub(super) fn autoload(&self, name: &str) -> Option<Gd<Node>> {
+        let path = format!("/root/{name}");
+        self.base().get_node_or_null(path.as_str())
+    }
+
+    /// Calls `method` on the `MindAssets` autoload and returns its `GString`
+    /// result as a `String` (`UI.formatIcons` / `Core.bundle` proxies).
+    pub(super) fn assets_string(&self, method: &str, args: &[Variant]) -> Option<String> {
+        let mut assets = self.autoload("MindAssets")?;
+        assets
+            .call(method, args)
+            .try_to::<GString>()
+            .ok()
+            .map(|value| value.to_string())
+    }
+
+    /// `Core.bundle` lookup with the "value == key means missing" rule
+    /// (`Bundle.get` returns the key when it has no entry).
+    pub(super) fn bundle_lookup<'a>(&'a self, key: &'a str) -> Option<&'a str> {
+        let value = self.bundle.get(key);
+        (value != key).then_some(value)
+    }
+
     /// Drops `MindUi`'s cached placement catalog after an unlock change; its
     /// campaign-less fallback reads the persisted settings file directly.
     pub(super) fn invalidate_ui_block_catalog(&self) {
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+        let Some(mut ui) = self.autoload("MindUi") else {
             return;
         };
         if ui.has_method("invalidate_block_catalog") {
