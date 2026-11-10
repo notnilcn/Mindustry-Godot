@@ -4,12 +4,12 @@
 //! Upstream: none (port-only; registry tests)
 
 use super::*;
+use crate::content::ContentError;
 use crate::content::category::Category;
 use crate::content::color::Rgba;
 use crate::content::id::BlockId;
 use crate::content::stacks::ItemStack;
 use crate::content::test_support::test_registry;
-use crate::content::ContentError;
 
 /// Plan 02 §7a: `blocks::construct_block_present` (`build2` exists).
 ///

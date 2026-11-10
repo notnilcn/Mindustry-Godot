@@ -1068,7 +1068,10 @@ impl BlockDef {
 }
 
 /// Resolves a generated item stack spec.
-pub(super) fn resolve_item(registry: &ContentRegistry, spec: &StackSpec) -> Result<ItemStack, ContentError> {
+pub(super) fn resolve_item(
+    registry: &ContentRegistry,
+    spec: &StackSpec,
+) -> Result<ItemStack, ContentError> {
     let item = registry
         .item_id(spec.item)
         .ok_or_else(|| ContentError::UnknownName(spec.item.to_owned()))?;

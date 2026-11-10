@@ -7,13 +7,13 @@ use super::*;
 
 use indexmap::IndexMap;
 
+use crate::content::ContentError;
 use crate::content::bundle::BundleView;
 use crate::content::id::{BlockId, PlanetId};
 use crate::content::registries::ContentRegistry;
 use crate::content::settings_store::UnlockStore;
-use crate::content::ContentError;
 
-use super::{BlockDef, BlockSpec, BlockKind};
+use super::{BlockDef, BlockKind, BlockSpec};
 
 /// Sink for generated block waves.
 pub trait BlockSink {

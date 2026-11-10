@@ -43,11 +43,12 @@ mod def;
 mod kind;
 mod loader;
 mod spec;
-mod traits;
-mod types;
 #[cfg(test)]
 mod tests;
+mod traits;
+mod types;
 
+pub use super::super::registries::planets::EnvFlag;
 pub use consume::*;
 pub use def::*;
 pub use kind::*;
@@ -55,7 +56,6 @@ pub use loader::*;
 pub use spec::*;
 pub use traits::*;
 pub use types::*;
-pub use super::super::registries::planets::EnvFlag;
 
 /// Base tile size constant (`Block.tilesize`).
 pub const TILE_SIZE: f32 = 8.0;
