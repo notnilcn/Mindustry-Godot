@@ -1,0 +1,105 @@
+old_path	old_first_line	old_last_line	item_name	new_path
+client/rust/mind-core/src/game/runtime.rs	66	77	UnlockRef	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	79	101	CampaignHookQueues	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	103	118	impl Default for CampaignHookQueues	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	120	126	CampaignCoreHooks	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	128	162	impl CoreCampaignHooks for CampaignCoreHooks	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	164	168	CampaignCoreQueues	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	170	184	install_campaign_core_hooks	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	186	200	reset_campaign_core_hooks	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	202	209	unlock_sort_key	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	211	220	event_content	game/runtime/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	55	64	SessionSync	game/runtime/session.rs
+client/rust/mind-core/src/game/runtime.rs	379	407	apply_played_invasions	game/runtime/session.rs
+client/rust/mind-core/src/game/runtime.rs	409	514	sync_session_with_sim	game/runtime/session.rs
+client/rust/mind-core/src/game/runtime.rs	516	543	run_wave_now	game/runtime/session.rs
+client/rust/mind-core/src/game/runtime.rs	545	696	campaign_tick_system	game/runtime/tick.rs
+client/rust/mind-core/src/game/runtime.rs	698	727	apply_sector_lighting	game/runtime/tick.rs
+client/rust/mind-core/src/game/runtime.rs	729	767	sector_light	game/runtime/tick.rs
+client/rust/mind-core/src/game/runtime.rs	769	817	objectives_tick_system	game/runtime/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	819	826	ObjectiveInputState	game/runtime/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	828	836	impl Sim { set_command_mode_satisfied }	game/runtime/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	838	849	RuntimeObjectiveEnv	game/runtime/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	851	970	impl ObjectiveEnv for RuntimeObjectiveEnv	game/runtime/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	972	1027	game_state_tick_system	game/runtime/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	1029	1052	on_captured_sector	game/runtime/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	1054	1065	current_sector_captured	game/runtime/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	1314	1480	weather_system	game/runtime/weather.rs
+client/rust/mind-core/src/game/runtime.rs	1482	1506	weather_water_attr	game/runtime/weather.rs
+client/rust/mind-core/src/game/runtime.rs	222	226	BaseCatalog	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	228	241	AiPlaceRequest	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	243	246	CampaignAiQueues	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	248	256	install_campaign_ai_queues	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1067	1092	TARGET_FLAGS	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1076	1092	TeamAiUnitRow	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1094	1113	impl TeamAiUnitRow	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1115	1127	TeamAiBuildingRow	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1129	1312	team_ai_system	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1953	1964	team_core_tiles	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1966	1977	enemy_core_tiles	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1979	2067	collect_team_ai_rows	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	2069	2095	team_ai_targets	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	2097	2110	team_ai_damaged	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	2112	2132	team_ai_enemy_stats	game/runtime/team_ai/mod.rs
+client/rust/mind-core/src/game/runtime.rs	1508	1641	run_team_base_builder	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1643	1656	core_unit_of	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1658	1664	core_unit_type	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1666	1686	live_type_count	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1688	1731	fill_first_core_items	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1733	1755	spawn_core_unit_at_random_core	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1757	1769	spawn_random_core_unit	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1771	1778	spawn_unit_at	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1780	1836	run_prebuild_ai_defenders	game/runtime/team_ai/builder.rs
+client/rust/mind-core/src/game/runtime.rs	1838	1855	enemy_stats_for	game/runtime/team_ai/stats.rs
+client/rust/mind-core/src/game/runtime.rs	1857	1951	turret_enemy_stats	game/runtime/team_ai/stats.rs
+client/rust/mind-core/src/game/runtime.rs	2140	2142	content (test fixture)	game/runtime/test_support.rs
+client/rust/mind-core/src/game/runtime.rs	2144	2146	campaign (test fixture)	game/runtime/test_support.rs
+client/rust/mind-core/src/game/runtime.rs	2148	2156	systems_are_noop_without_the_resource	game/runtime/tests/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	2158	2184	game_state_check_respects_can_game_over	game/runtime/tests/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	2186	2215	captured_sector_hook_tracks_achievements_and_derelict_team	game/runtime/tests/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	2217	2245	captured_flag_follows_rules	game/runtime/tests/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	2942	2989	game_state_capture_tracks_attack_stats_and_achievements	game/runtime/tests/game_state.rs
+client/rust/mind-core/src/game/runtime.rs	2247	2333	team_ai_orders_idle_wave_units_at_an_enemy_core	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2534	2616	team_ai_base_builder_queues_plans_for_the_host	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2618	2654	t10_team_world	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2656	2671	t10_session	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2673	2681	alpha_id	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2683	2712	base_builder_fills_enemy_core	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2714	2738	ai_core_spawn_caps_at_two_per_core	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2740	2755	rts_ai_spawns_core_unit_without_idle_squads	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2757	2786	prebuild_ai_spawns_one_defender_per_core	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2788	2850	estimate_stats_counts_loaded_turret	game/runtime/tests/team_ai.rs
+client/rust/mind-core/src/game/runtime.rs	2335	2406	weather_cooldowns_reset_on_play	game/runtime/tests/weather.rs
+client/rust/mind-core/src/game/runtime.rs	2408	2467	weather_env_feeds_generator_env	game/runtime/tests/weather.rs
+client/rust/mind-core/src/game/runtime.rs	2469	2532	sync_session_preserves_carried_team_plans	game/runtime/tests/session.rs
+client/rust/mind-core/src/game/runtime.rs	3300	3334	sync_registers_cores_and_spawns	game/runtime/tests/session.rs
+client/rust/mind-core/src/game/runtime.rs	3336	3380	sync_applies_the_launch_loadout	game/runtime/tests/session.rs
+client/rust/mind-core/src/game/runtime.rs	2852	2903	wave_timer_reaches_win_wave_and_captures	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	2905	2940	campaign_tick_polls_stats_into_the_service	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	2991	3022	wave_timer_counts_ticks	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	3024	3061	waiting_wave_holds_timer	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	3063	3087	wave_runs_without_timer_when_due	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	3255	3298	destroyed_cores_unregister_on_the_campaign_tick	game/runtime/tests/tick.rs
+client/rust/mind-core/src/game/runtime.rs	3150	3190	core_and_production_deltas_fold_into_the_sector_info	game/runtime/tests/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	3192	3253	produced_unlocks_queue_an_unlock_event_row	game/runtime/tests/hooks.rs
+client/rust/mind-core/src/game/runtime.rs	3089	3148	runtime_block_at_reports_building	game/runtime/tests/objectives.rs
+client/rust/mind-core/src/game/runtime.rs	3382	3462	team_has_item_reads_the_shared_team_pool	game/runtime/tests/objectives.rs
+client/rust/mind-core/src/ui/campaign.rs	459	469	BlockEntryView	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	471	484	BlockCategoryView	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	486	493	BlockCatalogView	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	495	503	impl BlockCatalogView	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	505	513	block_catalog	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	515	518	block_catalog_for	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	520	532	block_catalog_unlocked	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	534	539	block_catalog_unlocked_for	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	541	556	tech_node_auto_unlocks	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	558	577	block_catalog_with	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	579	616	BlockVisibilityContext	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	618	704	impl BlockVisibilityContext	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	706	725	block_catalog_from	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	727	804	block_catalog_visible	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	2563	2611	block_catalog_covers_build_menu	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	2613	2707	unlocked_catalog_filters_visibility_and_tech_gates	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	2709	2761	block_catalog_from_lists_live_mod_content	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	2763	2852	block_catalog_applies_build_visibility_rules	ui/block_catalog.rs
+client/rust/mind-core/src/ui/campaign.rs	2854	2892	build_visibility_predicates_match_upstream	ui/block_catalog.rs
