@@ -137,6 +137,23 @@ pub use waves::run_wave_system;
 /// World pixels per tile (`config::TILESIZE`).
 const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
 
+/// Runs `f` with the live [`UnitRuntime`] removed from the world and re-inserts
+/// it afterwards; `None` when no runtime is installed, matching the original
+/// `remove_non_send(...) else { … }` early-return sites.
+///
+/// While the resource is removed, nested code that looks it up sees no runtime
+/// (the deliberate behaviour of every converted remove/insert pair); never mix
+/// this with a `get_non_send(_mut)` site.
+fn with_unit_runtime_removed<R>(
+    world: &mut World,
+    f: impl FnOnce(&mut World, &mut UnitRuntime) -> R,
+) -> Option<R> {
+    let mut runtime = world.remove_non_send::<UnitRuntime>()?;
+    let result = f(world, &mut runtime);
+    world.insert_non_send(runtime);
+    Some(result)
+}
+
 /// Dead flying unit in its wreck fall (`UnitComp.killed`; UnitComp.java:980-991):
 /// the unit keeps existing with `Health.dead` until it crashes (grounded or
 /// overkilled), then `resolve_deaths` runs the normal destroy path

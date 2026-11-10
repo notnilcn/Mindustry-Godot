@@ -21,10 +21,9 @@ impl Sim {
         rotation: f32,
     ) -> Option<Entity> {
         let ecs = &mut self.ecs.0;
-        let mut runtime = ecs.remove_non_send::<UnitRuntime>()?;
-        let entity = runtime.spawn(ecs, name, team, x, y, rotation);
-        ecs.insert_non_send(runtime);
-        entity
+        with_unit_runtime_removed(ecs, |ecs, runtime| {
+            runtime.spawn(ecs, name, team, x, y, rotation)
+        })?
     }
 
     /// `PayloadBlockBuild.getPayload()` accessor: the payload held by a

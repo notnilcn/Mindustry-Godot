@@ -15,29 +15,30 @@ impl Sim {
     /// `water_attr` is the active weathers' water attribute
     /// (`weather_water_attr`; `0.0` with no weather).
     pub fn update_fires_and_puddles(&mut self) {
-        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
+        let Some(fireballs) = with_unit_runtime_removed(&mut self.ecs.0, |world, runtime| {
+            let fx = runtime.fx.clone();
+            // `state.envAttrs.get(Attribute.water)` from the active weathers
+            // (PAR-0127); `0.0` when no weather is running.
+            let water_attr = crate::game::runtime::weather_water_attr(world, &runtime.content);
+            let fireballs = crate::combat::fires::update_fires(
+                world,
+                &mut self.grid.tiles,
+                &runtime.content,
+                &mut runtime.rng,
+                fx.as_ref(),
+                water_attr,
+            );
+            crate::combat::puddles::update_puddles(
+                world,
+                &mut self.grid.tiles,
+                &runtime.content,
+                &mut runtime.rng,
+                fx.as_ref(),
+            );
+            fireballs
+        }) else {
             return;
         };
-        let fx = runtime.fx.clone();
-        // `state.envAttrs.get(Attribute.water)` from the active weathers
-        // (PAR-0127); `0.0` when no weather is running.
-        let water_attr = crate::game::runtime::weather_water_attr(&self.ecs.0, &runtime.content);
-        let fireballs = crate::combat::fires::update_fires(
-            &mut self.ecs.0,
-            &mut self.grid.tiles,
-            &runtime.content,
-            &mut runtime.rng,
-            fx.as_ref(),
-            water_attr,
-        );
-        crate::combat::puddles::update_puddles(
-            &mut self.ecs.0,
-            &mut self.grid.tiles,
-            &runtime.content,
-            &mut runtime.rng,
-            fx.as_ref(),
-        );
-        self.ecs.0.insert_non_send(runtime);
         // `FireComp.update` fireballs (`Bullets.fireball.createNet`, team
         // derelict, random angle, type damage) plus the puddle-reaction
         // fireballs collected by `Puddles.reactPuddle`.
@@ -79,39 +80,37 @@ impl Sim {
         &mut self,
         f: impl FnOnce(&mut crate::combat::bullet::CombatCtx<'_>) -> R,
     ) -> Option<R> {
-        let mut runtime = self.ecs.0.remove_non_send::<UnitRuntime>()?;
-        let audio = self
-            .ecs
-            .0
-            .remove_resource::<crate::audio::AudioSinkRes>()
-            .unwrap_or_else(crate::audio::AudioSinkRes::noop);
-        let mut spawned: Vec<Entity> = Vec::new();
-        let result = {
-            let UnitRuntime {
-                content,
-                grid,
-                rng,
-                fx,
-                seq,
-                ..
-            } = &mut runtime;
-            let mut ctx = crate::combat::bullet::CombatCtx {
-                world: &mut self.ecs.0,
-                content,
-                grid,
-                rng,
-                fx: fx.as_ref(),
-                audio: &audio,
-                seq,
-                spawned: &mut spawned,
+        with_unit_runtime_removed(&mut self.ecs.0, |world, runtime| {
+            let audio = world
+                .remove_resource::<crate::audio::AudioSinkRes>()
+                .unwrap_or_else(crate::audio::AudioSinkRes::noop);
+            let mut spawned: Vec<Entity> = Vec::new();
+            let result = {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    rng,
+                    fx,
+                    seq,
+                    ..
+                } = runtime;
+                let mut ctx = crate::combat::bullet::CombatCtx {
+                    world,
+                    content,
+                    grid,
+                    rng,
+                    fx: fx.as_ref(),
+                    audio: &audio,
+                    seq,
+                    spawned: &mut spawned,
+                };
+                f(&mut ctx)
             };
-            f(&mut ctx)
-        };
-        self.ecs.0.insert_resource(audio);
-        runtime.bullets_created += spawned.len() as u64;
-        runtime.bullets.extend(spawned);
-        self.ecs.0.insert_non_send(runtime);
-        Some(result)
+            world.insert_resource(audio);
+            runtime.bullets_created += spawned.len() as u64;
+            runtime.bullets.extend(spawned);
+            result
+        })
     }
 
     /// Drains due `DelayedExplosionActions` (the `Time.run` delays of

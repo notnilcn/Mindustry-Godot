@@ -64,15 +64,15 @@ impl Sim {
         let grid = self.grid.clone();
         let core_capture =
             crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
-        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
+        let Some(()) = with_unit_runtime_removed(&mut self.ecs.0, |world, runtime| {
+            runtime.wave_team = team;
+            if runtime.path_team != team {
+                runtime.path_team = team;
+                runtime.refresh_grid(&grid, world, core_capture);
+            }
+        }) else {
             return;
         };
-        runtime.wave_team = team;
-        if runtime.path_team != team {
-            runtime.path_team = team;
-            runtime.refresh_grid(&grid, &self.ecs.0, core_capture);
-        }
-        self.ecs.0.insert_non_send(runtime);
     }
 
     /// Requests a wave spawn for `wave` (0-based; `Logic.runWave` calls
@@ -146,63 +146,61 @@ impl Sim {
         // Java `Tmp.v1.rnd(spread)` with `spread = tilesize * 2`: a random
         // direction of length 16 (same draw as `spawn_enemies`' ground branch).
         let (wx, wy) = (x as f32 * 8.0, y as f32 * 8.0);
-        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
-            return;
-        };
-        let UnitRuntime {
-            content,
-            seq,
-            units,
-            units_created,
-            rng,
-            ..
-        } = &mut runtime;
-        let unmoving = content.status_id("unmoving");
-        let invincible = content.status_id("invincible");
-        let mut emitted = 0u64;
-        for group in &groups {
-            // `if(group.type == null) continue` (unresolvable unit type).
-            if content
-                .unit_id(&group.unit)
-                .and_then(|id| content.unit(id))
-                .is_none()
-            {
-                continue;
-            }
-            if group.spawn != -1 && group.spawn != packed {
-                continue;
-            }
-            let count = group.get_spawned(wave - 1);
-            for _ in 0..count {
-                let theta = rng
-                    .range(crate::determinism::RngStream::Sim, 0.0, 360.0)
-                    .to_radians();
-                let sx = wx + theta.cos() * 16.0;
-                let sy = wy + theta.sin() * 16.0;
-                let rotation = (height_px / 2.0 - sy)
-                    .atan2(width_px / 2.0 - sx)
-                    .to_degrees();
-                let team = group.team.unwrap_or(wave_team);
-                if let Some(entity) = spawn_group_unit(
-                    &mut self.ecs.0,
-                    content,
-                    seq,
-                    group,
-                    team,
-                    sx,
-                    sy,
-                    rotation,
-                    wave - 1,
-                    unmoving,
-                    invincible,
-                ) {
-                    units.push(entity);
-                    emitted += 1;
+        let _ = with_unit_runtime_removed(&mut self.ecs.0, |world, runtime| {
+            let UnitRuntime {
+                content,
+                seq,
+                units,
+                units_created,
+                rng,
+                ..
+            } = runtime;
+            let unmoving = content.status_id("unmoving");
+            let invincible = content.status_id("invincible");
+            let mut emitted = 0u64;
+            for group in &groups {
+                // `if(group.type == null) continue` (unresolvable unit type).
+                if content
+                    .unit_id(&group.unit)
+                    .and_then(|id| content.unit(id))
+                    .is_none()
+                {
+                    continue;
+                }
+                if group.spawn != -1 && group.spawn != packed {
+                    continue;
+                }
+                let count = group.get_spawned(wave - 1);
+                for _ in 0..count {
+                    let theta = rng
+                        .range(crate::determinism::RngStream::Sim, 0.0, 360.0)
+                        .to_radians();
+                    let sx = wx + theta.cos() * 16.0;
+                    let sy = wy + theta.sin() * 16.0;
+                    let rotation = (height_px / 2.0 - sy)
+                        .atan2(width_px / 2.0 - sx)
+                        .to_degrees();
+                    let team = group.team.unwrap_or(wave_team);
+                    if let Some(entity) = spawn_group_unit(
+                        world,
+                        content,
+                        seq,
+                        group,
+                        team,
+                        sx,
+                        sy,
+                        rotation,
+                        wave - 1,
+                        unmoving,
+                        invincible,
+                    ) {
+                        units.push(entity);
+                        emitted += 1;
+                    }
                 }
             }
-        }
-        *units_created += emitted;
-        self.ecs.0.insert_non_send(runtime);
+            *units_created += emitted;
+        });
     }
 
     /// Re-snapshots the live grid into the unit runtime (map load/tile change).
@@ -213,11 +211,9 @@ impl Sim {
         let grid = self.grid.clone();
         let core_capture =
             crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
-        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
-            return;
-        };
-        runtime.refresh_grid(&grid, &self.ecs.0, core_capture);
-        self.ecs.0.insert_non_send(runtime);
+        let _ = with_unit_runtime_removed(&mut self.ecs.0, |world, runtime| {
+            runtime.refresh_grid(&grid, world, core_capture);
+        });
     }
 }
 

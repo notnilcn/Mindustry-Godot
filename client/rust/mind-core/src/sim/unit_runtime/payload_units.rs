@@ -155,31 +155,31 @@ pub fn dump_carried_unit(world: &mut World, entity: Entity) -> bool {
         .remove::<crate::world::blocks::payloads::PayloadCarried>();
     world.entity_mut(entity).insert(crate::entities::comp::Unit);
     // `unit.vel.add(Mathf.range(0.5f), Mathf.range(0.5f))` (`UnitPayload.java:139`).
-    let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
+    let Some(()) = with_unit_runtime_removed(world, |world, runtime| {
+        let (jx, jy) = (
+            runtime
+                .rng
+                .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+            runtime
+                .rng
+                .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+        );
+        if let Some(mut vel) = world.get_mut::<Vel>(entity) {
+            vel.x += jx;
+            vel.y += jy;
+        }
+        // `unit.add()`: `EntityGroup.nextId()` then join `Groups.unit`.
+        runtime.seq = runtime.seq.wrapping_add(1);
+        let seq = runtime.seq;
+        if let Some(mut stored) = world.get_mut::<EntitySeq>(entity) {
+            stored.0 = seq;
+        } else {
+            world.entity_mut(entity).insert(EntitySeq(seq));
+        }
+        runtime.units.push(entity);
+        runtime.units_created += 1;
+    }) else {
         return false;
     };
-    let (jx, jy) = (
-        runtime
-            .rng
-            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
-        runtime
-            .rng
-            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
-    );
-    if let Some(mut vel) = world.get_mut::<Vel>(entity) {
-        vel.x += jx;
-        vel.y += jy;
-    }
-    // `unit.add()`: `EntityGroup.nextId()` then join `Groups.unit`.
-    runtime.seq = runtime.seq.wrapping_add(1);
-    let seq = runtime.seq;
-    if let Some(mut stored) = world.get_mut::<EntitySeq>(entity) {
-        stored.0 = seq;
-    } else {
-        world.entity_mut(entity).insert(EntitySeq(seq));
-    }
-    runtime.units.push(entity);
-    runtime.units_created += 1;
-    world.insert_non_send(runtime);
     true
 }
