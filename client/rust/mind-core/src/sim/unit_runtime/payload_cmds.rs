@@ -136,7 +136,7 @@ impl Sim {
                     .filter_map(|entity| {
                         let pos = ecs.get::<Pos>(entity)?;
                         let (dx, dy) = (pos.x - cx, pos.y - cy);
-                        let dist2 = dx * dx + dy * dy;
+                        let dist2 = dist2(dx, dy);
                         (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
                     })
                     .collect();

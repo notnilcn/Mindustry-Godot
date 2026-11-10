@@ -136,7 +136,7 @@ pub(super) fn target_flag_active(
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity;
         let replace = match best {
             None => true,
@@ -265,7 +265,7 @@ pub(crate) fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Opt
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity.id();
         let replace = match best {
             None => true,
@@ -296,7 +296,7 @@ pub(crate) fn closest_core_of_team(world: &World, team: u8, x: f32, y: f32) -> O
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity_ref.id();
         let replace = match best {
             None => true,
@@ -321,7 +321,7 @@ pub(super) fn closest_spawn_tile(runtime: &UnitRuntime, x: f32, y: f32) -> Optio
         let cy = tile.y() as f32 * TILE_SIZE;
         let dx = cx - x;
         let dy = cy - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         if best.is_none_or(|(best_dist, _)| dist2 < best_dist) {
             best = Some((dist2, tile));
         }

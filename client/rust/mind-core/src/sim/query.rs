@@ -55,3 +55,9 @@ pub(crate) fn unit_def<'a>(
 pub(crate) fn tile_world(tile: TilePos) -> (f32, f32) {
     (tile.x() as f32 * TILE_SIZE, tile.y() as f32 * TILE_SIZE)
 }
+
+/// Squared distance, verbatim `dx * dx + dy * dy` (no `mul_add`, `hypot`,
+/// `f64` widening or reassociation; Rust does not contract to FMA).
+pub(crate) fn dist2(dx: f32, dy: f32) -> f32 {
+    dx * dx + dy * dy
+}
