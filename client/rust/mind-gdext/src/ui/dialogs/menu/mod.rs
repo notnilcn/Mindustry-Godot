@@ -8,6 +8,7 @@ pub mod about;
 pub mod credits;
 pub mod discord;
 pub mod full_text;
+pub mod util;
 
 use crate::ui::dialog::DialogController;
 
