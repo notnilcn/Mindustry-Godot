@@ -10,7 +10,7 @@ use godot::obj::NewAlloc;
 use godot::prelude::*;
 
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::net::util_misc::string_array;
+use crate::ui::dialogs::net::util::string_array;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindScroll};
 
@@ -35,7 +35,7 @@ pub struct ListSelectDialog {
 impl DialogController for ListSelectDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn context_changed(&mut self, dialog: &mut MindDialog) {

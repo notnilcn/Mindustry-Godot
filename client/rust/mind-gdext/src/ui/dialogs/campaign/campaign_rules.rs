@@ -13,18 +13,17 @@ use std::rc::Rc;
 use godot::builtin::{Corner, Side};
 use godot::classes::control::SizeFlags;
 use godot::classes::{
-    Button, CenterContainer, HBoxContainer, PanelContainer, StyleBoxEmpty, StyleBoxFlat,
-    VBoxContainer,
+    Button, CenterContainer, PanelContainer, StyleBoxEmpty, StyleBoxFlat, VBoxContainer,
 };
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
+use crate::gdutil::variant::{dict_bool_or, dict_text_or, to_bool_lenient, to_text_lenient};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::net::util_h::{
-    campaign_call, clear_table_nodes, dict_bool, dict_string, dict_string_or, emit_dialog_signal,
-    variant_bool, variant_string,
-};
+use crate::ui::dialogs::game::util::campaign_call;
+use crate::ui::dialogs::net::util::{clear_table_nodes, dict_string_or, emit_dialog_signal};
 use crate::ui::kit::widgets::check::MindCheck;
+use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, Align, MindTable, styles};
 
 /// The dialog controllers in this module.
@@ -145,7 +144,7 @@ impl DialogController for CampaignRulesDialogController {
 /// `shown`: re-read the planet's rules and rebuild the page.
 fn campaign_rules_shown(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRulesState>>) {
     let planet = match dialog.context_value("planet") {
-        Some(value) => variant_string(&value),
+        Some(value) => to_text_lenient(&value),
         None => {
             let cached = state.borrow().views.clone();
             let views = if cached.is_empty() {
@@ -153,7 +152,7 @@ fn campaign_rules_shown(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRule
             } else {
                 cached
             };
-            dict_string(&views, "planet")
+            dict_text_or(&views, "planet")
         }
     };
     // `refresh_campaign_views(_planet)`: the per-planet projection; keep the
@@ -192,7 +191,10 @@ fn campaign_rules_shown(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRule
             let Ok(row) = entry.try_to::<VarDictionary>() else {
                 continue;
             };
-            toggles.insert(dict_string(&row, "key"), dict_bool(&row, "value", false));
+            toggles.insert(
+                dict_text_or(&row, "key"),
+                dict_bool_or(&row, "value", false),
+            );
         }
     }
     if toggles.is_empty() {
@@ -221,7 +223,7 @@ fn campaign_rules_planet_row(views: &VarDictionary, planet_name: &str) -> VarDic
         let Ok(row) = entry.try_to::<VarDictionary>() else {
             continue;
         };
-        if dict_string(&row, "name") == planet_name {
+        if dict_text_or(&row, "name") == planet_name {
             return row;
         }
     }
@@ -234,9 +236,9 @@ fn campaign_rules_planet_row(views: &VarDictionary, planet_name: &str) -> VarDic
 /// 7).
 fn campaign_rules_rule_visible(key: &str, planet_row: &VarDictionary) -> bool {
     match key {
-        "sector_invasion" => dict_bool(planet_row, "allow_sector_invasion", false),
-        "rts_ai" => dict_bool(planet_row, "show_rts_ai_rule", false),
-        "clear_sector_on_lose" => !dict_bool(planet_row, "clear_sector_on_lose", false),
+        "sector_invasion" => dict_bool_or(planet_row, "allow_sector_invasion", false),
+        "rts_ai" => dict_bool_or(planet_row, "show_rts_ai_rule", false),
+        "clear_sector_on_lose" => !dict_bool_or(planet_row, "clear_sector_on_lose", false),
         _ => true,
     }
 }
@@ -356,8 +358,7 @@ fn campaign_rules_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRu
     // 4 px #454545-bordered box, 140x50 each, centered (`CampaignRulesDialog`).
     let mut box_ = PanelContainer::new_alloc();
     box_.add_theme_stylebox_override("panel", &campaign_rules_options_box());
-    let mut diff_row = HBoxContainer::new_alloc();
-    diff_row.add_theme_constant_override("separation", 0);
+    let mut diff_row = factory::hbox(0);
     // code-instantiated: difficulty buttons are the data-driven Difficulty list.
     for difficulty_name in DIFFICULTIES {
         let mut button = Button::new_alloc();
@@ -397,7 +398,7 @@ fn campaign_rules_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRu
         let callable = Callable::from_fn("campaign_rules_toggle", move |args: &[&Variant]| {
             let value = args
                 .first()
-                .map(|value| variant_bool(value))
+                .map(|value| to_bool_lenient(value))
                 .unwrap_or(false);
             campaign_rules_toggle(&dialog_for, &state_for, &key_string, value);
             Variant::nil()

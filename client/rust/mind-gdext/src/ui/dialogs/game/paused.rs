@@ -13,12 +13,14 @@ use godot::classes::{Button, CenterContainer, Control, HBoxContainer, Json, Node
 use godot::obj::NewAlloc;
 use godot::prelude::*;
 
+use crate::gdutil::variant::{
+    dict_bool_or, dict_text_or, parse_json_object, to_bool_lenient, to_text_lenient,
+};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::game::util_b::{
-    campaign_call, current_slot_autosave, defer_dialog, dialog_node, dialog_press, dict_bool,
-    dict_string, game_over_flag, is_mobile, net_active, open_named_dialog, parse_json_object,
-    press, sector_state, set_button_text, stringify_object, ui_show_confirm, variant_bool,
-    variant_string,
+use crate::ui::dialogs::game::util::{
+    campaign_call, current_slot_autosave, defer_dialog, dialog_node, dialog_press, game_over_flag,
+    is_mobile, net_active, open_named_dialog, press, sector_state, set_button_text,
+    stringify_object, ui_show_confirm,
 };
 use crate::ui::kit;
 use crate::ui::kit::widgets::factory;
@@ -286,8 +288,8 @@ impl PausedDialog {
     /// `@abandon` appears for a campaign sector; `@planetmap` only on mobile.
     fn refresh_campaign_buttons(&mut self, dialog: &mut MindDialog) {
         let state = sector_state();
-        let campaign = dict_bool(&state, "campaign", false);
-        let editor = dict_bool(&state, "editor", false);
+        let campaign = dict_bool_or(&state, "campaign", false);
+        let editor = dict_bool_or(&state, "editor", false);
         let can_save = !campaign && !editor;
         // `PausedDialog.java:89-93`: the campaign branch builds no
         // `@savegame`/`@loadgame` row at all, so hide the whole row container.
@@ -304,7 +306,7 @@ impl PausedDialog {
             button.set_disabled(net_active);
         }
         if let Some(mut button) = self.objective_button.clone() {
-            button.set_visible(!dict_string(&state, "presetDescription").is_empty());
+            button.set_visible(!dict_text_or(&state, "presetDescription").is_empty());
         }
         let game_over = game_over_flag();
         if let Some(mut button) = self.abandon_button.clone() {
@@ -366,7 +368,7 @@ impl PausedDialog {
                 .try_to::<GString>()
                 .unwrap_or_default();
             let rules = parse_json_object(&text.to_string());
-            enabled = dict_bool(&rules, "allowEditRules", false);
+            enabled = dict_bool_or(&rules, "allowEditRules", false);
         }
         if enabled
             && let Some(mut net) = kit::net()
@@ -395,7 +397,7 @@ impl PausedDialog {
         let callable = Callable::from_fn("pause_confirm_result", move |args: &[&Variant]| {
             let confirmed = args
                 .first()
-                .map(|value| variant_bool(value))
+                .map(|value| to_bool_lenient(value))
                 .unwrap_or(false);
             let flags = take_pending(&dialog_gd);
             if flags & PENDING_ABANDON != 0 {
@@ -461,7 +463,7 @@ fn confirm_abandon(dialog: &mut MindDialog) {
 /// path (no direct return to the menu).
 fn abandon_sector(dialog: &mut MindDialog) {
     let abandoned = campaign_call("abandon_sector", &[])
-        .map(|value| variant_bool(&value))
+        .map(|value| to_bool_lenient(&value))
         .unwrap_or(false);
     if !abandoned {
         return;
@@ -505,7 +507,7 @@ fn quit_with_exit_save(dialog: &mut MindDialog) {
 
 /// `ui.fullText.show("@objective", preset.description)`.
 fn open_objective() {
-    let description = dict_string(&sector_state(), "presetDescription");
+    let description = dict_text_or(&sector_state(), "presetDescription");
     if description.is_empty() {
         return;
     }
@@ -556,7 +558,7 @@ fn open_rules() {
     let callable = Callable::from_fn("rules_edited", |args: &[&Variant]| {
         let json = args
             .first()
-            .map(|value| variant_string(value))
+            .map(|value| to_text_lenient(value))
             .unwrap_or_default();
         if let Some(mut campaign) = kit::campaign()
             && campaign.has_method("set_rules_json")

@@ -8,8 +8,10 @@
 
 use godot::prelude::*;
 
+use crate::gdutil::variant::to_i64_int_or_float;
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::net::util_misc::{planet_localized, rich, variant_i64};
+use crate::ui::dialogs::common::facade::rich;
+use crate::ui::dialogs::net::util::planet_localized;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
 
@@ -101,7 +103,7 @@ impl DialogController for CampaignCompleteDialog {
         // build before the playtime row (`CampaignCompleteDialog.java:37-40`).
         let playtime = view
             .get("playtime_ms")
-            .map(|value| variant_i64(&value))
+            .map(|value| to_i64_int_or_float(&value))
             .unwrap_or(0);
         if playtime > 0 {
             let time = MindDialog::format_time_ms(playtime);
