@@ -35,6 +35,9 @@ pub mod universe;
 pub mod waves;
 pub mod world_reloader;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 use serde::{Deserialize, Serialize};
 
 /// The coarse game phase.
