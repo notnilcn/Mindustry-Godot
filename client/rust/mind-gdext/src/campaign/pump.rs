@@ -1,0 +1,597 @@
+// Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Frame pump: runtime tick, capture bookkeeping, toasts and the turn/wave entry points.
+//! Upstream: core/src/mindustry/core/Control.java (update); core/src/mindustry/core/Logic.java (sectorCapture, runWave); game/Universe.java (runTurn); ui/fragments/HudFragment.java (toasts)
+
+use super::events::dispatch_event_rows;
+use super::service::save_service;
+use super::*;
+
+#[godot_api(secondary)]
+impl MindCampaign {
+    /// Forces sector capture (`Logic.sectorCapture`), routing through the live
+    /// runtime when one is installed so events and bookkeeping stay in sync.
+    #[func]
+    pub fn capture_sector(&mut self) -> bool {
+        let captured = if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                // `SectorCaptureEvent` listener inputs: Java fires the event
+                // inside `Logic.sectorCapture` before `rules.attackMode =
+                // false`, so snapshot the attacking flag and the pre-capture
+                // loss counter first (finding #2).
+                let was_attack_mode = runtime.session.rules.attack_mode;
+                let buildings_destroyed = runtime.session.stats.buildings_destroyed;
+                let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
+                let ok = !events.is_empty();
+                for event in events {
+                    // Shared with `game_state_tick_system` (GAPS #68 /
+                    // finding #2): the `GameService` capture hooks
+                    // (`on_sector_capture`) and the `Logic.java:117-121`
+                    // derelict-wave-team queue now run on this path too, so a
+                    // capture here counts for achievements.
+                    if let mind_core::game::play::PlayEvent::SectorCapture { planet, .. } = &event {
+                        on_captured_sector(
+                            &mut runtime,
+                            *planet,
+                            was_attack_mode,
+                            buildings_destroyed,
+                        );
+                    }
+                    runtime.events.push(event);
+                }
+                host.bind_mut().put_campaign_runtime(runtime);
+                ok
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if captured {
+            self.pump_runtime();
+            // `Logic.sectorCapture`'s "save, just in case": the capture
+            // bookkeeping must be on disk before a restart (PAR-0081).
+            self.persist_sector_record();
+            // `onSectorCaptured` -> `reloadMeshAsync` (T14).
+            self.planet_mesh_cache = None;
+            return true;
+        }
+        // Menu fallback on the facade copy.
+        let Some(mut campaign) = self.campaign.take() else {
+            return false;
+        };
+        let events = sector_capture(&mut self.session, &mut campaign);
+        self.campaign = Some(campaign);
+        self.planet_mesh_cache = None;
+        !events.is_empty()
+    }
+
+    /// Runs one production turn; returns success. Runs on the live runtime
+    /// campaign when one is installed (T1: one authoritative campaign).
+    #[func]
+    pub fn run_turn(&mut self) -> bool {
+        let Some(registry) = self.registry.take() else {
+            return false;
+        };
+        // `ctx` reads the live session (runtime copy while a sector runs).
+        let ctx = if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            let ctx = taken.as_ref().map(|runtime| TurnContext {
+                current_planet: runtime.session.sector.map(|(planet, _)| planet),
+                current_sector: runtime.session.sector,
+                playing_rules: Some((
+                    runtime.session.rules.waves,
+                    runtime.session.rules.attack_mode,
+                )),
+                current_wave: runtime.session.wave,
+            });
+            if let Some(runtime) = taken {
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+            ctx
+        } else {
+            None
+        }
+        .unwrap_or_default();
+        let Some(report) = self.with_campaign_mut(|campaign, settings| {
+            let turn = campaign.universe.turn;
+            campaign.run_turn(
+                &registry,
+                settings,
+                &ctx,
+                &mut JavaRandom::new(turn as u64 + 1),
+            )
+        }) else {
+            self.registry = Some(registry);
+            return false;
+        };
+        // Played-sector invasions hit the live session rules (T4: `Universe.java:550-555`).
+        if report.events.iter().any(|event| {
+            matches!(
+                event,
+                mind_core::game::universe::CampaignEvent::SectorInvasion { played: true, .. }
+            )
+        }) && let Some(mut host) = self.host()
+        {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                mind_core::game::runtime::apply_played_invasions(&mut runtime, &report.events);
+                self.session.rules = runtime.session.rules.clone();
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        }
+        // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+        self.toast_campaign_events(&report.events);
+        self.registry = Some(registry);
+        self.persist();
+        report.turn > 0
+    }
+
+    /// Advances the wave counter (`Logic.runWave`), mirroring into the live
+    /// runtime when one is installed. The live unit runtime spawns the wave on
+    /// the next `TickSet::RunWave` tick (`WaveSpawner.spawnEnemies`).
+    #[func]
+    pub fn run_wave(&mut self) -> bool {
+        let _ = run_wave_campaign(&mut self.session);
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let (_, spawn_index) = run_wave_campaign(&mut runtime.session);
+                host.bind_mut().put_campaign_runtime(runtime);
+                host.bind_mut().request_wave_spawn(spawn_index);
+            }
+        }
+        true
+    }
+}
+
+impl MindCampaign {
+    /// Pumps the live campaign runtime: drains tick events, applies capture
+    /// bookkeeping (stats, auto-unlocks, capture replacements), advances the
+    /// `Saves` policy (playtime + autosave cadence), runs due campaign turns
+    /// and saves. No-op without a host/runtime.
+    pub(super) fn pump_runtime(&mut self) {
+        let Some(mut host) = self.host() else {
+            // Menu/harness facade: the `capture_sector` fallback queues rows on
+            // the facade session, so drain them here too (PAR-0577 residual).
+            let rows = self.session.take_event_rows();
+            dispatch_event_rows(&mut self.events, rows);
+            return;
+        };
+        let Some(mut runtime) = host.bind_mut().take_campaign_runtime() else {
+            let rows = self.session.take_event_rows();
+            dispatch_event_rows(&mut self.events, rows);
+            return;
+        };
+        // PAR-0577 residual: drain the play-flow `EventRow` outbox into the
+        // `EventType` bus. The runtime session is authoritative while a sector
+        // is live, so its outbox is the one dispatched; the facade session's
+        // rows are a clone of it (the `start_*` flows install the runtime from
+        // `self.session.clone()`), and dropping them keeps a later fallback
+        // drain from replaying the same rows.
+        let rows = runtime.session.take_event_rows();
+        let _ = self.session.take_event_rows();
+        dispatch_event_rows(&mut self.events, rows);
+        // The runtime's tracker is authoritative while a sector is live; mirror
+        // it every pump so the persist path and the UI queries see the same
+        // `Vars.service` state the campaign systems just updated (GAPS #68).
+        self.service = runtime.service.clone();
+        let events = runtime.take_events();
+        let mut dirty = false;
+
+        // `Control.update` -> `saves.update()`: playtime accrual and the
+        // autosave cadence on the fixed-tick delta (deviation 11).
+        let tick = host.bind().get_tick().max(0) as u64;
+        let delta_ticks = tick.saturating_sub(self.last_pump_tick);
+        self.last_pump_tick = tick;
+        let saves_update = SavesUpdate {
+            delta_ticks,
+            is_game: runtime.session.phase.is_game(),
+            paused_with_dialog: host.bind().is_paused() && self.ui_has_dialog(),
+            game_over: runtime.session.game_over,
+            is_campaign: runtime.session.is_campaign(),
+        };
+        let saves_result = if delta_ticks > 0 {
+            settings_hub::with_settings(|store| {
+                let interval = store.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
+                self.saves.update_policy(saves_update, store, interval)
+            })
+        } else {
+            SavesUpdateResult::default()
+        };
+        // `SaveVersion.writeMeta` reads `control.saves.getTotalPlaytime()`; pass
+        // the host-accrued value into the sim before any save boundary.
+        let total_playtime = self.saves.total_playtime;
+        host.bind_mut().set_save_playtime(total_playtime);
+        // `Saves.java:210-212`: campaign playtime also lands in the planet stats
+        // (the runtime copy is authoritative while the sector is live).
+        if saves_result.playtime_added > 0
+            && saves_update.is_campaign
+            && let Some((planet, _)) = runtime.session.sector
+            && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+        {
+            stats.playtime += saves_result.playtime_added;
+        }
+        if saves_result.autosaved
+            && let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone())
+        {
+            // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
+            // live sector record (core snapshot, items, production, wave) lands
+            // in settings next to the autosave (PAR-0153). The writer takes the
+            // registry explicitly (finding #1): no facade field is borrowed
+            // across the `&mut self` call.
+            let registry = self.registry.take();
+            self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
+            self.registry = registry;
+            // `GameService.storeStats` at the autosave boundary: the tracker's
+            // stats/achievements land in the settings store alongside the
+            // sector record (the exit persist flushes the file).
+            settings_hub::with_settings(|settings| {
+                let mut store = SettingsUnlockStore::new(settings);
+                save_service(&mut self.service, &mut store);
+            });
+            // `Saves.SaveSlot.save` -> `savePreview()` (autosave path).
+            self.write_live_slot_preview(&file);
+            host.bind_mut()
+                .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+            self.saving_finish_tick = Some(tick.saturating_add(3));
+            dirty = true;
+            log::info!("autosave queued (`{}`)", file.display());
+        }
+        if self.saving_finish_tick.is_some_and(|finish| tick >= finish) {
+            self.saves.finish_saving();
+            self.saving_finish_tick = None;
+        }
+
+        let mut registry = self.registry.take();
+        let replacements: Vec<(String, String)> = if events.iter().any(|event| {
+            matches!(
+                event,
+                mind_core::game::play::PlayEvent::SectorCapture { .. }
+            )
+        }) {
+            let planet = runtime.session.sector.map(|(planet, _)| planet);
+            planet
+                .and_then(|planet| {
+                    registry
+                        .as_ref()
+                        .and_then(|registry| registry.planet(planet))
+                })
+                .map(|planet| planet.sector_capture_replacements.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        for event in &events {
+            match event {
+                mind_core::game::play::PlayEvent::SectorCapture { .. } => {
+                    self.apply_capture_bookkeeping(&mut runtime, registry.as_mut());
+                    dirty = true;
+                    // `Logic.sectorCapture` (`Logic.java:398-401`):
+                    // `control.saves.saveSector(state.rules.sector)` — the
+                    // captured world is saved immediately, like the GameOver arm.
+                    if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        self.write_live_slot_preview(&file);
+                        host.bind_mut()
+                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+                        self.saving_finish_tick = Some(tick.saturating_add(3));
+                        log::info!("capture save queued (`{}`)", file.display());
+                    }
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
+                }
+                mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
+                    self.campaign_complete = true;
+                    let _ = self.base_mut().emit_signal("campaign_complete", &[]);
+                }
+                mind_core::game::play::PlayEvent::GameOver { .. }
+                | mind_core::game::play::PlayEvent::SectorLose { .. } => {
+                    // `Sector.isBeingPlayed` (`Sector.java:148-151`) is false
+                    // once `state.gameOver` is set; clear it on the runtime copy
+                    // so the sector produces offline on later turns (T1).
+                    if let Some((planet, sector_id)) = runtime.session.sector
+                        && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
+                    {
+                        sector.being_played = false;
+                    }
+                    // `Control` GameOverEvent (`Control.java:188-195`): save the
+                    // game-over state immediately, so a later re-attack loads
+                    // the destroyed base (PAR-0084).
+                    if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        self.write_live_slot_preview(&file);
+                        host.bind_mut()
+                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+                        self.saving_finish_tick = Some(tick.saturating_add(3));
+                        log::info!("game-over save queued (`{}`)", file.display());
+                    }
+                    // `SaveVersion.writeMeta` persists the sector record next to
+                    // the save (spawn position + prepared core state), which the
+                    // lost-sector replay reads on the re-attack.
+                    self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
+                    dirty = true;
+                }
+                _ => {}
+            }
+        }
+
+        // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
+        // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
+        // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        let mut unlocked_block = false;
+        let mut unlocked_content: Vec<ContentRef> = Vec::new();
+        if !runtime.pending_unlocks.is_empty()
+            && let Some(registry) = registry.as_mut()
+        {
+            let mut newly: Vec<String> = Vec::new();
+            for unlock in std::mem::take(&mut runtime.pending_unlocks) {
+                let (content, name) = match unlock {
+                    UnlockRef::Item(id) => (
+                        ContentRef::of(ContentType::Item, id),
+                        registry.item(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Liquid(id) => (
+                        ContentRef::of(ContentType::Liquid, id),
+                        registry.liquid(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Unit(id) => (
+                        ContentRef::of(ContentType::Unit, id),
+                        registry.unit(id).map(|c| c.name.clone()),
+                    ),
+                };
+                let Some(name) = name else {
+                    continue;
+                };
+                let unlocked = settings_hub::with_settings(|settings| {
+                    let mut store = SettingsUnlockStore::new(settings);
+                    if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
+                        && fields.unlock(&name, &mut store)
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if unlocked {
+                    unlocked_content.push(content);
+                    newly.push(name);
+                }
+            }
+            if !newly.is_empty() {
+                let auto = settings_hub::with_settings(|settings| {
+                    let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+                    let mut store = SettingsUnlockStore::new(settings);
+                    tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
+                });
+                log::info!(
+                    "campaign unlock: {} produced, {} auto-unlocked",
+                    newly.len(),
+                    auto.len()
+                );
+                for content in auto {
+                    if content.type_ == ContentType::Block {
+                        unlocked_block = true;
+                    }
+                    unlocked_content.push(content);
+                    if let Some(name) = tech_tree::content_name(registry, content) {
+                        newly.push(name);
+                    }
+                }
+                self.unlocked_since_last_take.extend(newly);
+                let unlocked = collect_unlocked(registry);
+                runtime.set_unlocked_content(unlocked);
+                dirty = true;
+            }
+        }
+        // H04 T6: legacy launch pads queue destination records for the host to
+        // flush (`Sector.saveInfo` after `addItems`).
+        if !runtime.pending_info_saves.is_empty() {
+            for (planet, sector_id) in std::mem::take(&mut runtime.pending_info_saves) {
+                let planet_name = runtime
+                    .campaign
+                    .planet(planet)
+                    .map(|planet| planet.name.clone())
+                    .unwrap_or_default();
+                if let Some(sector) = runtime.campaign.sector(planet, sector_id) {
+                    settings_hub::with_settings(|settings| {
+                        let _ = sector.save_info(settings, &planet_name);
+                    });
+                }
+            }
+            dirty = true;
+        }
+        self.registry = registry;
+
+        if unlocked_block {
+            // `UnlockEvent` with a block reached the facade: the placement
+            // palette rebuilds (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
+        if let Some(registry) = self.registry.as_ref() {
+            // `Control.java:160-165`: each drained unlock shows the toast when
+            // `showUnlock()` is true.
+            for content in &unlocked_content {
+                self.push_unlock_toast(registry, *content);
+            }
+        }
+
+        if !replacements.is_empty() {
+            let replaced = host.bind_mut().apply_capture_replacements(&replacements);
+            if replaced > 0 {
+                dirty = true;
+            }
+        }
+
+        // Auto campaign turns (`Universe.update` turnCounter).
+        if runtime.turn_due {
+            runtime.turn_due = false;
+            let mut turn_events = Vec::new();
+            if let (Some(registry), Some(campaign)) =
+                (self.registry.as_ref(), Some(&mut runtime.campaign))
+            {
+                let turn = campaign.universe.turn;
+                let mut rand = JavaRandom::new(turn as u64 + 1);
+                let ctx = TurnContext {
+                    current_planet: runtime.session.sector.map(|(planet, _)| planet),
+                    current_sector: runtime.session.sector,
+                    playing_rules: Some((
+                        runtime.session.rules.waves,
+                        runtime.session.rules.attack_mode,
+                    )),
+                    current_wave: runtime.session.wave,
+                };
+                let report = settings_hub::with_settings(|settings| {
+                    campaign.run_turn(registry, settings, &ctx, &mut rand)
+                });
+                log::info!(
+                    "campaign turn {} ({} event(s))",
+                    report.turn,
+                    report.events.len()
+                );
+                turn_events = report.events;
+                dirty = true;
+            }
+            // Played-sector invasions restart the live waves (T4).
+            mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
+            // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+            if !turn_events.is_empty() {
+                self.toast_campaign_events(&turn_events);
+            }
+        }
+
+        // Mirror the authoritative runtime state into the facade for getters.
+        // Scalars/objectives stay fresh every pump; the full session (teams)
+        // and campaign clone only when an event actually landed.
+        let mirrored = !events.is_empty();
+        self.session.wave = runtime.session.wave;
+        self.session.wavetime = runtime.session.wavetime;
+        self.session.game_over = runtime.session.game_over;
+        self.session.won = runtime.session.won;
+        self.session.enemies = runtime.session.enemies;
+        self.session.spawn_count = runtime.session.spawn_count;
+        self.session.is_spawning = runtime.session.is_spawning;
+        self.session.sector = runtime.session.sector;
+        self.session.attack_after_waves = runtime.session.attack_after_waves;
+        self.session.rules = runtime.session.rules.clone();
+        self.session.objectives = runtime.session.objectives.clone();
+        // H09 T10: `game_stats_json` reads the live counters (small clone).
+        self.session.stats = runtime.session.stats.clone();
+        if mirrored {
+            self.session = runtime.session.clone();
+        }
+        // T1: while `dirty`, the facade must carry the runtime's campaign
+        // before `persist()` runs (the runtime is authoritative; the facade is
+        // only a view once this pump returns the runtime to the host).
+        if mirrored || dirty {
+            self.campaign = Some(runtime.campaign.clone());
+        }
+        host.bind_mut().put_campaign_runtime(runtime);
+        // The facade campaign copy feeds the views/persist; keep its playtime in
+        // step with the runtime accrual (a mirrored clone already carries it).
+        if !mirrored
+            && saves_result.playtime_added > 0
+            && saves_update.is_campaign
+            && let Some((planet, _)) = self.session.sector
+            && let Some(stats) = self
+                .campaign
+                .as_mut()
+                .and_then(|campaign| campaign.stats_for_mut(planet))
+        {
+            stats.playtime += saves_result.playtime_added;
+        }
+        if dirty {
+            self.persist();
+        }
+    }
+
+    /// `SectorCaptureEvent` listener half: tech auto-unlocks (including
+    /// `SectorComplete` objectives) and campaign-complete detection.
+    fn apply_capture_bookkeeping(
+        &mut self,
+        runtime: &mut CampaignRuntime,
+        registry: Option<&mut ContentRegistry>,
+    ) {
+        let Some(registry) = registry else {
+            return;
+        };
+        let unlocked = settings_hub::with_settings(|settings| {
+            let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+            let mut store = SettingsUnlockStore::new(settings);
+            tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
+        });
+        if !unlocked.is_empty() {
+            log::info!("campaign capture auto-unlocked {} content", unlocked.len());
+        }
+        for content in &unlocked {
+            // `Control.java:160-165` (`UnlockEvent`) half.
+            self.push_unlock_toast(registry, *content);
+        }
+        if unlocked
+            .iter()
+            .any(|content| content.type_ == ContentType::Block)
+        {
+            // `UnlockEvent` with a block: the palette rebuilds on capture
+            // unlocks (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
+    }
+
+    /// `HudFragment.showToast` for `CampaignEvent`s (`HudFragment.java:261-275`):
+    /// `sector.attacked` with the warning icon on a `SectorInvasion`. The
+    /// off-play `sector.capture`/`sector.lost` toasts land when the
+    /// `CampaignEvent` variants exist (seam §6). The label itself is suppressed
+    /// in the menu by `ui_root.gd _on_toast` (`HudFragment.java:753-754`).
+    fn toast_campaign_events(&self, events: &[mind_core::game::universe::CampaignEvent]) {
+        use mind_core::game::universe::CampaignEvent;
+        for event in events {
+            let CampaignEvent::SectorInvasion { planet, sector, .. } = event else {
+                continue;
+            };
+            let planet_record = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet(*planet));
+            let planet_name = planet_record
+                .map(|planet| planet.name.clone())
+                .unwrap_or_default();
+            // `Sector.name()` (`Sector.java:153-164`) through the one shared
+            // implementation; the record can be missing only if the event's
+            // sector is out of range (the port's defensive fallback is the bare
+            // grid index, never Java's `<planet>-<id>`).
+            let name = planet_record
+                .zip(
+                    self.campaign
+                        .as_ref()
+                        .and_then(|campaign| campaign.sector(*planet, *sector)),
+                )
+                .map(|(planet, record)| record.display_name(planet))
+                .unwrap_or_else(|| sector.to_string());
+            log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
+            let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+                continue;
+            };
+            let text = self
+                .base()
+                .get_node_or_null("/root/MindAssets")
+                .and_then(|mut assets| {
+                    assets
+                        .call(
+                            "bundle_format",
+                            &[
+                                GString::from("sector.attacked").to_variant(),
+                                PackedStringArray::from(vec![GString::from(name.as_str())])
+                                    .to_variant(),
+                            ],
+                        )
+                        .try_to::<GString>()
+                        .ok()
+                })
+                .unwrap_or_else(|| GString::from(format!("Sector {name} under attack!").as_str()));
+            let _ = hud.call(
+                "push_toast",
+                &[text.to_variant(), GString::from("warning").to_variant()],
+            );
+        }
+    }
+}
