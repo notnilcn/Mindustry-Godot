@@ -363,6 +363,31 @@ impl Saves {
         paths.sector_save(planet, id as u32)
     }
 
+    /// The file backing a sector's save association (`Sector.save` stores the
+    /// slot's **stem**, `SaveSlot.index`): the listed slot with that stem, else
+    /// the canonical sector file when the stem names it (a save queued earlier
+    /// this session), else `saves/<stem>.msav`.
+    ///
+    /// Upstream: `Saves.getSectorFile` (`Saves.java`) plus `SaveSlot.index`.
+    /// Extracted from `mind-gdext campaign.rs:1336-1350` at 291e30a8 (adopted by
+    /// X01). Never re-derives the path from the sector id alone: the association
+    /// came from save meta, so a copy under another name resolves to its own
+    /// file (CG-SAVE-05).
+    pub fn sector_save_file(&self, paths: &Paths, planet: &str, id: u16, stem: &str) -> PathBuf {
+        if let Some(slot) = self.slot_for_stem(stem) {
+            return slot.file.clone();
+        }
+        let canonical = paths.sector_save(planet, id as u32);
+        if canonical
+            .file_stem()
+            .is_some_and(|name| name.to_string_lossy() == stem)
+        {
+            canonical
+        } else {
+            paths.saves().join(format!("{stem}.{SAVE_EXTENSION}"))
+        }
+    }
+
     /// The listed slot whose stem is `stem` (`Sector.save`'s reference).
     ///
     /// `Sector.save` stores a slot *name*, not a path: resolving it through
@@ -596,9 +621,9 @@ pub fn apply_sector_saves(campaign: &mut Campaign, assignments: &[SectorSaveAssi
     let mut applied = 0;
     for assignment in assignments {
         let planet_name = campaign
-            .planet(assignment.planet)
-            .map(|planet| planet.name.clone())
-            .unwrap_or_default();
+            .planet_name(assignment.planet)
+            .unwrap_or_default()
+            .to_owned();
         let Some(sector) = campaign.sector_mut(assignment.planet, assignment.sector) else {
             continue;
         };
@@ -691,15 +716,11 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
-    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::game::test_support::{campaign, raw_registry};
     use crate::io::fs::MockFs;
     use crate::io::save::SaveIo;
     use crate::io::save::versions::v1::base_meta_tags;
     use crate::io::{StringMap, WireReader, WireWriter};
-
-    fn registry() -> ContentRegistry {
-        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap()
-    }
 
     fn meta_ctx(rules_json: &str, extra: &[(&str, &str)]) -> WriteContext<'static> {
         let mut tags: StringMap = base_meta_tags(8, 8, 2, "sector-map");
@@ -718,6 +739,38 @@ mod tests {
         fs.write(&paths.save_slot(0), b"x").unwrap();
         fs.write(&paths.save_slot(1), b"x").unwrap();
         assert_eq!(get_next_slot_file(&fs, &paths), paths.save_slot(2));
+    }
+
+    /// Facade `sector_save_file` (1336-1350): a listed slot with the stem wins,
+    /// then the canonical sector file when the stem names it, then
+    /// `saves/<stem>.msav`.
+    #[test]
+    fn sector_save_file_prefers_listed_slot_then_canonical_then_stem() {
+        let paths = Paths::new("/data");
+        // No listed slot and a stem that is not the canonical one.
+        let saves = Saves::new();
+        assert_eq!(
+            saves.sector_save_file(&paths, "serpulo", 15, "mybase"),
+            paths.saves().join("mybase.msav")
+        );
+        // The canonical file's own stem resolves to the canonical path.
+        assert_eq!(
+            saves.sector_save_file(&paths, "serpulo", 15, "sector-serpulo-15"),
+            paths.sector_save("serpulo", 15)
+        );
+        // A listed slot with that stem wins (CG-SAVE-05 renamed copy).
+        let mut saves = Saves::new();
+        let renamed = paths.saves().join("mybase.msav");
+        saves.slots.push(SaveSlot::new(renamed.clone()));
+        assert_eq!(
+            saves.sector_save_file(&paths, "serpulo", 15, "mybase"),
+            renamed
+        );
+        // A different stem does not resolve to the listed slot.
+        assert_eq!(
+            saves.sector_save_file(&paths, "serpulo", 15, "sector-serpulo-15"),
+            paths.sector_save("serpulo", 15)
+        );
     }
 
     #[test]
@@ -752,7 +805,7 @@ mod tests {
     fn load_lists_and_detects_sector_saves() {
         let fs = MockFs::new();
         let paths = Paths::new("/data");
-        let registry = registry();
+        let registry = raw_registry();
         let mut settings = SettingsStore::new();
         // One numbered slot, one sector slot.
         let ctx = WriteContext::meta_only(base_meta_tags(8, 8, 1, "normal"));
@@ -986,7 +1039,7 @@ mod tests {
 
     #[test]
     fn plan_remap_explicit_preset_and_legacy() {
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo = registry.planet_id("serpulo").unwrap();
         // Explicit preset tag: a save at sector 16 that belongs to groundZero
         // (resolved sector 170 after the planet-data remap) is remapped to 170.
@@ -1046,7 +1099,7 @@ mod tests {
     fn delete_sectors_scoped_by_planet() {
         let fs = MockFs::new();
         let paths = Paths::new("/data");
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo = registry.planet_id("serpulo").unwrap();
         let mut settings = SettingsStore::new();
         let mut saves = Saves::new();
@@ -1114,11 +1167,9 @@ mod tests {
     /// canonical file is gone; only `mybase.msav` exists.
     #[test]
     fn renamed_sector_save_attaches_by_meta() {
-        use crate::game::planet::EmptyNeighborhood;
-
         let fs = MockFs::new();
         let paths = Paths::new("/data");
-        let registry = registry();
+        let registry = raw_registry();
         let mut settings = SettingsStore::new();
         let mut saves = Saves::new();
         let ctx = meta_ctx(
@@ -1150,7 +1201,7 @@ mod tests {
             "`Sector.save`'s stem resolves back to the renamed file"
         );
 
-        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let mut campaign = campaign(&registry);
         assert_eq!(apply_sector_saves(&mut campaign, &assignments), 1);
         let sector = campaign
             .sector(registry.planet_id("serpulo").unwrap(), 170)
@@ -1165,11 +1216,9 @@ mod tests {
     /// stale value instead of stocking the record into a fresh core.
     #[test]
     fn corrupt_sector_save_never_attaches_as_a_base() {
-        use crate::game::planet::EmptyNeighborhood;
-
         let fs = MockFs::new();
         let paths = Paths::new("/data");
-        let registry = registry();
+        let registry = raw_registry();
         let mut settings = SettingsStore::new();
         let mut saves = Saves::new();
         let ctx = meta_ctx(
@@ -1190,7 +1239,7 @@ mod tests {
         assert!(saves.slots.is_empty(), "unreadable files are not slots");
         assert!(saves.sector_save_assignments(&registry).is_empty());
 
-        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let mut campaign = campaign(&registry);
         let serpulo = registry.planet_id("serpulo").unwrap();
         {
             // The settings record survived the corruption (Java keeps it too);

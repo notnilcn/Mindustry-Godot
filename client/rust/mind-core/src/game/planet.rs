@@ -644,11 +644,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
-    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
-
-    fn registry() -> ContentRegistry {
-        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap()
-    }
+    use crate::game::test_support::raw_registry;
 
     #[test]
     fn env_mask_bits_match_java_env() {
@@ -666,7 +662,7 @@ mod tests {
     /// `terrestrial|spores|groundOil|groundWater|oxygen` = 233).
     #[test]
     fn planet_default_env_matches_java() {
-        let registry = registry();
+        let registry = raw_registry();
         let default_env = |name: &str| {
             let def = registry.planet_by_name(name).expect("planet");
             Planet::from_def(&registry, def, 0.0).default_env
@@ -683,7 +679,7 @@ mod tests {
 
     #[test]
     fn from_def_copies_presets_and_orbits() {
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo_def = registry.planet_by_name("serpulo").unwrap();
         let sun_def = registry.planet_by_name("sun").unwrap();
         let sun = Planet::from_def(&registry, sun_def, 0.0);
@@ -714,7 +710,7 @@ mod tests {
     /// `allowLegacyLaunchPads` only gate player toggles, they are not defaults.
     #[test]
     fn serpulo_campaign_rule_defaults_match_java() {
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo_def = registry.planet_by_name("serpulo").unwrap();
         let serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
         assert!(!serpulo.campaign_rules.sector_invasion);
@@ -729,7 +725,7 @@ mod tests {
 
     #[test]
     fn apply_rules_sets_env_and_attributes() {
-        let registry = registry();
+        let registry = raw_registry();
         let erekir = registry.planet_by_name("erekir").unwrap();
         let planet = Planet::from_def(&registry, erekir, 0.0);
         let mut rules = Rules::default();
@@ -746,7 +742,7 @@ mod tests {
     /// (`Planets.java:82-88` for serpulo, `74-83` for erekir).
     #[test]
     fn serpulo_rule_setter_applies() {
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo_def = registry.planet_by_name("serpulo").unwrap();
         let serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
         let mut rules = Rules::default();
@@ -763,7 +759,7 @@ mod tests {
     /// (`PlanetDialog.java:270-288`; `saveInfo` is the caller's job).
     #[test]
     fn new_presets_marks_shown() {
-        let mut registry = registry();
+        let mut registry = raw_registry();
         // Unlock one normal preset; `groundZero` is `alwaysUnlocked` and must
         // stay out of the reveal.
         let preset_id = registry.sector_by_name("frozenForest").unwrap().id;
@@ -805,7 +801,7 @@ mod tests {
         const PROVIDERS: [u16; 3] = [246, 244, 242];
         const STORMRIDER: u16 = 27;
 
-        let registry = registry();
+        let registry = raw_registry();
         let serpulo_def = registry.planet_by_name("serpulo").unwrap();
         let mut serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
 
