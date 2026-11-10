@@ -86,7 +86,7 @@ impl Sim {
             if !ids.contains(&(seq.0 as i32)) {
                 return false;
             }
-            if entity_ref.get::<TeamComp>().map(|team_comp| team_comp.team) != Some(team) {
+            if team_of(&self.ecs.0, entity_ref.id()) != Some(team) {
                 return false;
             }
             entity_ref
@@ -154,7 +154,7 @@ impl Sim {
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_name,
-                "team": entity_ref.get::<TeamComp>().map(|team| team.team).unwrap_or(0),
+                "team": team_of(&self.ecs.0, entity_ref.id()).unwrap_or(0),
                 "kind": entity_ref
                     .get::<ControllerSlot>()
                     .map(|slot| slot.kind.name())
@@ -305,7 +305,7 @@ impl Sim {
             if self.ecs.0.get_entity(entity).is_err() {
                 continue;
             }
-            if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(wave_team) {
+            if team_of(&self.ecs.0, entity) != Some(wave_team) {
                 continue;
             }
             if self

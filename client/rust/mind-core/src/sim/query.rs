@@ -9,6 +9,9 @@
 //! bodies copy the original expressions verbatim).
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+
+use crate::entities::comp::TeamComp;
 
 /// Sorts the collected `(seq, entity)` pairs by the exact
 /// `(seq, entity.index())` key the sim's determinism sorts use and returns the
@@ -21,4 +24,9 @@ pub(crate) fn sorted_by_seq(it: impl Iterator<Item = (u64, Entity)>) -> Vec<Enti
     let mut items: Vec<(u64, Entity)> = it.collect();
     items.sort_by_key(|(seq, entity)| (*seq, entity.index()));
     items.into_iter().map(|(_, entity)| entity).collect()
+}
+
+/// The entity's [`TeamComp`] team (`world.get::<TeamComp>(e).map(|t| t.team)`).
+pub(crate) fn team_of(world: &World, e: Entity) -> Option<u8> {
+    world.get::<TeamComp>(e).map(|t| t.team)
 }

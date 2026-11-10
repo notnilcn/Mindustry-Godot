@@ -189,7 +189,7 @@ impl Sim {
             if entity_ref.get::<CoreBuild>().is_none() {
                 continue;
             }
-            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            if team_of(&self.ecs.0, entity_ref.id()) != Some(team) {
                 continue;
             }
             let Some(build) = entity_ref.get::<Building>() else {
@@ -375,7 +375,7 @@ impl Sim {
         let Some(target) = target else {
             return false;
         };
-        if self.ecs.0.get::<TeamComp>(target).map(|t| t.team) != Some(team) {
+        if team_of(&self.ecs.0, target) != Some(team) {
             return false;
         }
         if self
@@ -636,7 +636,7 @@ impl Sim {
     pub fn control_block_unit_id(&mut self, pos: TilePos) -> Option<i32> {
         let entity = self.grid.entity_at(pos)?;
         let team = self.player_team?;
-        if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(team) {
+        if team_of(&self.ecs.0, entity) != Some(team) {
             return None;
         }
         let def = self
@@ -697,7 +697,7 @@ impl Sim {
             .content
             .unit_by_name("block")
             .cloned()?;
-        let team = self.ecs.0.get::<TeamComp>(router).map_or(0, |t| t.team);
+        let team = team_of(&self.ecs.0, router).unwrap_or(0);
         let (x, y) = self
             .ecs
             .0

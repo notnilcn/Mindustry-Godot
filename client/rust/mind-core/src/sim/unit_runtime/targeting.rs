@@ -288,7 +288,7 @@ pub(crate) fn closest_core_of_team(world: &World, team: u8, x: f32, y: f32) -> O
         if entity_ref.get::<CoreBuild>().is_none() {
             continue;
         }
-        if entity_ref.get::<TeamComp>().map(|comp| comp.team) != Some(team) {
+        if team_of(world, entity_ref.id()) != Some(team) {
             continue;
         }
         let Some(pos) = entity_ref.get::<Pos>() else {
@@ -354,10 +354,7 @@ pub(crate) fn invalid_target(
     if health.dead {
         return true;
     }
-    if world
-        .get::<TeamComp>(target)
-        .is_some_and(|comp| comp.team == team)
-    {
+    if team_of(world, target) == Some(team) {
         return true;
     }
     if let Some(comp) = world.get::<UnitTypeComp>(target) {

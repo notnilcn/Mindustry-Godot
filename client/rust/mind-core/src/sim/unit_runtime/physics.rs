@@ -59,7 +59,7 @@ pub(super) fn rebuild_avoidance(world: &World, runtime: &mut UnitRuntime) {
         else {
             continue;
         };
-        let Some(team) = world.get::<TeamComp>(entity).map(|comp| comp.team) else {
+        let Some(team) = team_of(world, entity) else {
             continue;
         };
         // `team.team.isAI() && !team.team.rules().rtsAi`

@@ -283,7 +283,7 @@ pub(in crate::sim::unit_runtime) fn propagate_stuck(
         if other == entity {
             continue;
         }
-        if world.get::<TeamComp>(other).map(|comp| comp.team) != Some(team) {
+        if team_of(world, other) != Some(team) {
             continue;
         }
         // `other.controller() instanceof GroundAI` (`GroundAI.java:70`).

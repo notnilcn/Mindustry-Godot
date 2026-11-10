@@ -83,7 +83,7 @@ pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
     else {
         return false;
     };
-    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+    let team = team_of(world, entity).unwrap_or(0);
     // `if(!Units.canCreate(unit.team, unit.type)) return false;`
     if !crate::entities::comp::unit::queries::can_create_unit(world, team, def) {
         return false;

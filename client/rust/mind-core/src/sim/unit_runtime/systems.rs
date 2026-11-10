@@ -195,9 +195,7 @@ pub fn enemy_count_system(world: &mut World) {
                 .units
                 .iter()
                 .filter(|entity| {
-                    world
-                        .get::<TeamComp>(**entity)
-                        .is_some_and(|team| team.team == wave_team)
+                    team_of(world, **entity) == Some(wave_team)
                         && world
                             .get::<UnitCore>(**entity)
                             .is_some_and(|core| !core.dead)

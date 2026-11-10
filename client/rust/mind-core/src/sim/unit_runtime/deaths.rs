@@ -726,7 +726,7 @@ impl Sim {
 /// (`TeamData.cores`; used by the `CoreBlock.playDestroySound` override).
 pub(super) fn has_core_of_team(world: &World, content: &ContentRegistry, team: u8) -> bool {
     world.iter_entities().any(|entity| {
-        entity.get::<TeamComp>().map(|t| t.team) == Some(team)
+        team_of(world, entity.id()) == Some(team)
             && entity
                 .get::<crate::entities::comp::Building>()
                 .and_then(|building| content.block(building.block))

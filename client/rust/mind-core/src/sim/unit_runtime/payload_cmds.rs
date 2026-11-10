@@ -149,9 +149,8 @@ impl Sim {
             if target == carrier {
                 continue;
             }
-            let team_of = |entity: Entity| ecs.get::<TeamComp>(entity).map(|t| t.team);
-            let carrier_team = team_of(carrier).unwrap_or(0);
-            let target_team = team_of(target).unwrap_or(0);
+            let carrier_team = team_of(ecs, carrier).unwrap_or(0);
+            let target_team = team_of(ecs, target).unwrap_or(0);
             let target_ai = ecs
                 .get::<ControllerSlot>(target)
                 .is_some_and(|slot| slot.kind != AiKind::Player);
@@ -255,12 +254,7 @@ impl Sim {
             return false;
         };
         let (block, rotation) = (building.block, building.rotation);
-        let build_team = self
-            .ecs
-            .0
-            .get::<TeamComp>(build)
-            .map(|team| team.team)
-            .unwrap_or(0);
+        let build_team = team_of(&self.ecs.0, build).unwrap_or(0);
         let health = self
             .ecs
             .0
@@ -272,7 +266,7 @@ impl Sim {
         let Some(runtime) = ecs.remove_non_send::<UnitRuntime>() else {
             return false;
         };
-        let carrier_team = ecs.get::<TeamComp>(carrier).map(|t| t.team).unwrap_or(0);
+        let carrier_team = team_of(ecs, carrier).unwrap_or(0);
         let carrier_pos = ecs.get::<Pos>(carrier).copied();
         let carrier_hit = ecs
             .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)

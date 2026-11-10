@@ -1009,10 +1009,7 @@ pub(super) fn apply_movement_damage(
     else {
         return;
     };
-    let team = world
-        .get::<TeamComp>(entity)
-        .map(|team| team.team)
-        .unwrap_or(0);
+    let team = team_of(world, entity).unwrap_or(0);
     let unit_damage = crate::game::runtime::rules_of(world)
         .map(|rules| rules.unit_damage(team))
         .unwrap_or(1.0);
@@ -1082,7 +1079,7 @@ pub(super) fn apply_movement_damage(
                 let Some(build) = grid.tiles.getn(tx, ty).and_then(|t| t.build) else {
                     continue;
                 };
-                if world.get::<TeamComp>(build).map(|t| t.team) != Some(team) {
+                if team_of(world, build) != Some(team) {
                     targets.push(build);
                 }
             }
