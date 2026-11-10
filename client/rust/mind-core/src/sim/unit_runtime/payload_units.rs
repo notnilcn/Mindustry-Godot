@@ -77,10 +77,7 @@ pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
     let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
         return false;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| runtime.content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, &runtime.content, entity) else {
         return false;
     };
     let team = team_of(world, entity).unwrap_or(0);
@@ -132,9 +129,7 @@ pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
             if !crate::combat::bullet::unit_is_grounded(world, other) {
                 return false;
             }
-            world
-                .get::<UnitTypeComp>(other)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            unit_def(world, &runtime.content, other)
                 .is_some_and(|other_def| other_def.allow_leg_step == leg_step)
         });
         if overlap {

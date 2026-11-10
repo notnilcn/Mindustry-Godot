@@ -11,7 +11,10 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
+use crate::content::ContentRegistry;
+use crate::content::registries::units::UnitTypeDef;
 use crate::entities::comp::TeamComp;
+use crate::entities::comp::unit::comp::UnitTypeComp;
 
 /// Sorts the collected `(seq, entity)` pairs by the exact
 /// `(seq, entity.index())` key the sim's determinism sorts use and returns the
@@ -29,4 +32,15 @@ pub(crate) fn sorted_by_seq(it: impl Iterator<Item = (u64, Entity)>) -> Vec<Enti
 /// The entity's [`TeamComp`] team (`world.get::<TeamComp>(e).map(|t| t.team)`).
 pub(crate) fn team_of(world: &World, e: Entity) -> Option<u8> {
     world.get::<TeamComp>(e).map(|t| t.team)
+}
+
+/// The entity's unit definition: its [`UnitTypeComp`] id resolved through
+/// `content` (`get::<UnitTypeComp>` then `content.unit(id)`).
+pub(crate) fn unit_def<'a>(
+    world: &World,
+    content: &'a ContentRegistry,
+    e: Entity,
+) -> Option<&'a UnitTypeDef> {
+    let type_id = world.get::<UnitTypeComp>(e)?.type_id;
+    content.unit(type_id)
 }

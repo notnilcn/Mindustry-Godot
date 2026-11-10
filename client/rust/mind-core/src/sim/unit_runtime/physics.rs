@@ -53,10 +53,7 @@ pub(super) fn rebuild_avoidance(world: &World, runtime: &mut UnitRuntime) {
     }
     let entities = runtime.units.clone();
     for entity in entities {
-        let Some(def) = world
-            .get::<UnitTypeComp>(entity)
-            .and_then(|comp| runtime.content.unit(comp.type_id))
-        else {
+        let Some(def) = unit_def(world, &runtime.content, entity) else {
             continue;
         };
         let Some(team) = team_of(world, entity) else {
@@ -121,10 +118,7 @@ pub fn unit_physics_system(world: &mut World) {
     };
     let mut bodies: Vec<PhysicsBody> = Vec::with_capacity(runtime.units.len());
     for &entity in &runtime.units {
-        let Some(def) = world
-            .get::<UnitTypeComp>(entity)
-            .and_then(|comp| runtime.content.unit(comp.type_id))
-        else {
+        let Some(def) = unit_def(world, &runtime.content, entity) else {
             continue;
         };
         // `PhysicsProcess.add`: `unit.type.physics` only.

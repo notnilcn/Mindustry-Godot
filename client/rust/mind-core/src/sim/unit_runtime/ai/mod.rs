@@ -32,11 +32,8 @@ pub(super) fn resolve_command_kind(
     entity: Entity,
     slot: &ControllerSlot,
 ) -> Option<crate::content::registries::commands::ControllerKind> {
-    let command = slot.command.or_else(|| {
-        world
-            .get::<UnitTypeComp>(entity)
-            .and_then(|comp| content.unit(comp.type_id))
-            .and_then(|def| def.default_command)
-    })?;
+    let command = slot
+        .command
+        .or_else(|| unit_def(world, content, entity).and_then(|def| def.default_command))?;
     content.unit_command(command).map(|def| def.controller)
 }

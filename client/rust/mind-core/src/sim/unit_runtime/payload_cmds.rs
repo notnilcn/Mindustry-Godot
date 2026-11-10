@@ -157,9 +157,7 @@ impl Sim {
             let target_grounded = ecs
                 .get::<UnitCore>(target)
                 .is_some_and(|core| core.elevation < 0.001);
-            let (target_id, target_hit, target_allowed) = ecs
-                .get::<UnitTypeComp>(target)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            let (target_id, target_hit, target_allowed) = unit_def(ecs, &runtime.content, target)
                 .map(|def| (def.id, def.hit_size, def.allowed_in_payloads))
                 .unwrap_or((crate::content::UnitTypeId::new(0), f32::MAX, false));
             let carrier_hit = ecs
@@ -187,10 +185,8 @@ impl Sim {
                 _ => false,
             };
             // `PayloadComp.canPickup(Unit)`: `type.pickupUnits` gate.
-            let pickup_units = ecs
-                .get::<UnitTypeComp>(carrier)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .is_some_and(|def| def.pickup_units);
+            let pickup_units =
+                unit_def(ecs, &runtime.content, carrier).is_some_and(|def| def.pickup_units);
             if !pickup_units
                 || carrier_team != target_team
                 || !target_ai

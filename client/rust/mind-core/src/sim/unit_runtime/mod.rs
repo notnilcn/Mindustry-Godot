@@ -61,7 +61,7 @@ use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
 
 use super::Sim;
-use super::query::{sorted_by_seq, team_of};
+use super::query::{sorted_by_seq, team_of, unit_def};
 use super::runtime::{RuntimeError, load_vanilla_content};
 
 /// First entity sequence allocated to live units/bullets.

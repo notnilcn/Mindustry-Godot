@@ -1112,10 +1112,7 @@ pub(super) fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) 
         // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`) for payload/
         // ability spawns (H09 T10); the runtime is out of the world here, so
         // the type name comes from the local one.
-        let name = world
-            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
-            .and_then(|comp| runtime.content.unit(comp.type_id))
-            .map(|def| def.name.clone());
+        let name = unit_def(world, &runtime.content, entity).map(|def| def.name.clone());
         crate::game::stats::notify_unit_created(world, entity, name.as_deref());
         world
             .entity_mut(entity)

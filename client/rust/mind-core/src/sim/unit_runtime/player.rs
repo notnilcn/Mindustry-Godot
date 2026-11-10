@@ -259,10 +259,7 @@ impl Sim {
         // `for(mount : unit.mounts) mount.reload = mount.weapon.reload;`
         let reloads: Vec<f32> = {
             let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            unit_def(&self.ecs.0, &runtime.content, entity)
                 .map(|def| def.weapons.iter().map(|weapon| weapon.reload).collect())
                 .unwrap_or_default()
         };
@@ -390,11 +387,7 @@ impl Sim {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                 return false;
             };
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(target)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .cloned()
+            unit_def(&self.ecs.0, &runtime.content, target).cloned()
         };
         let Some(def) = def else {
             return false;
@@ -461,11 +454,7 @@ impl Sim {
                     let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                         return false;
                     };
-                    self.ecs
-                        .0
-                        .get::<UnitTypeComp>(before)
-                        .and_then(|comp| runtime.content.unit(comp.type_id))
-                        .cloned()
+                    unit_def(&self.ecs.0, &runtime.content, before).cloned()
                 };
                 let _ = before_def;
                 self.release_unit_to_ai(before, team);
@@ -484,11 +473,7 @@ impl Sim {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                 return;
             };
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .cloned()
+            unit_def(&self.ecs.0, &runtime.content, entity).cloned()
         };
         let kind = def.map_or(AiKind::Ground, |def| {
             crate::entities::comp::unit::lifecycle::select_team_controller(&self.ecs.0, &def, team)
@@ -552,11 +537,7 @@ impl Sim {
                     let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                         return false;
                     };
-                    let flying = self
-                        .ecs
-                        .0
-                        .get::<UnitTypeComp>(current)
-                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                    let flying = unit_def(&self.ecs.0, &runtime.content, current)
                         .is_some_and(|def| def.flying);
                     let hit = self
                         .ecs

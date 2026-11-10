@@ -191,16 +191,16 @@ pub(super) fn unit_control_cost(
     content: &ContentRegistry,
     entity: Entity,
 ) -> crate::ai::control_pathfinder::ControlCost {
-    world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-        .map_or(crate::ai::control_pathfinder::ControlCost::Ground, |def| {
+    unit_def(world, content, entity).map_or(
+        crate::ai::control_pathfinder::ControlCost::Ground,
+        |def| {
             crate::ai::control_pathfinder::ControlCost::for_unit(
                 def.naval,
                 def.allow_leg_step,
                 def.hovering,
             )
-        })
+        },
+    )
 }
 
 /// `Pathfinder.EnemyCoreField.getPositions` (Pathfinder.java:555-588): enemy
@@ -411,10 +411,7 @@ pub(super) fn face_target(
     let Some(target) = target else {
         return;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, content, entity) else {
         return;
     };
     let mech = world

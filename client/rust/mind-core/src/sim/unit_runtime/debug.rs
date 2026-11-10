@@ -110,9 +110,7 @@ impl Sim {
             let Some(seq) = entity_ref.get::<EntitySeq>() else {
                 continue;
             };
-            let type_name = entity_ref
-                .get::<UnitTypeComp>()
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            let type_name = unit_def(&self.ecs.0, &runtime.content, entity)
                 .map(|def| def.name.clone())
                 .unwrap_or_default();
             let mounts: Vec<serde_json::Value> = entity_ref
@@ -235,7 +233,7 @@ impl Sim {
     /// HUD boss bar (G03 T9) and the `guardian` hint (G05).
     pub fn boss_json(&self) -> String {
         use crate::content::ctype::Mappable;
-        use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+        use crate::entities::comp::unit::comp::StatusComp;
         let bosses = self.bosses();
         let runtime = self.unit_runtime();
         let mut names: Vec<String> = Vec::new();
@@ -243,12 +241,7 @@ impl Sim {
         let mut max_sum = 0.0f32;
         let mut first: Option<serde_json::Value> = None;
         for (index, &entity) in bosses.iter().enumerate() {
-            let def = runtime.and_then(|runtime| {
-                self.ecs
-                    .0
-                    .get::<UnitTypeComp>(entity)
-                    .and_then(|comp| runtime.content.unit(comp.type_id))
-            });
+            let def = runtime.and_then(|runtime| unit_def(&self.ecs.0, &runtime.content, entity));
             let name = def.map(|def| def.name().to_string()).unwrap_or_default();
             if index < 6 {
                 names.push(name.clone());

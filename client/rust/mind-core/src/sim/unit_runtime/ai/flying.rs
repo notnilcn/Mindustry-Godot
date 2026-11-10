@@ -26,10 +26,7 @@ pub(in crate::sim::unit_runtime) fn update_flying_ai(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| runtime.content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, &runtime.content, entity) else {
         return;
     };
     let (
