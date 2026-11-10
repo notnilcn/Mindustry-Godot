@@ -4,8 +4,8 @@
 //! Campaign lifecycle: exit saves, playtest/reset handling and the clear-data commands.
 //! Upstream: ui/dialogs/PausedDialog.java (runExitSave, checkPlaytest); core/src/mindustry/core/Logic.java (reset); ui/dialogs/SettingsMenuDialog.java (clear data)
 
-use super::*;
 use super::service::save_service;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

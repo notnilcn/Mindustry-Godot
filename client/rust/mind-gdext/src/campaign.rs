@@ -77,11 +77,11 @@ use crate::sim_host::MindSimHost;
 use crate::ui::root::MindUiRoot;
 use crate::wiring;
 
+use accelerator::PendingAcceleratorLaunch;
+use cache::DirMemo;
 #[allow(unused_imports)] // old `crate::campaign::FiredEvent` path
 pub use events::FiredEvent;
 pub use events::FiredEvents;
-use accelerator::PendingAcceleratorLaunch;
-use cache::DirMemo;
 use events::install_event_listeners;
 use service::load_service;
 

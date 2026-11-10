@@ -4,8 +4,8 @@
 //! Launch loadout: launch resources, the launch dialog payload and the loadout math.
 //! Upstream: ui/dialogs/LaunchLoadoutDialog.java; ui/dialogs/PlanetDialog.java (playSelected); game/Universe.java
 
-use super::*;
 use super::text::resolve_preset_description;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {
@@ -654,8 +654,8 @@ fn schematic_placeable_on_planet(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_util::*;
+    use super::*;
     use mind_core::content::MemoryUnlockStore;
     use mind_core::content::create_base_content;
 

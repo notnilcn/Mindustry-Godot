@@ -4,9 +4,9 @@
 //! Tech tree: the research flow, the research dialog payload and the objective text.
 //! Upstream: ui/dialogs/ResearchDialog.java; game/Objectives.java
 
-use super::*;
 use super::events::event_content_of;
 use super::text::content_icon_name;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

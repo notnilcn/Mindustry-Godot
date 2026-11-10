@@ -526,8 +526,8 @@ fn planet_body_rows(planets: &[PlanetDef], viewed: usize, seconds: f32) -> Vec<P
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_util::*;
+    use super::*;
     use mind_core::content::MemoryUnlockStore;
     use mind_core::content::create_base_content;
 

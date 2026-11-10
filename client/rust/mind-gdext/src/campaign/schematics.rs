@@ -4,8 +4,8 @@
 //! Schematic library: loading, listing, selecting and placing schematics.
 //! Upstream: game/Schematics.java
 
-use super::*;
 use super::cache::dir_mtime_key;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

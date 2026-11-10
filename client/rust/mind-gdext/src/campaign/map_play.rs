@@ -4,8 +4,8 @@
 //! Map play flows: custom games, playtests and joined worlds.
 //! Upstream: core/src/mindustry/core/Control.java (playMap); core/src/mindustry/core/World.java (loadMap)
 
-use super::*;
 use super::saves::sanitize_slot_name;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

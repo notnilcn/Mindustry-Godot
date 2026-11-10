@@ -5,8 +5,8 @@
 //! capture state, abandon, rename/icon).
 //! Upstream: ui/dialogs/PlanetDialog.java; type/Sector.java; world/blocks/campaign/LaunchPad.java
 
-use super::*;
 use super::text::resolve_preset_description;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

@@ -4,8 +4,8 @@
 //! Database/content-info payloads and the build-visibility context they filter by.
 //! Upstream: ui/dialogs/ContentInfoDialog.java; ui/dialogs/DatabaseDialog.java; ui/fragments/PlacementFragment.java
 
-use super::*;
 use super::text::content_icon_name;
+use super::*;
 
 #[godot_api(secondary)]
 impl MindCampaign {

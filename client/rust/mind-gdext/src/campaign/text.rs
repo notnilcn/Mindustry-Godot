@@ -131,7 +131,12 @@ impl MindCampaign {
     }
 
     /// `<type>.<name>.<field>` through the live bundle (empty when missing).
-    pub(super) fn localized_content_field(&self, type_name: &str, name: &str, field: &str) -> String {
+    pub(super) fn localized_content_field(
+        &self,
+        type_name: &str,
+        name: &str,
+        field: &str,
+    ) -> String {
         let key = format!("{type_name}.{name}.{field}");
         let value = self.bundle.get(&key);
         if value == key {
@@ -156,7 +161,11 @@ impl MindCampaign {
 
     /// `Content.emoji() + " " + Content.localizedName` (no leading space when
     /// the emoji is unknown).
-    pub(super) fn emoji_content_name(&self, registry: &ContentRegistry, content: ContentRef) -> String {
+    pub(super) fn emoji_content_name(
+        &self,
+        registry: &ContentRegistry,
+        content: ContentRef,
+    ) -> String {
         let name = tech_tree::content_name(registry, content).unwrap_or_default();
         let emoji = self.content_emoji(&name);
         let localized = self.localized_content_name(content.type_.name(), &name);
