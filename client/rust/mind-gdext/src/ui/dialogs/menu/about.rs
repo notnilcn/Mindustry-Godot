@@ -5,9 +5,10 @@
 //! Upstream: core/src/mindustry/ui/dialogs/AboutDialog.java
 
 use godot::classes::{Control, Os};
-use godot::obj::{NewAlloc, Singleton};
+use godot::obj::Singleton;
 use godot::prelude::*;
 
+use crate::gdutil::json::empty_object;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
@@ -115,7 +116,7 @@ impl AboutDialog {
         dialog.clear_content();
         // code-instantiated: link rows come from the Links.getLinks() data table,
         // which is not known at scene-authoring time.
-        let mut table = MindTable::new_alloc();
+        let mut table = factory::table();
         table.bind_mut().grow_horizontal();
         let mut control: Gd<Control> = table.clone().upcast();
         control.add_theme_constant_override("separation", 2);
@@ -126,7 +127,7 @@ impl AboutDialog {
         for (name, link, icon, _color) in LINKS {
             self.add_link(dialog, name, link, icon);
         }
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         // Upstream `AboutDialog.showCredits` opens the credits dialog.
         let callable = Callable::from_fn("show_credits", |_args: &[&Variant]| {
             if let Some(mut ui) = kit::ui() {
@@ -134,7 +135,7 @@ impl AboutDialog {
                     "open_dialog",
                     &[
                         GString::from("credits").to_variant(),
-                        GString::from("{}").to_variant(),
+                        empty_object().to_variant(),
                     ],
                 );
             }

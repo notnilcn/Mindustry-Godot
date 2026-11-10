@@ -87,7 +87,7 @@ impl DialogController for CreditsDialog {
         if !column.is_multiple_of(COLUMNS) {
             table.bind_mut().row();
         }
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 }
 
