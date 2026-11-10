@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0091: a deposited water puddle applies `wet` to a unit standing in it
 /// and evaporates to nothing on a dry floor (live `update_puddles`).
@@ -40,9 +41,7 @@ fn live_puddle_evaporates() {
     let dagger = sim
         .spawn_live_unit("dagger", 1, 42.0, 42.0, 0.0)
         .expect("dagger");
-    for _ in 0..40 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 40);
     assert!(
         sim.ecs
             .0
@@ -50,9 +49,7 @@ fn live_puddle_evaporates() {
             .is_some_and(|status| status.has_effect_of(wet)),
         "the puddle applied `wet` to the unit standing in it"
     );
-    for _ in 0..2000 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2000);
     assert!(
         puddles::find_at(&sim.ecs.0, 5, 5).is_none(),
         "the water puddle evaporated"
@@ -64,16 +61,14 @@ fn live_puddle_evaporates() {
 #[test]
 fn live_fire_burns_building() {
     let mut sim = live_sim(16);
-    let wall = place(&mut sim, 5, 5, "copper-wall", 1);
+    let wall = place_at(&mut sim, 5, 5, "copper-wall", 1);
     let start = health(&sim, wall).expect("wall health");
     let mut rng = crate::determinism::SimRng::new(3);
     assert!(
         crate::combat::fires::create(&mut sim.ecs.0, 5, 5, &mut rng).is_some(),
         "fire created"
     );
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let end = health(&sim, wall);
     assert!(
         end.is_none_or(|hp| hp < start),
@@ -144,7 +139,7 @@ fn incend_bullet_creates_fire() {
 #[test]
 fn live_destroyed_liquid_container_splashes() {
     let mut sim = live_sim(24);
-    let tank = place(&mut sim, 10, 10, "liquid-tank", 1);
+    let tank = place_at(&mut sim, 10, 10, "liquid-tank", 1);
     let water = sim
         .unit_runtime()
         .expect("rt")
@@ -222,9 +217,7 @@ fn weather_rain_spawns_and_wets_units() {
     let dagger = sim
         .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
         .expect("dagger");
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     assert_eq!(
         sim.group_counts().get("weather").copied().unwrap_or(0),
         1,

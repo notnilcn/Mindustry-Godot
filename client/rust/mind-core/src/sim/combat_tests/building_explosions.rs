@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// H09 T4: `Building.update()` skips `updateTile` for a disabled turret
 /// (`Turret` has the default `noUpdateDisabled = false`): a disabled, fed duo
@@ -14,7 +15,7 @@ fn disabled_duo_does_not_fire() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let enemy = sim
         .spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 20.0, 180.0)
@@ -23,9 +24,7 @@ fn disabled_duo_does_not_fire() {
     if let Some(mut building) = sim.ecs.0.get_mut::<crate::entities::comp::Building>(duo) {
         building.enabled = false;
     }
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let shots = sim
         .ecs
         .0
@@ -46,7 +45,7 @@ fn disabled_duo_does_not_fire() {
 #[test]
 fn blast_container_explosion_terms() {
     let mut sim = live_sim(32);
-    let container = place(&mut sim, 5, 5, "container", 1);
+    let container = place_at(&mut sim, 5, 5, "container", 1);
     let (content_len, blast, capacity) = {
         let content = &sim.unit_runtime().expect("rt").content;
         (
@@ -84,8 +83,8 @@ fn blast_container_explosion_terms() {
 #[test]
 fn linked_vault_explodes_weakly() {
     let mut sim = live_sim(32);
-    place(&mut sim, 5, 5, "core-shard", 1);
-    let vault = place(&mut sim, 8, 5, "vault", 1);
+    place_at(&mut sim, 5, 5, "core-shard", 1);
+    let vault = place_at(&mut sim, 8, 5, "vault", 1);
     assert!(
         sim.ecs
             .0
@@ -128,7 +127,7 @@ fn battery_lightning_count() {
     };
 
     let mut sim = live_sim(32);
-    let battery = place(&mut sim, 5, 5, "battery", 1);
+    let battery = place_at(&mut sim, 5, 5, "battery", 1);
     if let Some(mut power) = sim
         .ecs
         .0
@@ -181,7 +180,7 @@ fn explosion_waves_are_staggered() {
     use crate::combat::damage::explosion::dynamic_explosion;
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     let start = health(&sim, wall).expect("wall health");
     let (x, y) = (20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0);
     sim.with_combat_ctx(|ctx| {

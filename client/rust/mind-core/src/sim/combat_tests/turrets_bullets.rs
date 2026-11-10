@@ -5,13 +5,14 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0086: a placed `duo` fed copper acquires an enemy dagger, rotates,
 /// fires and kills it.
 #[test]
 fn placed_duo_kills_enemy_dagger() {
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let (tx, ty) = (20.0 * 8.0, 20.0 * 8.0);
     let dagger = sim
@@ -51,7 +52,7 @@ fn placed_duo_kills_enemy_dagger() {
 fn coolant_uses_current_liquid() {
     use crate::world::blocks::defense::turrets::handle_liquid;
     let mut sim = live_sim(16);
-    let duo = place(&mut sim, 5, 5, "duo", 1);
+    let duo = place_at(&mut sim, 5, 5, "duo", 1);
     let (water, cryo) = {
         let content = &sim.unit_runtime().expect("rt").content;
         (
@@ -70,9 +71,7 @@ fn coolant_uses_current_liquid() {
         assert_eq!(module.current_liquid(), cryo, "cryofluid is current");
         (module.get(water), module.get(cryo))
     };
-    for _ in 0..240 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 240);
     let module = sim
         .ecs
         .0
@@ -95,7 +94,7 @@ fn coolant_uses_current_liquid() {
 fn duo_water_coolant_speeds_fire_and_drains() {
     use crate::world::blocks::defense::turrets::{accept_liquid, handle_liquid};
     let mut sim = live_sim(16);
-    let duo = place(&mut sim, 5, 5, "duo", 1);
+    let duo = place_at(&mut sim, 5, 5, "duo", 1);
     let content = &sim.unit_runtime().expect("rt").content;
     let (water, slag, oil, cryo) = (
         content.liquid_id("water").expect("water"),
@@ -217,9 +216,7 @@ fn timed_kill_counts_up() {
     let missile = sim
         .spawn_live_unit("anthicus-missile", 1, 100.0, 100.0, 0.0)
         .expect("missile");
-    for _ in 0..(lifetime as usize / 2) {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, lifetime as usize / 2);
     assert!(
         sim.ecs
             .0
@@ -227,9 +224,7 @@ fn timed_kill_counts_up() {
             .is_some_and(|comp| comp.type_id == missile_id),
         "still flying mid-lifetime"
     );
-    for _ in 0..(lifetime as usize / 2 + 5) {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, lifetime as usize / 2 + 5);
     assert!(
         sim.ecs.0.get_entity(missile).is_err(),
         "removed at lifetime {lifetime}"
@@ -249,7 +244,7 @@ fn missile_dies_at_lifetime_and_explodes() {
         .content
         .unit_id("anthicus-missile")
         .expect("anthicus-missile");
-    let wall = place(&mut sim, 20, 12, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 12, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let _ = sim
         .spawn_live_unit("anthicus", 2, 100.0, 100.0, 0.0)
@@ -311,8 +306,8 @@ fn bullets_pass_over_enemy_conveyor() {
     use crate::ai::controller::{AiKind, ControllerSlot};
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 10, "copper-wall", 1);
-    let conveyor = place(&mut sim, 15, 10, "conveyor", 1);
+    let wall = place_at(&mut sim, 20, 10, "copper-wall", 1);
+    let conveyor = place_at(&mut sim, 15, 10, "conveyor", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let conveyor_start = health(&sim, conveyor).expect("conveyor health");
     // Immobile enemy unit behind the wall: the dagger's primary target.
@@ -325,9 +320,7 @@ fn bullets_pass_over_enemy_conveyor() {
     let _ = sim
         .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0, 0.0)
         .expect("dagger");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     assert_eq!(
         health(&sim, conveyor),
         Some(conveyor_start),
@@ -348,7 +341,7 @@ fn scathe_launches_missile_and_kills() {
     use crate::entities::comp::unit::comp::UnitTypeComp;
 
     let mut sim = live_sim(64);
-    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    let scathe = place_at(&mut sim, 10, 10, "scathe", 1);
     feed(&mut sim, scathe, "carbide", 10);
     let (tx, ty) = (10.0 * 8.0, 10.0 * 8.0);
     let dagger = sim
@@ -391,9 +384,9 @@ fn scathe_launches_missile_and_kills() {
 #[test]
 fn missile_ignores_conveyor_below() {
     let mut sim = live_sim(64);
-    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    let scathe = place_at(&mut sim, 10, 10, "scathe", 1);
     feed(&mut sim, scathe, "carbide", 10);
-    let conveyor = place(&mut sim, 15, 10, "conveyor", 2);
+    let conveyor = place_at(&mut sim, 15, 10, "conveyor", 2);
     let conveyor_start = health(&sim, conveyor).expect("conveyor health");
     let dagger = sim
         .spawn_live_unit("dagger", 2, 10.0 * 8.0 + 240.0, 10.0 * 8.0, 180.0)

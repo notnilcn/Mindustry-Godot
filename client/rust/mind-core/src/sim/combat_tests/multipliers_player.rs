@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// G01 T5: `ShieldComp.damage` divides by `rules.unitHealth(team)`, so a
 /// wave-team `unitHealthMultiplier` of 2 halves incoming damage.
@@ -87,7 +88,7 @@ fn block_health_zero_kills() {
     let mut sim = campaign_sim(48, |rules| {
         rules.block_health_multiplier = 0.0;
     });
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     crate::combat::damage::area::apply_health(&mut sim.ecs.0, wall, 1.0);
     let state = sim.ecs.0.get::<Health>(wall).expect("health");
     assert!(
@@ -105,7 +106,7 @@ fn player_respawns_after_death() {
     use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 
     let mut sim = live_sim(48);
-    let _core = place(&mut sim, 20, 20, "core-foundation", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-foundation", 1);
     let player = sim.spawn_player_at_best_core(1).expect("player spawn");
     let unit_type = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
         let runtime = sim.unit_runtime().expect("rt");
@@ -124,9 +125,7 @@ fn player_respawns_after_death() {
         health.health = 0.0;
         health.dead = true;
     }
-    for _ in 0..59 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 59);
     assert!(
         sim.player_unit().is_none(),
         "no respawn before the 60-tick death delay"
@@ -152,7 +151,7 @@ fn core_shard_spawns_alpha() {
     use crate::entities::comp::unit::comp::UnitTypeComp;
 
     let mut sim = live_sim(48);
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     let player = sim.spawn_player_at_best_core(1).expect("player spawn");
     let name = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
         let runtime = sim.unit_runtime().expect("rt");
@@ -169,7 +168,7 @@ fn possess_own_dagger_despawns_core_alpha() {
     use crate::entities::comp::Player;
 
     let mut sim = live_sim(48);
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     let alpha = sim.spawn_player_at_best_core(1).expect("alpha");
     let dagger = sim
         .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
@@ -209,7 +208,7 @@ fn clear_unit_returns_to_core() {
     use crate::entities::comp::unit::comp::UnitTypeComp;
 
     let mut sim = live_sim(48);
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
     let dagger = sim
         .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
@@ -247,7 +246,7 @@ fn clear_unit_returns_to_core() {
 #[test]
 fn cannot_possess_enemy_or_dead_unit() {
     let mut sim = live_sim(48);
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
     let enemy = sim
         .spawn_live_unit("dagger", 2, 220.0, 220.0, 0.0)
@@ -318,8 +317,8 @@ fn boss_list_tracks_wave_boss() {
 #[test]
 fn repair_point_heals_damaged_dagger() {
     let mut sim = live_sim(48);
-    let _repair = place(&mut sim, 20, 20, "repair-point", 1);
-    let _power = place(&mut sim, 21, 20, "power-source", 1);
+    let _repair = place_at(&mut sim, 20, 20, "repair-point", 1);
+    let _power = place_at(&mut sim, 21, 20, "power-source", 1);
     let tx = 20.0 * 8.0 + 4.0;
     let ty = 20.0 * 8.0 + 4.0;
     let dagger = sim
@@ -336,9 +335,7 @@ fn repair_point_heals_damaged_dagger() {
         .get::<Health>(dagger)
         .map(|health| health.max_health)
         .unwrap_or(0.0);
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let healed = health(&sim, dagger).expect("dagger alive");
     assert!(healed > 50.0, "repair point healed the dagger: {healed}");
     assert!(
@@ -360,7 +357,7 @@ fn destroyed_wall_emits_destroy_sound() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    let wall = place(&mut sim, 10, 10, "copper-wall", 1);
+    let wall = place_at(&mut sim, 10, 10, "copper-wall", 1);
     sim.tick().expect("tick");
     // Drop the placement's own place sound so only the death remains.
     log.clear();

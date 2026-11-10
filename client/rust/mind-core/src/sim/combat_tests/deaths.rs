@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{
+    campaign_runtime, health, live_sim, place_at, tick_n, unit_content_block,
+};
 
 /// T17: a dying flying unit crashes with area damage around its position
 /// (`UnitComp.destroy` -> `Damage.damage(team, x, y, hitSize^0.94 * 1.25,
@@ -14,7 +17,7 @@ use super::*;
 fn crashing_flare_damages_neighbours() {
     let mut sim = live_sim(32);
     let (wx, wy) = (15, 12);
-    let wall = place(&mut sim, wx, wy, "copper-wall", 1);
+    let wall = place_at(&mut sim, wx, wy, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let flare = sim
         .spawn_live_unit(
@@ -76,8 +79,8 @@ fn destroyed_building_leaves_rebuild_plan() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let wall_block = block(&sim, "copper-wall");
-    let wall = place(&mut sim, 10, 10, "copper-wall", 1);
+    let wall_block = unit_content_block(&sim, "copper-wall");
+    let wall = place_at(&mut sim, 10, 10, "copper-wall", 1);
     sim.ecs
         .0
         .get_mut::<Health>(wall)
@@ -85,11 +88,7 @@ fn destroyed_building_leaves_rebuild_plan() {
         .health = 0.0;
     sim.tick().expect("tick");
 
-    let campaign = sim
-        .ecs
-        .0
-        .get_resource::<CampaignRuntime>()
-        .expect("campaign");
+    let campaign = campaign_runtime(&sim);
     let plans = &campaign
         .session
         .teams
@@ -110,8 +109,8 @@ fn destroyed_building_leaves_rebuild_plan() {
 #[test]
 fn destroyed_blast_container_damages_neighbours() {
     let mut sim = live_sim(48);
-    let container = place(&mut sim, 10, 10, "container", 1);
-    let wall = place(&mut sim, 12, 10, "copper-wall", 1);
+    let container = place_at(&mut sim, 10, 10, "container", 1);
+    let wall = place_at(&mut sim, 12, 10, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let blast = sim
         .unit_runtime()
@@ -142,9 +141,7 @@ fn destroyed_blast_container_damages_neighbours() {
     );
     // `Damage.dynamicExplosion` staggers its waves 2 ticks apart
     // (`Time.run(i * 2f)`); the outer waves carry the radius.
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert!(
         health(&sim, wall).is_none_or(|hp| hp < wall_start),
         "the explosion damaged the wall 2 tiles away: {:?}",
@@ -157,7 +154,7 @@ fn destroyed_blast_container_damages_neighbours() {
 #[test]
 fn destroyed_coal_container_starts_fire() {
     let mut sim = live_sim(48);
-    let container = place(&mut sim, 10, 10, "container", 1);
+    let container = place_at(&mut sim, 10, 10, "container", 1);
     let coal = sim
         .unit_runtime()
         .expect("rt")
@@ -187,9 +184,7 @@ fn destroyed_coal_container_starts_fire() {
     );
     // The fire now comes from the staggered `Bullets.fireball` spawns
     // (`Time.run(i / 2f)`), not an immediate `Fires.create`.
-    for _ in 0..40 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 40);
     let fire = (10..=11)
         .any(|tx| (10..=11).any(|ty| crate::combat::fires::find_at(&sim.ecs.0, tx, ty).is_some()));
     assert!(

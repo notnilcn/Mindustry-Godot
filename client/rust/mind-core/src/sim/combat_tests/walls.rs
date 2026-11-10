@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// H02 T12: `Wall.WallBuild.collision` (`Wall.java:177-207`) — a phase wall
 /// deflects a share of the bullets that hit it (chance `chanceDeflect /
@@ -12,7 +13,7 @@ use super::*;
 #[test]
 fn phase_wall_reflects_low_damage_bullet() {
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "phase-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "phase-wall", 1);
     // Keep the wall alive across the volley so every bullet rolls.
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.max_health = 100_000.0;
@@ -53,9 +54,7 @@ fn phase_wall_reflects_low_damage_bullet() {
         }
     });
     assert_eq!(spawned.len(), 40, "all fixture bullets spawned");
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let deflected = spawned
         .iter()
         .filter(|entity| {
@@ -84,13 +83,13 @@ fn phase_wall_reflects_low_damage_bullet() {
 #[test]
 fn flash_hit_wall_logs_collision() {
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "phase-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "phase-wall", 1);
     // Keep the wall alive across the volley so every bullet lands.
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.max_health = 100_000.0;
         health.health = 100_000.0;
     }
-    let plain = place(&mut sim, 26, 20, "copper-wall", 1);
+    let plain = place_at(&mut sim, 26, 20, "copper-wall", 1);
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(plain) {
         health.max_health = 100_000.0;
         health.health = 100_000.0;
@@ -114,9 +113,7 @@ fn flash_hit_wall_logs_collision() {
                 let _ = ctx.spawn(&spawn);
             }
         });
-        for _ in 0..4 {
-            sim.tick().expect("tick");
-        }
+        tick_n(&mut sim, 4);
     }
     let flashes = sim.drain_wall_flashes();
     assert!(
@@ -138,7 +135,7 @@ fn surge_wall_arcs() {
     use crate::combat::lightning::LightningCounter;
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "surge-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "surge-wall", 1);
     // Keep the wall alive across the volley so every bullet rolls.
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.max_health = 100_000.0;
@@ -163,9 +160,7 @@ fn surge_wall_arcs() {
             let _ = ctx.spawn(&spawn);
         }
     });
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let branches = sim
         .ecs
         .0

@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n, unit_content_block};
 
 /// H01 T12: a team-1 `poly` with the `assist` command escorts the local
 /// builder player and copies their build plan (`BuilderAI.java:57-100,143-186`).
@@ -34,7 +35,7 @@ fn assist_poly_follows_building_player() {
         .insert_resource(CampaignRuntime::new(session, campaign));
     // A core funds the build (`shouldSkip`) and the campaign unit cap
     // (`unitCap 0 + core +8`).
-    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let core = place_at(&mut sim, 8, 8, "core-shard", 1);
     let copper = {
         let runtime = sim.unit_runtime().expect("rt");
         runtime.content.item_id("copper").expect("copper")
@@ -64,9 +65,7 @@ fn assist_poly_follows_building_player() {
 
     // Phase 1: the player is idle -> `moveTo(assistFollowing, hit + hit/2 + 60)`.
     let start = *sim.ecs.0.get::<Pos>(poly).expect("poly pos");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let ppos = *sim.ecs.0.get::<Pos>(poly).expect("poly pos");
     let apos = *sim.ecs.0.get::<Pos>(player).expect("player pos");
     let dst = ((ppos.x - apos.x).powi(2) + (ppos.y - apos.y).powi(2)).sqrt();
@@ -85,7 +84,7 @@ fn assist_poly_follows_building_player() {
     // Phase 2: queue the player's wall plan one tile east; the alpha starts the
     // construct (`updateBuildLogic`), then the cost is frozen so the plan stays
     // open for the whole acceptance window.
-    let wall = BlockId::new(block(&sim, "copper-wall"));
+    let wall = BlockId::new(unit_content_block(&sim, "copper-wall"));
     let plan = UnitBuildPlan::place(41, 40, 0, wall);
     sim.ecs
         .0
@@ -109,9 +108,7 @@ fn assist_poly_follows_building_player() {
         .get_mut::<ConstructState>(construct)
         .expect("construct state")
         .build_cost = 1_000_000.0;
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let player_plan = sim
         .ecs
         .0
@@ -176,7 +173,7 @@ fn idle_rebuild_poly_helps_builder() {
         .insert_resource(CampaignRuntime::new(session, campaign));
     // A core funds the build (`shouldSkip`) and the campaign unit cap
     // (`unitCap 0 + core +8`).
-    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let core = place_at(&mut sim, 8, 8, "core-shard", 1);
     let copper = {
         let runtime = sim.unit_runtime().expect("rt");
         runtime.content.item_id("copper").expect("copper")
@@ -196,7 +193,7 @@ fn idle_rebuild_poly_helps_builder() {
         slot.kind = AiKind::Command;
     }
 
-    let wall = BlockId::new(block(&sim, "copper-wall"));
+    let wall = BlockId::new(unit_content_block(&sim, "copper-wall"));
     let plan = UnitBuildPlan::place(41, 40, 0, wall);
     sim.ecs
         .0
@@ -222,9 +219,7 @@ fn idle_rebuild_poly_helps_builder() {
         .build_cost = 1_000_000.0;
 
     let start = *sim.ecs.0.get::<Pos>(helper).expect("helper pos");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
 
     let state = sim
         .ecs
@@ -302,15 +297,13 @@ fn manifold_dispatches_cargo_ai() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
     // A team-1 core satisfies the campaign unit cap (`unitCap 0 + core +8`).
-    let _core = place(&mut sim, 5, 5, "core-shard", 1);
-    let _enemy_core = place(&mut sim, 55, 55, "core-shard", 2);
+    let _core = place_at(&mut sim, 5, 5, "core-shard", 1);
+    let _enemy_core = place_at(&mut sim, 55, 55, "core-shard", 2);
     let manifold = sim
         .spawn_live_unit("manifold", 1, 20.0 * 8.0, 20.0 * 8.0, 0.0)
         .expect("manifold");
     let start = *sim.ecs.0.get::<Pos>(manifold).expect("manifold pos");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let kind = sim
         .ecs
         .0
@@ -333,7 +326,7 @@ fn assembly_drone_dispatches() {
     use crate::ai::types::assembler::AssemblerAi;
 
     let mut sim = live_sim(64);
-    let _enemy_core = place(&mut sim, 55, 55, "core-shard", 2);
+    let _enemy_core = place_at(&mut sim, 55, 55, "core-shard", 2);
     let drone = sim
         .spawn_live_unit("assembly-drone", 1, 20.0 * 8.0, 20.0 * 8.0, 0.0)
         .expect("assembly-drone");
@@ -351,9 +344,7 @@ fn assembly_drone_dispatches() {
         target_y: 26.0 * 8.0,
         target_angle: 90.0,
     });
-    for _ in 0..900 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 900);
     let pos = *sim.ecs.0.get::<Pos>(drone).expect("drone alive");
     let dst = ((pos.x - 26.0 * 8.0).powi(2) + (pos.y - 26.0 * 8.0).powi(2)).sqrt();
     let rotation = sim
@@ -386,7 +377,7 @@ fn turret_has_block_unit() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     let unit = sim
         .ecs
         .0
@@ -466,7 +457,7 @@ fn controlled_turret_shoots_at_aim() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     sim.set_player_team(1);
     let unit = sim
@@ -521,7 +512,7 @@ fn controlled_turret_shoots_at_aim() {
 #[test]
 fn core_control_select_respawns() {
     let mut sim = live_sim(48);
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let alpha = sim
         .spawn_player_unit("alpha", 1, 200.0, 200.0, 0.0)
         .expect("alpha");
@@ -562,7 +553,7 @@ fn placed_duo_idle_head_rotation_is_up() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     assert_eq!(
         sim.ecs
             .0
@@ -572,9 +563,7 @@ fn placed_duo_idle_head_rotation_is_up() {
         90.0,
         "BaseTurretBuild starts at rotation 90"
     );
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let state = sim.ecs.0.get::<TurretState>(duo).expect("turret state");
     assert_eq!(state.total_ammo, 0, "no ammo");
     assert!(state.target.is_none(), "no target");
@@ -595,7 +584,7 @@ fn placed_duo_idle_head_rotation_is_up() {
 fn assembler_output_area_occupancy() {
     use crate::world::blocks::units::UnitAssembler;
     let mut sim = live_sim(64);
-    let assembler = place(&mut sim, 20, 20, "tank-assembler", 1);
+    let assembler = place_at(&mut sim, 20, 20, "tank-assembler", 1);
     sim.tick().expect("tick");
     let occupied = |sim: &Sim| {
         sim.ecs
@@ -640,7 +629,7 @@ fn assembler_output_area_occupancy() {
     sim.tick().expect("tick");
     assert!(!occupied(&sim), "spawnedByCore units are ignored");
     sim.ecs.0.despawn(dagger);
-    let _wall = place(&mut sim, 29, 20, "copper-wall", 1);
+    let _wall = place_at(&mut sim, 29, 20, "copper-wall", 1);
     sim.tick().expect("tick");
     assert!(occupied(&sim), "a solid tile under a ground output");
 }
@@ -663,7 +652,7 @@ fn assembled_unit_takes_command_pos_and_payload_handoff() {
     {
         rules.default_team = 1;
     }
-    let conveyor = place(&mut sim, 10, 10, "payload-conveyor", 1);
+    let conveyor = place_at(&mut sim, 10, 10, "payload-conveyor", 1);
     let def = sim
         .unit_runtime()
         .expect("runtime")
@@ -724,7 +713,7 @@ fn assembled_unit_takes_command_pos_and_payload_handoff() {
         );
     }
     // An enemy-team payload block never takes it.
-    let enemy = place(&mut sim, 40, 40, "payload-conveyor", 2);
+    let enemy = place_at(&mut sim, 40, 40, "payload-conveyor", 2);
     let (_, handed) = deliver_assembled_unit(&mut sim.ecs.0, &def, 1, 320.0, 320.0, 0.0, None);
     assert!(!handed, "team check");
     assert!(
@@ -744,10 +733,10 @@ fn assembled_unit_takes_command_pos_and_payload_handoff() {
 fn router_is_a_control_block() {
     let mut sim = live_sim(48);
     sim.set_player_team(1);
-    let router = place(&mut sim, 10, 10, "router", 1);
-    let _distributor = place(&mut sim, 20, 20, "distributor", 1);
-    let _duo = place(&mut sim, 30, 30, "duo", 1);
-    let _enemy = place(&mut sim, 40, 40, "router", 2);
+    let router = place_at(&mut sim, 10, 10, "router", 1);
+    let _distributor = place_at(&mut sim, 20, 20, "distributor", 1);
+    let _duo = place_at(&mut sim, 30, 30, "duo", 1);
+    let _enemy = place_at(&mut sim, 40, 40, "router", 2);
     let pos = |x: i16, y: i16| crate::world::TilePos::new(x, y);
     let first = sim
         .control_block_unit_id(pos(10, 10))
@@ -786,9 +775,9 @@ fn possessed_router_routes_toward_aim_while_shooting() {
     use crate::world::blocks::distribution::transfer;
     let mut sim = live_sim(48);
     sim.set_player_team(1);
-    let router = place(&mut sim, 10, 10, "router", 1);
-    let east = place(&mut sim, 11, 10, "container", 1);
-    let north = place(&mut sim, 9, 11, "container", 1);
+    let router = place_at(&mut sim, 10, 10, "router", 1);
+    let east = place_at(&mut sim, 11, 10, "container", 1);
+    let north = place_at(&mut sim, 9, 11, "container", 1);
     let copper = sim
         .unit_runtime()
         .expect("runtime")

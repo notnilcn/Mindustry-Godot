@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0138: a player `mega` picks up an adjacent friendly dagger and drops it
 /// elsewhere (`requestUnitPayload` -> `dropLastPayload`).
@@ -74,7 +75,7 @@ fn mega_picks_up_and_drops_building() {
     let mega = sim
         .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
         .expect("mega");
-    let wall = place(&mut sim, 14, 12, "copper-wall", 1);
+    let wall = place_at(&mut sim, 14, 12, "copper-wall", 1);
     // A point inside the wall tile (tile 14 spans x 112..120, y 96..104).
     assert!(
         sim.apply_payload_command(1, 115.0, 99.0, None),
@@ -135,9 +136,7 @@ fn idle_unit_faces_and_shoots_target_behind_it() {
         weapons.weapons.clear();
     }
     let start = health(&sim, enemy).expect("enemy health");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let rotation = sim
         .ecs
         .0
@@ -157,7 +156,7 @@ fn live_combat_emits_fx_on_the_installed_sink() {
     let mut sim = live_sim(48);
     let bus = std::sync::Arc::new(crate::fx::sink::FxBus::new());
     sim.unit_runtime_mut().expect("runtime").fx = bus.clone();
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let (tx, ty) = (20.0 * 8.0, 20.0 * 8.0);
     let _ = sim
@@ -322,9 +321,7 @@ fn spiroct_sap_heals() {
         .spawn_live_unit("dagger", 2, 130.0, 100.0, 180.0)
         .expect("dagger");
     let dagger_start = health(&sim, dagger).expect("dagger health");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let spiroct_now = health(&sim, spiroct).expect("spiroct alive");
     assert!(
         spiroct_now > max_health - 100.0,

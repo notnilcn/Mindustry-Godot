@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// H09 T1: `Logic.java:533-535` fog update — a player-team unit reveals its
 /// radius, discovers tiles permanently and does not distinguish hidden tiles.
@@ -22,9 +23,7 @@ fn fog_unit_reveals_and_discovers() {
     let dagger = sim
         .spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
         .expect("dagger");
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     // Dagger fog radius 174/8 = 21.75 -> event radius 21, drawn +1.
     assert!(
         sim.fog_visible_tile(1, 30, 20),
@@ -48,9 +47,7 @@ fn fog_unit_reveals_and_discovers() {
     // Moving away keeps the explored tile discovered but not visible.
     let mut pos = sim.ecs.0.get_mut::<Pos>(dagger).expect("dagger pos");
     pos.x = 50.0 * 8.0 + 4.0;
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     assert!(
         !sim.fog_visible_tile(1, 20, 20),
         "the left-behind tile is no longer visible"
@@ -127,7 +124,7 @@ fn turret_ignores_unit_in_fog() {
     // Placed before the fog reset: after it, the static-fog mask
     // (all-zero until something is discovered) would reject the placement,
     // mirroring Java's `fogControl.isDiscovered == false` for every tile.
-    let duo = place(&mut sim, 10, 10, "duo", 1);
+    let duo = place_at(&mut sim, 10, 10, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     sim.reset_fog();
     // T3 makes every turret a fog source covering its range; zero the
@@ -140,9 +137,7 @@ fn turret_ignores_unit_in_fog() {
     }
     sim.spawn_live_unit("dagger", 2, 25.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 180.0)
         .expect("enemy dagger");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let target = sim
         .ecs
         .0
@@ -156,9 +151,7 @@ fn turret_ignores_unit_in_fog() {
     // A team-1 dagger next to the enemy reveals it (radius 21).
     sim.spawn_live_unit("dagger", 1, 24.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 0.0)
         .expect("friendly dagger");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let target = sim
         .ecs
         .0
@@ -179,13 +172,11 @@ fn ai_team_sees_through_fog() {
         rules.disable_unit_cap = true;
     });
     sim.reset_fog();
-    let duo = place(&mut sim, 20, 20, "duo", 2);
+    let duo = place_at(&mut sim, 20, 20, "duo", 2);
     feed(&mut sim, duo, "copper", 10);
     sim.spawn_live_unit("dagger", 1, 35.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 180.0)
         .expect("player dagger");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let target = sim
         .ecs
         .0
@@ -208,10 +199,8 @@ fn find_enemy_tile_skips_undiscovered() {
         rules.disable_unit_cap = true;
     });
     sim.reset_fog();
-    place(&mut sim, 40, 40, "core-shard", 2);
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    place_at(&mut sim, 40, 40, "core-shard", 2);
+    tick_n(&mut sim, 5);
 
     let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
     let mut indexer = BlockIndexer::new();
@@ -232,9 +221,7 @@ fn find_enemy_tile_skips_undiscovered() {
 
     sim.spawn_live_unit("dagger", 1, 40.0 * 8.0 + 4.0, 40.0 * 8.0 + 4.0, 0.0)
         .expect("dagger");
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
     let mut indexer = BlockIndexer::new();
     indexer.rebuild(&mut sim.ecs.0, &runtime.content);
@@ -296,9 +283,7 @@ fn placement_rejected_in_static_fog() {
 
     sim.spawn_live_unit("dagger", 1, 30.0 * 8.0 + 4.0, 30.0 * 8.0 + 4.0, 0.0)
         .expect("dagger");
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
     let table = sim
         .ecs
@@ -335,12 +320,10 @@ fn radar_discovers_in_600_ticks() {
         rules.disable_unit_cap = true;
     });
     // Placed before the fog reset (the all-zero static mask else rejects).
-    let radar = place(&mut sim, 20, 20, "radar", 1);
-    place(&mut sim, 21, 20, "power-source", 1);
+    let radar = place_at(&mut sim, 20, 20, "radar", 1);
+    place_at(&mut sim, 21, 20, "power-source", 1);
     sim.reset_fog();
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let progress = sim
         .ecs
         .0
@@ -353,9 +336,7 @@ fn radar_discovers_in_600_ticks() {
     );
     // One tick is lost while the power graph links (efficiency 0 on the first
     // tick), so full discovery completes on tick 601.
-    for _ in 0..301 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 301);
     let progress = sim
         .ecs
         .0
@@ -378,11 +359,9 @@ fn duo_reveals_its_range() {
         rules.disable_unit_cap = true;
     });
     // Placed before the fog reset (the all-zero static mask else rejects).
-    place(&mut sim, 10, 10, "duo", 1);
+    place_at(&mut sim, 10, 10, "duo", 1);
     sim.reset_fog();
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     // `Mathf.round(160 / 8) = 20` tiles, drawn with the +1 visual margin.
     assert!(sim.fog_visible_tile(1, 30, 10), "a tile at +20 is visible");
     assert!(

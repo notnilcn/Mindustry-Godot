@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// G01 T6a: a wave ground unit walks the enemy-core flowfield
 /// (`Pathfinder.fieldCore`, GroundAI.java:46-60) instead of detouring to the
@@ -31,16 +32,14 @@ fn ground_wave_paths_to_core_not_nearest_building() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    place(&mut sim, 10, 48, "core-shard", 1);
+    place_at(&mut sim, 10, 48, "core-shard", 1);
     // Decoy: much closer to the dagger than the core, but on another axis.
-    let wall = place(&mut sim, 80, 10, "copper-wall", 1);
+    let wall = place_at(&mut sim, 80, 10, "copper-wall", 1);
     let dagger = sim
         .spawn_live_unit("dagger", 2, 85.0 * 8.0, 48.0 * 8.0, 180.0)
         .expect("dagger");
     let start_x = sim.ecs.0.get::<Pos>(dagger).expect("pos").x;
-    for _ in 0..3000 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3000);
     let x = sim
         .ecs
         .0
@@ -91,16 +90,14 @@ fn field_is_stable_across_units() {
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
-    place(&mut sim, 10, 48, "core-shard", 1);
+    place_at(&mut sim, 10, 48, "core-shard", 1);
     sim.spawn_live_unit("dagger", 2, 85.0 * 8.0, 48.0 * 8.0, 180.0)
         .expect("dagger a");
     sim.spawn_live_unit("dagger", 2, 85.0 * 8.0, 44.0 * 8.0, 180.0)
         .expect("dagger b");
 
     let before = sim.unit_runtime().expect("rt").pathfinder.updates;
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let after = sim.unit_runtime().expect("rt").pathfinder.updates;
     assert!(
         after - before <= 2,
@@ -137,9 +134,9 @@ fn horizon_prefers_factory() {
     // Core 147 px from the horizon (out of its 140 px range) but still nearer
     // than the factory at 170 px: the `{factory, null}` flag must win over the
     // old nearest-building anchor.
-    place(&mut sim, 47, 47, "core-shard", 1);
+    place_at(&mut sim, 47, 47, "core-shard", 1);
     let core = sim.grid.tiles.get(47, 47).build.expect("core entity");
-    let press = place(&mut sim, 75, 75, "graphite-press", 1);
+    let press = place_at(&mut sim, 75, 75, "graphite-press", 1);
     // `targetFlagActive` needs `items.any()` in the port's model.
     let coal = sim
         .unit_runtime()
@@ -204,7 +201,7 @@ fn flare_falls_back_to_core() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let flare = sim
         .spawn_live_unit("flare", 2, 60.0 * 8.0, 60.0 * 8.0, 180.0)
         .expect("flare");
@@ -257,7 +254,7 @@ fn mono_mines_and_delivers() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let ore = {
         let rt = sim.unit_runtime().expect("rt");
         rt.content.block_id("ore-copper").expect("ore-copper")
@@ -272,9 +269,7 @@ fn mono_mines_and_delivers() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mono) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..2000 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2000);
     let copper = sim
         .unit_runtime()
         .expect("rt")
@@ -320,7 +315,7 @@ fn miner_comp_respects_tier() {
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let ore = {
         let rt = sim.unit_runtime().expect("rt");
         rt.content.block_id("ore-titanium").expect("ore-titanium")
@@ -335,9 +330,7 @@ fn miner_comp_respects_tier() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mono) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let titanium = sim
         .unit_runtime()
         .expect("rt")
@@ -385,8 +378,8 @@ fn mega_repairs_damaged_wall() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    place(&mut sim, 10, 10, "core-shard", 1);
-    let wall = place(&mut sim, 30, 10, "copper-wall", 1);
+    place_at(&mut sim, 10, 10, "core-shard", 1);
+    let wall = place_at(&mut sim, 30, 10, "copper-wall", 1);
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.health = 100.0;
     }
@@ -396,9 +389,7 @@ fn mega_repairs_damaged_wall() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mega) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..900 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 900);
     let healed = health(&sim, wall).unwrap_or(0.0);
     let (mp, wp) = (
         sim.ecs.0.get::<Pos>(mega).copied().expect("mega pos"),
@@ -437,7 +428,7 @@ fn poly_rebuilds_destroyed_wall() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let copper = sim
         .unit_runtime()
         .expect("rt")
@@ -452,7 +443,7 @@ fn poly_rebuilds_destroyed_wall() {
         .0
         .get::<ItemModule>(core)
         .map_or(0, |items| items.get(copper));
-    let wall = place(&mut sim, 20, 10, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 10, "copper-wall", 1);
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.health = 0.0;
         health.dead = true;
@@ -464,9 +455,7 @@ fn poly_rebuilds_destroyed_wall() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(poly) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..1200 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1200);
     let rebuilt = sim.grid.tiles.get(20, 10).build;
     let after = sim
         .ecs
@@ -514,14 +503,12 @@ fn wave_alpha_falls_back_to_ground_ai() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    place(&mut sim, 10, 48, "core-shard", 1);
+    place_at(&mut sim, 10, 48, "core-shard", 1);
     let alpha = sim
         .spawn_live_unit("alpha", 2, 80.0 * 8.0, 48.0 * 8.0, 180.0)
         .expect("alpha");
     let start_x = sim.ecs.0.get::<Pos>(alpha).expect("pos").x;
-    for _ in 0..900 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 900);
     let x = sim
         .ecs
         .0
@@ -582,9 +569,7 @@ fn hold_fire_stops_shooting() {
             .map(|weapons| weapons.mounts.iter().map(|m| m.total_shots).sum::<i32>())
             .unwrap_or(0)
     };
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let before = shots(&sim);
     assert!(before > 0, "the dagger fired before the stance: {before}");
     let id = sim
@@ -607,9 +592,7 @@ fn hold_fire_stops_shooting() {
         enabled: true,
     })
     .expect("stance");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let after = shots(&sim);
     assert_eq!(after, before, "holdFire stops firing ({before} -> {after})");
 }
@@ -661,9 +644,7 @@ fn boost_stance_lifts_nova() {
         enabled: true,
     })
     .expect("stance");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let elevation = sim
         .ecs
         .0
@@ -702,7 +683,7 @@ fn mono_item_stance_filters_item() {
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
-    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let core = place_at(&mut sim, 10, 10, "core-shard", 1);
     let (copper_ore, lead_ore) = {
         let rt = sim.unit_runtime().expect("rt");
         (
@@ -736,9 +717,7 @@ fn mono_item_stance_filters_item() {
         enabled: true,
     })
     .expect("stance");
-    for _ in 0..1500 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1500);
     let (copper, lead) = {
         let rt = sim.unit_runtime().expect("rt");
         let items = sim.ecs.0.get::<ItemModule>(core);

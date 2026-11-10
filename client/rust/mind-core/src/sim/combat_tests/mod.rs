@@ -11,6 +11,7 @@ use bevy_ecs::entity::Entity;
 use crate::content::BlockId;
 use crate::determinism::SimCommand;
 use crate::entities::comp::{Health, Pos, Vel};
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 use super::Sim;
 
@@ -34,40 +35,6 @@ mod targeting;
 mod turrets_bullets;
 mod walls;
 
-pub(super) fn live_sim(size: i32) -> Sim {
-    let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
-    sim
-}
-
-pub(super) fn block(sim: &Sim, name: &str) -> u16 {
-    sim.unit_runtime()
-        .expect("runtime")
-        .content
-        .block_id(name)
-        .expect("block")
-        .get()
-}
-
-pub(super) fn place(sim: &mut Sim, x: i16, y: i16, name: &str, team: u8) -> Entity {
-    let block = block(sim, name);
-    sim.command(SimCommand::Place {
-        x,
-        y,
-        block,
-        rotation: 0,
-        team,
-        player: None,
-    })
-    .expect("place");
-    sim.grid
-        .tiles
-        .get(x as i32, y as i32)
-        .build
-        .expect("placed building")
-}
-
 fn feed(sim: &mut Sim, turret: Entity, item: &str, count: usize) {
     let id = sim
         .unit_runtime()
@@ -80,27 +47,21 @@ fn feed(sim: &mut Sim, turret: Entity, item: &str, count: usize) {
     }
 }
 
-fn health(sim: &Sim, e: Entity) -> Option<f32> {
-    sim.ecs.0.get::<Health>(e).map(|h| h.health)
-}
-
 fn shots_in(sim_setup: impl Fn(&mut Sim, Entity), ticks: usize) -> (i32, f32) {
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let duo = place_at(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     sim_setup(&mut sim, duo);
     // Hostile wall dummy inside the duo's 150 px range: a unit target would
     // return fire (G01 T6a gives it the Java targeting cadence), which kills
     // the duo before the coolant window ends.
-    let _wall = place(&mut sim, 31, 20, "copper-wall", 2);
+    let _wall = place_at(&mut sim, 31, 20, "copper-wall", 2);
     let start = sim
         .ecs
         .0
         .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
         .map_or(0, |s| s.total_ammo);
-    for _ in 0..ticks {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, ticks);
     let end = sim
         .ecs
         .0

@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0140: every registered command id is accepted for a commandable unit
 /// and stored on it (`CommandAI.command`, CommandAI.java:57-64); move orders
@@ -188,7 +189,7 @@ fn commanded_builder_repairs_target() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let core = place_at(&mut sim, 8, 8, "core-shard", 1);
     let copper = sim
         .unit_runtime()
         .expect("rt")
@@ -198,7 +199,7 @@ fn commanded_builder_repairs_target() {
     if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(core) {
         items.add(copper, 500, 4000);
     }
-    let wall = place(&mut sim, 16, 12, "copper-wall", 1);
+    let wall = place_at(&mut sim, 16, 12, "copper-wall", 1);
     // Destroy it so `resolve_deaths` queues the team ghost plan.
     if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
         health.health = 0.0;
@@ -213,9 +214,7 @@ fn commanded_builder_repairs_target() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(builder) {
         slot.kind = AiKind::Builder;
     }
-    for _ in 0..1200 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1200);
     let rebuilt = sim.grid.tiles.get(16, 12).build.is_some();
     assert!(rebuilt, "the builder rebuilt the destroyed wall");
 }
@@ -234,9 +233,7 @@ fn boost_kind_lifts_mech() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(nova) {
         slot.kind = AiKind::Boost;
     }
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
     assert!(
         sim.ecs
             .0
@@ -264,9 +261,7 @@ fn live_status_burning_damages_unit() {
         .expect("burning");
     let start = health(&sim, dagger).expect("health");
     apply_status(&mut sim.ecs.0, dagger, burning, 300.0);
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let end = health(&sim, dagger).expect("alive");
     assert!(end < start, "burning ticked live damage ({start} -> {end})");
 }
@@ -288,9 +283,7 @@ fn live_ability_repair_field_heals() {
         .expect("dagger health")
         .health = 50.0;
     // Poly's `RepairFieldAbility` reload is 480 ticks (`standard.rs` poly spec).
-    for _ in 0..520 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 520);
     let end = health(&sim, dagger).expect("alive");
     assert!(end > 50.0, "repair field healed live (50 -> {end})");
 }
@@ -319,9 +312,7 @@ fn dagger_slowed_on_deep_water() {
             unit,
             crate::world::TilePos::new(36, 12),
         );
-        for _ in 0..60 {
-            sim.tick().expect("tick");
-        }
+        tick_n(&mut sim, 60);
         let pos = sim
             .ecs
             .0
@@ -424,9 +415,7 @@ fn commanded_dagger_reaches_target() {
         queue: false,
     })
     .expect("move order");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let pos = sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
     let dist = ((pos.x - 260.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
     assert!(
@@ -505,9 +494,7 @@ fn set_move_command_does_not_move_units() {
         queue: false,
     })
     .expect("command switch applies");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let pos = sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
     let dist = ((pos.x - 100.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
     assert!(

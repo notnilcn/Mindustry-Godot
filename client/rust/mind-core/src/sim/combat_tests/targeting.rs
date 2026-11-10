@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// T2: `AIController.updateWeapons` searches per mount
 /// (`findTarget(mountX, mountY, weapon.range(), bullet.collidesAir,
@@ -54,7 +55,7 @@ fn ground_weapon_ignores_air_target_per_mount() {
     };
     eprintln!("T2 ground-only unit: {name}");
 
-    let wall = place(&mut sim, 29, 25, "copper-wall", 1);
+    let wall = place_at(&mut sim, 29, 25, "copper-wall", 1);
     let unit = sim
         .spawn_live_unit(&name, 2, 200.0, 200.0, 0.0)
         .expect("ground-only unit");
@@ -68,9 +69,7 @@ fn ground_weapon_ignores_air_target_per_mount() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let target = sim
         .ecs
         .0
@@ -124,7 +123,7 @@ fn dagger_engages_core_at_target_hitsize() {
     eprintln!(
         "T2 hitSize unit: {name} range {range} weapon ({weapon_x}, {weapon_y}) hit {shooter_hit}"
     );
-    let core = place(&mut sim, 20, 20, "core-shard", 1);
+    let core = place_at(&mut sim, 20, 20, "core-shard", 1);
     // core-shard Pos = (160, 160); hitSize = 24 -> the shoot/invalidate range is
     // `range + 12`. `rotation 0` puts the mount at `unit - (weapon.y, weapon.x)`.
     let target_dist = range + 12.0 - 4.0;
@@ -191,8 +190,8 @@ fn flying_mount_keeps_in_range_main_target() {
     use crate::ai::controller::{AiKind, ControllerSlot};
 
     let mut sim = live_sim(64);
-    let core = place(&mut sim, 20, 20, "core-shard", 1);
-    let dagger = place(&mut sim, 24, 20, "duo", 1);
+    let core = place_at(&mut sim, 20, 20, "core-shard", 1);
+    let dagger = place_at(&mut sim, 24, 20, "duo", 1);
     let flare = sim
         .spawn_live_unit("flare", 2, 200.0, 190.0, 180.0)
         .expect("flare");
@@ -206,9 +205,7 @@ fn flying_mount_keeps_in_range_main_target() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(bait) {
         slot.kind = crate::ai::controller::AiKind::NoAi;
     }
-    for _ in 0..130 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 130);
     let target = sim
         .ecs
         .0
@@ -248,7 +245,7 @@ fn horizon_auto_drops_bombs_on_conveyor() {
         .insert_resource(CampaignRuntime::new(session, campaign));
 
     // A concrete ground victim: a copper wall on a building tile.
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     let before = health(&sim, wall).expect("wall health");
     let horizon = sim
         .spawn_live_unit("horizon", 2, 20.0 * 8.0, 20.0 * 8.0 - 14.0, 90.0)
@@ -256,9 +253,7 @@ fn horizon_auto_drops_bombs_on_conveyor() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(horizon) {
         slot.kind = AiKind::Flying;
     }
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let after = health(&sim, wall).unwrap_or(0.0);
     eprintln!("T2 horizon bombs: wall {before} -> {after}");
     assert!(after < before, "the horizon dropped bombs on the wall");
@@ -298,7 +293,7 @@ fn non_controllable_mount_not_overwritten() {
     for x in 11..=14 {
         sim.grid.tiles.get_mut(x, 20).floor = water;
     }
-    let _wall = place(&mut sim, 28, 20, "copper-wall", 1);
+    let _wall = place_at(&mut sim, 28, 20, "copper-wall", 1);
     let unit = sim
         .spawn_live_unit(&name, 2, 100.0, 160.0, 0.0)
         .expect("unit");
@@ -312,9 +307,7 @@ fn non_controllable_mount_not_overwritten() {
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
         slot.kind = AiKind::Command;
     }
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let weapons = sim
         .ecs
         .0
@@ -341,7 +334,7 @@ fn turret_leads_moving_target() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 10, 10, "duo", 1);
+    let duo = place_at(&mut sim, 10, 10, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let duo_pos = sim
         .ecs
@@ -411,7 +404,7 @@ fn turret_reaims_every_tick() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 10, 10, "duo", 1);
+    let duo = place_at(&mut sim, 10, 10, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let duo_pos = sim
         .ecs
@@ -461,7 +454,7 @@ fn turret_holds_fire_out_of_range() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(48);
-    let duo = place(&mut sim, 10, 10, "duo", 1);
+    let duo = place_at(&mut sim, 10, 10, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     let duo_pos = sim
         .ecs
@@ -510,7 +503,7 @@ fn scathe_does_not_predict() {
     use crate::world::blocks::defense::turrets::TurretState;
 
     let mut sim = live_sim(64);
-    let scathe = place(&mut sim, 20, 20, "scathe", 1);
+    let scathe = place_at(&mut sim, 20, 20, "scathe", 1);
     // `Turret.targetPosition` returns without ammo (`Turret.java:460`).
     feed(&mut sim, scathe, "carbide", 1);
     let scathe_pos = sim

@@ -6,6 +6,9 @@ use super::*;
 use crate::command::CommandRecord;
 use crate::content::BlockId;
 use crate::scenario::{Scenario, ScenarioPlayer, command_log_to_string, parse_command_log};
+use crate::sim::test_support::{
+    campaign_runtime, campaign_runtime_mut, live_sim, place_at, runtime_sim, tick_n,
+};
 
 /// Runs a command script and returns the sim plus the per-tick checksum stream.
 fn run_scripted(seed: u64, records: &[CommandRecord], steps: u64) -> (Sim, Vec<u64>) {
@@ -547,7 +550,7 @@ fn factory_command_records_hint() {
 #[test]
 fn core_team_config_sets_the_player_team_when_allowed() {
     use crate::determinism::{ConfigValue, SimCommand};
-    let mut sim = super::production_tests::runtime_sim();
+    let mut sim = runtime_sim();
     let core = sim.world_block_id("core-shard").expect("core-shard");
     sim.apply(Command::Place {
         x: 20,
@@ -758,9 +761,7 @@ fn block_runtime_provisions_and_ticks_placed_buildings() {
     assert!(sim.ecs.0.get::<Health>(entity).is_some());
 
     let before = sim.ecs.0.get_resource::<BuildClock>().expect("clock").time;
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     let after = sim.ecs.0.get_resource::<BuildClock>().expect("clock").time;
     assert!(after > before, "UpdateBuildings ran ({before} -> {after})");
 
@@ -795,9 +796,7 @@ fn block_runtime_is_deterministic() {
             player: None,
         })
         .expect("place conveyor");
-        for _ in 0..10 {
-            sim.tick().expect("tick");
-        }
+        tick_n(&mut sim, 10);
         sim.runtime_checksum().value()
     }
     assert_eq!(run(), run());
@@ -1367,11 +1366,7 @@ fn rules_world_dirty_rederives_limit_area() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
     {
-        let mut runtime = sim
-            .ecs
-            .0
-            .get_resource_mut::<CampaignRuntime>()
-            .expect("runtime");
+        let mut runtime = campaign_runtime_mut(&mut sim);
         runtime.session.rules.limit_map_area = true;
         runtime.session.rules.limit_x = 2;
         runtime.session.rules.limit_y = 2;
@@ -1381,11 +1376,7 @@ fn rules_world_dirty_rederives_limit_area() {
     }
     sim.tick().expect("tick");
     assert_eq!(sim.grid.limit_area, Some((2, 2, 4, 4)));
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<CampaignRuntime>()
-        .expect("runtime");
+    let runtime = campaign_runtime(&sim);
     assert!(!runtime.rules_world_dirty, "flag cleared");
 }
 
@@ -1395,10 +1386,8 @@ fn rules_world_dirty_rederives_limit_area() {
 #[test]
 fn closed_door_blocks_ground_unit() {
     use crate::ai::types::ground::unit_can_pass;
-    use crate::sim::combat_tests::{live_sim, place};
-
     let mut sim = live_sim(16);
-    place(&mut sim, 8, 8, "door", 2);
+    place_at(&mut sim, 8, 8, "door", 2);
     // `DoorBuild.open = false` on creation (`Door.java:67`).
     let dagger = sim
         .spawn_live_unit("dagger", 2, 6.0 * 8.0, 8.0 * 8.0, 0.0)
@@ -1420,10 +1409,8 @@ fn closed_door_blocks_ground_unit() {
 fn open_door_lets_unit_pass() {
     use crate::ai::types::ground::unit_can_pass;
     use crate::determinism::SimCommand;
-    use crate::sim::combat_tests::{live_sim, place};
-
     let mut sim = live_sim(16);
-    place(&mut sim, 8, 8, "door", 2);
+    place_at(&mut sim, 8, 8, "door", 2);
     let dagger = sim
         .spawn_live_unit("dagger", 2, 6.0 * 8.0, 8.0 * 8.0, 0.0)
         .expect("dagger");
@@ -1449,10 +1436,8 @@ fn open_door_lets_unit_pass() {
 #[test]
 fn door_toggle_updates_flowfield() {
     use crate::determinism::SimCommand;
-    use crate::sim::combat_tests::{live_sim, place};
-
     let mut sim = live_sim(16);
-    place(&mut sim, 8, 8, "door", 2);
+    place_at(&mut sim, 8, 8, "door", 2);
     let index = sim.grid.tiles.index(8, 8);
     assert!(
         sim.unit_runtime().expect("runtime").pathfinder.tiles[index].solid(),
@@ -1469,9 +1454,7 @@ fn door_toggle_updates_flowfield() {
         "an open door clears the pathfinder solid bit"
     );
     // `Door.tapped` throttles a second toggle within 60 ticks (`Door.java:148-154`).
-    for _ in 0..61 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 61);
     sim.command(SimCommand::Configure {
         x: 8,
         y: 8,
@@ -1490,10 +1473,8 @@ fn door_toggle_updates_flowfield() {
 /// path through (`costGround` = `1 + health * 5`) than a fresh one.
 #[test]
 fn damaged_wall_is_cheaper_to_path_through() {
-    use crate::sim::combat_tests::{live_sim, place};
-
     let mut sim = live_sim(16);
-    let wall = place(&mut sim, 8, 8, "copper-wall", 2);
+    let wall = place_at(&mut sim, 8, 8, "copper-wall", 2);
     let index = sim.grid.tiles.index(8, 8);
     let fresh = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
     assert_eq!(fresh, 8, "copper-wall 320 hp packs as health/40 = 8");
@@ -1502,7 +1483,7 @@ fn damaged_wall_is_cheaper_to_path_through() {
     }
     // Java re-packs on `TileChangeEvent` (`Pathfinder.java:150-154`); the live
     // sim's equivalent trigger is any placement/break.
-    place(&mut sim, 8, 12, "copper-wall", 2);
+    place_at(&mut sim, 8, 12, "copper-wall", 2);
     let packed = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
     assert_eq!(packed, 2, "80 hp packs as 2");
     assert!(packed < fresh, "a damaged wall is cheaper to path through");
