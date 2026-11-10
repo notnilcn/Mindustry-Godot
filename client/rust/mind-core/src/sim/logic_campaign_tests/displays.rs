@@ -14,11 +14,11 @@ use super::*;
 fn tileable_2x2_links_root_bottom_left() {
     use crate::logic::blocks::display::link_displays;
     let mut sim = campaign_sim();
-    let a = place(&mut sim, "tile-logic-display", 20, 20);
-    let b = place(&mut sim, "tile-logic-display", 21, 20);
-    let c = place(&mut sim, "tile-logic-display", 20, 21);
-    let d = place(&mut sim, "tile-logic-display", 21, 21);
-    tick(&mut sim, 1);
+    let a = place_team1(&mut sim, "tile-logic-display", 20, 20);
+    let b = place_team1(&mut sim, "tile-logic-display", 21, 20);
+    let c = place_team1(&mut sim, "tile-logic-display", 20, 21);
+    let d = place_team1(&mut sim, "tile-logic-display", 21, 21);
+    tick_n(&mut sim, 1);
     link_displays(&mut sim.ecs.0, a);
     for e in [a, b, c, d] {
         let state = sim
@@ -45,9 +45,9 @@ fn tileable_2x2_links_root_bottom_left() {
 fn flush_draw_forwards_to_root() {
     use crate::logic::blocks::display::link_displays;
     let mut sim = campaign_sim();
-    let root = place(&mut sim, "tile-logic-display", 20, 20);
-    let member = place(&mut sim, "tile-logic-display", 21, 20);
-    tick(&mut sim, 1);
+    let root = place_team1(&mut sim, "tile-logic-display", 20, 20);
+    let member = place_team1(&mut sim, "tile-logic-display", 21, 20);
+    tick_n(&mut sim, 1);
     link_displays(&mut sim.ecs.0, root);
     place_linked_world_processor(
         &mut sim,
@@ -56,7 +56,7 @@ fn flush_draw_forwards_to_root() {
         "draw clear 255 0 0\ndrawflush display1\nstop\n",
         &[LogicLink::new("display1", 11, 10)],
     );
-    tick(&mut sim, 2);
+    tick_n(&mut sim, 2);
     let (root_commands, root_operations) = sim
         .ecs
         .0
@@ -82,10 +82,10 @@ fn image_packs_root_index() {
     use crate::logic::blocks::display::link_displays;
     use crate::logic::executor::draw::{DISPLAY_DRAW_TYPE, cmd_p1, cmd_p4, unpack_sign};
     let mut sim = campaign_sim();
-    let root = place(&mut sim, "tile-logic-display", 20, 20);
-    let member = place(&mut sim, "tile-logic-display", 21, 20);
-    let target = place(&mut sim, "logic-display", 30, 30);
-    tick(&mut sim, 1);
+    let root = place_team1(&mut sim, "tile-logic-display", 20, 20);
+    let member = place_team1(&mut sim, "tile-logic-display", 21, 20);
+    let target = place_team1(&mut sim, "logic-display", 30, 30);
+    tick_n(&mut sim, 1);
     link_displays(&mut sim.ecs.0, root);
     let root_index = sim
         .ecs
@@ -103,7 +103,7 @@ fn image_packs_root_index() {
             LogicLink::new("display2", 20, 20),
         ],
     );
-    tick(&mut sim, 2);
+    tick_n(&mut sim, 2);
     let command = sim
         .ecs
         .0
@@ -132,7 +132,7 @@ fn image_packs_root_index() {
 fn queue_cap_1024() {
     use crate::logic::executor::draw::{COMMAND_CLEAR, pack_cmd, pack_sign};
     let mut sim = campaign_sim();
-    let display = place(&mut sim, "logic-display", 20, 20);
+    let display = place_team1(&mut sim, "logic-display", 20, 20);
     {
         let mut state = sim
             .ecs
@@ -174,7 +174,7 @@ fn queue_cap_1024() {
 fn display_process_drains_into_raster() {
     use crate::logic::display_raster::{LogicDisplayRasters, NoImages, process_display};
     let mut sim = campaign_sim();
-    let display = place(&mut sim, "logic-display", 20, 20);
+    let display = place_team1(&mut sim, "logic-display", 20, 20);
     place_linked_world_processor(
         &mut sim,
         10,
@@ -182,7 +182,7 @@ fn display_process_drains_into_raster() {
         "draw clear 255 0 0\ndraw rect 10 10 20 20\ndrawflush display1\n",
         &[LogicLink::new("display1", 10, 10)],
     );
-    tick(&mut sim, 2);
+    tick_n(&mut sim, 2);
     assert!(process_display(&mut sim.ecs.0, display, &NoImages));
     let rasters = sim
         .ecs
@@ -210,10 +210,10 @@ fn display_process_drains_into_raster() {
 fn display_sense_dimensions() {
     use crate::logic::blocks::display::link_displays;
     let mut sim = campaign_sim();
-    let plain = place(&mut sim, "logic-display", 20, 20);
-    let root = place(&mut sim, "tile-logic-display", 24, 20);
-    let member = place(&mut sim, "tile-logic-display", 25, 20);
-    tick(&mut sim, 1);
+    let plain = place_team1(&mut sim, "logic-display", 20, 20);
+    let root = place_team1(&mut sim, "tile-logic-display", 24, 20);
+    let member = place_team1(&mut sim, "tile-logic-display", 25, 20);
+    tick_n(&mut sim, 1);
     link_displays(&mut sim.ecs.0, root);
     place_linked_world_processor(
         &mut sim,
@@ -225,7 +225,7 @@ fn display_sense_dimensions() {
             LogicLink::new("display2", 14, 10),
         ],
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let num = |name: &str| {
         sim.ecs
             .0
@@ -293,7 +293,7 @@ fn canvas_write_out_of_range_ignored() {
 fn canvas_logic_read_write() {
     use crate::logic::blocks::canvas::CanvasBlockState;
     let mut sim = campaign_sim();
-    let canvas = place(&mut sim, "canvas", 20, 20);
+    let canvas = place_team1(&mut sim, "canvas", 20, 20);
     place_linked_world_processor(
         &mut sim,
         10,
@@ -301,7 +301,7 @@ fn canvas_logic_read_write() {
         "write 3 canvas1 10\nread r canvas1 10\nstop\n",
         &[LogicLink::new("canvas1", 10, 10)],
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let state = sim
         .ecs
         .0
@@ -328,7 +328,7 @@ fn canvas_logic_read_write() {
         "write 9 canvas2 11\nstop\n",
         &[LogicLink::new("canvas2", 10, 10)],
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let state = sim
         .ecs
         .0
@@ -346,8 +346,8 @@ fn canvas_save_roundtrip() {
     use crate::logic::blocks::canvas::CanvasBlockState;
     use crate::world::block::BlockTable;
     let mut sim = campaign_sim();
-    let a = place(&mut sim, "canvas", 20, 20);
-    let b = place(&mut sim, "canvas", 22, 20);
+    let a = place_team1(&mut sim, "canvas", 20, 20);
+    let b = place_team1(&mut sim, "canvas", 22, 20);
     {
         let mut state = sim.ecs.0.get_mut::<CanvasBlockState>(a).expect("state");
         state.set_pixel(5, 2);

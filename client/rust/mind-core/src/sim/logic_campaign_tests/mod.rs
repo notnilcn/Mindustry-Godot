@@ -12,7 +12,6 @@ use bevy_ecs::entity::Entity;
 
 use crate::content::BlockId;
 use crate::content::registries::fx_meta::{EffectRef, effect_by_name};
-use crate::game::runtime::CampaignRuntime;
 use crate::logic::blocks::LogicBlockState;
 use crate::logic::blocks::LogicDisplayState;
 use crate::logic::blocks::LogicLink;
@@ -21,9 +20,10 @@ use crate::world::TilePos;
 use crate::world::blocks::distribution::transfer;
 
 use super::Sim;
-use super::production_tests::{
-    configure, install_campaign_session, install_logic_world, item, place, place_world_processor,
-    runtime_sim, test_rules,
+use crate::sim::test_support::{
+    assert_events_drained, campaign_runtime, campaign_runtime_mut, campaign_sim, configure,
+    feed_turret, finish_sim, item, place_team1, place_world_processor, runtime_sim, test_rules,
+    tick_n, wide_sim,
 };
 
 mod displays;
@@ -71,88 +71,27 @@ const OVERGROWTH: &str = "fetch buildCount count @crux 0 @air-factory\nop add i 
 
 // ---- helpers (the live-sim shape the `gdext` host installs) ----
 
-fn tick(sim: &mut Sim, ticks: usize) {
-    for _ in 0..ticks {
-        sim.tick().expect("tick");
-    }
-}
-
-/// Content/team logic constants, installed before the processors are decoded
-/// (`GlobalVars.install_world`, H06 T20).
-fn install_globals(sim: &mut Sim) {
-    let content = crate::world::harness::BuildHarness::load_content();
-    crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
-}
-
-/// `runtime_sim` + unit runtime + logic globals + campaign session + live
-/// logic resources (what the host installs before a sector starts).
-fn finish_sim(mut sim: Sim, rules: crate::game::rules::Rules) -> Sim {
-    sim.install_unit_runtime().expect("unit runtime");
-    install_globals(&mut sim);
-    install_campaign_session(&mut sim, rules);
-    install_logic_world(&mut sim);
-    sim
-}
-
-fn campaign_sim() -> Sim {
-    finish_sim(runtime_sim(), test_rules())
-}
-
-/// A flat map of `size` x `size` (Ground Zero's 256x256 map area needs a
-/// winner that cannot disable the limit).
-fn wide_sim(size: i32) -> Sim {
-    let mut sim = Sim::new(3, size, size, BlockId::AIR, BlockId::AIR);
-    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
-    sim.grid.fill(stone, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
-    sim
-}
-
-fn runtime(sim: &Sim) -> &CampaignRuntime {
-    sim.ecs
-        .0
-        .get_resource::<CampaignRuntime>()
-        .expect("campaign runtime")
-}
-
 fn session_wave(sim: &Sim) -> i32 {
-    runtime(sim).session.wave
+    campaign_runtime(sim).session.wave
 }
 
 fn has_flag(sim: &Sim, flag: &str) -> bool {
-    runtime(sim).session.rules.objective_flags.contains(flag)
+    campaign_runtime(sim)
+        .session
+        .rules
+        .objective_flags
+        .contains(flag)
 }
 
 fn set_flags(sim: &mut Sim, flags: &[&str]) {
-    let mut rt = sim
-        .ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign runtime");
+    let mut rt = campaign_runtime_mut(sim);
     for flag in flags {
         rt.session.rules.objective_flags.insert((*flag).to_owned());
     }
 }
 
 fn set_wave(sim: &mut Sim, wave: i32) {
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign runtime")
-        .session
-        .wave = wave;
-}
-
-fn assert_events_drained(sim: &Sim) {
-    let state = sim
-        .ecs
-        .0
-        .get_resource::<crate::logic::world::LogicWorldState>()
-        .expect("logic world");
-    assert!(
-        state.events.is_empty(),
-        "logic events are drained each tick"
-    );
+    campaign_runtime_mut(sim).session.wave = wave;
 }
 
 fn unit_count(sim: &Sim, name: &str, team: u8) -> usize {
@@ -184,10 +123,7 @@ fn unit_count(sim: &Sim, name: &str, team: u8) -> usize {
 
 /// Adds a spawn rule to the live session (`Rules.spawns`).
 fn add_spawn_group(sim: &mut Sim, unit: &str, amount: i32) {
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign runtime")
+    campaign_runtime_mut(sim)
         .session
         .rules
         .spawns
@@ -210,20 +146,6 @@ fn add_spawn_tile(sim: &mut Sim, x: i32, y: i32) {
         .expect("spawn");
     let index = sim.grid.tiles.index(x, y);
     sim.grid.tiles.geti_mut(index).overlay = spawn;
-}
-
-/// Feeds turret ammo through the real `acceptItem`/`handleItem` dispatch (the
-/// item module does not hold turret ammo).
-fn feed_turret(sim: &mut Sim, turret: Entity, item_name: &str, amount: usize) {
-    let ammo = item(sim, item_name);
-    let world = &mut sim.ecs.0;
-    for _ in 0..amount {
-        assert!(
-            transfer::dispatch_accept_item(world, turret, turret, ammo),
-            "{item_name} accepted"
-        );
-        transfer::dispatch_handle_item(world, turret, turret, ammo);
-    }
 }
 
 /// Places a world processor whose code carries one link (`LogicBlock` link

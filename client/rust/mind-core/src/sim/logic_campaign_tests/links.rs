@@ -5,6 +5,7 @@
 //! Upstream: core/src/mindustry/logic/LExecutor.java.
 
 use super::*;
+use crate::sim::test_support::campaign_runtime_mut;
 
 // ---- I03 T6: processor links, config lifecycle and guard rails ----
 
@@ -37,8 +38,8 @@ fn processor_code(sim: &Sim, e: Entity) -> String {
 #[test]
 fn link_toggle_via_number_config() {
     let mut sim = campaign_sim();
-    let processor = place(&mut sim, "micro-processor", 10, 10);
-    place(&mut sim, "switch", 12, 10);
+    let processor = place_team1(&mut sim, "micro-processor", 10, 10);
+    place_team1(&mut sim, "switch", 12, 10);
     let packed = TilePos::new(12, 10).pack();
     assert!(processor_links(&sim, processor).is_empty());
     configure(
@@ -70,8 +71,8 @@ fn link_toggle_via_number_config() {
 #[test]
 fn unlink_reenables_disabled() {
     let mut sim = campaign_sim();
-    let processor = place(&mut sim, "micro-processor", 10, 10);
-    let message = place(&mut sim, "message", 12, 10);
+    let processor = place_team1(&mut sim, "micro-processor", 10, 10);
+    let message = place_team1(&mut sim, "message", 12, 10);
     let packed = TilePos::new(12, 10).pack();
     configure(
         &mut sim,
@@ -109,8 +110,8 @@ fn unlink_reenables_disabled() {
 #[test]
 fn processor_removed_reenables() {
     let mut sim = campaign_sim();
-    let processor = place(&mut sim, "micro-processor", 10, 10);
-    let message = place(&mut sim, "message", 12, 10);
+    let processor = place_team1(&mut sim, "micro-processor", 10, 10);
+    let message = place_team1(&mut sim, "message", 12, 10);
     configure(
         &mut sim,
         10,
@@ -120,7 +121,7 @@ fn processor_removed_reenables() {
     assert_eq!(processor_links(&sim, processor).len(), 1);
     // One tick assembles the program, which fills `executor.links` (Java
     // `updateCode` runs from `updateTile`).
-    tick(&mut sim, 1);
+    tick_n(&mut sim, 1);
     {
         let mut building = sim
             .ecs
@@ -156,10 +157,7 @@ fn world_processor_not_accessible() {
     place_world_processor(&mut sim, 10, 10, "set x 1\nstop\n");
     let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("placed");
     assert_eq!(processor_code(&sim, processor), "set x 1\nstop\n");
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign runtime")
+    campaign_runtime_mut(&mut sim)
         .session
         .rules
         .allow_edit_world_processors = false;
@@ -193,8 +191,8 @@ fn world_processor_not_accessible() {
 #[test]
 fn tap_links_valid_target() {
     let mut sim = campaign_sim();
-    let processor = place(&mut sim, "micro-processor", 10, 10);
-    place(&mut sim, "switch", 12, 10);
+    let processor = place_team1(&mut sim, "micro-processor", 10, 10);
+    place_team1(&mut sim, "switch", 12, 10);
     sim.command(crate::determinism::SimCommand::ConfigTap {
         x: 10,
         y: 10,
@@ -225,7 +223,7 @@ fn tap_links_valid_target() {
     );
     // Out of range (micro processor `range = 80` world units = 10 tiles): the
     // tap is not consumed and the panel switches to the tapped building.
-    place(&mut sim, "switch", 30, 10);
+    place_team1(&mut sim, "switch", 30, 10);
     sim.command(crate::determinism::SimCommand::ConfigTap {
         x: 10,
         y: 10,

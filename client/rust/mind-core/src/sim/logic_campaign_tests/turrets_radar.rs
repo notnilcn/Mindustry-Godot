@@ -14,7 +14,7 @@ use super::*;
 #[test]
 fn control_shoot_aims_duo() {
     let mut sim = campaign_sim();
-    let duo = place(&mut sim, "duo", 18, 18);
+    let duo = place_team1(&mut sim, "duo", 18, 18);
     feed_turret(&mut sim, duo, "copper", 10);
     place_world_processor(
         &mut sim,
@@ -22,7 +22,7 @@ fn control_shoot_aims_duo() {
         10,
         "getblock building d 18 18\ncontrol shoot d 23 18 1\nstop\n",
     );
-    tick(&mut sim, 40);
+    tick_n(&mut sim, 40);
     let state = sim
         .ecs
         .0
@@ -44,9 +44,9 @@ fn control_shoot_aims_duo() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    tick(&mut sim, 100);
+    tick_n(&mut sim, 100);
     let after_cooldown = sim.unit_runtime().expect("runtime").bullets.len();
-    tick(&mut sim, 200);
+    tick_n(&mut sim, 200);
     let later = sim.unit_runtime().expect("runtime").bullets.len();
     assert!(
         later <= after_cooldown,
@@ -59,7 +59,7 @@ fn control_shoot_aims_duo() {
 #[test]
 fn control_shootp_tracks_unit() {
     let mut sim = campaign_sim();
-    let duo = place(&mut sim, "duo", 18, 18);
+    let duo = place_team1(&mut sim, "duo", 18, 18);
     feed_turret(&mut sim, duo, "copper", 10);
     // A team-2 core lets the target dagger spawn under the unit cap.
     let core = sim.world_block_id("core-shard").expect("core");
@@ -81,7 +81,7 @@ fn control_shootp_tracks_unit() {
         10,
         "getblock building d 18 18\nfetch unit u @crux 0 @dagger\ncontrol shootp d u 1\nstop\n",
     );
-    tick(&mut sim, 10);
+    tick_n(&mut sim, 10);
     let state = sim
         .ecs
         .0
@@ -123,8 +123,8 @@ fn enemy_core(sim: &mut Sim) {
 #[test]
 fn radar_health_order() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
-    let duo = place(&mut sim, "duo", 18, 18);
+    place_team1(&mut sim, "core-shard", 20, 20);
+    let duo = place_team1(&mut sim, "duo", 18, 18);
     enemy_core(&mut sim);
     let low = sim
         .spawn_live_unit("dagger", 2, 24.0 * 8.0, 18.0 * 8.0, 0.0)
@@ -140,7 +140,7 @@ fn radar_health_order() {
         10,
         "getblock building d 18 18\nradar enemy any any health d 1 hi\nradar enemy any any health d 0 lo\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     let _ = duo;
     assert_eq!(
         processor_obj(&sim, 10, 10, "hi"),
@@ -160,8 +160,8 @@ fn radar_health_order() {
 #[test]
 fn radar_range() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
-    place(&mut sim, "micro-processor", 12, 12);
+    place_team1(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "micro-processor", 12, 12);
     enemy_core(&mut sim);
     let near = sim
         .spawn_live_unit("dagger", 2, 150.0, 96.0, 0.0)
@@ -177,7 +177,7 @@ fn radar_range() {
         10,
         "getblock building micro 12 12\nradar enemy any any distance micro 1 out\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "out"),
         Some(LogicObject::Unit(near)),
@@ -191,8 +191,8 @@ fn radar_range() {
 #[test]
 fn radar_cache_holds_29_ticks() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
-    let duo = place(&mut sim, "duo", 18, 18);
+    place_team1(&mut sim, "core-shard", 20, 20);
+    let duo = place_team1(&mut sim, "duo", 18, 18);
     enemy_core(&mut sim);
     let low = sim
         .spawn_live_unit("dagger", 2, 24.0 * 8.0, 18.0 * 8.0, 0.0)
@@ -204,7 +204,7 @@ fn radar_cache_holds_29_ticks() {
         10,
         "getblock building d 18 18\nradar enemy any any health d 1 out\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "out"),
         Some(LogicObject::Unit(low))
@@ -215,13 +215,13 @@ fn radar_cache_holds_29_ticks() {
         .spawn_live_unit("dagger", 2, 26.0 * 8.0, 18.0 * 8.0, 0.0)
         .expect("dagger");
     set_health(&mut sim, high, 200.0);
-    tick(&mut sim, 25);
+    tick_n(&mut sim, 25);
     assert_eq!(
         processor_obj(&sim, 10, 10, "out"),
         Some(LogicObject::Unit(low)),
         "still cached before 30 ticks"
     );
-    tick(&mut sim, 15);
+    tick_n(&mut sim, 15);
     assert_eq!(
         processor_obj(&sim, 10, 10, "out"),
         Some(LogicObject::Unit(high)),
@@ -235,8 +235,8 @@ fn radar_cache_holds_29_ticks() {
 #[test]
 fn radar_attacker_filter() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
-    place(&mut sim, "duo", 18, 18);
+    place_team1(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "duo", 18, 18);
     enemy_core(&mut sim);
     // `assembly-drone` has no weapons in Java (`weapons.is_empty()`).
     let unarmed = sim
@@ -255,7 +255,7 @@ fn radar_attacker_filter() {
         10,
         "getblock building d 18 18\nradar enemy any attacker health d 1 out\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "out"),
         Some(LogicObject::Unit(armed)),
