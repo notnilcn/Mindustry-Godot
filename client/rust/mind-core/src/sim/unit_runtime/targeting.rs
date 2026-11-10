@@ -391,9 +391,7 @@ pub(super) fn building_center(world: &World, entity: Entity) -> Option<(f32, f32
 /// `Tile.worldx()`/`worldy()` (Tile.java:166-171): the tile's corner-based
 /// world coordinate, `x * tilesize`. The tile spans `[x*8 - 4, x*8 + 4)` and a
 /// building on it sits at `drawx = worldx + block.offset`.
-pub(super) fn tile_world(tile: TilePos) -> (f32, f32) {
-    (tile.x() as f32 * TILE_SIZE, tile.y() as f32 * TILE_SIZE)
-}
+pub(super) use crate::sim::query::tile_world;
 
 /// `AIController.faceTarget` (AIController.java:121-128): omni-movement
 /// units and mechs turn toward a valid in-range target when `type.faceTarget`

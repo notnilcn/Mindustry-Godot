@@ -15,6 +15,10 @@ use crate::content::ContentRegistry;
 use crate::content::registries::units::UnitTypeDef;
 use crate::entities::comp::TeamComp;
 use crate::entities::comp::unit::comp::UnitTypeComp;
+use crate::world::TilePos;
+
+/// World pixels per tile (`config::TILESIZE`).
+const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
 
 /// Sorts the collected `(seq, entity)` pairs by the exact
 /// `(seq, entity.index())` key the sim's determinism sorts use and returns the
@@ -43,4 +47,11 @@ pub(crate) fn unit_def<'a>(
 ) -> Option<&'a UnitTypeDef> {
     let type_id = world.get::<UnitTypeComp>(e)?.type_id;
     content.unit(type_id)
+}
+
+/// `Tile.worldx()`/`worldy()` (Tile.java:166-171): the tile's corner-based
+/// world coordinate, `x * tilesize`. The tile spans `[x*8 - 4, x*8 + 4)` and a
+/// building on it sits at `drawx = worldx + block.offset`.
+pub(crate) fn tile_world(tile: TilePos) -> (f32, f32) {
+    (tile.x() as f32 * TILE_SIZE, tile.y() as f32 * TILE_SIZE)
 }
