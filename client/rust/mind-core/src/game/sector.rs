@@ -18,10 +18,12 @@ use indexmap::IndexMap;
 use super::campaign_rules::CampaignRules;
 use super::planet::Planet;
 use super::rules::Rules;
-use crate::content::{PlanetId, SectorId};
+use crate::content::{ContentRegistry, PlanetId, SectorId};
+use crate::io::json::content_serde::JsonItemStack;
 use crate::io::json::rules::{ExportStat, SectorInfo};
 use crate::io::settings::SettingsStore;
 use crate::math::WindowedMean;
+use crate::world::ItemModule;
 
 pub use crate::io::json::content_serde::SectorKey;
 
@@ -748,6 +750,55 @@ impl Sector {
         settings.remove(&self.info_key(planet_name));
     }
 
+    /// The persisted record plus the two derived flags the campaign dialogs read
+    /// (`beingPlayed`/`hasSave`).
+    ///
+    /// Upstream: `SectorInfo` JSON shape (`SectorInfo.java`); the two extra keys
+    /// are the facade's `PlanetDialog` row projection, not a stored field.
+    /// Extracted from `mind-gdext campaign.rs:2636-2659` at 291e30a8
+    /// (adopted by X01).
+    ///
+    /// The one `serde_json::to_value` failure mode (a non-map `SectorInfo`) is
+    /// structurally impossible; it yields [`serde_json::Value::Null`], which the
+    /// facade's `Option` return mapped to `None`.
+    pub fn record_json(&self) -> serde_json::Value {
+        let mut value = serde_json::to_value(&self.info.info).unwrap_or(serde_json::Value::Null);
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert(
+                "beingPlayed".to_owned(),
+                serde_json::Value::Bool(self.being_played),
+            );
+            map.insert(
+                "hasSave".to_owned(),
+                serde_json::Value::Bool(self.save.is_some()),
+            );
+        }
+        value
+    }
+
+    /// Clears one sector's persisted base/items and drops its save association
+    /// (`PlanetDialog.abandonSectorConfirm`, non-playing branch).
+    ///
+    /// Extracted from the facade's free `clear_sector_record` at
+    /// `mind-gdext campaign.rs:7632-7645` (291e30a8), adopted by X01.
+    pub fn clear_base(&mut self, settings: &mut SettingsStore, planet_name: &str) {
+        self.save = None;
+        self.being_played = false;
+        self.clear_info(settings, planet_name);
+    }
+
+    /// Off-play abandon (`PlanetDialog.abandonSectorConfirm`): clears the stored
+    /// items, core flag and production rates, then persists the record.
+    ///
+    /// Extracted from `mind-gdext campaign.rs:5545-5553` at 291e30a8 (adopted by
+    /// X01). The facade ignores the `save_info` error, so this does too.
+    pub fn abandon(&mut self, settings: &mut SettingsStore, planet_name: &str) {
+        self.info.info.items.clear();
+        self.info.info.has_core = false;
+        self.info.info.production.clear();
+        let _ = self.save_info(settings, planet_name);
+    }
+
     /// `Sector.unlocked`.
     pub fn unlocked(&self) -> bool {
         self.has_base() || self.preset_always_unlocked
@@ -935,6 +986,64 @@ impl Sector {
     }
 }
 
+/// `(item name, amount)` pairs from JSON stacks, dropping stacks with no item
+/// name (Java's deserialized `null` item).
+///
+/// Upstream: `Schematic.requirements()`/`Rules.loadout` stack handling
+/// (`Schematic.java`, `LaunchLoadoutDialog.java:138-141`). Extracted from
+/// `mind-core game/play.rs:401` and `mind-gdext campaign.rs:6617` at 291e30a8
+/// (adopted by X01).
+pub fn stacks_to_pairs(stacks: &[JsonItemStack]) -> Vec<(String, i32)> {
+    stacks
+        .iter()
+        .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount)))
+        .collect()
+}
+
+/// Clears `module` and fills it from `(item name, amount)` pairs, clamped to
+/// `[0, cap]` and capped by `cap` (`ItemModule.add`/`ItemModule.set`).
+///
+/// Upstream: `Logic.play` starting-items half (`Logic.java:73-91`) and
+/// `SectorInfo.write` (`SectorInfo.java:165-196`). Extracted from
+/// `mind-core game/play.rs:397-409`, `game/runtime.rs:503-509` and
+/// `mind-gdext campaign.rs:1826-1834` at 291e30a8 (adopted by X01). Unknown item
+/// names are skipped, as in every replaced copy.
+pub fn fill_module(
+    module: &mut ItemModule,
+    registry: &ContentRegistry,
+    pairs: &[(String, i32)],
+    cap: i32,
+) {
+    module.clear();
+    for (name, amount) in pairs {
+        if let Some(item) = registry.item_id(name) {
+            module.add(item, (*amount).clamp(0, cap), cap);
+        }
+    }
+}
+
+/// Dense item-id-indexed amounts from `(item name, amount)` pairs; unknown
+/// names are skipped and repeated names accumulate.
+///
+/// Upstream: `Universe.updateLaunchResources(ItemSeq)` (`Universe.java:113-116`).
+/// Extracted from `mind-gdext campaign.rs:5405-5416` (the accelerator launch
+/// export) and `campaign.rs:6431-6438` (the launch-dialog resource rebuild) at
+/// 291e30a8 (adopted by X01). The two copies differ only in `+=` vs `=`; the
+/// second's pairs come from an `IndexMap`, so names are unique there and both
+/// forms agree. This is the additive form, mirroring
+/// [`crate::ui::campaign::launch_resource_sequence`]'s name→id projection.
+pub fn dense_from_names(registry: &ContentRegistry, pairs: &[(String, i32)]) -> Vec<i32> {
+    let mut dense = vec![0i32; registry.items().len()];
+    for (name, amount) in pairs {
+        if let Some(item) = registry.item_id(name)
+            && let Some(slot) = dense.get_mut(item.index())
+        {
+            *slot += *amount;
+        }
+    }
+    dense
+}
+
 /// Packs a `(x, y)` tile position the way Arc `Point2.pack` does
 /// (`(x << 16) | y & 0xffff`; x is the high half).
 pub const fn pack_position(x: i32, y: i32) -> i32 {
@@ -952,6 +1061,7 @@ mod tests {
 
     use super::*;
     use crate::game::play::PlaySession;
+    use crate::game::test_support::raw_registry;
 
     #[test]
     fn info_windows_update_and_cap() {
@@ -1070,11 +1180,9 @@ mod tests {
     /// unset (documented deviation).
     #[test]
     fn display_name_matches_java_precedence() {
-        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
         use crate::game::planet::Planet;
 
-        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
-            .expect("base content");
+        let registry = raw_registry();
         let def = registry.planet_by_name("serpulo").expect("serpulo");
         let planet = Planet::from_def(&registry, def, 0.0);
         assert!(planet.sectors.len() > 1, "serpulo is a multi-sector planet");
@@ -1266,10 +1374,7 @@ mod tests {
     /// with the static-wall suppression rules.
     #[test]
     fn scan_sector_resources_matches_set_sector_rules() {
-        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
-
-        let content = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
-            .expect("content");
+        let content = raw_registry();
         let id = |name: &str| content.block_id(name).expect("block");
         let mut grid = crate::world::WorldGrid::new(8, 8);
         // Isolate the static-wall darkness term: the border term would darken
@@ -1428,5 +1533,132 @@ mod tests {
         sector.preset_difficulty = 0.0;
         sector.threat = 0.3;
         assert_eq!(sector.threat_bucket(), "medium");
+    }
+
+    /// `sector_record_value` (facade 2636-2659): the persisted record plus the
+    /// derived `beingPlayed`/`hasSave` flags the planet rows read.
+    #[test]
+    fn record_json_adds_played_and_save_flags() {
+        let mut sector = Sector::new(PlanetId::new(5), 15);
+        sector.info.info.wave = 7;
+        // No save, not played: the inserted flags are false.
+        let value = sector.record_json();
+        assert_eq!(value["beingPlayed"], serde_json::Value::Bool(false));
+        assert_eq!(value["hasSave"], serde_json::Value::Bool(false));
+        assert_eq!(value["wave"], serde_json::json!(7));
+
+        sector.save = Some("sector-serpulo-15".to_owned());
+        sector.being_played = true;
+        let value = sector.record_json();
+        assert_eq!(value["beingPlayed"], serde_json::Value::Bool(true));
+        assert_eq!(value["hasSave"], serde_json::Value::Bool(true));
+    }
+
+    /// `clear_sector_record` (facade 7632-7645): drops the save association,
+    /// the played flag and the persisted record.
+    #[test]
+    fn clear_base_drops_save_and_record() {
+        let mut settings = SettingsStore::new();
+        let mut sector = Sector::new(PlanetId::new(5), 15);
+        sector.save = Some("sector-serpulo-15".to_owned());
+        sector.being_played = true;
+        sector.info.info.has_core = true;
+        sector.info.info.items.insert("copper".to_owned(), 10);
+        sector.save_info(&mut settings, "serpulo").unwrap();
+        assert!(settings.has(&sector.info_key("serpulo")));
+
+        sector.clear_base(&mut settings, "serpulo");
+        assert!(sector.save.is_none());
+        assert!(!sector.being_played);
+        assert_eq!(sector.info, SectorInfoState::new());
+        assert!(
+            !settings.has(&sector.info_key("serpulo")),
+            "the persisted record is removed"
+        );
+    }
+
+    /// Off-play abandon (facade 5545-5553): items/core/production clear and the
+    /// record is persisted, while the save association stays until the caller
+    /// deletes the file.
+    #[test]
+    fn abandon_clears_base_fields_and_persists() {
+        let mut settings = SettingsStore::new();
+        let mut sector = Sector::new(PlanetId::new(5), 15);
+        sector.save = Some("sector-serpulo-15".to_owned());
+        sector.info.info.has_core = true;
+        sector.info.info.items.insert("copper".to_owned(), 250);
+        sector
+            .info
+            .info
+            .production
+            .insert("copper".to_owned(), ExportStat::default());
+
+        sector.abandon(&mut settings, "serpulo");
+        assert!(sector.info.info.items.is_empty());
+        assert!(!sector.info.info.has_core);
+        assert!(sector.info.info.production.is_empty());
+        let saved: SectorInfo = settings
+            .get_json(&sector.info_key("serpulo"))
+            .expect("read settings")
+            .expect("record written");
+        assert!(!saved.has_core);
+        assert!(saved.items.is_empty());
+        assert!(sector.save.is_some(), "the file cleanup is the caller's");
+    }
+
+    /// `stacks_to_pairs` (play.rs:401, facade 6617): name-bearing stacks become
+    /// pairs; an item-less stack is dropped.
+    #[test]
+    fn stacks_to_pairs_skips_nameless_stacks() {
+        let stacks = vec![
+            JsonItemStack {
+                item: Some("copper".to_owned()),
+                amount: 25,
+            },
+            JsonItemStack {
+                item: None,
+                amount: 3,
+            },
+        ];
+        assert_eq!(stacks_to_pairs(&stacks), vec![("copper".to_owned(), 25)]);
+    }
+
+    /// `fill_module` (play.rs:397-409, runtime.rs:503-509, facade 1826-1834):
+    /// clears first, skips unknown names, clamps negatives to zero and caps at
+    /// `cap`.
+    #[test]
+    fn fill_module_clamps_and_clears() {
+        let registry = raw_registry();
+        let mut module = ItemModule::with_items(registry.items().len());
+        let copper = registry.item_id("copper").expect("copper");
+        module.add(copper, 50, 1000);
+        let pairs = vec![
+            ("copper".to_owned(), 60),
+            ("copper".to_owned(), 90),
+            ("lead".to_owned(), -5),
+            ("not-an-item".to_owned(), 7),
+        ];
+        fill_module(&mut module, &registry, &pairs, 100);
+        assert_eq!(module.get(copper), 100, "clear + add, capped at 100");
+        assert_eq!(module.total(), 100);
+        let lead = registry.item_id("lead").expect("lead");
+        assert_eq!(module.get(lead), 0, "negative amounts clamp to zero");
+    }
+
+    /// `dense_from_names` (facade 5405-5416 and 6431-6438): unknown names are
+    /// skipped and repeated names accumulate in the dense item-id sequence.
+    #[test]
+    fn dense_from_names_accumulates_and_skips_unknown() {
+        let registry = raw_registry();
+        let pairs = vec![
+            ("copper".to_owned(), 5),
+            ("copper".to_owned(), 3),
+            ("not-an-item".to_owned(), 9),
+        ];
+        let dense = dense_from_names(&registry, &pairs);
+        assert_eq!(dense.len(), registry.items().len());
+        let copper = registry.item_id("copper").expect("copper");
+        assert_eq!(dense[copper.index()], 8);
+        assert_eq!(dense.iter().sum::<i32>(), 8);
     }
 }
