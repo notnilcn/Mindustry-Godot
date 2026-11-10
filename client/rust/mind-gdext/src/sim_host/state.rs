@@ -12,10 +12,6 @@ pub(super) fn hint_state_value(
     content: Option<&ContentRegistry>,
     team: u8,
 ) -> serde_json::Value {
-    use mind_core::content::BlockFlag;
-    use mind_core::entities::comp::TeamComp;
-    use mind_core::entities::comp::unit::comp::{ItemsComp, UnitCore, UnitPayloads, UnitTypeComp};
-
     let block_name = |id: BlockId| {
         content
             .and_then(|content| content.block(id))
@@ -34,30 +30,7 @@ pub(super) fn hint_state_value(
 
     // Player unit inputs (`UnitCore`/`ItemsComp`/`UnitPayloads`).
     let (player_dead, spawned_by_core, player_has_item, player_payload, player_can_boost) =
-        match sim.player_unit() {
-            Some(entity) => {
-                let core = sim.ecs.0.get::<UnitCore>(entity);
-                let items = sim.ecs.0.get::<ItemsComp>(entity);
-                let payloads = sim.ecs.0.get::<UnitPayloads>(entity);
-                let can_boost = sim
-                    .ecs
-                    .0
-                    .get::<UnitTypeComp>(entity)
-                    .and_then(|comp| content.and_then(|content| content.unit(comp.type_id)))
-                    .is_some_and(|def| def.can_boost);
-                (
-                    core.map(|core| core.dead).unwrap_or(false),
-                    core.map(|core| core.spawned_by_core).unwrap_or(false),
-                    items.and_then(|items| items.item).is_some(),
-                    payloads
-                        .map(|payloads| payloads.stack.len() as i64)
-                        .unwrap_or(-1),
-                    can_boost,
-                )
-            }
-            None => (true, false, false, -1, false),
-        };
-
+        hint_player_inputs(sim, content);
     // Live session counters (`HintsFragment` reads `state.wave`/wave team AI).
     let runtime = sim
         .ecs
@@ -68,8 +41,127 @@ pub(super) fn hint_state_value(
         .unwrap_or((0, 0));
 
     // Team unit count (`TeamData.units`).
-    let team_units = sim
-        .ecs
+    let team_units = hint_team_units(sim, team);
+    // Building counters + the first core's identity (`state.teams.get(team)`).
+    let HintBuildings {
+        conveyors,
+        cores,
+        fabricators,
+        extinguishers,
+        core_block,
+        core_capacity,
+        core_copper,
+        core_has_foundation_cost,
+        core_zone_present,
+    } = hint_building_pass(sim, content, team);
+    // `Trigger.blockInfo`-style live plan count (the player's build queue).
+    let plans = sim.player_build_plans().len() as i64;
+
+    // Campaign facts for the T4b predicates (live runtime campaign + rules).
+    let HintCampaign {
+        attack_mode,
+        serpulo,
+        team_rebuild_plans,
+        fungal_pass_saved,
+        tar_fields_captured,
+        sector_threat,
+        cores_destroyed,
+        boss,
+    } = hint_campaign_facts(sim, content, team, runtime);
+    serde_json::json!({
+        "placed": placed,
+        "events": events,
+        "player_dead": player_dead,
+        "player_has_item": player_has_item,
+        "player_can_boost": player_can_boost,
+        "player_spawned_by_core": spawned_by_core,
+        "player_payload": player_payload,
+        "team_units": team_units,
+        "enemies": enemies,
+        "wave": wave,
+        "conveyors": conveyors,
+        "plans": plans,
+        "core_block": core_block,
+        "core_copper": core_copper,
+        "core_capacity": core_capacity,
+        "core_has_foundation_cost": core_has_foundation_cost,
+        "cores": cores,
+        "fabricators": fabricators,
+        "extinguishers": extinguishers,
+        "core_zone_present": core_zone_present,
+        "cores_destroyed": cores_destroyed,
+        "boss": boss,
+        "team_rebuild_plans": team_rebuild_plans,
+        "serpulo": serpulo,
+        "fungal_pass_saved": fungal_pass_saved,
+        "tar_fields_captured": tar_fields_captured,
+        "sector_threat": sector_threat,
+        "attack_mode": attack_mode,
+    })
+}
+
+/// Building-pass counters for the hint predicates (`state.teams.get(team)`).
+struct HintBuildings {
+    conveyors: i64,
+    cores: i64,
+    fabricators: i64,
+    extinguishers: i64,
+    core_block: String,
+    core_capacity: i64,
+    core_copper: i64,
+    core_has_foundation_cost: bool,
+    core_zone_present: bool,
+}
+
+/// Campaign facts for the T4b hint predicates (live runtime campaign + rules).
+struct HintCampaign {
+    attack_mode: bool,
+    serpulo: bool,
+    team_rebuild_plans: i64,
+    fungal_pass_saved: bool,
+    tar_fields_captured: bool,
+    sector_threat: f64,
+    cores_destroyed: i64,
+    boss: serde_json::Value,
+}
+
+/// Player-unit inputs for the hint predicates (`UnitCore`/`ItemsComp`/
+/// `UnitPayloads`): `(dead, spawned_by_core, has_item, payload_count,
+/// can_boost)`.
+fn hint_player_inputs(
+    sim: &Sim,
+    content: Option<&ContentRegistry>,
+) -> (bool, bool, bool, i64, bool) {
+    use mind_core::entities::comp::unit::comp::{ItemsComp, UnitCore, UnitPayloads, UnitTypeComp};
+    match sim.player_unit() {
+        Some(entity) => {
+            let core = sim.ecs.0.get::<UnitCore>(entity);
+            let items = sim.ecs.0.get::<ItemsComp>(entity);
+            let payloads = sim.ecs.0.get::<UnitPayloads>(entity);
+            let can_boost = sim
+                .ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| content.and_then(|content| content.unit(comp.type_id)))
+                .is_some_and(|def| def.can_boost);
+            (
+                core.map(|core| core.dead).unwrap_or(false),
+                core.map(|core| core.spawned_by_core).unwrap_or(false),
+                items.and_then(|items| items.item).is_some(),
+                payloads
+                    .map(|payloads| payloads.stack.len() as i64)
+                    .unwrap_or(-1),
+                can_boost,
+            )
+        }
+        None => (true, false, false, -1, false),
+    }
+}
+
+/// Team unit count (`TeamData.units`).
+fn hint_team_units(sim: &Sim, team: u8) -> i64 {
+    use mind_core::entities::comp::TeamComp;
+    sim.ecs
         .0
         .get_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
         .map(|runtime| {
@@ -84,9 +176,12 @@ pub(super) fn hint_state_value(
                 })
                 .count() as i64
         })
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
 
-    // Building counters + the first core's identity (`state.teams.get(team)`).
+/// Building counters, the first core's identity and `core-zone` presence.
+fn hint_building_pass(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> HintBuildings {
+    use mind_core::content::BlockFlag;
     let mut conveyors = 0i64;
     let mut cores = 0i64;
     let mut fabricators = 0i64;
@@ -136,9 +231,6 @@ pub(super) fn hint_state_value(
         }
     }
 
-    // `Trigger.blockInfo`-style live plan count (the player's build queue).
-    let plans = sim.player_build_plans().len() as i64;
-
     // `Indexer.isBlockPresent(Blocks.coreZone)`; checked across the tile's
     // block/floor/overlay layers.
     let core_zone_present = content
@@ -154,7 +246,26 @@ pub(super) fn hint_state_value(
             })
         });
 
-    // Campaign facts for the T4b predicates (live runtime campaign + rules).
+    HintBuildings {
+        conveyors,
+        cores,
+        fabricators,
+        extinguishers,
+        core_block,
+        core_capacity,
+        core_copper,
+        core_has_foundation_cost,
+        core_zone_present,
+    }
+}
+
+/// Campaign facts for the T4b predicates (live runtime campaign + rules).
+fn hint_campaign_facts(
+    sim: &Sim,
+    content: Option<&ContentRegistry>,
+    team: u8,
+    runtime: Option<&CampaignRuntime>,
+) -> HintCampaign {
     let rules = mind_core::game::runtime::rules_of(&sim.ecs.0);
     let attack_mode = rules.is_some_and(|rules| rules.attack_mode);
     // `!rules.hasEnv(Env.scorching)` (`world/meta/Env.java`; the one bit table
@@ -206,36 +317,16 @@ pub(super) fn hint_state_value(
     let boss: serde_json::Value =
         serde_json::from_str(&sim.boss_json()).unwrap_or(serde_json::Value::Null);
 
-    serde_json::json!({
-        "placed": placed,
-        "events": events,
-        "player_dead": player_dead,
-        "player_has_item": player_has_item,
-        "player_can_boost": player_can_boost,
-        "player_spawned_by_core": spawned_by_core,
-        "player_payload": player_payload,
-        "team_units": team_units,
-        "enemies": enemies,
-        "wave": wave,
-        "conveyors": conveyors,
-        "plans": plans,
-        "core_block": core_block,
-        "core_copper": core_copper,
-        "core_capacity": core_capacity,
-        "core_has_foundation_cost": core_has_foundation_cost,
-        "cores": cores,
-        "fabricators": fabricators,
-        "extinguishers": extinguishers,
-        "core_zone_present": core_zone_present,
-        "cores_destroyed": cores_destroyed,
-        "boss": boss,
-        "team_rebuild_plans": team_rebuild_plans,
-        "serpulo": serpulo,
-        "fungal_pass_saved": fungal_pass_saved,
-        "tar_fields_captured": tar_fields_captured,
-        "sector_threat": sector_threat,
-        "attack_mode": attack_mode,
-    })
+    HintCampaign {
+        attack_mode,
+        serpulo,
+        team_rebuild_plans,
+        fungal_pass_saved,
+        tar_fields_captured,
+        sector_threat,
+        cores_destroyed,
+        boss,
+    }
 }
 
 impl MindSimHost {
