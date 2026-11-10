@@ -158,13 +158,7 @@ impl INode for MindInput {
             self.bridge.ui_dialog = dialog_open;
             self.refresh_game_state();
             self.refresh_top_dialog();
-            let locked = self.locks.any();
-            if self.bridge.locked != locked {
-                self.bridge.locked = locked;
-                let _ = self
-                    .bridge
-                    .with_host_mut(|host| host.set_input_locked(locked));
-            }
+            self.sync_input_locks();
         }
         for raw in translated {
             // Touch gestures drive the mobile bridge directly (plan-14 mobile
@@ -239,13 +233,7 @@ impl INode for MindInput {
         self.refresh_top_dialog();
         // `InputHandler.locked()`: the host zeroes the player axis while any
         // lock is active (PAR-0100).
-        let locked = self.locks.any();
-        if self.bridge.locked != locked {
-            self.bridge.locked = locked;
-            let _ = self
-                .bridge
-                .with_host_mut(|host| host.set_input_locked(locked));
-        }
+        self.sync_input_locks();
         for event in pending {
             self.refresh_command_mode_hold(&event);
             self.bridge.handle(&self.bindings, event);

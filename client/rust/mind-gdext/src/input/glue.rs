@@ -60,6 +60,19 @@ impl MindInput {
         );
     }
 
+    /// `InputHandler.locked()` push (PAR-0100): mirrors the live lock set onto
+    /// the bridge flag and hands it to the sim host when it changed. Runs from
+    /// `input`/`process` and from the two cutscene lock setters.
+    pub(super) fn sync_input_locks(&mut self) {
+        let locked = self.locks.any();
+        if self.bridge.locked != locked {
+            self.bridge.locked = locked;
+            let _ = self
+                .bridge
+                .with_host_mut(|host| host.set_input_locked(locked));
+        }
+    }
+
     /// Adopts `MindSimHost.selected_block()` as the live placement block.
     fn sync_selected_block(&mut self) {
         let Some(name) = self

@@ -363,8 +363,8 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return false;
         };
+        let team = self.player_team();
         self.with_host(|host| {
-            let team = self.player_team();
             let interactive = host
                 .building_team(x, y)
                 .is_some_and(|building_team| building_team == team || building_team == 0);

@@ -574,18 +574,21 @@ impl DesktopBridge {
     /// Runs `f` with the scene sim host bound, or returns `None` when the
     /// scene has none (the same `self.host.clone()` + `bind()` the call sites
     /// wrote out). The `Gd` is cloned first, so `f` may still read the other
-    /// bridge fields while the guard is alive.
+    /// bridge fields while the guard is alive. A body that itself returns
+    /// `Option` ends with `.flatten()`.
     ///
     /// `f` must not call back into Godot (a `call("…")`, a signal or a UI node
-    /// access) or re-bind the host: the guard must never be held across a
-    /// re-entry.
+    /// access): the guard must never be held across a re-entry. A nested
+    /// immutable `bind()` (a helper that binds the same host again, such as
+    /// `player_team`) is fine; a nested `bind_mut` panics.
     pub(super) fn with_host<R>(&self, f: impl FnOnce(&MindSimHost) -> R) -> Option<R> {
         let host = self.host.clone()?;
         let guard = host.bind();
         Some(f(&guard))
     }
 
-    /// [`Self::with_host`] for a mutable sim host (`bind_mut`).
+    /// [`Self::with_host`] for a mutable sim host (`bind_mut`). No nested
+    /// `bind`/`bind_mut` of the host may run inside `f`.
     pub(super) fn with_host_mut<R>(&self, f: impl FnOnce(&mut MindSimHost) -> R) -> Option<R> {
         let mut host = self.host.clone()?;
         let mut guard = host.bind_mut();
