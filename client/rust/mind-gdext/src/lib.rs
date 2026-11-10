@@ -15,6 +15,7 @@ mod content_boot;
 mod display_context;
 mod editor;
 mod fx;
+mod gdutil;
 mod hello;
 mod input;
 mod log_bridge;
