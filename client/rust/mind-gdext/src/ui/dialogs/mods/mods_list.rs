@@ -90,8 +90,7 @@ pub(super) fn mods_requires_reload() -> bool {
 /// .uniformX()`, `margin(12f)`.
 pub(super) fn mods_build_action_row() -> Gd<HBoxContainer> {
     // code-instantiated: the import/browser pair is rebuilt with `cont`.
-    let mut actions = HBoxContainer::new_alloc();
-    actions.add_theme_constant_override("separation", 0);
+    let mut actions = factory::hbox(0);
     {
         let import_icon = factory::glyph_label("add", 24, Color::WHITE);
         let mut import_button =

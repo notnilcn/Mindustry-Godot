@@ -67,7 +67,7 @@ use godot::classes::control::{FocusMode, LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
     BoxContainer, Button, CenterContainer, ColorRect, Control, HBoxContainer, Label, LineEdit,
-    MarginContainer, PanelContainer, ProgressBar, ScrollContainer, StyleBoxEmpty, VBoxContainer,
+    MarginContainer, PanelContainer, ProgressBar, ScrollContainer, StyleBoxEmpty,
 };
 use godot::global::{HorizontalAlignment, VerticalAlignment};
 use godot::prelude::*;
@@ -318,8 +318,7 @@ pub(super) fn mods_build_import_overlay(dialog: &mut MindDialog, state: &Rc<RefC
     frame.set_mouse_filter(MouseFilter::IGNORE);
     overlay.add_child(&frame);
     // code-instantiated: the overlay column (title, chooser, back bar).
-    let mut layout = VBoxContainer::new_alloc();
-    layout.add_theme_constant_override("separation", 8);
+    let mut layout = factory::vbox(8);
     layout.set_mouse_filter(MouseFilter::IGNORE);
     frame.add_child(&layout);
 
@@ -355,8 +354,7 @@ pub(super) fn mods_build_import_overlay(dialog: &mut MindDialog, state: &Rc<RefC
     panel.add_theme_stylebox_override("panel", &panel_box);
     center.add_child(&panel);
     // code-instantiated: the two chooser entries.
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 0);
+    let mut column = factory::vbox(0);
     panel.add_child(&column);
 
     // `Iconc.file` is a raw code point, not an alias.
@@ -660,8 +658,7 @@ pub(super) fn mods_refresh_state(state: &Rc<RefCell<ModsState>>, st: &mut ModsSt
     } else {
         // `search.image(Icon.zoom).padRight(8f); search.field("", rebuild).growX();`
         // code-instantiated: the search row is rebuilt with `cont` (`setup()`).
-        let mut search_row = HBoxContainer::new_alloc();
-        search_row.add_theme_constant_override("separation", 8);
+        let mut search_row = factory::hbox(8);
         search_row.add_child(&factory::glyph_label("zoom", 22, Color::WHITE));
         // code-instantiated: the search field filters the runtime mod rows.
         let mut search = factory::field("");
@@ -690,7 +687,7 @@ pub(super) fn mods_refresh_state(state: &Rc<RefCell<ModsState>>, st: &mut ModsSt
 
         // `cont.pane(table1 -> pane[0] = table1.margin(10f).top()).scrollX(false)`.
         // code-instantiated: the mod rows are data-driven from `MindMods.list()`.
-        let mut list = MindTable::new_alloc();
+        let mut list = factory::table();
         list.set_h_size_flags(SizeFlags::EXPAND_FILL);
         list.bind_mut().margin(10.0);
         // code-instantiated: the scroll pane wraps the runtime mod table.
@@ -758,7 +755,7 @@ pub(super) fn mods_ensure_root(state: &mut ModsState) -> Option<Gd<MindTable>> {
         return None;
     }
     // code-instantiated: the dialog body is rebuilt from `MindMods.list()`.
-    let mut table = MindTable::new_alloc();
+    let mut table = factory::table();
     {
         let mut bound = table.bind_mut();
         bound.grow_horizontal();

@@ -160,8 +160,7 @@ pub(super) fn mods_content_grid(content: &[VarDictionary]) -> Gd<VBoxContainer> 
     grid.set_h_size_flags(SizeFlags::EXPAND_FILL);
     grid.add_theme_constant_override("separation", 4);
     for chunk in content.chunks(14) {
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 4);
+        let mut row = factory::hbox(4);
         for entry in chunk {
             row.add_child(&mods_content_icon(entry));
         }

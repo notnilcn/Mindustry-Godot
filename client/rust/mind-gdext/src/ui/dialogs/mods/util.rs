@@ -15,42 +15,22 @@ use godot::global::{HorizontalAlignment, VerticalAlignment};
 use godot::prelude::*;
 #[cfg(test)]
 use mind_core::util::strip_colors;
-use std::{cell::RefCell, rc::Rc};
 
 // ---------------------------------------------------------------------------
 // shared helpers
 // ---------------------------------------------------------------------------
 
-/// A queued one-shot action (`Callable.call_deferred` payload).
-pub(in crate::ui::dialogs) type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
-
-/// Queues `action` for the idle phase.
-///
-/// Every controller in this batch keeps its state in an `Rc<RefCell<..>>` that
-/// its own buttons and lasting signal handlers share. A `MindMods`/`MindUi`
-/// call made while that state is borrowed can re-enter a handler synchronously
-/// (`mods_changed`, `mod_import_progress`, `confirm_result`), so the handlers
-/// queue their work here instead of borrowing recursively.
-pub(in crate::ui::dialogs) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
-    let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
-    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
-        let queued = slot.borrow_mut().take();
-        if let Some(action) = queued {
-            action();
-        }
-        Variant::nil()
-    });
-    callable.call_deferred(&[]);
-}
-
-/// Calls one `MindUi` method (`None` when the facade or method is absent).
-pub(in crate::ui::dialogs) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
-    let mut ui = kit::ui()?;
-    if !ui.has_method(method) {
-        return None;
-    }
-    Some(ui.call(method, args))
-}
+// Adopted from F1/F2: the bodies were byte-identical to the shared helpers
+// (the catalogue's batch_g rows). The old names stay because the mods children
+// import them through `super::util`; the `dict_*` wrappers below keep local
+// bodies where batch_g's scalar coercion is narrower than gdutil's.
+pub(in crate::ui::dialogs) use crate::gdutil::variant::{
+    dict_text_or as dict_string, to_bool_int_only as variant_bool, to_i64_number as variant_i64,
+    to_text_lenient as variant_string,
+};
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::defer::defer_action;
+pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::ui_call;
+pub(in crate::ui::dialogs) use crate::ui::dialogs::rules::util::{dialog_node, fmt_key};
 
 /// Opens a registered dialog through `MindUi`.
 pub(in crate::ui::dialogs) fn open_dialog(name: &str, context_json: &str) {
@@ -61,19 +41,6 @@ pub(in crate::ui::dialogs) fn open_dialog(name: &str, context_json: &str) {
             GString::from(context_json).to_variant(),
         ],
     );
-}
-
-/// `UiRoot.dialog(name)` on the `UiRoot` registry (falls back to the tree).
-pub(in crate::ui::dialogs) fn dialog_node(name: &str) -> Option<Gd<Node>> {
-    if let Some(mut root) = kit::node("/root/Spine/Ui/UiRoot")
-        && root.has_method("dialog")
-        && let Ok(node) = root
-            .call("dialog", &[GString::from(name).to_variant()])
-            .try_to::<Gd<Node>>()
-    {
-        return Some(node);
-    }
-    kit::tree_root()?.find_child(name)
 }
 
 /// The `MindMods` autoload.
@@ -94,63 +61,17 @@ pub(in crate::ui::dialogs) fn refresh_dialog_deferred(node: &Gd<Node>) {
     });
 }
 
-/// `str(value)` for one variant (empty when unconvertible).
-pub(in crate::ui::dialogs) fn variant_string(value: &Variant) -> String {
-    if let Ok(text) = value.try_to::<GString>() {
-        return text.to_string();
-    }
-    if let Ok(flag) = value.try_to::<bool>() {
-        return flag.to_string();
-    }
-    if let Ok(number) = value.try_to::<i64>() {
-        return number.to_string();
-    }
-    if let Ok(number) = value.try_to::<f64>() {
-        return number.to_string();
-    }
-    String::new()
-}
-
-/// `int(value)` for one variant.
-pub(in crate::ui::dialogs) fn variant_i64(value: &Variant) -> i64 {
-    if let Ok(number) = value.try_to::<i64>() {
-        return number;
-    }
-    if let Ok(number) = value.try_to::<f64>() {
-        return number as i64;
-    }
-    if let Ok(text) = value.try_to::<GString>() {
-        return text.to_string().trim().parse().unwrap_or(0);
-    }
-    0
-}
-
-/// `bool(value)` for one variant.
-pub(in crate::ui::dialogs) fn variant_bool(value: &Variant) -> bool {
-    if let Ok(flag) = value.try_to::<bool>() {
-        return flag;
-    }
-    if let Ok(number) = value.try_to::<i64>() {
-        return number != 0;
-    }
-    false
-}
-
-/// A dictionary value coerced to text (`str(dict.get(key, ""))`).
-pub(in crate::ui::dialogs) fn dict_string(dict: &VarDictionary, key: &str) -> String {
-    dict.get(key)
-        .map(|value| variant_string(&value))
-        .unwrap_or_default()
-}
-
-/// A dictionary value coerced to a boolean.
+// batch_g's own `dict_bool`/`dict_i64` call its *no-string / no-bool*
+// `variant_bool`/`variant_i64`; gdutil's `dict_bool_or`/`dict_i64_or` use the
+// lenient chains, so these two keep a local body (same fallback as before).
+/// A dictionary value coerced to a boolean (batch_g's `bool(value)`).
 pub(in crate::ui::dialogs) fn dict_bool(dict: &VarDictionary, key: &str, default: bool) -> bool {
     dict.get(key)
         .map(|value| variant_bool(&value))
         .unwrap_or(default)
 }
 
-/// A dictionary value coerced to an integer.
+/// A dictionary value coerced to an integer (batch_g's no-bool `int(value)`).
 pub(in crate::ui::dialogs) fn dict_i64(dict: &VarDictionary, key: &str, default: i64) -> i64 {
     dict.get(key)
         .map(|value| variant_i64(&value))
@@ -179,15 +100,6 @@ pub(in crate::ui::dialogs) fn bt(key: &str) -> String {
 /// `MindWidgets.markup(key)`: the bundle string translated to BBCode.
 pub(in crate::ui::dialogs) fn bm(key: &str) -> String {
     kit::tm(key).to_string()
-}
-
-/// `Bundle.format` with `{0}`-style substitution (`_fmt`).
-pub(in crate::ui::dialogs) fn fmt_key(key: &str, args: &[&str]) -> String {
-    let mut result = bt(key);
-    for (index, arg) in args.iter().enumerate() {
-        result = result.replace(&format!("{{{index}}}"), arg);
-    }
-    result
 }
 
 /// A solid `StyleBoxFlat` (`_flat`).

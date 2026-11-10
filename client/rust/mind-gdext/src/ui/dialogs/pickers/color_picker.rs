@@ -4,8 +4,9 @@
 //! The color picker dialog controller. Filled by S10 (docs/PLANS).
 //! Upstream: ui/dialogs/ColorPicker.java
 
+use crate::gdutil::variant::{to_bool_int_only, to_text_lenient};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::mods::util::{bt, variant_bool, variant_string};
+use crate::ui::dialogs::mods::util::bt;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, styles};
 use godot::builtin::Side;
@@ -120,13 +121,13 @@ impl DialogController for ColorPickerDialog {
         // `show_picker(color, alpha, consumer)` has no native equivalent; the
         // optional context keys carry the same seed values (see module docs).
         if let Some(value) = dialog.context_value("color") {
-            let text = variant_string(&value);
+            let text = to_text_lenient(&value);
             if let Some(color) = parse_html_color(&text) {
                 self.set_color(color);
             }
         }
         if let Some(value) = dialog.context_value("alpha") {
-            self.state.borrow_mut().alpha = variant_bool(&value);
+            self.state.borrow_mut().alpha = to_bool_int_only(&value);
         }
         build_picker(dialog, &self.state);
     }
@@ -247,7 +248,7 @@ fn build_picker(dialog: &mut MindDialog, state: &Rc<RefCell<PickerState>>) {
         let hex_callable = Callable::from_fn("picker_hex", move |args: &[&Variant]| {
             let text = args
                 .first()
-                .map(|value| variant_string(value))
+                .map(|value| to_text_lenient(value))
                 .unwrap_or_default();
             {
                 let mut st = state_for_hex.borrow_mut();
@@ -267,7 +268,7 @@ fn build_picker(dialog: &mut MindDialog, state: &Rc<RefCell<PickerState>>) {
     state.borrow_mut().hex = Some(hex);
 
     dialog.clear_buttons();
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     // code-instantiated: `@ok` (`Icon.ok`) applies the picked colour.
     let mut ok = factory::icon_button(
         "ok",
