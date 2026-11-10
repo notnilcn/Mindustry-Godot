@@ -5,6 +5,85 @@
 
 use super::*;
 
+/// Typed field reads over one parsed JSON command payload (H06).
+///
+/// Both JSON entry points ([`MindSimHost::apply_sim_command_json`] and
+/// [`MindSimHost::submit_player_command_json`]) share these. Each accessor
+/// reproduces the exact `serde_json` chain its call sites used, so the accepted
+/// shapes and defaults are unchanged (`as_u64` + `as` for the content ids,
+/// `as_i64` + `try_from` for the tile coordinates).
+struct JsonArgs<'a>(&'a serde_json::Value);
+
+impl<'a> JsonArgs<'a> {
+    /// `get(k).and_then(|v| v.as_i64()).and_then(|v| i16::try_from(v).ok())`.
+    fn i16(&self, k: &str) -> Option<i16> {
+        self.0
+            .get(k)
+            .and_then(|v| v.as_i64())
+            .and_then(|v| i16::try_from(v).ok())
+    }
+
+    /// `get(k).and_then(|v| v.as_i64())`.
+    fn i64(&self, k: &str) -> Option<i64> {
+        self.0.get(k).and_then(|v| v.as_i64())
+    }
+
+    /// `get(k).and_then(|v| v.as_u64()).unwrap_or(default) as u16`.
+    fn u16_or(&self, k: &str, default: u64) -> u16 {
+        self.0.get(k).and_then(|v| v.as_u64()).unwrap_or(default) as u16
+    }
+
+    /// `get(k).and_then(|v| v.as_u64()).unwrap_or(default) as u8`.
+    fn u8_or(&self, k: &str, default: u64) -> u8 {
+        self.0.get(k).and_then(|v| v.as_u64()).unwrap_or(default) as u8
+    }
+
+    /// `get(k).and_then(|v| v.as_i64()).unwrap_or(default).clamp(0, 3) as i8`
+    /// (the `rotation` quarter-turn field).
+    fn rotation(&self, k: &str, default: i64) -> i8 {
+        self.0
+            .get(k)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(default)
+            .clamp(0, 3) as i8
+    }
+
+    /// `get(k).and_then(|v| v.as_f64())`.
+    fn f64(&self, k: &str) -> Option<f64> {
+        self.0.get(k).and_then(|v| v.as_f64())
+    }
+
+    /// `get(k).and_then(|v| v.as_str())`.
+    fn str(&self, k: &str) -> Option<&'a str> {
+        self.0.get(k).and_then(|v| v.as_str())
+    }
+
+    /// `get(k).and_then(|v| v.as_bool())`.
+    fn bool(&self, k: &str) -> Option<bool> {
+        self.0.get(k).and_then(|v| v.as_bool())
+    }
+
+    /// `get(k).and_then(|v| v.as_bool()).unwrap_or(default)`.
+    fn bool_or(&self, k: &str, default: bool) -> bool {
+        self.0.get(k).and_then(|v| v.as_bool()).unwrap_or(default)
+    }
+
+    /// `get(k).and_then(|v| v.as_array()).map(|rows| rows.iter()
+    /// .filter_map(|row| row.as_i64().map(|id| id as i32)).collect())
+    /// .unwrap_or_default()`.
+    fn i32_list(&self, k: &str) -> smallvec::SmallVec<[i32; 32]> {
+        self.0
+            .get(k)
+            .and_then(|v| v.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.as_i64().map(|id| id as i32))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 impl MindSimHost {
     /// Whether `(x, y)` now holds `block` anchored there: the tile's block id
     /// matches and the building entity's center tile is `(x, y)` (`T7`, the
@@ -17,9 +96,7 @@ impl MindSimHost {
                 .grid
                 .entity_at(pos)
                 .and_then(|entity| {
-                    self.sim
-                        .ecs
-                        .0
+                    self.world()
                         .get::<mind_core::entities::comp::Building>(entity)
                 })
                 .is_some_and(|building| building.tile == pos)
@@ -81,7 +158,7 @@ impl MindSimHost {
                 return false;
             }
         };
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             log::warn!("place_block: ({x}, {y}) does not fit in i16");
             return false;
         };
@@ -91,8 +168,7 @@ impl MindSimHost {
         // report success when the block really sits anchored at `(x, y)`.
         let placed = applied && self.tile_holds_block(x, y, id);
         if placed {
-            self.emit_state();
-            self.emit_world_changed();
+            self.mark_world_changed();
         }
         placed
     }
@@ -100,14 +176,13 @@ impl MindSimHost {
     /// Breaks the block at `(x, y)` immediately (API path; MCP §7c step 5).
     #[func]
     pub fn break_block(&mut self, x: i32, y: i32) -> bool {
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             log::warn!("break_block: ({x}, {y}) does not fit in i16");
             return false;
         };
         let applied = self.apply_command(Command::Break { x, y });
         if applied {
-            self.emit_state();
-            self.emit_world_changed();
+            self.mark_world_changed();
         }
         applied
     }
@@ -126,7 +201,7 @@ impl MindSimHost {
                 return false;
             }
         };
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             log::warn!("place_block_rot: ({x}, {y}) does not fit in i16");
             return false;
         };
@@ -152,7 +227,7 @@ impl MindSimHost {
             log::debug!("valid_place_preview: unknown block `{name}`");
             return false;
         };
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         self.sim
@@ -175,35 +250,23 @@ impl MindSimHost {
             log::warn!("apply_sim_command_json: invalid JSON");
             return false;
         };
-        let op = value.get("op").and_then(|v| v.as_str()).unwrap_or("");
-        let coord = |key: &str| {
-            value
-                .get(key)
-                .and_then(|v| v.as_i64())
-                .and_then(|v| i16::try_from(v).ok())
-        };
-        let (x, y) = (coord("x"), coord("y"));
+        let args = JsonArgs(&value);
+        let op = args.str("op").unwrap_or("");
+        let (x, y) = (args.i16("x"), args.i16("y"));
         // Optional issuing player: `Some` routes place/break through the
         // player unit's build queue like live input (PAR-0098).
-        let player = value
-            .get("player")
-            .and_then(|v| v.as_i64())
-            .map(|id| id as i32);
+        let player = args.i64("player").map(|id| id as i32);
         let command = match op {
             "place" => {
                 let (Some(x), Some(y)) = (x, y) else {
                     log::warn!("apply_sim_command_json: place needs x,y");
                     return false;
                 };
-                let block = value.get("block").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                let rotation = value
-                    .get("rotation")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-                    .clamp(0, 3) as i8;
+                let block = args.u16_or("block", 0);
+                let rotation = args.rotation("rotation", 0);
                 // The staged team (when given) drives the pre-check so enemy
                 // staging works; otherwise the live default team is used.
-                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                let team = args.u8_or("team", 0);
                 let check_team = if value.get("team").is_some() {
                     team
                 } else {
@@ -239,18 +302,10 @@ impl MindSimHost {
                 SimCommand::Break { x, y, player }
             }
             "spawn_unit" => {
-                let unit = value.get("unit").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(1) as u8;
-                let fx = value
-                    .get("px")
-                    .and_then(|v| v.as_f64())
-                    .or_else(|| x.map(f64::from))
-                    .unwrap_or(0.0);
-                let fy = value
-                    .get("py")
-                    .and_then(|v| v.as_f64())
-                    .or_else(|| y.map(f64::from))
-                    .unwrap_or(0.0);
+                let unit = args.u16_or("unit", 0);
+                let team = args.u8_or("team", 1);
+                let fx = args.f64("px").or_else(|| x.map(f64::from)).unwrap_or(0.0);
+                let fy = args.f64("py").or_else(|| y.map(f64::from)).unwrap_or(0.0);
                 SimCommand::SpawnUnit {
                     unit,
                     x: fx as f32,
@@ -259,29 +314,20 @@ impl MindSimHost {
                 }
             }
             "unit_command" => {
-                let units: smallvec::SmallVec<[i32; 32]> = value
-                    .get("units")
-                    .and_then(|v| v.as_array())
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|row| row.as_i64().map(|id| id as i32))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let units: smallvec::SmallVec<[i32; 32]> = args.i32_list("units");
                 if units.is_empty() {
                     log::warn!("apply_sim_command_json: unit_command without units");
                     return false;
                 }
-                let command = value.get("command").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let command = args.u16_or("command", 0);
                 // `unit_command` targets: `x`/`y` are the raw wire pair (world
                 // pixels for a move, or the lossless `pack_wire_target` pair);
                 // the optional `target_unit` key packs an EntitySeq attack
                 // target for recipes (H03 blocker #2: ids do not fit an f32).
-                let fx = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let fy = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let (x, y) = value
-                    .get("target_unit")
-                    .and_then(|v| v.as_i64())
+                let fx = args.f64("x").unwrap_or(0.0);
+                let fy = args.f64("y").unwrap_or(0.0);
+                let (x, y) = args
+                    .i64("target_unit")
                     .map(|id| {
                         mind_core::sim::pack_wire_target(
                             &mind_core::input::action::CommandTarget::Unit(id as i32),
@@ -294,29 +340,15 @@ impl MindSimHost {
                     x,
                     y,
                     // `queue` (I01 T13): append instead of replace.
-                    queue: value
-                        .get("queue")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    queue: args.bool_or("queue", false),
                 }
             }
             // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in
             // `content_list("unitStance")` order, `enabled`.
             "unit_stance" => {
-                let units: smallvec::SmallVec<[i32; 32]> = value
-                    .get("units")
-                    .and_then(|v| v.as_array())
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|row| row.as_i64().map(|id| id as i32))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let stance = value.get("stance").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                let enabled = value
-                    .get("enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
+                let units: smallvec::SmallVec<[i32; 32]> = args.i32_list("units");
+                let stance = args.u16_or("stance", 0);
+                let enabled = args.bool_or("enabled", true);
                 SimCommand::UnitStance {
                     units,
                     stance,
@@ -325,7 +357,7 @@ impl MindSimHost {
             }
             // `InputHandler.unitControl`/`unitClear` (G01 T9).
             "unit_control" => SimCommand::UnitControl {
-                unit: value.get("unit").and_then(|v| v.as_i64()).map(|v| v as i32),
+                unit: args.i64("unit").map(|v| v as i32),
             },
             "unit_clear" => SimCommand::UnitClear,
             other => {
@@ -353,33 +385,24 @@ impl MindSimHost {
             log::warn!("submit_player_command_json: invalid JSON");
             return false;
         };
-        let op = value.get("op").and_then(|v| v.as_str()).unwrap_or("");
-        let coord = |key: &str| {
-            value
-                .get(key)
-                .and_then(|v| v.as_i64())
-                .and_then(|v| i16::try_from(v).ok())
-        };
+        let args = JsonArgs(&value);
+        let op = args.str("op").unwrap_or("");
         let command = match op {
             "place" => {
-                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                let (Some(x), Some(y)) = (args.i16("x"), args.i16("y")) else {
                     return false;
                 };
                 SimCommand::Place {
                     x,
                     y,
-                    block: value.get("block").and_then(|v| v.as_u64()).unwrap_or(0) as u16,
-                    rotation: value
-                        .get("rotation")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0)
-                        .clamp(0, 3) as i8,
-                    team: value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
+                    block: args.u16_or("block", 0),
+                    rotation: args.rotation("rotation", 0),
+                    team: args.u8_or("team", 0),
                     player: Some(0),
                 }
             }
             "break" => {
-                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                let (Some(x), Some(y)) = (args.i16("x"), args.i16("y")) else {
                     return false;
                 };
                 SimCommand::Break {
@@ -390,12 +413,12 @@ impl MindSimHost {
             }
             "configure" => {
                 use mind_core::determinism::ConfigValue;
-                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                let (Some(x), Some(y)) = (args.i16("x"), args.i16("y")) else {
                     return false;
                 };
-                let config = if let Some(name) = value.get("content").and_then(|v| v.as_str()) {
+                let config = if let Some(name) = args.str("content") {
                     ConfigValue::Content(name.to_string())
-                } else if let Some(number) = value.get("number").and_then(|v| v.as_f64()) {
+                } else if let Some(number) = args.f64("number") {
                     // `to_sim_config` (`command_emit.rs:268-277`): integral in
                     // i32 range -> Int, otherwise Float.
                     if number.fract() == 0.0
@@ -406,9 +429,9 @@ impl MindSimHost {
                     } else {
                         ConfigValue::Float(number as f32)
                     }
-                } else if let Some(flag) = value.get("bool").and_then(|v| v.as_bool()) {
+                } else if let Some(flag) = args.bool("bool") {
                     ConfigValue::Bool(flag)
-                } else if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                } else if let Some(text) = args.str("text") {
                     ConfigValue::Text(text.to_string())
                 } else {
                     log::warn!("submit_player_command_json: configure needs a value");
@@ -421,28 +444,17 @@ impl MindSimHost {
                 }
             }
             "rotate" => {
-                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                let (Some(x), Some(y)) = (args.i16("x"), args.i16("y")) else {
                     return false;
                 };
                 SimCommand::Rotate {
                     x,
                     y,
-                    direction: value
-                        .get("direction")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    direction: args.bool_or("direction", false),
                 }
             }
             "delete_plans" => {
-                let positions: smallvec::SmallVec<[i32; 32]> = value
-                    .get("positions")
-                    .and_then(|v| v.as_array())
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|row| row.as_i64().map(|id| id as i32))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let positions: smallvec::SmallVec<[i32; 32]> = args.i32_list("positions");
                 SimCommand::DeletePlans { positions }
             }
             other => {
