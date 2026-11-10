@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::combat::targeting::UnitSort;
@@ -455,6 +456,22 @@ pub struct AmmoEntry {
     pub bullet: BulletId,
     /// Remaining amount (ammo units).
     pub amount: i32,
+}
+
+/// Borrows a turret entity's [`TurretState`] component.
+pub(super) fn turret(world: &World, e: Entity) -> Option<&TurretState> {
+    world.get::<TurretState>(e)
+}
+
+/// Mutable [`turret`] for read-modify-write callers that keep the component in
+/// place. Production turret paths `take` the state across `update_turret`, so
+/// only the tests use it today.
+#[cfg(test)]
+pub(super) fn turret_mut(world: &mut World, e: Entity) -> Option<&mut TurretState> {
+    use bevy_ecs::change_detection::Mut;
+    // `Mut::into_inner` marks the component changed, like the `Mut` guard the
+    // call sites used before the helper.
+    world.get_mut::<TurretState>(e).map(Mut::into_inner)
 }
 
 impl TurretState {

@@ -24,7 +24,7 @@ use super::math::{
 use super::targeting::{
     bullet, find_target, shoot, target_position, validate_target, within_target_range,
 };
-use super::{PendingShot, TurretAmmo, TurretConfig, TurretKind, TurretState};
+use super::{PendingShot, TurretAmmo, TurretConfig, TurretKind, TurretState, turret};
 
 // ---- update engine ----
 
@@ -39,8 +39,8 @@ pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
         .filter(|entity| entity.contains::<TurretState>())
         .map(|entity| entity.id())
         .collect();
-    for turret in turrets {
-        if ctx.world.get::<TurretState>(turret).is_none() {
+    for e in turrets {
+        if turret(ctx.world, e).is_none() {
             continue;
         }
         // `Building.update()`: `if(enabled || !block.noUpdateDisabled)
@@ -49,16 +49,16 @@ pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
         // without a `Building` component (harness turrets) still update.
         if ctx
             .world
-            .get::<crate::entities::comp::Building>(turret)
+            .get::<crate::entities::comp::Building>(e)
             .is_some_and(|building| !building.enabled)
         {
             continue;
         }
-        let Some(mut state) = ctx.world.entity_mut(turret).take::<TurretState>() else {
+        let Some(mut state) = ctx.world.entity_mut(e).take::<TurretState>() else {
             continue;
         };
-        update_turret(ctx, turret, &mut state, &targets);
-        ctx.world.entity_mut(turret).insert(state);
+        update_turret(ctx, e, &mut state, &targets);
+        ctx.world.entity_mut(e).insert(state);
     }
 }
 

@@ -4,6 +4,7 @@
 //! Tests for the turret state machine, ammo and shooting pipeline.
 //! Upstream: none (port-only; turret tests)
 
+use super::types::{turret as state_of, turret_mut as state_of_mut};
 use super::*;
 use crate::combat::harness::CombatHarness;
 use crate::content::registries::sound_meta::SoundId;
@@ -77,11 +78,7 @@ fn item_ammo_acceptance_and_merge() {
     assert!(!accept_item(&harness.build.world, turret, lead));
     handle_item(&mut harness.build.world, turret, copper);
     handle_item(&mut harness.build.world, turret, copper);
-    let state = harness
-        .build
-        .world
-        .get::<TurretState>(turret)
-        .expect("state");
+    let state = state_of(&harness.build.world, turret).expect("state");
     assert_eq!(state.ammo.len(), 1, "same item merges into one entry");
     assert_eq!(state.ammo[0].amount, 4, "duo copper ammoMultiplier 2 x2");
     assert!(has_ammo(&harness.build.world, turret));
@@ -95,17 +92,12 @@ fn ammo_consumption_decrements_total() {
     for _ in 0..5 {
         handle_item(&mut harness.build.world, turret, copper);
     }
-    let before = harness
-        .build
-        .world
-        .get::<TurretState>(turret)
-        .unwrap()
-        .total_ammo;
+    let before = state_of(&harness.build.world, turret).unwrap().total_ammo;
     let hp_before = harness.building_health_at(10, 8);
     for _ in 0..40 {
         harness.tick();
     }
-    let state = harness.build.world.get::<TurretState>(turret).unwrap();
+    let state = state_of(&harness.build.world, turret).unwrap();
     assert!(state.total_ammo < before, "ammo consumed");
     assert!(state.total_shots > 0, "turret fired");
     assert!(
@@ -129,17 +121,11 @@ fn coolant_speeds_reload() {
     for _ in 0..10 {
         harness.tick();
     }
-    let without = harness
-        .build
-        .world
-        .get::<TurretState>(turret)
+    let without = state_of(&harness.build.world, turret)
         .unwrap()
         .reload_counter;
     assert!(without > 0.0, "reload accumulated without a target");
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .unwrap()
         .reload_counter = 0.0;
     harness
@@ -151,10 +137,7 @@ fn coolant_speeds_reload() {
     for _ in 0..10 {
         harness.tick();
     }
-    let with = harness
-        .build
-        .world
-        .get::<TurretState>(turret)
+    let with = state_of(&harness.build.world, turret)
         .unwrap()
         .reload_counter;
     assert!(with > without, "coolant boosted reload: {with} > {without}");
@@ -174,12 +157,7 @@ fn power_gate_blocks_until_powered() {
         harness.tick();
     }
     assert_eq!(
-        harness
-            .build
-            .world
-            .get::<TurretState>(turret)
-            .unwrap()
-            .total_shots,
+        state_of(&harness.build.world, turret).unwrap().total_shots,
         0,
         "no shots without power"
     );
@@ -193,13 +171,7 @@ fn power_gate_blocks_until_powered() {
         harness.tick();
     }
     assert!(
-        harness
-            .build
-            .world
-            .get::<TurretState>(turret)
-            .unwrap()
-            .total_shots
-            > 0,
+        state_of(&harness.build.world, turret).unwrap().total_shots > 0,
         "shoots once powered"
     );
 }
@@ -222,14 +194,7 @@ fn cone_gate_delays_first_shot_until_aligned() {
     let mut fired_tick = None;
     for tick in 1..=30 {
         harness.tick();
-        if harness
-            .build
-            .world
-            .get::<TurretState>(turret)
-            .unwrap()
-            .total_shots
-            > 0
-        {
+        if state_of(&harness.build.world, turret).unwrap().total_shots > 0 {
             fired_tick = Some(tick);
             break;
         }
@@ -241,10 +206,7 @@ fn cone_gate_delays_first_shot_until_aligned() {
 fn activation_timer_blocks_shooting() {
     let mut harness = CombatHarness::new(32, 16, 7);
     let (turret, _) = turret_at(&mut harness, "test-item");
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .unwrap()
         .activation_timer = 5.0;
     let copper = harness.content().item_id("copper").expect("copper");
@@ -255,12 +217,7 @@ fn activation_timer_blocks_shooting() {
         harness.tick();
     }
     assert_eq!(
-        harness
-            .build
-            .world
-            .get::<TurretState>(turret)
-            .unwrap()
-            .total_shots,
+        state_of(&harness.build.world, turret).unwrap().total_shots,
         0,
         "activation timer blocks fire"
     );
@@ -291,7 +248,7 @@ fn payload_ammo_accept_and_consume() {
     for _ in 0..80 {
         harness.tick();
     }
-    let state = harness.build.world.get::<TurretState>(turret).unwrap();
+    let state = state_of(&harness.build.world, turret).unwrap();
     assert!(state.total_shots > 0, "payload turret fired");
     assert!(state.total_ammo < 3, "payload ammo consumed");
     assert!(
@@ -326,7 +283,7 @@ fn build_turret_advances_construction() {
         .expect("construct state")
         .progress;
     assert!(progress > 0.0, "build turret advanced the construct");
-    let state = harness.build.world.get::<TurretState>(turret).unwrap();
+    let state = state_of(&harness.build.world, turret).unwrap();
     assert!(state.build_warmup > 0.0, "build warmup ramped");
 }
 
@@ -485,13 +442,7 @@ fn hail_shot_emits_its_own_sound() {
         harness.tick();
     }
     assert!(
-        harness
-            .build
-            .world
-            .get::<TurretState>(turret)
-            .unwrap()
-            .total_shots
-            > 0,
+        state_of(&harness.build.world, turret).unwrap().total_shots > 0,
         "hail fired"
     );
     let mut matched = 0;
@@ -616,7 +567,7 @@ fn lancer_charges_before_its_delayed_shot() {
         .spawn_test_turret("lancer", tx, ty, 1)
         .expect("lancer");
     {
-        let mut state = harness.build.world.get_mut::<TurretState>(turret).unwrap();
+        let state = state_of_mut(&mut harness.build.world, turret).unwrap();
         // `reload = 80` (`Blocks.java:3586`): start full so the first tick
         // queues the charged shot; aim already on the wall (angle 0) and a
         // zeroed retarget timer acquire it immediately.
@@ -633,10 +584,7 @@ fn lancer_charges_before_its_delayed_shot() {
     assert_eq!(state.charge, 0.0);
     // Freeze probe: aim the turret away; `shouldTurn()` is false while
     // charging, so the rotation must not follow the target.
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .unwrap()
         .rotation = 90.0;
     let mut charge_mid = 0.0f32;

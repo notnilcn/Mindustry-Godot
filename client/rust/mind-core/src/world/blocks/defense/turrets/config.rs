@@ -430,6 +430,16 @@ pub(super) fn apply_block_coolant(
         });
 }
 
+/// The `BulletType` fields every ammo table entry copies: `(ammoMultiplier,
+/// rangeChange, minRangeChange)`. A bullet missing from the registry keeps the
+/// M5 defaults (`1`, `0`, `0`), matching the old per-field `unwrap_or`s.
+fn ammo_meta(def: Option<&BulletDef>) -> (f32, f32, f32) {
+    let mult = def.map(|d| d.ammo_multiplier).unwrap_or(1.0);
+    let range_change = def.map(|d| d.range_change).unwrap_or(0.0);
+    let min_range_change = def.map(|d| d.min_range_change).unwrap_or(0.0);
+    (mult, range_change, min_range_change)
+}
+
 pub(super) fn config_for_inner(
     content: &ContentRegistry,
     name: &str,
@@ -440,26 +450,24 @@ pub(super) fn config_for_inner(
     let bullet = |n: &str| names.get(n).copied();
     let item_ammo = |item_name: &str, bullet_name: &str| -> Option<ItemAmmo> {
         let id = bullet(bullet_name)?;
-        let def = content.bullet(id);
-        let mult = def.map(|d| d.ammo_multiplier as i32).unwrap_or(1);
+        let (mult, range_change, min_range_change) = ammo_meta(content.bullet(id));
         Some(ItemAmmo {
             item: item(item_name)?,
             bullet: id,
-            ammo_multiplier: mult.max(1),
-            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
-            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
+            ammo_multiplier: (mult as i32).max(1),
+            range_change,
+            min_range_change,
         })
     };
     let liquid_ammo = |liquid_name: &str, bullet_name: &str| -> Option<LiquidAmmo> {
         let id = bullet(bullet_name)?;
-        let def = content.bullet(id);
-        let mult = def.map(|d| d.ammo_multiplier).unwrap_or(1.0);
+        let (mult, range_change, min_range_change) = ammo_meta(content.bullet(id));
         Some(LiquidAmmo {
             liquid: liquid(liquid_name)?,
             bullet: id,
             ammo_multiplier: mult.max(0.001),
-            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
-            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
+            range_change,
+            min_range_change,
         })
     };
 
@@ -696,12 +704,12 @@ pub(super) fn config_for_inner(
         }
         "test-power" => {
             let bullet = bullet("fuse")?;
-            let def = content.bullet(bullet);
+            let (_, range_change, min_range_change) = ammo_meta(content.bullet(bullet));
             Some(TurretConfig {
                 ammo: TurretAmmo::Power(PowerAmmo {
                     bullet,
-                    range_change: def.map(|d| d.range_change).unwrap_or(0.0),
-                    min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
+                    range_change,
+                    min_range_change,
                 }),
                 liquid_consumed: 1.0 / 60.0,
                 range: 120.0,
