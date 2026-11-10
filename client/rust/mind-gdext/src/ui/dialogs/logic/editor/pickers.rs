@@ -21,8 +21,7 @@ pub(super) fn picker_popup(dialog: &mut MindDialog) -> (Gd<PopupPanel>, Gd<VBoxC
     let mut popup = PopupPanel::new_alloc();
     dialog.base_mut().add_child(&popup);
     connect_popup_free(&popup);
-    let mut root = VBoxContainer::new_alloc();
-    root.add_theme_constant_override("separation", 2);
+    let root = factory::vbox(2);
     popup.add_child(&root);
     (popup, root)
 }
@@ -381,8 +380,7 @@ pub(super) fn godot_num1(value: f64) -> String {
 pub(super) fn picker_tabs(root: &Gd<VBoxContainer>, icons: &[&str], tables: Vec<Gd<Control>>) {
     let mut root = root.clone();
     // code-instantiated: the `squareTogglei` tab row and its page stack.
-    let mut tabs = HBoxContainer::new_alloc();
-    tabs.add_theme_constant_override("separation", 0);
+    let mut tabs = factory::hbox(0);
     root.add_child(&tabs);
     let mut holder = VBoxContainer::new_alloc();
     holder.set_v_size_flags(SizeFlags::EXPAND_FILL);
@@ -659,8 +657,7 @@ pub(super) fn open_sound_picker(
     let dialog_gd = dialog.to_gd();
     let (mut popup, mut root) = picker_popup(dialog);
     // code-instantiated: the category rail + sound list of the sound browser.
-    let mut body = HBoxContainer::new_alloc();
-    body.add_theme_constant_override("separation", 4);
+    let mut body = factory::hbox(4);
     root.add_child(&body);
     let mut tabs = VBoxContainer::new_alloc();
     tabs.set_custom_minimum_size(Vector2::new(160.0, 0.0));
@@ -669,8 +666,7 @@ pub(super) fn open_sound_picker(
     scroll.set_horizontal_scroll_mode(ScrollMode::DISABLED);
     scroll.set_custom_minimum_size(Vector2::new(450.0, 420.0));
     body.add_child(&scroll);
-    let mut list = VBoxContainer::new_alloc();
-    list.add_theme_constant_override("separation", 3);
+    let list = factory::vbox(3);
     scroll.add_child(&list);
     let selected: Rc<RefCell<String>> = Rc::new(RefCell::new(current_category));
     let on_pick = picker_handler(&dialog_gd, state, &popup, index, field_index, "@sfx-");
@@ -748,11 +744,7 @@ pub(super) fn rebuild_sound_list(
     on_pick: &PickFn,
 ) {
     let mut list = list.clone();
-    for child in list.get_children().iter_shared() {
-        let mut child = child.clone();
-        list.remove_child(&child);
-        child.queue_free();
-    }
+    kit::clear_children(&mut list);
     let category = selected.borrow().clone();
     let shown: Vec<SoundEntry> = if category == "all" {
         choices.to_vec()

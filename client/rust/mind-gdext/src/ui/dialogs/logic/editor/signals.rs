@@ -53,18 +53,5 @@ pub(super) fn on_pressed<F>(
     });
 }
 
-/// A queued one-shot action (`Callable.call_deferred` payload).
-pub(super) type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
-
-/// A `Callable` that queues `action` for the idle phase (`call_deferred`).
-pub(super) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
-    let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
-    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
-        let queued = slot.borrow_mut().take();
-        if let Some(action) = queued {
-            action();
-        }
-        Variant::nil()
-    });
-    callable.call_deferred(&[]);
-}
+// Adopted from F2: the local body was byte-identical to the shared helper.
+pub(super) use crate::ui::dialogs::common::defer::defer_action;

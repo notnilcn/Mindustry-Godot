@@ -41,11 +41,7 @@ pub(super) fn rebuild_list(dialog: &mut MindDialog, state: &Rc<RefCell<LogicStat
     let Some(mut list) = list else {
         return;
     };
-    for child in list.get_children().iter_shared() {
-        let mut child = child.clone();
-        list.remove_child(&child);
-        child.queue_free();
-    }
+    kit::clear_children(&mut list);
     {
         let mut st = state.borrow_mut();
         st.row_nodes.clear();
@@ -93,8 +89,7 @@ pub(super) fn statement_row(
     frame.set_mouse_filter(MouseFilter::PASS);
     frame.add_theme_stylebox_override("panel", &white_pane_box(state, color));
     elem.add_child(&frame);
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 0);
+    let mut column = factory::vbox(0);
     column.set_mouse_filter(MouseFilter::PASS);
     frame.add_child(&column);
 
@@ -109,8 +104,7 @@ pub(super) fn statement_row(
     }
     header.add_theme_stylebox_override("panel", &header_box);
     column.add_child(&header);
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 0);
+    let mut box_ = factory::hbox(0);
     box_.set_mouse_filter(MouseFilter::IGNORE);
     header.add_child(&box_);
     let mut hbox: Gd<Container> = box_.clone().upcast();

@@ -111,12 +111,10 @@ pub(super) fn open_add_dialog(
     let mut panel = PanelContainer::new_alloc();
     panel.add_theme_stylebox_override("panel", &button_box(state));
     add_any(&cont, &panel);
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 4);
+    let mut column = factory::vbox(4);
     panel.add_child(&column);
     // code-instantiated: the `Icon.zoom` search row of the add menu.
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 8);
+    let mut search_row = factory::hbox(8);
     column.add_child(&search_row);
     let glyph = factory::glyph_label("zoom", 22, Color::WHITE);
     search_row.add_child(&glyph);
@@ -128,8 +126,7 @@ pub(super) fn open_add_dialog(
     scroll.set_horizontal_scroll_mode(ScrollMode::DISABLED);
     scroll.set_v_size_flags(SizeFlags::EXPAND_FILL);
     column.add_child(&scroll);
-    let mut list = VBoxContainer::new_alloc();
-    list.add_theme_constant_override("separation", 0);
+    let list = factory::vbox(0);
     scroll.add_child(&list);
     let matched: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let rebuild: Rc<dyn Fn()> = {
@@ -197,11 +194,7 @@ pub(super) fn rebuild_add_list(
     search_row: &Gd<HBoxContainer>,
 ) {
     let mut list = list.clone();
-    for child in list.get_children().iter_shared() {
-        let mut child = child.clone();
-        list.remove_child(&child);
-        child.queue_free();
-    }
+    kit::clear_children(&mut list);
     let text = search.get_text().to_string().to_lowercase();
     let mut first_match: Option<String> = None;
     let mut sections: Vec<(String, Gd<GridContainer>)> = Vec::new();
@@ -288,8 +281,7 @@ pub(super) fn add_category_header(category: &str) -> Gd<Control> {
     margin.add_theme_constant_override("margin_right", 5);
     margin.add_theme_constant_override("margin_top", 10);
     margin.add_theme_constant_override("margin_bottom", 5);
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 0);
+    let mut row = factory::hbox(0);
     margin.add_child(&row);
     let icon = category_icon(category);
     if !icon.is_empty() {
