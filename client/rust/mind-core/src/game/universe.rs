@@ -13,14 +13,21 @@
 //! deterministic (HLP §2.4, plan 12 deviation 11); `universe::update_global`
 //! replaces plan 05's `UniverseGlobal` stub system.
 
+use std::path::PathBuf;
+
 use indexmap::IndexMap;
 
-use super::planet::{Planet, SectorNeighborhood};
+use super::campaign_rules::CampaignRules;
+use super::planet::{EmptyNeighborhood, Planet, SectorNeighborhood};
 use super::rules::{BASE_INVASION_CHANCE, INVASION_GRACE_PERIOD, TURN_DURATION_TICKS};
+use super::saves::Saves;
 use super::schematics::Schematics;
 use super::sector::Sector;
 use super::stats::CampaignStats;
 use crate::content::{ContentRegistry, PlanetId};
+use crate::io::IoError;
+use crate::io::fs::Paths;
+use crate::io::json::content_serde::SectorKey;
 use crate::io::settings::SettingsStore;
 use crate::random::JavaRandom;
 
@@ -213,7 +220,8 @@ pub fn file_stem(path: &str) -> &str {
 /// `max` recomputation from the launcher's stored items minus the schematic
 /// cost, or the destination preset loadout when the destination forbids a
 /// launch loadout) and whether the launcher can pay `requirements +
-/// resources` (`valid`).
+/// resources` (`valid`). Delegates to [`launch_plan_full`], which returns the
+/// same two values plus the `total` charge.
 #[allow(clippy::too_many_arguments)]
 pub fn launch_plan(
     stored: &IndexMap<String, i32>,
@@ -225,6 +233,54 @@ pub fn launch_plan(
     preset_loadout: &IndexMap<String, i32>,
     all_items: &[String],
 ) -> (IndexMap<String, i32>, bool) {
+    let plan = launch_plan_full(
+        stored,
+        requirements,
+        resources,
+        capacity,
+        max,
+        allow_launch_loadout,
+        preset_loadout,
+        all_items,
+    );
+    (plan.resources, plan.valid)
+}
+
+/// [`launch_plan_full`]'s result: the staged launch resources, the `total`
+/// charge the launcher must pay and whether it can pay it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaunchPlan {
+    /// Staged launch resources by item name (`resources`).
+    pub resources: IndexMap<String, i32>,
+    /// `requirements + resources`, zero entries omitted (`total`).
+    pub total: IndexMap<String, i32>,
+    /// Whether the launcher holds `total` (`valid`).
+    pub valid: bool,
+}
+
+/// [`launch_plan`] plus the `total` charge (`requirements + resources`), so the
+/// caller that removes the launch cost does not recompute it.
+///
+/// Upstream: `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`)
+/// and its `total` (`LaunchLoadoutDialog.java:79-84`, `PlanetDialog.playSelected`
+/// at `PlanetDialog.java:1409-1410`). Extracted from `universe::launch_plan`
+/// (`mind-core game/universe.rs:218-262` at 291e30a8) and the facade's
+/// `launch_total` (`mind-gdext campaign.rs:7515` at 291e30a8; adopted by X01).
+///
+/// `total` uses the facade `launch_total` shape (zero-amount staged resources
+/// are not entries); `valid` therefore matches [`launch_plan`]'s, since a zero
+/// entry can never fail the `stored >= amount && amount >= 0` test.
+#[allow(clippy::too_many_arguments)]
+pub fn launch_plan_full(
+    stored: &IndexMap<String, i32>,
+    requirements: &IndexMap<String, i32>,
+    resources: &IndexMap<String, i32>,
+    capacity: i32,
+    max: bool,
+    allow_launch_loadout: bool,
+    preset_loadout: &IndexMap<String, i32>,
+    all_items: &[String],
+) -> LaunchPlan {
     let cap = capacity.max(0);
     // `resources.min(cap)`: the staged sequence is clamped to the capacity.
     let mut out: IndexMap<String, i32> = resources
@@ -249,15 +305,22 @@ pub fn launch_plan(
             out.insert(item.clone(), value);
         }
     }
-    // `total = requirements + resources`; `valid = sitems.has(total)`.
+    // `total = requirements + resources` (facade `launch_total`).
     let mut total = requirements.clone();
     for (item, amount) in &out {
-        *total.entry(item.clone()).or_insert(0) += *amount;
+        if *amount != 0 {
+            *total.entry(item.clone()).or_insert(0) += *amount;
+        }
     }
+    // `valid = sitems.has(total)`.
     let valid = total
         .iter()
         .all(|(item, amount)| stored.get(item).copied().unwrap_or(0) >= *amount && *amount >= 0);
-    (out, valid)
+    LaunchPlan {
+        resources: out,
+        total,
+        valid,
+    }
 }
 
 impl Universe {
@@ -297,6 +360,30 @@ impl Universe {
         );
         rules.ambient_light.0.a = 1.0 - alpha;
         rules.lighting = (alpha - 1.0).abs() > f32::EPSILON;
+    }
+
+    /// The dense launch-resource sequence as a `{item name: amount}` map, in
+    /// item-id order and with zero entries omitted.
+    ///
+    /// Upstream: `Universe.getLaunchResources` (`Universe.java:113-116`), the
+    /// inverse of [`crate::ui::campaign::launch_resource_sequence`] (name ->
+    /// dense id). Extracted from the facade's
+    /// `mind-gdext campaign.rs:6170-6177` and `:6389-6401` at 291e30a8 (adopted
+    /// by X01). The two copies differ on `> 0` vs `!= 0` and on stopping at the
+    /// sequence end; this is the `get_launch_resource_stacks` form (`> 0`,
+    /// stop), so the launch dialog's nonzero-including-negative form at
+    /// `:6389-6401` keeps its local copy.
+    pub fn launch_resource_stacks(&self, registry: &ContentRegistry) -> IndexMap<String, i32> {
+        let mut out = IndexMap::new();
+        for (index, item) in registry.items().iter().enumerate() {
+            let Some(amount) = self.last_launch_resources.get(index).copied() else {
+                break;
+            };
+            if amount > 0 {
+                out.insert(item.name.clone(), amount);
+            }
+        }
+        out
     }
 }
 
@@ -481,6 +568,191 @@ impl Campaign {
                     record.clear_stats();
                 }
             }
+        }
+    }
+
+    /// The planet's content name, or `None` when `id` is not in the campaign.
+    ///
+    /// Upstream: `Planet.name` (`Planet.java`). Extracted from the facade's
+    /// `campaign.planet(id).map(|p| p.name.clone()).unwrap_or_default()` sites
+    /// (`mind-gdext campaign.rs:837,1171,2438,2941,3443,3479,4453,4992,5493,7216`
+    /// at 291e30a8; adopted by X01) and from this crate's `saves.rs:598-601` /
+    /// `universe.rs:853` copies. Callers keep their own `unwrap_or_default()`.
+    pub fn planet_name(&self, id: PlanetId) -> Option<&str> {
+        self.planet(id).map(|planet| planet.name.as_str())
+    }
+
+    /// The `"<planet>-<id>"` key for one of a planet's sectors
+    /// (`SectorKey::format`), or `None` for an unknown planet.
+    ///
+    /// Upstream: `Sector.write` (`Sector.java`). Extracted from the
+    /// `session.rules.sector = Some(SectorKey::format(..))` pairs in
+    /// `mind-core game/play.rs:437/516` at 291e30a8 (H02 adopts).
+    pub fn sector_key(&self, planet: PlanetId, id: u16) -> Option<SectorKey> {
+        self.planet(planet)
+            .map(|planet| SectorKey::format(&planet.name, id))
+    }
+
+    /// One of a planet's sectors plus its planet id, resolved by planet
+    /// **name** and sector index.
+    ///
+    /// Upstream: `Planet.getSector` (`Planet.java`). Extracted from the 12
+    /// facade `planet_id_by_name(..) + sector(..)` sites (`mind-gdext
+    /// campaign.rs:1369,1441,2641,2692,3951,3960,5986,6267,6624,6652,6690,6724`
+    /// at 291e30a8; adopted by X01). `planet_id_by_name` stays a linear scan.
+    pub fn sector_by_name(&self, planet: &str, id: u16) -> Option<(PlanetId, &Sector)> {
+        let planet_id = self.planet_id_by_name(planet)?;
+        let sector = self.sector(planet_id, id)?;
+        Some((planet_id, sector))
+    }
+
+    /// Mutable [`Campaign::sector_by_name`].
+    pub fn sector_by_name_mut(&mut self, planet: &str, id: u16) -> Option<(PlanetId, &mut Sector)> {
+        let planet_id = self.planet_id_by_name(planet)?;
+        let sector = self.sector_mut(planet_id, id)?;
+        Some((planet_id, sector))
+    }
+
+    /// Persists one sector's record, resolving the planet name itself
+    /// (`Sector.saveInfo`). `Ok(false)` when the planet or sector is absent;
+    /// errors are the store's.
+    ///
+    /// Upstream: `Sector.saveInfo` (`Sector.java`). Extracted from the facade's
+    /// pending-info-save flush (`mind-gdext campaign.rs:1165-1180` at
+    /// 291e30a8; adopted by X01) and from this crate's `universe.rs:763/857`
+    /// `save_info` sites.
+    pub fn save_sector_info(
+        &self,
+        settings: &mut SettingsStore,
+        planet: PlanetId,
+        id: u16,
+    ) -> Result<bool, IoError> {
+        let Some(planet_name) = self.planet_name(planet) else {
+            return Ok(false);
+        };
+        let Some(sector) = self.sector(planet, id) else {
+            return Ok(false);
+        };
+        sector.save_info(settings, planet_name)?;
+        Ok(true)
+    }
+
+    /// Runs `f` on one sector resolved by planet **name** and index, then
+    /// persists its record; `None` when the planet or sector does not exist
+    /// (in which case nothing is written).
+    ///
+    /// Upstream: `Sector.saveInfo` (`Sector.java`). Extracted from the facade's
+    /// edit sites (`mind-gdext campaign.rs:1175,1822,2687,2945,5552,6631,6661,6697,6733`
+    /// at 291e30a8; adopted by X01). Every one of them ignores the `save_info`
+    /// error, so this does too.
+    pub fn edit_sector<R>(
+        &mut self,
+        settings: &mut SettingsStore,
+        planet: &str,
+        id: u16,
+        f: impl FnOnce(&mut Sector) -> R,
+    ) -> Option<R> {
+        let planet_id = self.planet_id_by_name(planet)?;
+        let sector = self.sector_mut(planet_id, id)?;
+        let result = f(&mut *sector);
+        let _ = sector.save_info(settings, planet);
+        Some(result)
+    }
+
+    /// Clears `Sector.beingPlayed` on every sector (`false` everywhere).
+    ///
+    /// Upstream: the `sector.beingPlayed = false` resets in `Control`/`Logic`.
+    /// Extracted from `mind-gdext campaign.rs:1632,4944,5729` at 291e30a8
+    /// (adopted by X01) and from the core tests' per-sector resets.
+    pub fn clear_being_played(&mut self) {
+        for planet in self.planets.values_mut() {
+            for sector in &mut planet.sectors {
+                sector.being_played = false;
+            }
+        }
+    }
+
+    /// Boots a fresh campaign from settings and the listed save slots:
+    /// `from_registry` -> `load_all` -> save-meta sector assignment ->
+    /// `update_base_coverage_from_neighbors`.
+    ///
+    /// Upstream: `Vars.init` (`ClientLauncher.java:166-189`) and `Planet.init`
+    /// (`Planet.java:458-473`). Extracted from the facade's `bootstrap_with`
+    /// (`mind-gdext campaign.rs:636-661` at 291e30a8; adopted by X01). The
+    /// returned `usize` is the number of sectors a readable save slot backed —
+    /// the count the facade logs.
+    pub fn boot(
+        registry: &ContentRegistry,
+        settings: &SettingsStore,
+        saves: &Saves,
+    ) -> (Campaign, usize) {
+        let mut campaign = Campaign::from_registry(registry, &EmptyNeighborhood);
+        campaign.load_all(settings);
+        // `Saves.load` assigns sector slots from save **meta** (`Saves.java:120-186`):
+        // a readable slot backs the sector its rules name, so a copy under
+        // another name still resumes (CG-SAVE-05).
+        let assignments = saves.sector_save_assignments(registry);
+        let applied = super::saves::apply_sector_saves(&mut campaign, &assignments);
+        // `Planet.init` (`Planet.java:469-471`) recomputes base coverage after
+        // `sector.loadInfo`; run it again with the stored infos and save files on
+        // the sectors (H05 T1).
+        for planet in campaign.planets.values_mut() {
+            planet.update_base_coverage_from_neighbors();
+        }
+        (campaign, applied)
+    }
+
+    /// Clears the campaign-save state of every planet (or only `only`) and
+    /// returns the save files the caller must delete, **in facade order**.
+    ///
+    /// Upstream: `SettingsMenuDialog`'s clear/clear-planet campaign saves.
+    /// Extracted from `mind-gdext campaign.rs:5697-5756` at 291e30a8 (adopted by
+    /// X01). Per matching planet, in `planets` order: clears stats, then for
+    /// every sector in index order drops `save`/`being_played`, removes the
+    /// persisted record and yields the canonical save file and its backup
+    /// (file, then backup). The filesystem deletion stays in the facade.
+    pub fn clear_saves(
+        &mut self,
+        settings: &mut SettingsStore,
+        paths: &Paths,
+        only: Option<PlanetId>,
+    ) -> Vec<PathBuf> {
+        let planets: Vec<(PlanetId, String)> = self
+            .planets
+            .values()
+            .filter(|planet| only.is_none_or(|target| target == planet.id))
+            .map(|planet| (planet.id, planet.name.clone()))
+            .collect();
+        let mut files = Vec::new();
+        for (id, name) in planets {
+            self.clear_stats(id);
+            let Some(planet) = self.planet_mut(id) else {
+                continue;
+            };
+            for sector in &mut planet.sectors {
+                sector.save = None;
+                sector.being_played = false;
+                sector.clear_info(settings, &name);
+                let file = paths.sector_save(&name, sector.id as u32);
+                let backup = crate::io::SaveIo::backup_file_for(&file);
+                files.push(file);
+                files.push(backup);
+            }
+        }
+        files
+    }
+
+    /// Writes one planet's `CampaignRules` (`PlanetDialog.rules`).
+    ///
+    /// Upstream: `PlanetDialog.rules` (`PlanetDialog.java:1144-1176`). Extracted
+    /// from the "write planet rules" half of `set_campaign_rule`
+    /// (`mind-gdext campaign.rs:5980-6050`) and `set_campaign_rules_json`
+    /// (`:6080-6130`) at 291e30a8 (adopted by X01). Re-applying the rules to the
+    /// played session is H02's `play::reapply_planet_rules`; persistence is the
+    /// caller's `save_all`.
+    pub fn set_campaign_rules(&mut self, planet: PlanetId, rules: CampaignRules) {
+        if let Some(record) = self.planet_mut(planet) {
+            record.campaign_rules = rules;
         }
     }
 
@@ -702,11 +974,6 @@ impl Campaign {
         ctx: &TurnContext,
         seconds_passed: f32,
     ) {
-        let planet_name = self
-            .planet(planet)
-            .map(|p| p.name.clone())
-            .unwrap_or_default();
-
         let ids: Vec<u16> = self
             .planet(planet)
             .map(|p| p.sectors.iter().map(|s| s.id).collect())
@@ -760,8 +1027,9 @@ impl Campaign {
                 for value in sector.info.info.items.values_mut() {
                     *value = (*value).max(0);
                 }
-                let _ = sector.save_info(settings, &planet_name);
             }
+            // `Sector.saveInfo` after the production pass (`Sector.java`).
+            let _ = self.save_sector_info(settings, planet, id);
         }
     }
 
@@ -850,12 +1118,7 @@ impl Campaign {
         }
         // `sector.saveInfo()` for every invaded record (`Universe.java:554`).
         for (planet_id, sector_id) in to_save {
-            let Some(planet_name) = self.planet(planet_id).map(|planet| planet.name.clone()) else {
-                continue;
-            };
-            if let Some(sector) = self.sector(planet_id, sector_id) {
-                let _ = sector.save_info(settings, &planet_name);
-            }
+            let _ = self.save_sector_info(settings, planet_id, sector_id);
         }
     }
 
@@ -891,14 +1154,13 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
-    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
     use crate::game::schematic::Schematic;
+    use crate::game::test_support::{campaign as campaign_fixture, raw_registry};
     use crate::io::json::rules::ExportStat;
 
     fn make_campaign() -> (ContentRegistry, Campaign) {
-        let registry =
-            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
-        let campaign = Campaign::from_registry(&registry, &crate::game::planet::EmptyNeighborhood);
+        let registry = raw_registry();
+        let campaign = campaign_fixture(&registry);
         (registry, campaign)
     }
 
@@ -1525,5 +1787,326 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 0, "some preset-less sectors in 0..20");
+    }
+
+    /// `Campaign::planet_name` (facade sites 837..7216; core saves/universe
+    /// copies) and `Campaign::sector_key` (play.rs 437/516).
+    #[test]
+    fn planet_name_and_sector_key_resolve() {
+        let (_registry, campaign, planet) = serpulo();
+        assert_eq!(campaign.planet_name(planet), Some("serpulo"));
+        assert_eq!(campaign.planet_name(PlanetId::new(9999)), None);
+
+        let key = campaign.sector_key(planet, 15).expect("sector key");
+        assert_eq!(key.to_string(), "serpulo-15");
+        assert_eq!(key.planet(), Some("serpulo"));
+        assert_eq!(key.sector(), Some(15));
+        assert_eq!(campaign.sector_key(PlanetId::new(9999), 15), None);
+    }
+
+    /// `Campaign::sector_by_name{,_mut}` (the 12 facade resolve-then-edit sites):
+    /// the planet name resolves to its id and the sector, and an unknown planet
+    /// or sector is `None`.
+    #[test]
+    fn sector_by_name_resolves_planet_and_sector() {
+        let (_registry, mut campaign, planet) = serpulo();
+        let (found, sector) = campaign.sector_by_name("serpulo", 15).expect("serpulo:15");
+        assert_eq!(found, planet);
+        assert_eq!(sector.id, 15);
+        assert!(campaign.sector_by_name("serpulo", u16::MAX).is_none());
+        assert!(campaign.sector_by_name("no-such-planet", 15).is_none());
+
+        let (found, sector) = campaign
+            .sector_by_name_mut("serpulo", 15)
+            .expect("serpulo:15");
+        assert_eq!(found, planet);
+        sector.info.info.wave = 4;
+        assert_eq!(campaign.sector(planet, 15).unwrap().info.info.wave, 4);
+        assert!(campaign.sector_by_name_mut("serpulo", u16::MAX).is_none());
+        assert!(campaign.sector_by_name_mut("no-such-planet", 15).is_none());
+    }
+
+    /// `Campaign::save_sector_info` resolves the planet name itself; a missing
+    /// planet or sector reports `Ok(false)` and writes nothing.
+    #[test]
+    fn save_sector_info_resolves_planet_name() {
+        let (_registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        campaign.sector_mut(planet, 15).unwrap().info.info.wave = 12;
+        assert!(
+            campaign
+                .save_sector_info(&mut settings, planet, 15)
+                .expect("known planet and sector")
+        );
+        let key = crate::game::sector::info_key("serpulo", 15);
+        assert!(settings.has(&key));
+        let saved: crate::io::json::rules::SectorInfo = settings
+            .get_json(&key)
+            .expect("read settings")
+            .expect("record written");
+        assert_eq!(saved.wave, 12);
+
+        let before = settings.len();
+        assert!(
+            !campaign
+                .save_sector_info(&mut settings, PlanetId::new(9999), 15)
+                .expect("absent planet is not an I/O error")
+        );
+        assert!(
+            !campaign
+                .save_sector_info(&mut settings, planet, u16::MAX)
+                .expect("absent sector is not an I/O error")
+        );
+        assert_eq!(settings.len(), before, "nothing written for a miss");
+    }
+
+    /// `Campaign::edit_sector`: mutate then persist; a miss returns `None` and
+    /// writes nothing inline.
+    #[test]
+    fn edit_sector_mutates_and_persists() {
+        let (_registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        let result = campaign.edit_sector(&mut settings, "serpulo", 15, |sector| {
+            sector.info.info.wave = 9;
+            sector.info.info.attempts = 2;
+            "done"
+        });
+        assert_eq!(result, Some("done"));
+        let key = crate::game::sector::info_key("serpulo", 15);
+        let saved: crate::io::json::rules::SectorInfo = settings
+            .get_json(&key)
+            .expect("read settings")
+            .expect("record written");
+        assert_eq!(saved.wave, 9);
+        assert_eq!(saved.attempts, 2);
+        assert_eq!(campaign.sector(planet, 15).unwrap().info.info.wave, 9);
+
+        let before = settings.len();
+        assert_eq!(
+            campaign.edit_sector(&mut settings, "no-such-planet", 15, |_| ()),
+            None
+        );
+        assert_eq!(
+            campaign.edit_sector(&mut settings, "serpulo", u16::MAX, |_| ()),
+            None
+        );
+        assert_eq!(settings.len(), before, "no write on a miss");
+    }
+
+    /// `Campaign::clear_being_played` (facade 1632/4944/5729).
+    #[test]
+    fn clear_being_played_clears_every_sector() {
+        let (_registry, mut campaign, planet) = serpulo();
+        campaign.sector_mut(planet, 1).unwrap().being_played = true;
+        campaign.sector_mut(planet, 2).unwrap().being_played = true;
+        assert_eq!(
+            campaign
+                .planets
+                .values()
+                .flat_map(|planet| &planet.sectors)
+                .filter(|sector| sector.being_played)
+                .count(),
+            2
+        );
+        campaign.clear_being_played();
+        assert!(
+            campaign
+                .planets
+                .values()
+                .flat_map(|planet| &planet.sectors)
+                .all(|sector| !sector.being_played)
+        );
+    }
+
+    /// `Campaign::set_campaign_rules` is the write half of the rules dialog:
+    /// it replaces the planet's record and leaves every other planet alone.
+    #[test]
+    fn set_campaign_rules_writes_planet_rules() {
+        use crate::game::campaign_rules::Difficulty;
+
+        let (_registry, mut campaign, planet) = serpulo();
+        let other = campaign.planet_id_by_name("erekir").unwrap();
+        let other_before = campaign.planet(other).unwrap().campaign_rules.clone();
+        let mut rules = campaign.planet(planet).unwrap().campaign_rules.clone();
+        rules.difficulty = Difficulty::Hard;
+        rules.fog = true;
+        campaign.set_campaign_rules(planet, rules.clone());
+        assert_eq!(campaign.planet(planet).unwrap().campaign_rules, rules);
+        // The other planets keep their records.
+        assert_eq!(campaign.planet(other).unwrap().campaign_rules, other_before);
+        // Unknown planet: no-op.
+        campaign.set_campaign_rules(PlanetId::new(9999), CampaignRules::default());
+    }
+
+    /// `Campaign::boot` (`bootstrap_with` 636-661): loads settings, assigns the
+    /// save slots from their meta and re-runs base coverage.
+    #[test]
+    fn boot_assigns_sector_saves_and_recomputes_coverage() {
+        use crate::io::fs::MockFs;
+        use crate::io::save::SaveOptions;
+        use crate::io::save::slot::SaveSlot;
+        use crate::io::save::version::WriteContext;
+        use crate::io::save::versions::v1::base_meta_tags;
+
+        let registry = raw_registry();
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let mut tags = base_meta_tags(8, 8, 2, "sector-map");
+        tags.insert("rules".to_owned(), r#"{"sector":"serpulo-15"}"#.to_owned());
+        let ctx = WriteContext::meta_only(tags);
+        SaveSlot::new(paths.sector_save("serpulo", 15))
+            .save(&fs, &paths, &ctx, &SaveOptions::new())
+            .unwrap();
+        saves.load(&fs, &paths, &registry, &mut settings);
+
+        let (campaign, applied) = Campaign::boot(&registry, &settings, &saves);
+        assert_eq!(applied, 1, "one readable slot backs one sector");
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector = campaign.sector(serpulo, 15).expect("sector 15");
+        assert_eq!(sector.save.as_deref(), Some("sector-serpulo-15"));
+
+        // `update_base_coverage_from_neighbors` ran on the loaded campaign.
+        let fresh = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        assert_eq!(
+            sector.threat,
+            fresh.sector(serpulo, 15).unwrap().threat,
+            "boot recomputes coverage after the assignment"
+        );
+    }
+
+    /// `Campaign::clear_saves` (facade 5697-5756): clears only the scoped
+    /// planets, in planets/sector order, and returns `[file, backup]` per
+    /// sector.
+    #[test]
+    fn clear_saves_scopes_planets_and_returns_files_in_order() {
+        let (_registry, mut campaign, serpulo) = serpulo();
+        let erekir = campaign.planet_id_by_name("erekir").unwrap();
+        let mut settings = SettingsStore::new();
+        let paths = Paths::new("/data");
+        for (planet, id, name) in [(serpulo, 15u16, "serpulo"), (erekir, 0u16, "erekir")] {
+            let sector = campaign.sector_mut(planet, id).unwrap();
+            sector.save = Some(format!("sector-{name}-{id}"));
+            sector.info.info.has_core = true;
+            sector.save_info(&mut settings, name).unwrap();
+        }
+        campaign.planet_mut(serpulo).unwrap().stats.sectors_captured = 3;
+        campaign.planet_mut(erekir).unwrap().stats.sectors_captured = 2;
+
+        let count = campaign.planet(serpulo).unwrap().sector_count();
+        let files = campaign.clear_saves(&mut settings, &paths, Some(serpulo));
+        assert_eq!(files.len(), count * 2, "file + backup per sector");
+        let first = paths.sector_save("serpulo", 0);
+        assert_eq!(files[0], first);
+        assert_eq!(files[1], crate::io::SaveIo::backup_file_for(&first));
+        assert_eq!(
+            files[files.len() - 2],
+            paths.sector_save("serpulo", (count - 1) as u32)
+        );
+        assert!(
+            campaign
+                .planet(serpulo)
+                .unwrap()
+                .sectors
+                .iter()
+                .all(|sector| sector.save.is_none() && !sector.being_played)
+        );
+        assert_eq!(campaign.planet(serpulo).unwrap().stats.sectors_captured, 0);
+        assert_eq!(campaign.planet(erekir).unwrap().stats.sectors_captured, 2);
+        assert!(
+            campaign.sector(erekir, 0).unwrap().save.is_some(),
+            "the other planet is untouched"
+        );
+
+        // A second, planet-scoped call covers Erekir.
+        let erekir_count = campaign.planet(erekir).unwrap().sector_count();
+        let files = campaign.clear_saves(&mut settings, &paths, Some(erekir));
+        assert_eq!(files.len(), erekir_count * 2);
+        assert_eq!(campaign.sector(erekir, 0).unwrap().save, None);
+    }
+
+    /// `launch_plan_full` keeps `launch_plan`'s outputs and adds the facade
+    /// `launch_total` (zero staged entries omitted).
+    #[test]
+    fn launch_plan_full_matches_launch_plan_and_total() {
+        let stored = IndexMap::from([("copper".to_owned(), 3000), ("lead".to_owned(), 2000)]);
+        let requirements = IndexMap::from([("copper".to_owned(), 1000), ("lead".to_owned(), 800)]);
+        let resources = IndexMap::from([("copper".to_owned(), 400), ("silicon".to_owned(), 0)]);
+        let all_items = vec!["copper".to_owned(), "lead".to_owned()];
+        let (legacy, legacy_valid) = launch_plan(
+            &stored,
+            &requirements,
+            &resources,
+            2000,
+            true,
+            true,
+            &IndexMap::new(),
+            &all_items,
+        );
+        let plan = launch_plan_full(
+            &stored,
+            &requirements,
+            &resources,
+            2000,
+            true,
+            true,
+            &IndexMap::new(),
+            &all_items,
+        );
+        assert_eq!(plan.resources, legacy);
+        assert_eq!(plan.valid, legacy_valid);
+        assert!(plan.valid);
+        // Max on: copper 3000-1000 capped at 2000, lead 2000-800=1200.
+        assert_eq!(plan.total.get("copper"), Some(&3000));
+        assert_eq!(plan.total.get("lead"), Some(&2000));
+        // The zero staged silicon is not a total entry (`launch_total`).
+        assert!(!plan.total.contains_key("silicon"));
+
+        // A short launcher still reports invalid, and a preset loadout replaces
+        // the staged resources.
+        let (legacy, legacy_valid) = launch_plan(
+            &IndexMap::new(),
+            &requirements,
+            &resources,
+            2000,
+            false,
+            false,
+            &IndexMap::from([("copper".to_owned(), 50)]),
+            &all_items,
+        );
+        let plan = launch_plan_full(
+            &IndexMap::new(),
+            &requirements,
+            &resources,
+            2000,
+            false,
+            false,
+            &IndexMap::from([("copper".to_owned(), 50)]),
+            &all_items,
+        );
+        assert_eq!(plan.resources, legacy);
+        assert_eq!(plan.valid, legacy_valid);
+        assert!(!plan.valid);
+        assert_eq!(plan.resources.len(), 1);
+        assert_eq!(plan.resources.get("copper"), Some(&50));
+    }
+
+    /// `Universe::launch_resource_stacks` (`get_launch_resource_stacks`
+    /// 6170-6177): dense id sequence to name map, positive entries only.
+    #[test]
+    fn launch_resource_stacks_maps_dense_ids() {
+        let (registry, _campaign) = make_campaign();
+        let mut universe = Universe::new();
+        let copper = registry.item_id("copper").expect("copper").index();
+        let lead = registry.item_id("lead").expect("lead").index();
+        let mut sequence = vec![0i32; registry.items().len() + 2];
+        sequence[copper] = 30;
+        sequence[lead] = -5;
+        universe.last_launch_resources = sequence;
+        let stacks = universe.launch_resource_stacks(&registry);
+        assert_eq!(stacks.len(), 1, "only positive amounts are reported");
+        assert_eq!(stacks.get("copper"), Some(&30));
+        assert!(!stacks.contains_key("lead"));
     }
 }
