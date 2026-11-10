@@ -55,16 +55,16 @@ impl MindSimHost {
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         runtime
             .units
             .iter()
             .filter_map(|entity| {
-                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
-                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
-                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let pos = self.world().get::<Pos>(*entity)?;
+                let core = self.world().get::<UnitCore>(*entity)?;
+                let type_comp = self.world().get::<UnitTypeComp>(*entity)?;
                 let def = content.unit(type_comp.type_id)?;
                 Some((
                     pos.x,
@@ -87,45 +87,34 @@ impl MindSimHost {
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         runtime
             .units
             .iter()
             .filter_map(|entity| {
-                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
-                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
-                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let pos = self.world().get::<Pos>(*entity)?;
+                let core = self.world().get::<UnitCore>(*entity)?;
+                let type_comp = self.world().get::<UnitTypeComp>(*entity)?;
                 let def = content.unit(type_comp.type_id)?;
                 let team = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::TeamComp>(*entity)
                     .map(|comp| comp.team)
                     .unwrap_or(0);
                 let healthf = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<Health>(*entity)
                     .map(Health::fraction)
                     .unwrap_or(1.0);
-                let mech = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<MechComp>(*entity)
-                    .map(|mech| MechDraw {
-                        base_rotation: mech.base_rotation,
-                        walk_time: mech.walk_time,
-                        stride: def.mech_stride.max(0.001),
-                    });
+                let mech = self.world().get::<MechComp>(*entity).map(|mech| MechDraw {
+                    base_rotation: mech.base_rotation,
+                    walk_time: mech.walk_time,
+                    stride: def.mech_stride.max(0.001),
+                });
                 let treads = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::TankComp>(*entity)
                     .map(|tank| TreadsDraw {
                         tread_time: tank.tread_time,
@@ -134,9 +123,7 @@ impl MindSimHost {
                     });
                 // L04 T3: `CrawlComp` draw state (`UnitType.drawCrawl`).
                 let crawl = if def.segments > 0 {
-                    self.sim
-                        .ecs
-                        .0
+                    self.world()
                         .get::<mind_core::entities::comp::unit::comp::CrawlComp>(*entity)
                 } else {
                     None
@@ -151,9 +138,7 @@ impl MindSimHost {
                 });
                 // L04 T3: `drawPayload` reads `payloads().first()` (oldest).
                 let payload = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::UnitPayloads>(*entity)
                     .and_then(|payloads| payloads.stack.first())
                     .and_then(|payload| match payload {
@@ -191,9 +176,7 @@ impl MindSimHost {
                         }
                     });
                 let legs = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::LegsComp>(*entity)
                     .map(|comp| LegsDraw {
                         base_rotation: comp.base_rotation,
@@ -219,9 +202,7 @@ impl MindSimHost {
                         shadow_elevation: def.shadow_elevation,
                     });
                 let weapons = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::weapons::UnitWeapons>(*entity)
                     .map(|weapons| {
                         weapons
@@ -252,23 +233,17 @@ impl MindSimHost {
                     })
                     .unwrap_or_default();
                 let id = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::ecs::EntitySeq>(*entity)
                     .map(|seq| seq.0)
                     .unwrap_or(0);
                 let mine_tile = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::MinerComp>(*entity)
                     .filter(|miner| miner.mining)
                     .and_then(|miner| miner.mine_tile.map(|pos| (pos.x(), pos.y())));
                 let item = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::ItemsComp>(*entity)
                     .and_then(|items| items.item)
                     .and_then(|(item, amount)| {
@@ -279,18 +254,14 @@ impl MindSimHost {
                     });
                 let is_player = self.sim.player_unit() == Some(*entity);
                 let health = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<Health>(*entity)
                     .map(|health| health.health)
                     .unwrap_or(0.0);
                 // H03 T10: active status effects with their view parameters
                 // (`StatusEffect.effect/effectChance/color`).
                 let statuses = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::StatusComp>(*entity)
                     .map(|comp| {
                         comp.statuses
@@ -323,9 +294,7 @@ impl MindSimHost {
                     )
                 };
                 let fin = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::TimedKillComp>(*entity)
                     .map(|timed| {
                         if timed.lifetime > 0.0 {
@@ -384,13 +353,13 @@ impl MindSimHost {
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let wanted: std::collections::HashSet<i32> = ids.iter().copied().collect();
         let mut out = Vec::new();
         for &entity in &runtime.units {
-            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+            let Ok(entity_ref) = self.world().get_entity(entity) else {
                 continue;
             };
             let Some(seq) = entity_ref.get::<mind_core::ecs::EntitySeq>() else {
@@ -422,11 +391,11 @@ impl MindSimHost {
     /// (T13/PAR-0129).
     pub fn force_shields(&self) -> Vec<(f32, f32, f32, u8, f32, u8, f32)> {
         use mind_core::world::blocks::defense::shields::ForceProjectorState;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(state) = entity.get::<ForceProjectorState>() else {
                 continue;
             };
@@ -467,11 +436,11 @@ impl MindSimHost {
     pub fn unit_shields(&self) -> Vec<(f32, f32, f32, f32, u8, f32)> {
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::unit::comp::{ShieldComp, UnitTypeComp};
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(shield) = entity.get::<ShieldComp>() else {
                 continue;
             };
@@ -518,11 +487,11 @@ impl MindSimHost {
         use mind_core::content::registries::units::ability::AbilityKind;
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::unit::comp::{ShieldComp, UnitCore, UnitTypeComp};
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(comp) = entity.get::<AbilityComp>() else {
                 continue;
             };
@@ -574,7 +543,7 @@ impl MindSimHost {
                             .and_then(|name| content.unit_by_name(name))
                             .is_some_and(|spawn| {
                                 mind_core::entities::comp::unit::queries::can_create_unit(
-                                    &self.sim.ecs.0,
+                                    self.world(),
                                     team,
                                     spawn,
                                 )
@@ -607,7 +576,7 @@ impl MindSimHost {
     /// `(center tile x, center tile y, world x, world y, size, java_color)`.
     /// Rust-only seam for the status pass (T14/PAR-0097).
     pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let team = self.player_team();
@@ -615,7 +584,7 @@ impl MindSimHost {
         // drives the efficiency pulse (`BuildingComp.java:651`; I02 T3).
         let tick = self.sim.tick_count();
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
                 continue;
             };
@@ -638,7 +607,7 @@ impl MindSimHost {
             // per-family `shouldConsume()` overrides in
             // `mind_core::world::status::java_block_status`).
             let status =
-                mind_core::world::status::java_block_status(&self.sim.ecs.0, entity.id(), tick);
+                mind_core::world::status::java_block_status(self.world(), entity.id(), tick);
             let size = def.size.max(1);
             // `Building.tile` is the center tile; `Block.offset` recentres the
             // even-size sprites (same convention as `blocks.rs`).
@@ -675,15 +644,13 @@ impl MindSimHost {
         let cy = (y + (size - 1) / 2) as f32 * 8.0 + def.offset;
         let rotation = self.building_rotation(x, y);
         let efficiency = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<Building>(entity)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
         match def.kind {
             BlockKind::UnitFactory => {
-                let state = self.sim.ecs.0.get::<UnitFactoryBuild>(entity)?;
+                let state = self.world().get::<UnitFactoryBuild>(entity)?;
                 let (unit, fraction) =
                     factory_preview(&def.unit_plans, state.current_plan, state.progress);
                 Some(UnitBuildDraw {
@@ -701,7 +668,7 @@ impl MindSimHost {
                 })
             }
             BlockKind::Reconstructor => {
-                let state = self.sim.ecs.0.get::<ReconstructorBuild>(entity)?;
+                let state = self.world().get::<ReconstructorBuild>(entity)?;
                 let (unit, fraction, arrived) = reconstructor_preview(
                     &def.reconstructor_upgrades,
                     state.payload,

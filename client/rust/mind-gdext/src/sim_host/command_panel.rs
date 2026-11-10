@@ -116,9 +116,7 @@ impl MindSimHost {
 
     /// `ObjectiveInputState.command_mode_satisfied` (G04 T4/G08 T15).
     pub fn command_mode_satisfied(&self) -> bool {
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get_resource::<mind_core::game::runtime::ObjectiveInputState>()
             .is_some_and(|state| state.command_mode_satisfied)
     }
@@ -143,15 +141,13 @@ impl MindSimHost {
         let mut out = Vec::with_capacity(ids.len());
         for &id in ids {
             let Some(&entity) = runtime.units.iter().find(|&&entity| {
-                self.sim
-                    .ecs
-                    .0
+                self.world()
                     .get::<EntitySeq>(entity)
                     .is_some_and(|seq| seq.0 as i32 == id)
             }) else {
                 continue;
             };
-            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+            let Ok(entity_ref) = self.world().get_entity(entity) else {
                 continue;
             };
             let Some(type_comp) = entity_ref.get::<UnitTypeComp>() else {
@@ -179,7 +175,7 @@ impl MindSimHost {
     /// filter (the command panel probe above reports the command but not the
     /// icon behaviour).
     pub fn command_draws_target(&self, id: i32) -> bool {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return false;
         };
         self.command_panel_units(&[id])
@@ -269,11 +265,7 @@ impl MindSimHost {
                 })
             })
             .collect();
-        GString::from(
-            serde_json::to_string(&rows)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&rows, "[]")
     }
 
     /// G01 T15: drains the per-tick building-damage log as
@@ -286,11 +278,7 @@ impl MindSimHost {
             .iter()
             .map(|event| [event.x as f64, event.y as f64, event.team as f64])
             .collect();
-        GString::from(
-            serde_json::to_string(&rows)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&rows, "[]")
     }
 
     /// Verify seam: the `ObjectiveInputState.command_mode_satisfied` flag.
@@ -307,10 +295,10 @@ impl MindSimHost {
     #[func]
     pub fn command_panel_json(&self, ids_json: GString) -> GString {
         let ids: Vec<i32> = serde_json::from_str(ids_json.to_string().as_str()).unwrap_or_default();
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return GString::from("{\"types\":[],\"commands\":[],\"stances\":[]}");
         };
         let units = self.command_panel_units(&ids);
-        GString::from(command_panel(content, &units).to_string().as_str())
+        crate::gdutil::json::value_gstring(&command_panel(content, &units))
     }
 }

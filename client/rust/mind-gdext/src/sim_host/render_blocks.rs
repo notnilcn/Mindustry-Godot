@@ -19,7 +19,7 @@ impl MindSimHost {
             out.entries.clear();
             return;
         };
-        mind_core::audio::ambient::collect_ambient(&self.sim.ecs.0, content, out);
+        mind_core::audio::ambient::collect_ambient(self.world(), content, out);
     }
 
     /// T6: per-frame `control.sound.loop` sources (Rust-only).
@@ -29,13 +29,10 @@ impl MindSimHost {
             return;
         };
         let infinite = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .campaign_runtime()
             .is_some_and(|campaign| campaign.session.rules.infinite_resources);
         mind_core::audio::frame::collect_frame_loops(
-            &self.sim.ecs.0,
+            self.world(),
             content,
             self.sim.tick_count() as f32,
             infinite,
@@ -49,10 +46,10 @@ impl MindSimHost {
             out.clear();
             return;
         };
-        mind_core::audio::frame::collect_turret_loops(&self.sim.ecs.0, content, out);
+        mind_core::audio::frame::collect_turret_loops(self.world(), content, out);
         // H07 T11: continuous-weapon `SoundLoop`s (vela/navanax) append to the
         // same per-key fade table.
-        mind_core::audio::frame::collect_weapon_loops(&self.sim.ecs.0, out);
+        mind_core::audio::frame::collect_weapon_loops(self.world(), out);
     }
 
     /// T7: in-game music context state (rules/wave/boss/core hp; Rust-only).
@@ -60,7 +57,7 @@ impl MindSimHost {
         let Some(content) = self.sim.block_runtime().map(|runtime| runtime.content()) else {
             return Default::default();
         };
-        mind_core::audio::frame::read_game_state(&self.sim.ecs.0, content)
+        mind_core::audio::frame::read_game_state(self.world(), content)
     }
 
     /// H07 T6: one view per live `WeatherRuntime`, sorted by `EntitySeq`
@@ -68,9 +65,7 @@ impl MindSimHost {
     pub fn weather_views(&self, out: &mut Vec<mind_core::fx::WeatherStateView>) {
         out.clear();
         let mut rows: Vec<(u64, mind_core::fx::WeatherStateView)> = self
-            .sim
-            .ecs
-            .0
+            .world()
             .iter_entities()
             .filter_map(|entity| {
                 let state = entity.get::<mind_core::entities::comp::weather::WeatherRuntime>()?;
@@ -99,15 +94,11 @@ impl MindSimHost {
     pub fn conveyor_items(&self, x: i32, y: i32) -> Option<(u8, Vec<BeltItemSlot>)> {
         let entity = self.tile_at(x, y)?.build?;
         let rot = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::ecs::BuildingComp>(entity)?
             .rot;
         let belt = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
         let mut items = Vec::with_capacity(belt.len as usize);
         for i in 0..belt.len as usize {
@@ -126,7 +117,7 @@ impl MindSimHost {
         let def = content.block(self.sim.grid.tile(x, y).block)?;
         let speed =
             mind_core::world::blocks::distribution::ConveyorBehavior::belt_speed(&def.name)?;
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let (blend_bits, sclx, scly, clog_heat) = {
             let belt =
                 world.get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
@@ -154,9 +145,7 @@ impl MindSimHost {
     /// renderer.
     pub fn drill_draw(&self, x: i32, y: i32) -> Option<f32> {
         let entity = self.tile_at(x, y)?.build?;
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get::<mind_core::entities::comp::DrillState>(entity)
             .map(|state| state.time_drilled)
     }
@@ -168,9 +157,7 @@ impl MindSimHost {
     pub fn turret_draw(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
         let entity = self.tile_at(x, y)?.build?;
         let state = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)?;
         let len = -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
         let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
@@ -192,7 +179,7 @@ impl MindSimHost {
         let entity = self.tile_at(x, y)?.build?;
         let content = self.content_snapshot.as_ref()?;
         let def = content.block(self.sim.grid.tile(x, y).block)?;
-        let state = self.sim.ecs.0.get::<TurretState>(entity)?;
+        let state = self.world().get::<TurretState>(entity)?;
         let name = def.name.as_str();
 
         let len = -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
@@ -208,9 +195,7 @@ impl MindSimHost {
         // `drawTurret`: `Drawf.liquid(liquid, ..., liquids.get(toDraw) /
         // block.liquidCapacity, toDraw.color, drawrot)`.
         let (liquid_fraction, liquid_color) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::modules::LiquidModule>(entity)
             .map(|liquids| {
                 let liquid = liquids.current_liquid();
@@ -281,43 +266,31 @@ impl MindSimHost {
         use mind_core::world::blocks::storage::unloader::UnloaderBuild;
         let entity = self.tile_at(x, y)?.build?;
         let healthf = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<Health>(entity)
             .map(Health::fraction)
             .unwrap_or(1.0);
         Some(BlockStateDraw {
             door_open: self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<DoorState>(entity)
                 .map(|door| door.open)
                 .unwrap_or(false),
             enabled: self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::entities::comp::building::Building>(entity)
                 .map(|building| building.enabled)
                 .unwrap_or(true),
             sort_item: self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<SorterBuild>(entity)
                 .and_then(|sorter| sorter.sort_item),
             unloader_item: self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<UnloaderBuild>(entity)
                 .and_then(|unloader| unloader.sort_item),
             source_item: self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<SandboxState>(entity)
                 .and_then(|state| state.item),
             healthf,
@@ -353,11 +326,11 @@ impl MindSimHost {
     /// tile y, size, healthf)`.
     pub fn cached_crack_draws(&self) -> Vec<(f32, f32, i32, i32, f32)> {
         use mind_core::entities::comp::health::Health;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
                 continue;
             };
@@ -399,7 +372,7 @@ impl MindSimHost {
         let (x0, y0, w, h) = rect;
         let (x1, y1) = (x0 + w, y0 + h);
         let mut rows: Vec<(u32, FireDraw)> = Vec::new();
-        for entity_ref in self.sim.ecs.0.iter_entities() {
+        for entity_ref in self.world().iter_entities() {
             let Some(fire) = entity_ref.get::<FireState>() else {
                 continue;
             };
@@ -433,13 +406,13 @@ impl MindSimHost {
     pub fn puddle_draws(&self, rect: (f32, f32, f32, f32)) -> Vec<PuddleDraw> {
         use mind_core::combat::puddles::{MAX_LIQUID, PuddleState};
         use mind_core::render::drawf::shift_value;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let (x0, y0, w, h) = rect;
         let (x1, y1) = (x0 + w, y0 + h);
         let mut rows: Vec<(u32, PuddleDraw)> = Vec::new();
-        for entity_ref in self.sim.ecs.0.iter_entities() {
+        for entity_ref in self.world().iter_entities() {
             let Some(puddle) = entity_ref.get::<PuddleState>() else {
                 continue;
             };
@@ -503,7 +476,7 @@ impl MindSimHost {
         let entity = tile.build?;
         let content = self.content_snapshot.as_ref()?;
         let def = content.block(tile.block)?;
-        let ecs = &self.sim.ecs.0;
+        let ecs = self.world();
         let size = def.size.max(1);
         let rotation = self.building_rotation(x, y);
         let cx = (x + (size - 1) / 2) as f32 * 8.0 + def.offset;
@@ -568,10 +541,7 @@ impl MindSimHost {
     /// `Sim::resolve_deaths`): `(x, y, rotation, block)` in insertion order.
     pub fn team_block_plans(&self) -> Vec<(i16, i16, i8, BlockId)> {
         let team = mind_core::ecs::TeamId(self.player_team());
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+        self.campaign_runtime()
             .and_then(|runtime| runtime.session.teams.data(team))
             .map(|data| {
                 data.plans
@@ -596,19 +566,17 @@ impl MindSimHost {
         };
         let mut out = Vec::new();
         for &entity in &runtime.bullets {
-            let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+            let Some(pos) = self.world().get::<Pos>(entity) else {
                 continue;
             };
-            let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+            let Some(bullet) = self.world().get::<Bullet>(entity) else {
                 continue;
             };
             if bullet.finished() {
                 continue;
             }
             let id = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<EntitySeq>(entity)
                 .map(|seq| seq.0)
                 .unwrap_or(0);
@@ -641,7 +609,7 @@ impl MindSimHost {
                 .unwrap_or(1)
         };
         for (id, x, y, time, lifetime, block, _team) in
-            mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0)
+            mind_core::game::launch_payload::payload_rows(self.world_mut())
         {
             out.push(PadDraw::Launch {
                 id,
@@ -653,7 +621,7 @@ impl MindSimHost {
             });
         }
         for (id, x, y, block, _config, arriving, arriving_timer, cooldown) in
-            mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0)
+            mind_core::game::landing_pad::landing_pad_rows(self.world_mut())
         {
             out.push(PadDraw::Landing {
                 id,
@@ -667,7 +635,7 @@ impl MindSimHost {
             });
         }
         for (id, x, y, block, progress) in
-            mind_core::world::behavior::campaign::launch_pad_rows(&mut self.sim.ecs.0)
+            mind_core::world::behavior::campaign::launch_pad_rows(self.world_mut())
         {
             out.push(PadDraw::Pad {
                 id,
@@ -686,6 +654,6 @@ impl MindSimHost {
     /// `render/accelerator.rs`: the live `CampaignState`/`Building` counters plus
     /// the block's drawn footprint. Rust-only seam (like `pad_draws`).
     pub fn accelerator_draws(&mut self) -> Vec<mind_core::render::accelerator::AcceleratorDraw> {
-        mind_core::render::accelerator::accelerator_rows(&mut self.sim.ecs.0)
+        mind_core::render::accelerator::accelerator_rows(self.world_mut())
     }
 }

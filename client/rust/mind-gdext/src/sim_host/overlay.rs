@@ -37,13 +37,11 @@ impl MindSimHost {
         let mut enemy_units = Vec::new();
         if let Some(runtime) = self.sim.unit_runtime() {
             for &entity in &runtime.units {
-                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                let Some(pos) = self.world().get::<Pos>(entity) else {
                     continue;
                 };
                 let team = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<TeamComp>(entity)
                     .map(|comp| comp.team)
                     .unwrap_or(0);
@@ -53,12 +51,7 @@ impl MindSimHost {
             }
         }
         let mut enemy_cores = Vec::new();
-        if let Some(runtime) = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
-        {
+        if let Some(runtime) = self.campaign_runtime() {
             for team in runtime.session.teams.active.clone() {
                 let Some(data) = runtime.session.teams.data(team) else {
                     continue;
@@ -67,7 +60,7 @@ impl MindSimHost {
                     continue;
                 }
                 for &core in &data.cores {
-                    if let Some(pos) = self.sim.ecs.0.get::<Pos>(core) {
+                    if let Some(pos) = self.world().get::<Pos>(core) {
                         enemy_cores.push((pos.x, pos.y, team.0));
                     }
                 }
@@ -109,12 +102,11 @@ impl MindSimHost {
         let tile = self.tile_at(x, y)?;
         let entity = tile.build?;
         let def = content.block(tile.block)?;
-        let cx = x as f32 * TILESIZE_F + def.offset;
-        let cy = y as f32 * TILESIZE_F + def.offset;
+        let (cx, cy) = tile_center(x, y, def.offset);
         if matches!(def.kind, BlockKind::PowerNode) {
             let laser_range = power_laser_range(&def.name) * TILESIZE_F;
             let mut links = Vec::new();
-            if let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) {
+            if let Some(module) = self.world().get::<PowerModule>(entity) {
                 for packed in &module.links {
                     let (lx, ly) = mind_core::world::pos::unpack(*packed);
                     let Some(other) = self.tile_at(lx as i32, ly as i32) else {
@@ -145,16 +137,12 @@ impl MindSimHost {
         if let Some(range) = bridge_range {
             use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
             let linked = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<ItemBridgeBuild>(entity)
                 .map(|bridge| bridge.link)
                 .unwrap_or(-1);
             let team = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::entities::comp::TeamComp>(entity)
                 .map(|comp| comp.team)
                 .unwrap_or(0);
@@ -172,9 +160,7 @@ impl MindSimHost {
                     let other_team = other
                         .build
                         .and_then(|entity| {
-                            self.sim
-                                .ecs
-                                .0
+                            self.world()
                                 .get::<mind_core::entities::comp::TeamComp>(entity)
                         })
                         .map(|comp| comp.team)
@@ -203,13 +189,12 @@ impl MindSimHost {
             // `LogicBlock.range` lives on the family knobs (`LogicBlockDef`).
             let range = (!privileged)
                 .then(|| {
-                    mind_core::logic::blocks::logic_def_of(&self.sim.ecs.0, entity)
+                    mind_core::logic::blocks::logic_def_of(self.world(), entity)
                         .map(|def| def.range)
                         .unwrap_or(0.0)
                 })
                 .filter(|range| *range > 0.0);
-            let links =
-                mind_core::logic::blocks::logic_block::overlay_links(&self.sim.ecs.0, entity);
+            let links = mind_core::logic::blocks::logic_block::overlay_links(self.world(), entity);
             return Some(ConfigOverlay::Logic {
                 x: cx,
                 y: cy,
@@ -236,21 +221,14 @@ impl MindSimHost {
             return SelectOverlay::None;
         };
         let team = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::TeamComp>(entity)
             .map(|comp| comp.team)
             .unwrap_or(0);
         let content = self.content_snapshot.as_ref();
         let def = content.and_then(|content| content.block(tile.block));
         let (cx, cy) = def
-            .map(|def| {
-                (
-                    x as f32 * TILESIZE_F + def.offset,
-                    y as f32 * TILESIZE_F + def.offset,
-                )
-            })
+            .map(|def| tile_center(x, y, def.offset))
             .unwrap_or((x as f32 * TILESIZE_F, y as f32 * TILESIZE_F));
         if team != self.player_team() {
             return SelectOverlay::None;
@@ -258,9 +236,7 @@ impl MindSimHost {
         if def.is_some_and(|def| def.kind == BlockKind::MessageBlock) {
             // `MessageBlock.drawSelect`: the stored message above the block.
             let text = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::logic::blocks::MessageBlockState>(entity)
                 .map(|state| state.message.clone())
                 .unwrap_or_default();
@@ -274,9 +250,7 @@ impl MindSimHost {
                 .base()
                 .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets");
             let (tag, icon) = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::logic::blocks::LogicBlockState>(entity)
                 .map(|state| {
                     let icon = (state.icon_tag != '\0')
@@ -293,7 +267,7 @@ impl MindSimHost {
                 })
                 .unwrap_or((None, None));
             let mut units = Vec::new();
-            for unit in self.sim.ecs.0.iter_entities() {
+            for unit in self.world().iter_entities() {
                 let Some(ai) = unit.get::<mind_core::ai::types::logic::LogicAi>() else {
                     continue;
                 };
@@ -408,7 +382,7 @@ impl MindSimHost {
     /// H03 T5 step 6 diagnosis seam.
     #[func]
     pub fn place_range_json(&self, name: GString) -> GString {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return GString::from("null");
         };
         let Some(id) = content.block_id(&name.to_string()) else {

@@ -85,17 +85,13 @@ impl MindSimHost {
             return false;
         };
         if self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<UnitCore>(entity)
             .is_some_and(|core| core.dead)
         {
             return false;
         }
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get::<UnitTypeComp>(entity)
             .and_then(|comp| {
                 self.content_registry()
@@ -119,7 +115,7 @@ impl MindSimHost {
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.
     pub fn player_can_deposit_at(&self, x: i32, y: i32) -> Option<bool> {
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             return None;
         };
         (self
@@ -132,15 +128,10 @@ impl MindSimHost {
     /// Team a local placement carries (`state.rules.defaultTeam`; the live
     /// campaign session wins over the build-guard fallback).
     pub fn player_team(&self) -> u8 {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+        self.campaign_runtime()
             .map(|runtime| runtime.session.rules.default_team)
             .or_else(|| {
-                self.sim
-                    .ecs
-                    .0
+                self.world()
                     .get_resource::<mind_core::world::limits::BuildRules>()
                     .map(|rules| rules.default_team)
             })
@@ -167,18 +158,11 @@ impl MindSimHost {
         }
         let team = team as u8;
         self.sim.set_relay_player_team(team);
-        if let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
-            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
-        {
+        if let Some(mut runtime) = self.campaign_runtime_mut() {
             runtime.session.rules.default_team = team;
         }
         if let Some(mut rules) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_resource_mut::<mind_core::world::limits::BuildRules>()
         {
             rules.default_team = team;
@@ -212,10 +196,7 @@ impl MindSimHost {
     /// Live sector rules for the renderer's per-frame feed (G03 T12):
     /// campaign session first, else the last `load_sector` rules.
     pub fn live_rules(&self) -> Option<Rules> {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+        self.campaign_runtime()
             .map(|runtime| runtime.session.rules.clone())
             .or_else(|| self.sector_rules.clone())
     }
@@ -225,10 +206,7 @@ impl MindSimHost {
     /// (`UnlockableContent.java:281-283`): outside a campaign every content
     /// option is unlocked.
     pub fn in_campaign(&self) -> bool {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+        self.campaign_runtime()
             .is_some_and(|runtime| runtime.session.sector.is_some())
     }
 
@@ -236,7 +214,7 @@ impl MindSimHost {
     /// `isOnPlanet` filter: the campaign session's sector planet, else
     /// `rules.planet`'s default (`Rules.java:249`, `serpulo`).
     pub fn config_planet(&self) -> Option<mind_core::content::PlanetId> {
-        if let Some(runtime) = self.sim.ecs.0.get_resource::<CampaignRuntime>()
+        if let Some(runtime) = self.campaign_runtime()
             && let Some((planet, _)) = runtime.session.sector
         {
             return Some(planet);
@@ -281,9 +259,7 @@ impl MindSimHost {
     #[func]
     pub fn set_player_team(&mut self, team: i64) -> bool {
         let editor = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::limits::BuildRules>()
             .is_some_and(|rules| rules.editor)
             || self.live_rules().is_some_and(|rules| rules.editor);
@@ -297,9 +273,7 @@ impl MindSimHost {
         // `PlayerComp.team(team)`: `if(unit != null) unit.team(team)`.
         if let Some(unit) = self.sim.player_unit()
             && let Some(mut comp) = self
-                .sim
-                .ecs
-                .0
+                .world_mut()
                 .get_mut::<mind_core::entities::comp::TeamComp>(unit)
         {
             comp.team = team;
@@ -308,18 +282,11 @@ impl MindSimHost {
         self.sim.set_player_team(team);
         // `player_team()` reads the live rules' `defaultTeam`; keep the editor's
         // selected team authoritative for placement and unit ownership.
-        if let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
-            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
-        {
+        if let Some(mut runtime) = self.campaign_runtime_mut() {
             runtime.session.rules.default_team = team;
         }
         if let Some(mut rules) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_resource_mut::<mind_core::world::limits::BuildRules>()
         {
             rules.default_team = team;
@@ -370,7 +337,7 @@ impl MindSimHost {
         use mind_core::entities::comp::unit::comp::UnitTypeComp;
         let mut dict = VarDictionary::new();
         let entity = self.sim.player_unit();
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let health = entity.and_then(|e| world.get::<Health>(e));
         let type_name = entity
             .and_then(|e| world.get::<UnitTypeComp>(e))
@@ -408,7 +375,7 @@ impl MindSimHost {
         dict.set("type", &GString::from(type_name.as_str()));
         dict.set(
             "statuses",
-            &GString::from(serde_json::Value::Array(statuses).to_string().as_str()),
+            &crate::gdutil::json::value_gstring(&serde_json::Value::Array(statuses)),
         );
         dict
     }
@@ -423,8 +390,8 @@ impl MindSimHost {
     pub fn player_core_healths_json(&self) -> GString {
         use mind_core::entities::comp::health::Health;
         let team = self.player_team();
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return GString::from("[]");
+        let Some(content) = self.content_registry() else {
+            return crate::gdutil::json::empty_array();
         };
         let mut rows: Vec<serde_json::Value> = Vec::new();
         let mut seen = Vec::new();
@@ -449,9 +416,7 @@ impl MindSimHost {
             let anchor_x = (pos.x() as i32 - def.size_offset) as f32 * unit + def.offset;
             let anchor_y = (pos.y() as i32 - def.size_offset) as f32 * unit + def.offset;
             let (health, max) = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<Health>(entity)
                 .map(|health| (health.health, health.max_health))
                 .unwrap_or((0.0, 0.0));
@@ -462,7 +427,7 @@ impl MindSimHost {
                 "max": max,
             }));
         }
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// `WaveSpawner.playerNear()` (`WaveSpawner.java:58-60`, G03 T9): spawns
@@ -510,7 +475,7 @@ impl MindSimHost {
                 })
             })
             .collect();
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// Debug probe (J04 T1): the turret's resolved targeting state at `(x, y)`
@@ -529,7 +494,7 @@ impl MindSimHost {
         let Some(entity) = tile.build else {
             return d;
         };
-        let Some(state) = self.sim.ecs.0.get::<TurretState>(entity) else {
+        let Some(state) = self.world().get::<TurretState>(entity) else {
             return d;
         };
         let config = &state.config;
@@ -559,11 +524,7 @@ impl MindSimHost {
             .as_ref()
             .and_then(|content| content.item_id("copper"))
             .is_some_and(|item| {
-                mind_core::world::blocks::defense::turrets::accept_item(
-                    &self.sim.ecs.0,
-                    entity,
-                    item,
-                )
+                mind_core::world::blocks::defense::turrets::accept_item(self.world(), entity, item)
             });
         d.set("accepts_copper", &accepts_copper.to_variant());
         match state.target {
@@ -574,9 +535,7 @@ impl MindSimHost {
                     &(self.sim.ecs.seq_of(target).unwrap_or(u64::MAX) as i64).to_variant(),
                 );
                 let name = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::UnitTypeComp>(target)
                     .and_then(|comp| {
                         self.content_snapshot
@@ -586,7 +545,7 @@ impl MindSimHost {
                     .map(|def| def.name.clone())
                     .unwrap_or_default();
                 row.set("name", &GString::from(name.as_str()).to_variant());
-                if let Some(pos) = self.sim.ecs.0.get::<mind_core::entities::comp::Pos>(target) {
+                if let Some(pos) = self.world().get::<mind_core::entities::comp::Pos>(target) {
                     row.set("x", &pos.x.to_variant());
                     row.set("y", &pos.y.to_variant());
                 }
@@ -603,7 +562,7 @@ impl MindSimHost {
     pub fn player_unit_pos(&self) -> PackedFloat32Array {
         let mut out = PackedFloat32Array::new();
         if let Some(entity) = self.sim.player_unit()
-            && let Some(pos) = self.sim.ecs.0.get::<mind_core::entities::comp::Pos>(entity)
+            && let Some(pos) = self.world().get::<mind_core::entities::comp::Pos>(entity)
         {
             out.push(pos.x);
             out.push(pos.y);
@@ -646,7 +605,7 @@ impl MindSimHost {
                 .to_string()
                 .as_str(),
             ),
-            None => GString::from("{}"),
+            None => crate::gdutil::json::empty_object(),
         }
     }
 }

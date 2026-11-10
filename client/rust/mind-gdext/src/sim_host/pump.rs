@@ -60,9 +60,7 @@ impl MindSimHost {
     /// boundary (`team_ai_system` -> `CampaignAiQueues`; PAR-0139).
     pub(super) fn drain_ai_placements(&mut self) {
         let Some(queues) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::game::runtime::CampaignAiQueues>()
         else {
             return;
@@ -260,9 +258,7 @@ impl MindSimHost {
             self.sim.config().fixed_hz,
             self.sim.config().max_ticks_per_frame,
         );
-        self.world_dirty = true;
-        self.emit_state();
-        self.emit_world_changed();
+        self.mark_world_changed();
     }
 
     /// Pauses/resumes the fixed-step pump (resets the accumulator).

@@ -15,25 +15,23 @@ impl MindSimHost {
     #[func]
     pub fn building_bars_json(&self, x: i32, y: i32) -> GString {
         let Some(tile) = self.tile_at(x, y) else {
-            return GString::from("[]");
+            return crate::gdutil::json::empty_array();
         };
         let Some(entity) = tile.build else {
-            return GString::from("[]");
+            return crate::gdutil::json::empty_array();
         };
         // `PlacementFragment.hovered()` calls `build.display(table)` for the
         // hovered building whatever its team (Java shows enemy/derelict bars
         // too); only the *unit* test is player-team-scoped
         // (`Units.closestOverlap(player.team(), ...)`).
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return GString::from("[]");
+        let Some(content) = self.content_registry() else {
+            return crate::gdutil::json::empty_array();
         };
         let Some(def) = content.block(tile.block) else {
-            return GString::from("[]");
+            return crate::gdutil::json::empty_array();
         };
         let healthf = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::health::Health>(entity)
             .map(mind_core::entities::comp::health::Health::fraction)
             .unwrap_or(1.0);
@@ -47,23 +45,17 @@ impl MindSimHost {
             )
         }))
         .then(|| {
-            self.sim
-                .ecs
-                .0
+            self.world()
                 .get::<PowerModule>(entity)
                 .map(|module| module.status)
         })
         .flatten();
         let items_total = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<ItemModule>(entity)
             .map(|module| module.total);
         let liquids = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<LiquidModule>(entity)
             .map(|module| module.liquids.clone());
         let liquid_info: Vec<(String, u32)> = content
@@ -84,7 +76,7 @@ impl MindSimHost {
         // `Block.setBars` family overrides read live component state (J05
         // T4): heat, drill speed/warmup, `storageCapacity` + the unlocked item
         // count for a core, and the factory's progress.
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let table = world.get_resource::<mind_core::world::block::BlockTable>();
         let instance = table.and_then(|table| table.instance(tile.block));
         let power_module = world.get::<PowerModule>(entity);
@@ -426,7 +418,7 @@ impl MindSimHost {
                 })
             })
             .collect();
-        GString::from(serde_json::Value::Array(json).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(json))
     }
 
     /// `BuildingComp.displayConsumption` rows for the hovered building
@@ -442,14 +434,14 @@ impl MindSimHost {
     /// Java (`cons.optional && cons.booster`).
     #[func]
     pub fn building_consumption_json(&self, x: i32, y: i32) -> GString {
-        let empty = || GString::from("[]");
+        let empty = || crate::gdutil::json::empty_array();
         let Some(entity) = self.tile_at(x, y).and_then(|tile| tile.build) else {
             return empty();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return empty();
         };
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let team = world
             .get::<mind_core::entities::comp::TeamComp>(entity)
             .map(|team| team.team);
@@ -480,6 +472,6 @@ impl MindSimHost {
                 })
             })
             .collect();
-        GString::from(serde_json::json!([images]).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::json!([images]))
     }
 }

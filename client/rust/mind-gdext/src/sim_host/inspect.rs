@@ -109,23 +109,17 @@ impl MindSimHost {
     #[func]
     pub fn building_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::<GString, Variant>::new();
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return out;
         };
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let Some(building) = world.get::<mind_core::entities::comp::Building>(entity) else {
             return out;
         };
         {
             let mut put = |key: &str, value: Variant| {
-                out.set(&GString::from(key), &value);
+                out.set(key, &value);
             };
             put("block", Variant::from(i64::from(building.block.raw())));
             put("rotation", Variant::from(i64::from(building.rotation)));
@@ -225,30 +219,21 @@ impl MindSimHost {
     #[func]
     pub fn power_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
         let mut out = Dictionary::<GString, f64>::new();
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return out;
         };
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         if let Some(module) = world.get::<PowerModule>(entity) {
-            out.set(&GString::from("status"), module.status as f64);
-            out.set(&GString::from("stored"), module.stored as f64);
-            out.set(&GString::from("init"), if module.init { 1.0 } else { 0.0 });
+            out.set("status", module.status as f64);
+            out.set("stored", module.stored as f64);
+            out.set("init", if module.init { 1.0 } else { 0.0 });
             if let Some(graph) = world
                 .get_resource::<PowerGrids>()
                 .and_then(|grids| grids.graph(module.graph))
             {
-                out.set(&GString::from("graph_id"), graph.debug_id as f64);
-                out.set(
-                    &GString::from("satisfaction"),
-                    graph.get_satisfaction() as f64,
-                );
+                out.set("graph_id", graph.debug_id as f64);
+                out.set("satisfaction", graph.get_satisfaction() as f64);
             }
         }
         out
@@ -258,22 +243,13 @@ impl MindSimHost {
     #[func]
     pub fn liquid_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
         let mut out = Dictionary::<GString, f64>::new();
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return out;
         };
-        if let Some(module) = self.sim.ecs.0.get::<LiquidModule>(entity) {
-            out.set(&GString::from("current"), module.current_amount as f64);
-            out.set(
-                &GString::from("has_any"),
-                if module.has_any() { 1.0 } else { 0.0 },
-            );
+        if let Some(module) = self.world().get::<LiquidModule>(entity) {
+            out.set("current", module.current_amount as f64);
+            out.set("has_any", if module.has_any() { 1.0 } else { 0.0 });
         }
         out
     }
@@ -282,21 +258,15 @@ impl MindSimHost {
     #[func]
     pub fn heat_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
         let mut out = Dictionary::<GString, f64>::new();
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return out;
         };
-        if let Some(heat) = self.sim.ecs.0.get::<HeatState>(entity) {
-            out.set(&GString::from("heat"), heat.heat as f64);
-            out.set(&GString::from("heat_output"), heat.heat_output as f64);
+        if let Some(heat) = self.world().get::<HeatState>(entity) {
+            out.set("heat", heat.heat as f64);
+            out.set("heat_output", heat.heat_output as f64);
             out.set(
-                &GString::from("frac"),
+                "frac",
                 mind_core::world::blocks::heat::heat_frac(heat.heat, heat.heat_output) as f64,
             );
         }
@@ -315,7 +285,7 @@ impl MindSimHost {
     /// `resolve_deaths` destroys it and pushes the ghost plan.
     #[func]
     pub fn debug_kill_building(&mut self, x: i32, y: i32) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         let Some(entity) = self
@@ -326,9 +296,7 @@ impl MindSimHost {
             return false;
         };
         let Some(mut health) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_mut::<mind_core::entities::comp::Health>(entity)
         else {
             return false;
@@ -342,21 +310,18 @@ impl MindSimHost {
     /// runtime.
     #[func]
     pub fn debug_create_fire(&mut self, x: i32, y: i32) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
         else {
             return false;
         };
         let created =
-            mind_core::combat::fires::create(&mut self.sim.ecs.0, tx, ty, &mut runtime.rng)
-                .is_some();
-        self.sim.ecs.0.insert_non_send(runtime);
+            mind_core::combat::fires::create(self.world_mut(), tx, ty, &mut runtime.rng).is_some();
+        self.world_mut().insert_non_send(runtime);
         created
     }
 
@@ -365,7 +330,7 @@ impl MindSimHost {
     /// liquid is unknown, the deposit reacts/vaporizes, or there is no runtime.
     #[func]
     pub fn debug_deposit_puddle(&mut self, x: i32, y: i32, liquid: GString, amount: f64) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         let Some(id) = self
@@ -376,18 +341,21 @@ impl MindSimHost {
             return false;
         };
         let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
         else {
             return false;
         };
+        // Field path: the world is borrowed mutably below while `content` is
+        // still live, which the `content_registry()` accessor (borrowing all
+        // of `self`) would reject.
         let Some(content) = self.content_snapshot.as_ref() else {
-            self.sim.ecs.0.insert_non_send(runtime);
+            self.world_mut().insert_non_send(runtime);
             return false;
         };
         let created = mind_core::combat::puddles::deposit(
+            // Field path: `self.sim.grid.tiles` and `content` are borrowed
+            // alongside the world.
             &mut self.sim.ecs.0,
             &self.sim.grid.tiles,
             content,
@@ -398,7 +366,7 @@ impl MindSimHost {
             &mut runtime.rng,
         )
         .is_some();
-        self.sim.ecs.0.insert_non_send(runtime);
+        self.world_mut().insert_non_send(runtime);
         created
     }
 
@@ -437,11 +405,9 @@ impl MindSimHost {
             .into_iter()
             .find_map(|(_, entity, comp)| {
                 (comp.team.0 == team
-                    && self.sim.ecs.0.get::<ItemModule>(entity).is_some()
+                    && self.world().get::<ItemModule>(entity).is_some()
                     && self
-                        .sim
-                        .ecs
-                        .0
+                        .world()
                         .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
                         .is_some())
                 .then_some(entity)
@@ -450,13 +416,11 @@ impl MindSimHost {
             return 0;
         };
         let capacity = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
             .map(|core| core.storage_capacity)
             .unwrap_or(i32::MAX);
-        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+        match self.world_mut().get_mut::<ItemModule>(entity) {
             Some(mut module) => i64::from(module.add(item, amount, capacity)),
             None => 0,
         }
@@ -483,23 +447,17 @@ impl MindSimHost {
             return 0.0;
         };
         let capacity = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::block::BlockTable>()
             .and_then(|table| {
-                self.sim
-                    .ecs
-                    .0
+                self.world()
                     .get::<mind_core::entities::comp::Building>(entity)
                     .map(|building| building.block)
                     .and_then(|block| table.get(block).map(|inst| inst.def.liquid_capacity))
             })
             .unwrap_or(0.0);
         match self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_mut::<mind_core::world::modules::LiquidModule>(entity)
         {
             Some(mut module) => f64::from(module.add(liquid, amount as f32, capacity)),
@@ -525,21 +483,17 @@ impl MindSimHost {
             return 0;
         };
         let block = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::Building>(entity)
             .map(|building| building.block);
         let capacity = block
             .and_then(|block| {
-                self.sim
-                    .ecs
-                    .0
+                self.world()
                     .get_resource::<mind_core::world::block::BlockTable>()
                     .and_then(|table| table.get(block).map(|inst| inst.def.item_capacity))
             })
             .unwrap_or(0);
-        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+        match self.world_mut().get_mut::<ItemModule>(entity) {
             Some(mut module) => i64::from(module.add(item, amount, capacity)),
             None => 0,
         }
@@ -550,10 +504,7 @@ impl MindSimHost {
     pub fn weather_json(&self) -> GString {
         let content = self.sim.block_runtime().map(|runtime| runtime.content());
         let entries: Vec<serde_json::Value> = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .campaign_runtime()
             .map(|campaign| {
                 campaign
                     .session
@@ -576,9 +527,7 @@ impl MindSimHost {
             })
             .unwrap_or_default();
         let mut active: Vec<(u64, serde_json::Value)> = self
-            .sim
-            .ecs
-            .0
+            .world()
             .iter_entities()
             .filter_map(|entity| {
                 let state = entity.get::<mind_core::entities::comp::weather::WeatherRuntime>()?;
@@ -608,7 +557,7 @@ impl MindSimHost {
             "entries": entries,
             "active": active,
         });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// T9 test seam: force a weather (`Call.createWeather`), same shape as
@@ -626,7 +575,7 @@ impl MindSimHost {
             log::warn!("debug_create_weather: unknown weather `{name}`");
             return false;
         };
-        if self.sim.ecs.0.iter_entities().any(|entity| {
+        if self.world().iter_entities().any(|entity| {
             entity
                 .get::<mind_core::entities::comp::weather::WeatherRuntime>()
                 .is_some_and(|state| state.weather == weather)
@@ -634,9 +583,7 @@ impl MindSimHost {
             return false;
         }
         let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
         else {
             return false;
@@ -648,14 +595,14 @@ impl MindSimHost {
         let seq = runtime.seq;
         runtime.seq = seq.wrapping_add(1);
         mind_core::entities::comp::weather::create_weather(
-            &mut self.sim.ecs.0,
+            self.world_mut(),
             seq,
             weather,
             intensity,
             duration,
             (angle.cos(), angle.sin()),
         );
-        self.sim.ecs.0.insert_non_send(runtime);
+        self.world_mut().insert_non_send(runtime);
         true
     }
 
@@ -704,9 +651,7 @@ impl MindSimHost {
         );
         // Live building health (J04 T2 verification; debug probe only).
         match tile.build.and_then(|entity| {
-            self.sim
-                .ecs
-                .0
+            self.world()
                 .get::<mind_core::entities::comp::health::Health>(entity)
         }) {
             Some(health) => {
@@ -723,9 +668,7 @@ impl MindSimHost {
         let mut liquid_rows: Vec<serde_json::Value> = Vec::new();
         if let Some(entity) = tile.build
             && let Some(module) = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::world::modules::LiquidModule>(entity)
         {
             for (index, amount) in module.liquids.iter().enumerate() {
@@ -745,7 +688,8 @@ impl MindSimHost {
         }
         d.set(
             "liquids",
-            &GString::from(serde_json::Value::Array(liquid_rows).to_string().as_str()).to_variant(),
+            &crate::gdutil::json::value_gstring(&serde_json::Value::Array(liquid_rows))
+                .to_variant(),
         );
         // `Rules.limitMapArea` play area (`World.getDarkness` border half);
         // `null` when unrestricted.
@@ -799,7 +743,7 @@ impl MindSimHost {
         // `snow-boulder`/`basalt-boulder` for `groundZero`'s scatter stack).
         let mut blocks: Dictionary<GString, Variant> = Dictionary::new();
         for (name, count) in boulder_blocks {
-            blocks.set(&GString::from(name.as_str()), &count.to_variant());
+            blocks.set(name.as_str(), &count.to_variant());
         }
         d.set("boulder_blocks", &blocks.to_variant());
         d
@@ -815,15 +759,13 @@ impl MindSimHost {
     /// entry cheap so a playtest can always probe the fog state.
     #[func]
     pub fn fog_debug_json(&self) -> GString {
-        let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
+        let Some(rules) = mind_core::game::runtime::rules_of(self.world()) else {
             return GString::from("{\"fog\":false}");
         };
         let mut teams: Vec<u8> = Vec::new();
         let mut discovered = 0usize;
         if let Some(fog) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::game::fog::FogControl>()
         {
             for (id, data) in fog.fog.iter().enumerate() {
@@ -834,9 +776,7 @@ impl MindSimHost {
             }
         }
         let sources = self.sim.fog_sources(0).len().max(
-            self.sim
-                .ecs
-                .0
+            self.world()
                 .get_resource::<mind_core::game::fog::FogControl>()
                 .map_or(0, |fog| fog.fog.iter().flatten().count()),
         );
@@ -847,7 +787,7 @@ impl MindSimHost {
             "discoveredTiles": discovered,
             "sources": sources,
         });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// Single-tile fog probe (`FogControl.isVisibleTile`/`isDiscovered`):
@@ -855,15 +795,13 @@ impl MindSimHost {
     /// readback, renamed).
     #[func]
     pub fn fog_debug_tile_json(&self, team: i32, x: i32, y: i32) -> GString {
-        let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
+        let Some(rules) = mind_core::game::runtime::rules_of(self.world()) else {
             return GString::from("{\"fog\":false}");
         };
         let team = (team & 0xFF) as u8;
         let mut teams: Vec<u8> = Vec::new();
         if let Some(fog) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::game::fog::FogControl>()
         {
             for (id, data) in fog.fog.iter().enumerate() {
@@ -879,7 +817,7 @@ impl MindSimHost {
             "discovered": self.sim.fog_discovered(team, x, y),
             "teams": teams,
         });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// Bounded per-tile fog rect probe (I01 T15): visibility + discovery for
@@ -907,7 +845,7 @@ impl MindSimHost {
             ));
         }
         let value = serde_json::json!({ "x": x, "y": y, "w": w, "h": h, "rows": rows });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// Debug: forces `rules.fog`/`rules.staticFog` on the live session and
@@ -915,12 +853,7 @@ impl MindSimHost {
     #[func]
     pub fn debug_set_fog(&mut self, fog: bool, static_fog: bool) -> bool {
         {
-            let Some(mut runtime) = self
-                .sim
-                .ecs
-                .0
-                .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
-            else {
+            let Some(mut runtime) = self.campaign_runtime_mut() else {
                 return false;
             };
             runtime.session.rules.fog = fog;

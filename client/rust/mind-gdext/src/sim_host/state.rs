@@ -267,7 +267,7 @@ impl MindSimHost {
             Ok(json) => GString::from(json.as_str()),
             Err(err) => {
                 log::error!("get_state_json: dump failed: {err}");
-                GString::from("{}")
+                crate::gdutil::json::empty_object()
             }
         }
     }
@@ -309,7 +309,7 @@ impl MindSimHost {
             return out;
         };
         for (type_, count) in content_counts(registry) {
-            out.set(&GString::from(type_.name()), count as i64);
+            out.set(type_.name(), count as i64);
         }
         out
     }
@@ -410,7 +410,7 @@ impl MindSimHost {
     pub fn get_group_counts(&self) -> Dictionary<GString, i64> {
         let mut out = Dictionary::<GString, i64>::new();
         for (name, count) in self.sim.group_counts() {
-            out.set(&GString::from(name), count as i64);
+            out.set(name, count as i64);
         }
         out
     }
@@ -445,14 +445,14 @@ impl MindSimHost {
     #[func]
     pub fn network_state(&self) -> GString {
         let tick = self.sim.tick_count();
-        let state = mind_core::world::NetworkState::capture(&self.sim.ecs.0, tick);
+        let state = mind_core::world::NetworkState::capture(self.world(), tick);
         GString::from(state.to_json().as_str())
     }
 
     /// Live network counts `{graphs, liquids, heat_buildings}` (plan 09 §3.12).
     #[func]
     pub fn network_counts(&self) -> Dictionary<GString, i64> {
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let graphs = world
             .get_resource::<PowerGrids>()
             .map(|grids| grids.graph_count())
@@ -468,9 +468,9 @@ impl MindSimHost {
             }
         }
         let mut out = Dictionary::<GString, i64>::new();
-        out.set(&GString::from("graphs"), graphs as i64);
-        out.set(&GString::from("liquids"), liquids);
-        out.set(&GString::from("heat_buildings"), heat);
+        out.set("graphs", graphs as i64);
+        out.set("liquids", liquids);
+        out.set("heat_buildings", heat);
         out
     }
 

@@ -81,18 +81,14 @@ impl MindSimHost {
     /// rules keep fog off.
     pub fn apply_static_fog(&mut self, bytes: Vec<u8>) -> bool {
         if self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::game::fog::FogControl>()
             .is_none()
         {
             self.sim.reset_fog();
         }
         let Some(mut fog) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_resource_mut::<mind_core::game::fog::FogControl>()
         else {
             return false;
@@ -104,7 +100,7 @@ impl MindSimHost {
     /// Default-team core count in the live world (the lost-sector probe; the
     /// session's `Teams.cores` is not installed on a fresh load).
     pub fn player_core_blocks(&self, team: u8) -> usize {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return 0;
         };
         self.sim
@@ -123,7 +119,7 @@ impl MindSimHost {
     /// Distinct teams holding a core in the live world
     /// (`state.teams.getActive().count(TeamData::hasCore)`, `World.java:369-373`).
     pub fn core_teams(&self) -> Vec<u8> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut teams: Vec<u8> = self
@@ -217,19 +213,19 @@ impl MindSimHost {
     /// Installs (replacing any previous) the live campaign runtime resource so
     /// the `TickSet::Campaign`/`Objectives`/`GameStateCheck` systems run.
     pub fn install_campaign_runtime(&mut self, runtime: CampaignRuntime) {
-        self.sim.ecs.0.insert_resource(runtime);
+        self.world_mut().insert_resource(runtime);
     }
 
     /// Removes the campaign runtime (menu/abort/new world).
     pub fn clear_campaign_runtime(&mut self) {
-        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        self.world_mut().remove_resource::<CampaignRuntime>();
         // The hooks answer `is_campaign: false` again and drop pending deltas.
-        mind_core::game::runtime::reset_campaign_core_hooks(&mut self.sim.ecs.0);
+        mind_core::game::runtime::reset_campaign_core_hooks(self.world_mut());
     }
 
     /// Takes the runtime out for host-side bookkeeping.
     pub fn take_campaign_runtime(&mut self) -> Option<CampaignRuntime> {
-        self.sim.ecs.0.remove_resource::<CampaignRuntime>()
+        self.world_mut().remove_resource::<CampaignRuntime>()
     }
 
     /// Puts a bookkept runtime back.
@@ -237,9 +233,9 @@ impl MindSimHost {
         // The campaign core hooks queue `SectorInfo.handleCoreItem` deltas the
         // campaign tick folds into the played sector (PAR-0082), and the AI
         // queue carries the base-builder placements the pump drains (PAR-0139).
-        mind_core::game::runtime::install_campaign_core_hooks(&mut self.sim.ecs.0);
-        mind_core::game::runtime::install_campaign_ai_queues(&mut self.sim.ecs.0);
-        self.sim.ecs.0.insert_resource(runtime);
+        mind_core::game::runtime::install_campaign_core_hooks(self.world_mut());
+        mind_core::game::runtime::install_campaign_ai_queues(self.world_mut());
+        self.world_mut().insert_resource(runtime);
     }
 
     /// The installed runtime's `Vars.service`-equivalent tracker (`GAPS #68`):
@@ -247,20 +243,13 @@ impl MindSimHost {
     /// mirrors it into `MindCampaign` for persistence and the UI queries.
     /// `None` without a campaign sector installed.
     pub fn campaign_service(&self) -> Option<&mind_core::game::service::ServiceTracker> {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
-            .map(|runtime| &runtime.service)
+        self.campaign_runtime().map(|runtime| &runtime.service)
     }
 
     /// The installed runtime's `universe.secondsf()` (read-only; `None` with
     /// no campaign sector installed).
     pub fn campaign_universe_secondsf(&self) -> Option<f32> {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+        self.campaign_runtime()
             .map(|runtime| runtime.campaign.universe.secondsf(false))
     }
 
@@ -288,6 +277,7 @@ impl MindSimHost {
         let mut runtime = self.take_campaign_runtime()?;
         let sync = sync_session_with_sim(
             &mut runtime.session,
+            // Field path: the `sector_spawns` read below borrows `self`.
             &mut self.sim.ecs.0,
             content,
             self.sector_spawns,
@@ -378,9 +368,7 @@ impl MindSimHost {
             })
             .collect();
         mind_core::sim::Sim::stock_core(&mut self.sim, entity, &resolved);
-        self.world_dirty = true;
-        self.emit_state();
-        self.emit_world_changed();
+        self.mark_world_changed();
         log::info!(
             "place_launch_loadout: `{}` core at ({core_x}, {core_y}) stocked from {} stack(s)",
             schem.name(),
@@ -408,7 +396,7 @@ impl MindSimHost {
 
     /// The accelerator building at tile `(x, y)` (any tile of its footprint).
     pub(super) fn accelerator_at(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return None;
         };
         let entity = self
@@ -416,9 +404,7 @@ impl MindSimHost {
             .grid
             .entity_at(mind_core::world::TilePos::new(tx, ty))?;
         let block = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::Building>(entity)?
             .block;
         let kind = self.content_snapshot.as_ref()?.block(block)?.kind;
@@ -429,7 +415,7 @@ impl MindSimHost {
     /// the first core in entity order). Rust-only seam for the campaign
     /// research spend.
     pub fn player_core_items(&self, team: u8) -> Vec<(String, i32)> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
@@ -442,7 +428,7 @@ impl MindSimHost {
             {
                 continue;
             }
-            let Some(module) = self.sim.ecs.0.get::<ItemModule>(entity) else {
+            let Some(module) = self.world().get::<ItemModule>(entity) else {
                 continue;
             };
             let mut out = Vec::new();
@@ -480,7 +466,7 @@ impl MindSimHost {
             let is_core = content
                 .block(comp.block)
                 .is_some_and(|def| def.kind == BlockKind::CoreBlock);
-            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+            if !is_core || self.world().get::<ItemModule>(entity).is_none() {
                 continue;
             }
             target = Some(entity);
@@ -489,7 +475,7 @@ impl MindSimHost {
         let Some(entity) = target else {
             return 0;
         };
-        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+        match self.world_mut().get_mut::<ItemModule>(entity) {
             Some(mut module) => module.remove(item, amount),
             None => 0,
         }
@@ -515,7 +501,7 @@ impl MindSimHost {
             let is_core = content
                 .block(comp.block)
                 .is_some_and(|def| def.kind == BlockKind::CoreBlock);
-            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+            if !is_core || self.world().get::<ItemModule>(entity).is_none() {
                 continue;
             }
             target = Some(entity);
@@ -525,12 +511,11 @@ impl MindSimHost {
             return false;
         };
         let capacity = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
             .map(|core| core.storage_capacity)
             .unwrap_or(0);
+        // Field path: `content` below borrows `self.content_snapshot`.
         let Some(mut module) = self.sim.ecs.0.get_mut::<ItemModule>(entity) else {
             return false;
         };
@@ -589,9 +574,7 @@ impl MindSimHost {
         };
         let open = self.sim.accelerator_config_tapped(entity);
         let (anchor_x, anchor_y) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::Building>(entity)
             .map(|building| (i32::from(building.tile.x()), i32::from(building.tile.y())))
             .unwrap_or((x, y));
@@ -634,7 +617,7 @@ impl MindSimHost {
                 "open_dialog",
                 &[
                     GString::from("planet").to_variant(),
-                    GString::from(context.to_string().as_str()).to_variant(),
+                    crate::gdutil::json::value_gstring(&context).to_variant(),
                 ],
             );
         }
@@ -673,7 +656,7 @@ impl MindSimHost {
             .collect();
         self.world_dirty = true;
         self.emit_state();
-        GString::from(serde_json::Value::Array(stacks).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(stacks))
     }
 
     /// `launching = false` right before the sector switch (Accelerator.java:274).
@@ -691,8 +674,8 @@ impl MindSimHost {
     /// derelict core's inventory (PAR-0485 / CG-ECON-02).
     #[func]
     pub fn core_items_json(&self) -> GString {
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return GString::from("{}");
+        let Some(content) = self.content_registry() else {
+            return crate::gdutil::json::empty_object();
         };
         GString::from(core_items_json(&self.sim, content, self.player_team()).as_str())
     }
@@ -701,7 +684,7 @@ impl MindSimHost {
     /// `LaunchPayloadComp.draw`: `fin = time/lifetime`, region `<block>-pod`).
     #[func]
     pub fn launch_payloads_json(&mut self) -> GString {
-        let rows = mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0);
+        let rows = mind_core::game::launch_payload::payload_rows(self.world_mut());
         let mapped: Vec<String> = rows
             .into_iter()
             .map(|(id, x, y, time, lifetime, block, team)| {
@@ -730,7 +713,7 @@ impl MindSimHost {
     /// draw). `id` is the entity index; `config`/`arriving` are item names.
     #[func]
     pub fn landing_pads_json(&mut self) -> GString {
-        let rows = mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0);
+        let rows = mind_core::game::landing_pad::landing_pad_rows(self.world_mut());
         let item_name = |id: Option<u16>| -> Option<String> {
             id.and_then(|id| {
                 self.content_snapshot
