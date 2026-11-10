@@ -77,9 +77,27 @@ use crate::sim_host::MindSimHost;
 use crate::ui::root::MindUiRoot;
 use crate::wiring;
 
+#[allow(unused_imports)] // old `crate::campaign::FiredEvent` path
+pub use events::FiredEvent;
+pub use events::FiredEvents;
 use accelerator::PendingAcceleratorLaunch;
+use cache::DirMemo;
+use cache::dir_mtime_key;
+use events::dispatch_event_rows;
+use events::event_content_of;
+use events::install_event_listeners;
+use service::load_service;
+use service::save_service;
+use text::content_icon_name;
+use text::resolve_preset_description;
 
 mod accelerator;
+mod cache;
+mod events;
+mod hud;
+mod runtime;
+mod service;
+mod text;
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
 const OUTLINE_RAD: f32 = 1.17;
@@ -87,238 +105,6 @@ const OUTLINE_RAD: f32 = 1.17;
 /// Off-play-sector inventory rows of `ResearchDialog.rebuildItems`
 /// (`Vec<(sector, rows)>`).
 type SectorInventory = Vec<(SectorRef, Vec<(String, i32)>)>;
-
-/// One `EventType` row dispatched through the campaign bus
-/// (`core/src/mindustry/game/EventType.java`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FiredEvent {
-    /// Upstream `EventType` class name (`EventRow::class_name`).
-    pub class: &'static str,
-    /// Payload summary the recorder listener built (`"player 7"`,
-    /// `"serpulo:15"`, `"item 3"`, ...).
-    pub detail: String,
-}
-
-/// Bounded record of the rows dispatched through the campaign `Events` bus
-/// (PAR-0577 residual).
-///
-/// `Events` listeners are `FnMut(&T)` closures with no handle on the node, so
-/// the facade installs one recorder listener per class (the port's equivalent
-/// of `Control.java`'s `Events.on(...)` registrations); this log is the
-/// observable sink the MCP oracle reads (`take_fired_events`) and the unit
-/// tests assert on.
-#[derive(Debug, Default)]
-pub struct FiredEvents {
-    rows: VecDeque<FiredEvent>,
-    counts: BTreeMap<&'static str, u64>,
-}
-
-impl FiredEvents {
-    /// Empty log.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Records one dispatched row, dropping the oldest past
-    /// `mind_core::event::EVENT_QUEUE_CAPACITY` (the host drains every frame;
-    /// the cap only guards a never-draining host).
-    pub fn record(&mut self, class: &'static str, detail: impl Into<String>) {
-        *self.counts.entry(class).or_insert(0) += 1;
-        while self.rows.len() >= event::EVENT_QUEUE_CAPACITY {
-            self.rows.pop_front();
-        }
-        self.rows.push_back(FiredEvent {
-            class,
-            detail: detail.into(),
-        });
-    }
-
-    /// Drains the retained rows (oldest first).
-    pub fn take(&mut self) -> Vec<FiredEvent> {
-        self.rows.drain(..).collect()
-    }
-
-    /// Retained row count.
-    pub fn len(&self) -> usize {
-        self.rows.len()
-    }
-
-    /// Whether no row is retained.
-    pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
-    }
-
-    /// Rows dispatched for `class` since the last [`Self::clear`].
-    pub fn count(&self, class: &str) -> u64 {
-        self.counts.get(class).copied().unwrap_or(0)
-    }
-
-    /// Rows dispatched since the last [`Self::clear`].
-    pub fn total(&self) -> u64 {
-        self.counts.values().sum()
-    }
-
-    /// Drops the retained rows and the counters (match reset).
-    pub fn clear(&mut self) {
-        self.rows.clear();
-        self.counts.clear();
-    }
-}
-
-/// Payload summary of one `EventContent` (`"item 3"`, `"liquid 1"`,
-/// `"unit 5"`).
-fn event_content_detail(content: event::EventContent) -> String {
-    match content {
-        event::EventContent::Item(id) => format!("item {id}"),
-        event::EventContent::Liquid(id) => format!("liquid {id}"),
-        event::EventContent::Unit(id) => format!("unit {id}"),
-    }
-}
-
-/// `EventContent` projection of a content reference, for the event kinds whose
-/// payload is content (`UnlockEvent`/`ResearchEvent`).
-///
-/// `EventContent` models item/liquid/unit only; block/status/sector content has
-/// no payload variant, so those rows cannot be published (`mind-core`
-/// residual: `event.rs` needs `Block(u16)`).
-fn event_content_of(content: ContentRef) -> Option<event::EventContent> {
-    match content.type_ {
-        ContentType::Item => Some(event::EventContent::Item(content.id)),
-        ContentType::Liquid => Some(event::EventContent::Liquid(content.id)),
-        ContentType::Unit => Some(event::EventContent::Unit(content.id)),
-        _ => None,
-    }
-}
-
-/// Registers the recorder listeners for every `EventType` class the host owns.
-///
-/// The outbox the play flows fill ([`mind_core::game::play::PlaySession`])
-/// carries the `GameEvent` flow rows plus `SimEvent::PlayEvent` (`Logic.play`);
-/// the remaining queued `SimEvent`s are dispatched by the sim's own bus
-/// (`Sim::flush_events`). Every upstream listener the port kept inline
-/// (capture bookkeeping, autosaves, unlock toasts) already runs in
-/// `pump_runtime`; the recorder makes the fired rows observable.
-fn install_event_listeners(events: &mut event::Events, log: &Rc<RefCell<FiredEvents>>) {
-    fn record(log: &Rc<RefCell<FiredEvents>>, class: &'static str, detail: String) {
-        if let Ok(mut log) = log.try_borrow_mut() {
-            log.record(class, detail);
-        }
-    }
-
-    macro_rules! recorder {
-        ($on:ident, $class:literal, |$e:ident| $detail:expr) => {{
-            let log = Rc::clone(log);
-            events.$on(move |$e| record(&log, $class, $detail));
-        }};
-    }
-
-    recorder!(on_play, "PlayEvent", |_e| String::new());
-    recorder!(on_world_load, "WorldLoadEvent", |_e| String::new());
-    recorder!(on_game_over, "GameOverEvent", |e| format!(
-        "winner {}",
-        e.winner
-    ));
-    recorder!(on_sector_capture, "SectorCaptureEvent", |e| format!(
-        "{}:{} initial={}",
-        e.planet.raw(),
-        e.sector,
-        e.initial
-    ));
-    recorder!(on_sector_launch, "SectorLaunchEvent", |e| format!(
-        "{}:{}",
-        e.planet.raw(),
-        e.sector
-    ));
-    recorder!(on_unlock, "UnlockEvent", |e| event_content_detail(
-        e.content
-    ));
-    recorder!(on_research, "ResearchEvent", |e| event_content_detail(
-        e.content
-    ));
-    recorder!(on_deposit, "DepositEvent", |e| format!(
-        "{},{} {} x{}",
-        e.x,
-        e.y,
-        event_content_detail(event::EventContent::Item(e.item)),
-        e.amount
-    ));
-    recorder!(on_build_select, "BuildSelectEvent", |e| format!(
-        "{},{} team {} breaking={}",
-        e.x, e.y, e.team, e.breaking
-    ));
-    recorder!(on_config, "ConfigEvent", |e| format!(
-        "{},{} player {:?}",
-        e.x, e.y, e.player
-    ));
-    recorder!(on_player_join, "PlayerJoin", |e| format!(
-        "player {}",
-        e.player
-    ));
-    recorder!(on_player_leave, "PlayerLeave", |e| format!(
-        "player {}",
-        e.player
-    ));
-}
-
-/// Dispatches drained [`event::EventRow`]s to the bus; returns the count.
-fn dispatch_event_rows(
-    events: &mut event::Events,
-    rows: impl IntoIterator<Item = event::EventRow>,
-) -> usize {
-    let mut count = 0;
-    for row in rows {
-        events.dispatch_row(row);
-        count += 1;
-    }
-    count
-}
-
-/// The modification time of a directory used as a cache key (finding #9).
-///
-/// `None` means the directory (or its mtime) could not be read; the memo then
-/// reloads instead of pinning a possibly empty result.
-fn dir_mtime_key(dir: &std::path::Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(dir).and_then(|meta| meta.modified()).ok()
-}
-
-/// A directory-mtime-keyed memo (finding #9).
-///
-/// Only populated when the directory is readable, so an unreadable directory
-/// degrades to the uncached behaviour. The caller chooses what to load; the
-/// helpers here only own the invalidation rule and are unit-tested directly.
-#[derive(Debug, Default)]
-struct DirMemo<T> {
-    /// The mtime the cached value was loaded under.
-    key: Option<std::time::SystemTime>,
-    /// The cached value; `Some` only alongside a `Some` key.
-    value: Option<T>,
-}
-
-impl<T> DirMemo<T> {
-    /// The cached value when `key` is still the one it was loaded under.
-    fn get(&self, key: Option<std::time::SystemTime>) -> Option<&T> {
-        if key.is_some() && self.key == key {
-            self.value.as_ref()
-        } else {
-            None
-        }
-    }
-
-    /// Stores `value` under `key`; an unreadable directory is never cached.
-    fn store(&mut self, key: Option<std::time::SystemTime>, value: T) {
-        if key.is_none() {
-            return;
-        }
-        self.key = key;
-        self.value = Some(value);
-    }
-
-    /// Drops the cached value (content boot / data-root change).
-    fn clear(&mut self) {
-        self.key = None;
-        self.value = None;
-    }
-}
 
 /// `MindCampaign` — campaign/sector/rules/tech/schematic facade for MCP + UI.
 #[derive(GodotClass)]
@@ -473,84 +259,6 @@ impl INode for MindCampaign {
         self.run_exit_save();
         self.persist();
     }
-}
-
-/// `state.rules.sector.preset.description` for the paused dialog's
-/// `@objective` entry (`PausedDialog.java:76-80`).
-///
-/// The campaign registry boots with an empty `MemoryBundle`, so
-/// `UnlockableContent.description` is usually unset; fall back to the live
-/// bundle's `sector.<preset>.description` key (`UnlockableContent.java:91`
-/// loads it through `Core.bundle`).
-fn resolve_preset_description(
-    registry: Option<&ContentRegistry>,
-    bundle: &Bundle,
-    preset: Option<SectorId>,
-) -> String {
-    let Some(def) = preset.and_then(|preset| registry.and_then(|registry| registry.sector(preset)))
-    else {
-        return String::new();
-    };
-    def.unlock
-        .description
-        .clone()
-        .filter(|description| !description.is_empty())
-        .or_else(|| {
-            bundle
-                .get_or_null(&format!("sector.{}.description", def.name))
-                .map(str::to_owned)
-        })
-        .unwrap_or_default()
-}
-
-/// Loads the shared achievement/stat tracker from a settings-backed store.
-///
-/// `DesktopLauncher`'s anonymous `GameService` keeps `Vars.service` alive for
-/// the whole process and reads the persisted `achievement-<name>` /
-/// `achievement-stat-<name>` keys on boot ([`ServiceTracker::load`]). The
-/// facade owns that one tracker and injects it into every live
-/// [`CampaignRuntime`], so sector switches never restart the counters.
-fn load_service(store: &dyn UnlockStore) -> ServiceTracker {
-    let mut tracker = ServiceTracker::new();
-    tracker.load(store);
-    tracker
-}
-
-/// Writes the shared tracker's stats/achievements through a settings-backed
-/// store (`GameService.storeStats`). The caller flushes `Core.settings`.
-fn save_service(tracker: &mut ServiceTracker, store: &mut dyn UnlockStore) {
-    tracker.save(store);
-}
-
-/// `Achievement` rows as JSON for the achievements table: declaration order,
-/// `{name, unlocked, progress, goal, stat}` (`LocalGameService::achievement_rows`;
-/// the extra two fields are the stat/goal the row's progress is clamped to).
-fn service_achievement_rows_json(service: &mind_core::game::service::LocalGameService) -> String {
-    let rows: Vec<serde_json::Value> = service
-        .achievement_rows()
-        .into_iter()
-        .map(|row: AchievementRow| {
-            serde_json::json!({
-                "name": row.achievement.name(),
-                "unlocked": row.unlocked,
-                "progress": row.progress,
-                "goal": row.achievement.goal(),
-                "stat": row.achievement.stat().map(|stat| stat.name()),
-            })
-        })
-        .collect();
-    serde_json::Value::Array(rows).to_string()
-}
-
-/// `SStat` rows as JSON for the stats table: declaration order,
-/// `{name, value}` (`LocalGameService::stat_rows`).
-fn service_stat_rows_json(service: &mind_core::game::service::LocalGameService) -> String {
-    let rows: Vec<serde_json::Value> = service
-        .stat_rows()
-        .into_iter()
-        .map(|(stat, value)| serde_json::json!({ "name": stat.name(), "value": value }))
-        .collect();
-    serde_json::Value::Array(rows).to_string()
 }
 
 /// One body row of [`planet_body_rows`].
@@ -750,73 +458,6 @@ impl MindCampaign {
         }
     }
 
-    /// The wired `MindSimHost` that owns the live sim/runtime.
-    fn host(&self) -> Option<Gd<MindSimHost>> {
-        wiring::optional(&self.sim_host)
-    }
-
-    /// Pulls the live runtime's achievement/stat tracker back into the facade.
-    ///
-    /// The runtime copy is authoritative while a sector runs (Java has one
-    /// global `Vars.service`; the port's `CampaignRuntime` owns the listener
-    /// state the campaign systems mutate), so every facade read/persist
-    /// mirrors it first. No-op without an installed runtime.
-    fn sync_service(&mut self) {
-        let Some(host) = self.host() else {
-            return;
-        };
-        let guard = host.bind();
-        if let Some(tracker) = guard.campaign_service() {
-            self.service = tracker.clone();
-        }
-    }
-
-    /// Writes the shared tracker through `Core.settings` (`GameService.storeStats`
-    /// half: the values land in the settings store; the caller flushes it).
-    fn persist_service(&mut self) {
-        self.sync_service();
-        settings_hub::with_settings(|settings| {
-            let mut store = SettingsUnlockStore::new(settings);
-            save_service(&mut self.service, &mut store);
-        });
-    }
-
-    /// The achievement rows as JSON (`achievement_rows`), for the achievements
-    /// table. Reads the live runtime's tracker when a sector is installed.
-    #[func]
-    pub fn service_achievement_rows_json(&mut self) -> GString {
-        self.sync_service();
-        GString::from(service_achievement_rows_json(self.service.service()).as_str())
-    }
-
-    /// The `SStat` rows as JSON (`stat_rows`), for the stats table.
-    #[func]
-    pub fn service_stat_rows_json(&mut self) -> GString {
-        self.sync_service();
-        GString::from(service_stat_rows_json(self.service.service()).as_str())
-    }
-
-    /// `(unlocked, total)` achievement completion for a UI progress line
-    /// (`LocalGameService::completion`), as `{"unlocked": n, "total": m}`.
-    #[func]
-    pub fn service_completion_json(&mut self) -> GString {
-        self.sync_service();
-        let (unlocked, total) = self.service.service().completion();
-        GString::from(
-            serde_json::json!({ "unlocked": unlocked, "total": total })
-                .to_string()
-                .as_str(),
-        )
-    }
-
-    /// The unlocked achievement names as JSON (`KEY_ACHIEVEMENTS` payload;
-    /// `LocalGameService::unlocked_json`).
-    #[func]
-    pub fn service_unlocked_json(&mut self) -> GString {
-        self.sync_service();
-        GString::from(self.service.service().unlocked_json().to_string().as_str())
-    }
-
     /// `Saves.SaveSlot.savePreview` on the live world (`Saves.java:343-358`):
     /// renders `<user>/previews/save_slot_<stem>.png` from the current grid
     /// before the queued save lands at the IO boundary. Java runs it for every
@@ -851,17 +492,6 @@ impl MindCampaign {
                 false
             }
         }
-    }
-
-    /// `Core.scene.hasDialog()` for the `MindUi` dialog stack.
-    fn ui_has_dialog(&self) -> bool {
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            return false;
-        };
-        if !ui.has_method("has_dialog") {
-            return false;
-        }
-        ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
     }
 
     /// The schematic library (`Schematics.load`: vanilla loadouts plus every
@@ -948,74 +578,6 @@ impl MindCampaign {
             }
         }
         out
-    }
-
-    /// Persists campaign/universe/unlock state to `user://config/settings.bin`.
-    ///
-    /// Mirrors the live runtime campaign first: while a sector runs the runtime
-    /// copy is authoritative, so writing the facade's last-mirrored copy would
-    /// reset the turn counter and clock (Java has one object graph:
-    /// `Vars.universe`/`planet.sectors`; `Universe.save()` `Universe.java:293`).
-    fn persist(&mut self) {
-        self.mirror_runtime_campaign();
-        if let Some(campaign) = self.campaign.as_mut()
-            && let Err(error) = settings_hub::with_settings(|settings| campaign.save_all(settings))
-        {
-            log::warn!("campaign save_all failed: {error}");
-        }
-        // `GameService.storeStats` half: the shared tracker's stats and
-        // achievement flags land in the same settings store, then flush.
-        self.persist_service();
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("campaign settings flush failed: {error}");
-        }
-    }
-
-    /// Runs `f` on THE live campaign: the runtime's copy while a sector runs
-    /// (then mirrors it into the facade), else the facade. Java has one
-    /// object graph (`Vars.universe` / `planet.sectors`); the facade is a view
-    /// that catches up, never a second copy (H04 T1).
-    ///
-    /// `f` runs with the runtime taken out of the host, so it must not call
-    /// back into Godot (H-environment §3: no held `bind_mut` across calls).
-    /// It receives the one shared settings store (`Core.settings`, PAR-0164);
-    /// the closure must not call back into the hub (the lock is not re-entrant).
-    fn with_campaign_mut<R>(
-        &mut self,
-        f: impl FnOnce(&mut Campaign, &mut SettingsStore) -> R,
-    ) -> Option<R> {
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let out =
-                    settings_hub::with_settings(|settings| f(&mut runtime.campaign, settings));
-                self.campaign = Some(runtime.campaign.clone());
-                host.bind_mut().put_campaign_runtime(runtime);
-                return Some(out);
-            }
-        }
-        let mut campaign = self.campaign.take()?;
-        let out = settings_hub::with_settings(|settings| f(&mut campaign, settings));
-        self.campaign = Some(campaign);
-        Some(out)
-    }
-
-    /// Copies the runtime campaign + service tracker into the facade (no-op
-    /// without a runtime). Facade -> runtime copies never happen (T1: the
-    /// runtime stays authoritative until it is dropped).
-    fn mirror_runtime_campaign(&mut self) {
-        let Some(mut host) = self.host() else {
-            return;
-        };
-        let taken = host.bind_mut().take_campaign_runtime();
-        if let Some(runtime) = taken {
-            self.campaign = Some(runtime.campaign.clone());
-            // The runtime owns the live `Vars.service`-equivalent tracker
-            // (GAPS #68); keep the facade's copy current for the persist path
-            // and the UI queries.
-            self.service = runtime.service.clone();
-            host.bind_mut().put_campaign_runtime(runtime);
-        }
     }
 
     /// Pumps the live campaign runtime: drains tick events, applies capture
@@ -2379,62 +1941,6 @@ impl MindCampaign {
         })
     }
 
-    /// `UI.showErrorMessage(text)` (`UI.java:495-508`): a modal error prompt.
-    /// The port has no dedicated error dialog; `show_text` with the
-    /// `@error.title` header is the same shape. The argument is a bundle key
-    /// (`@`-prefixed like the Java call sites).
-    fn show_error(&self, message: &str) {
-        let text = self.bundle.get(message.trim_start_matches('@')).to_owned();
-        self.show_error_text(&text);
-    }
-
-    /// [`Self::show_error`] with a bundle key formatted against `args`
-    /// (`Core.bundle.format`).
-    fn show_error_key(&self, key: &str, args: &[&str]) {
-        let text = self.bundle.format(key.trim_start_matches('@'), args);
-        self.show_error_text(&text);
-    }
-
-    fn show_error_text(&self, text: &str) {
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            log::warn!("error shown with no UI available: {text}");
-            return;
-        };
-        let title = self.bundle.get("error.title").to_owned();
-        // `Dialog.add(text)` parses markup upstream; the prompt labels take
-        // BBCode, so render both through `UI.formatIcons` first.
-        let render = |raw: &str| -> String {
-            self.base()
-                .get_node_or_null("/root/MindAssets")
-                .and_then(|mut assets| {
-                    assets
-                        .call("markup_text", &[GString::from(raw).to_variant()])
-                        .try_to::<GString>()
-                        .ok()
-                })
-                .map(|rendered| rendered.to_string())
-                .unwrap_or_else(|| raw.to_owned())
-        };
-        let title = render(&title);
-        let text = render(text);
-        ui.call(
-            "show_text",
-            &[
-                GString::from(title.as_str()).to_variant(),
-                GString::from(text.as_str()).to_variant(),
-            ],
-        );
-    }
-
-    /// `Core.scene` menu restore for an invalid map (`World.loadMap` posts
-    /// `state.set(State.menu)`, `World.java:391`).
-    fn set_menu_visible(&self, visible: bool) {
-        let Some(mut ui_root) = wiring::optional(&self.ui_root) else {
-            return;
-        };
-        ui_root.bind_mut().set_menu_visible(visible);
-    }
-
     /// Starts a custom map by name (`Logic.playMap`, survival rules).
     /// Superseded by [`Self::start_map_mode`] for the map-play dialog.
     #[func]
@@ -3097,27 +2603,6 @@ impl MindCampaign {
         changed
     }
 
-    /// Emits an `unlock` for the toast when the content `showUnlock()`s.
-    ///
-    /// `Control.java:160-165` (`UnlockEvent` -> `hudfrag.showUnlock`); the
-    /// default is true (`UnlockableContent.java:242`) and `StatusEffect` is the
-    /// only `false` override (`StatusEffect.java:140`), so status unlocks are
-    /// skipped. No HUD present (tests) is a no-op.
-    fn push_unlock_toast(&self, registry: &ContentRegistry, content: ContentRef) {
-        if content.type_ == ContentType::Status {
-            return;
-        }
-        let Some(name) = tech_tree::content_name(registry, content) else {
-            return;
-        };
-        let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
-            return;
-        };
-        if hud.has_method("push_unlock") {
-            hud.call("push_unlock", &[GString::from(name.as_str()).to_variant()]);
-        }
-    }
-
     /// `ResearchDialog.rebuildItems` inventory for `planets` (Java
     /// `rootPlanets`): the stored items of every based, non-frozen sector plus
     /// the active sector's live core module. Returns the pool, the per-other-
@@ -3487,110 +2972,12 @@ impl MindCampaign {
         }
     }
 
-    /// `<type>.<name>.name` through the live bundle, falling back to `name`.
-    fn localized_content_name(&self, type_name: &str, name: &str) -> String {
-        let key = format!("{type_name}.{name}.name");
-        let value = self.bundle.get(&key);
-        if value == key {
-            name.to_owned()
-        } else {
-            value.to_owned()
-        }
-    }
-
-    /// `<type>.<name>.description` (empty when the bundle has no entry).
-    fn localized_content_description(&self, type_name: &str, name: &str) -> String {
-        self.localized_content_field(type_name, name, "description")
-    }
-
-    /// `<type>.<name>.<field>` through the live bundle (empty when missing).
-    fn localized_content_field(&self, type_name: &str, name: &str, field: &str) -> String {
-        let key = format!("{type_name}.{name}.{field}");
-        let value = self.bundle.get(&key);
-        if value == key {
-            String::new()
-        } else {
-            value.to_owned()
-        }
-    }
-
-    /// `UnlockableContent.emoji()` through the `MindAssets` `Iconc` table
-    /// (`Fonts.getUnicodeStr`); empty when the content has no icon.
-    fn content_emoji(&self, name: &str) -> String {
-        let Some(mut assets) = self.base().get_node_or_null("/root/MindAssets") else {
-            return String::new();
-        };
-        assets
-            .call("unicode_str", &[GString::from(name).to_variant()])
-            .try_to::<GString>()
-            .map(|value| value.to_string())
-            .unwrap_or_default()
-    }
-
     /// `Objectives.Research.display()` half: `content.techNode == null ||
     /// parent == null || parent.content.unlockedHost()`. The parent comes from
     /// `UnlockFields.tech_node` (the last-created node), matching Java's
     /// `UnlockableContent.techNode` (PAR-0500).
     fn research_parent_unlocked(&self, registry: &ContentRegistry, content: ContentRef) -> bool {
         tech_tree::research_parent_unlocked(registry, content)
-    }
-
-    /// `Content.emoji() + " " + Content.localizedName` (no leading space when
-    /// the emoji is unknown).
-    fn emoji_content_name(&self, registry: &ContentRegistry, content: ContentRef) -> String {
-        let name = tech_tree::content_name(registry, content).unwrap_or_default();
-        let emoji = self.content_emoji(&name);
-        let localized = self.localized_content_name(content.type_.name(), &name);
-        if emoji.is_empty() {
-            localized
-        } else {
-            format!("{emoji} {localized}")
-        }
-    }
-
-    /// `SectorPreset.localizedName`.
-    fn sector_localized_name(&self, registry: &ContentRegistry, id: SectorId) -> String {
-        let name = registry
-            .sector(id)
-            .map(|record| record.name.clone())
-            .unwrap_or_default();
-        self.localized_content_name("sector", &name)
-    }
-
-    /// Localized preset name for a planet-local sector index (H03 T17: Java's
-    /// sector-lost toast passes `state.getSector().name()`, `Control.java`).
-    /// Falls back to the internal preset name / an empty string.
-    #[func]
-    pub fn sector_name_localized(&self, planet: GString, sector: i64) -> GString {
-        let Some(registry) = self.registry.as_ref() else {
-            return GString::new();
-        };
-        let Some(campaign) = self.campaign.as_ref() else {
-            return GString::new();
-        };
-        let Ok(sector) = u16::try_from(sector) else {
-            return GString::new();
-        };
-        let Some(planet_id) = registry.planet_id(&planet.to_string()) else {
-            return GString::new();
-        };
-        let Some(cell) = campaign.sector(planet_id, sector) else {
-            return GString::new();
-        };
-        let name = match cell.preset {
-            Some(preset) => self.sector_localized_name(registry, preset),
-            None => cell.preset_name.clone().unwrap_or_default(),
-        };
-        GString::from(name.as_str())
-    }
-
-    /// `Planet.localizedName`.
-    fn planet_localized_name(&self, registry: &ContentRegistry, id: PlanetId) -> String {
-        let name = registry
-            .planet(id)
-            .map(|record| record.name.clone())
-            .unwrap_or_default();
-        self.localized_content_name("planet", &name)
     }
 
     /// `Objective.display()` and `complete()` for the hover popup
@@ -3635,26 +3022,6 @@ impl MindCampaign {
         (complete, self.bundle.format(key, &[argument.as_str()]))
     }
 
-    /// Refreshes the live runtime's unlocked-content cache from the registry
-    /// after research/clear flows. It does **not** copy the facade campaign
-    /// into the runtime: while a sector runs the runtime copy is authoritative
-    /// (T1) and campaign mutations go through [`Self::with_campaign_mut`], so
-    /// only the derived unlocked-content set is pushed.
-    fn push_campaign_to_runtime(&mut self) {
-        let unlocked = self
-            .registry
-            .as_ref()
-            .map(collect_unlocked)
-            .unwrap_or_default();
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                runtime.set_unlocked_content(unlocked);
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-        }
-    }
-
     /// `UnlockableContent.unlockedHost()` by content name (G05 T4b hint gates);
     /// `false` for unknown names or before content boot.
     #[func]
@@ -3678,82 +3045,6 @@ impl MindCampaign {
             out.push(&GString::from(name.as_str()));
         }
         out
-    }
-
-    /// Fires a host-side `PlayerJoin` (`NetServer` join path,
-    /// `NetServer.java:1020`) or `PlayerLeave` (`onDisconnect`,
-    /// `NetServer.java:618`).
-    ///
-    /// The relay roster is identity-based and the port has no `Player.id`
-    /// counter, so `player` is the relay member row id (the closest stable
-    /// analogue), truncated to the wire `u32`. Called from
-    /// `MindNet::drain_members_rows` on `connected` transitions; `#[func]` so
-    /// the MCP oracle can drive the bus headlessly.
-    #[func]
-    pub fn fire_player_event(&mut self, join: bool, player: i64) -> bool {
-        let player = u32::try_from(player).unwrap_or(u32::MAX);
-        if join {
-            self.events
-                .dispatch_game(event::GameEvent::PlayerJoin(event::PlayerJoin { player }));
-        } else {
-            self.events
-                .dispatch_game(event::GameEvent::PlayerLeave(event::PlayerLeave { player }));
-        }
-        true
-    }
-
-    /// Drains the rows the `EventType` bus dispatched (`[{class, detail}]`),
-    /// oldest first (PAR-0577 residual; MCP/UI observability).
-    #[func]
-    pub fn take_fired_events(&mut self) -> Array<VarDictionary> {
-        let rows = self.fired_events.borrow_mut().take();
-        let mut out = Array::<VarDictionary>::new();
-        for row in rows {
-            let mut dict = VarDictionary::new();
-            dict.set("class", &GString::from(row.class));
-            dict.set("detail", &GString::from(row.detail.as_str()));
-            out.push(&dict);
-        }
-        out
-    }
-
-    /// Rows dispatched per `EventType` class since the last clear
-    /// (`[{"class", "count"}]`, declaration order of first dispatch).
-    #[func]
-    pub fn fired_event_counts_json(&self) -> GString {
-        let counts = &self.fired_events.borrow().counts;
-        let rows: Vec<serde_json::Value> = counts
-            .iter()
-            .map(|(class, count)| serde_json::json!({"class": class, "count": count}))
-            .collect();
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
-    }
-
-    /// Total rows dispatched since the last clear.
-    #[func]
-    pub fn fired_event_total(&self) -> i64 {
-        self.fired_events.borrow().total() as i64
-    }
-
-    /// Rows dispatched for one `EventType` class since the last clear.
-    #[func]
-    pub fn fired_event_count(&self, class: GString) -> i64 {
-        self.fired_events.borrow().count(&class.to_string()) as i64
-    }
-
-    /// Retained row count (bounded record, not the drained rows).
-    #[func]
-    pub fn fired_event_pending(&self) -> i64 {
-        self.fired_events.borrow().len() as i64
-    }
-
-    /// Drops the retained rows and the per-class counters (match reset).
-    #[func]
-    pub fn clear_fired_events(&mut self) {
-        if !self.fired_events.borrow().is_empty() {
-            log::info!("campaign event bus: cleared");
-        }
-        self.fired_events.borrow_mut().clear();
     }
 
     /// `ContentInfoDialog.show(content)`: name/description/details plus the
@@ -3999,17 +3290,6 @@ impl MindCampaign {
                 settings.get_bool("advanced-launch-pad-unlocked", false)
             });
         context
-    }
-
-    /// Drops `MindUi`'s cached placement catalog after an unlock change; its
-    /// campaign-less fallback reads the persisted settings file directly.
-    fn invalidate_ui_block_catalog(&self) {
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            return;
-        };
-        if ui.has_method("invalidate_block_catalog") {
-            let _ = ui.call("invalidate_block_catalog", &[]);
-        }
     }
 
     /// Core Database view JSON (`DatabaseDialog` planet tabs + content grid).
@@ -6916,17 +6196,6 @@ impl MindCampaign {
         self.content_error = None;
     }
 
-    /// `GameOverDialog` stats rows (`state.stats`, G03 T16):
-    /// `{"wave", "unitsCreated", "enemiesDestroyed", "built", "destroyed",
-    /// "deconstructed", "waves"}` in Java label order.
-    #[func]
-    pub fn game_stats_json(&self) -> GString {
-        // `GameStats::context_json` owns the key names + the `rules.waves` gate
-        // (`GameOverDialog.java:78-84`); the dialog's `STAT_ROWS` mirror them.
-        let value = self.session.stats.context_json(self.session.rules.waves);
-        GString::from(value.to_string().as_str())
-    }
-
     /// `SaveSlot.getPlayTime()` for the current slot (`GameOverDialog`'s
     /// "Time Played" row, `GameOverDialog.java:91-97`): the live accumulated
     /// playtime, else the slot's saved meta. `-1` when no slot is current
@@ -6943,90 +6212,6 @@ impl MindCampaign {
             .as_ref()
             .map(|meta| meta.time_played)
             .unwrap_or_default()
-    }
-
-    /// `state.isCampaign()`: a live campaign sector is loaded (the same
-    /// condition `get_hud_state` reports as `campaign`). The J/N toggles read
-    /// it (`DesktopInput.java:446-461`).
-    #[func]
-    pub fn campaign_active(&self) -> bool {
-        self.session.is_campaign()
-    }
-
-    /// Live HUD/status fields (`HudFragment` read surface, gap3 C-10). Appended
-    /// for `MindHud`; additive and read-only. Includes the campaign session's
-    /// wave/enemy/timer/goal state the other getters do not expose.
-    #[func]
-    pub fn get_hud_state(&self) -> VarDictionary {
-        let mut dict = VarDictionary::new();
-        let key = |name: &str| GString::from(name);
-        dict.set(&key("campaign"), &self.session.is_campaign().to_variant());
-        dict.set(&key("waves"), &self.session.rules.waves.to_variant());
-        dict.set(
-            &key("waveSending"),
-            &self.session.rules.wave_sending.to_variant(),
-        );
-        dict.set(&key("attack"), &self.session.rules.attack_mode.to_variant());
-        dict.set(&key("wave"), &self.session.wave.to_variant());
-        dict.set(&key("enemies"), &self.session.enemies.to_variant());
-        dict.set(&key("wavetime"), &self.session.wavetime.to_variant());
-        dict.set(&key("winWave"), &self.session.rules.win_wave.to_variant());
-        dict.set(
-            &key("waveTimer"),
-            &self.session.rules.wave_timer.to_variant(),
-        );
-        dict.set(
-            &key("waitEnemies"),
-            &self.session.rules.wait_enemies.to_variant(),
-        );
-        // `Logic.isWaitingWave` (`Logic.java:621-624`); G03 reads it for
-        // `wave.waveInProgress`.
-        dict.set(
-            &key("waitingWave"),
-            &mind_core::game::play::is_waiting_wave(&self.session).to_variant(),
-        );
-        dict.set(&key("gameOver"), &self.session.game_over.to_variant());
-        dict.set(
-            &key("afterGameOver"),
-            &self.session.after_game_over.to_variant(),
-        );
-        dict.set(&key("won"), &self.session.won.to_variant());
-        dict.set(&key("isSpawning"), &self.session.is_spawning.to_variant());
-        dict.set(
-            &key("hasCore"),
-            &(self.session.player_core_count() > 0).to_variant(),
-        );
-        dict.set(
-            &key("enemyCores"),
-            &(self.session.wave_core_count() as i64).to_variant(),
-        );
-        if let Some((planet, sector)) = self.session.sector {
-            let planet_name = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.planet(planet))
-                .map(|planet| planet.name.clone())
-                .unwrap_or_default();
-            let preset_name = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(planet, sector))
-                .and_then(|sector| sector.preset_name.clone());
-            let was_captured = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(planet, sector))
-                .map(|sector| sector.info.info.was_captured)
-                .unwrap_or(false);
-            dict.set(&key("planet"), &planet_name.as_str().to_variant());
-            dict.set(&key("sector"), &(sector as i64).to_variant());
-            dict.set(
-                &key("sectorName"),
-                &preset_name.unwrap_or(planet_name).as_str().to_variant(),
-            );
-            dict.set(&key("wasCaptured"), &was_captured.to_variant());
-        }
-        dict
     }
 }
 
@@ -7207,20 +6392,6 @@ fn save_date_stamp() -> String {
     format!("{} {day:02} {hour12}:{minute:02}", MONTHS[month - 1])
 }
 
-/// `UnlockableContent.load` (`UnlockableContent.java:117`) and the
-/// `SectorPreset` override (`SectorPreset.java:134`): sector presets resolve
-/// the `sector-<name>` atlas region (falling back to `Icon.terrain` -- the
-/// GDScript `MindWidgets.content_icon` supplies that glyph when the region is
-/// missing); every other content resolves `<type>-<name>-ui`. The port's
-/// content-type name for `SectorPreset` is `sector` (`ContentType` parity).
-fn content_icon_name(type_name: &str, name: &str) -> String {
-    if type_name == "sector" || type_name == "sectorpreset" {
-        format!("sector-{name}")
-    } else {
-        format!("{type_name}-{name}-ui")
-    }
-}
-
 /// Renders one stat value's cells for the `content_info_json` payload: Text
 /// cells pass through `UI.formatIcons` (`render_markup`), every other cell
 /// serializes as its tagged JSON form (`Cell::k`).
@@ -7386,11 +6557,8 @@ fn clear_sector_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mind_core::assets::bundle::parse_properties;
     use mind_core::content::MemoryUnlockStore;
     use mind_core::content::create_base_content;
-    use mind_core::game::achievements::Achievement;
-    use mind_core::game::achievements::SStat;
 
     /// Test-only `expect`: the workspace denies `clippy::expect_used`.
     fn require<T>(value: Option<T>, what: &str) -> T {
@@ -7406,52 +6574,6 @@ mod tests {
             Ok(value) => value,
             Err(error) => panic!("{what}: {error}"),
         }
-    }
-
-    /// EV-0063: the registry boots with an empty `MemoryBundle`, so the paused
-    /// dialog's `@objective` gate must resolve the description from the live
-    /// `Core.bundle` key (`sector.<preset>.description`).
-    #[test]
-    fn preset_description_falls_back_to_the_live_bundle() {
-        let registry =
-            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
-                Ok(registry) => registry,
-                Err(error) => panic!("base content: {error}"),
-            };
-        let Some(preset) = registry.sector_by_name("groundZero") else {
-            panic!("groundZero preset missing");
-        };
-        assert!(
-            preset.unlock.description.is_none(),
-            "empty MemoryBundle must leave the registry description unset"
-        );
-        let properties = parse_properties("sector.groundZero.description = Defend the sector.");
-        let bundle = Bundle::from_layers(vec![properties]);
-        assert_eq!(
-            resolve_preset_description(Some(&registry), &bundle, Some(preset.id)),
-            "Defend the sector."
-        );
-    }
-
-    /// A registry built with the description keeps precedence over the bundle.
-    #[test]
-    fn preset_description_prefers_the_registry_value() {
-        let content =
-            MemoryBundle::with_pairs([("sector.groundZero.description", "Registry text")]);
-        let registry = match create_base_content(&content, &MemoryUnlockStore::new(), true) {
-            Ok(registry) => registry,
-            Err(error) => panic!("base content: {error}"),
-        };
-        let Some(preset) = registry.sector_by_name("groundZero") else {
-            panic!("groundZero preset missing");
-        };
-        let bundle = Bundle::from_layers(vec![parse_properties(
-            "sector.groundZero.description = Bundle text",
-        )]);
-        assert_eq!(
-            resolve_preset_description(Some(&registry), &bundle, Some(preset.id)),
-            "Registry text"
-        );
     }
 
     /// PAR-0037/PAR-0030 + T5: a preset map's rules replace `state.rules`
@@ -7700,114 +6822,6 @@ mod tests {
         );
     }
 
-    /// GAPS #68 host wiring: the shared `Vars.service` tracker (a) boots from
-    /// the persisted settings keys, (b) is the exact tracker a fresh
-    /// `CampaignRuntime` runs on (`with_service`), and (c) round-trips the
-    /// values the campaign systems wrote through the save/load helpers the
-    /// autosave/exit paths call.
-    #[test]
-    fn service_injection_roundtrips_through_the_unlock_store() {
-        let registry =
-            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
-                Ok(registry) => registry,
-                Err(error) => panic!("base content: {error}"),
-            };
-        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-
-        // A previous session persisted a stat and an achievement under the
-        // module ABI keys (`achievement-*` / `achievement-stat-*`).
-        let mut boot_store = MemoryUnlockStore::new();
-        boot_store.set_i32("achievement-stat-unitsDestroyed", 1_234);
-        boot_store.set_bool("achievement-buildT5", true);
-
-        // Boot: `load_service` restores the tracker from `Core.settings`.
-        let boot = load_service(&boot_store);
-        assert_eq!(boot.service().get(SStat::UnitsDestroyed), 1_234);
-        assert!(boot.service().unlocked(Achievement::BuildT5));
-
-        // A default runtime starts empty; the facade injects the shared one.
-        let untouched = CampaignRuntime::new(PlaySession::default(), campaign.clone())
-            .with_service(ServiceTracker::new());
-        assert_eq!(untouched.service.service().get(SStat::UnitsDestroyed), 0);
-        let mut runtime =
-            CampaignRuntime::new(PlaySession::default(), campaign).with_service(boot.clone());
-        assert_eq!(runtime.service.service().get(SStat::UnitsDestroyed), 1_234);
-        assert!(runtime.service.service().unlocked(Achievement::BuildT5));
-
-        // The campaign listener half keeps counting on the injected tracker
-        // (the runtime systems call these hooks; the direct call is the same
-        // seam without a sim tick).
-        runtime.service.on_sector_launch();
-        assert_eq!(runtime.service.service().get(SStat::TimesLaunched), 1);
-        // The facade mirrors the runtime's copy every pump/persist.
-        let mirrored = runtime.service.clone();
-        assert_eq!(mirrored.service().get(SStat::TimesLaunched), 1);
-
-        // Autosave/exit: the mirrored tracker saves through the store...
-        let mut saved = MemoryUnlockStore::new();
-        let mut tracker = mirrored;
-        save_service(&mut tracker, &mut saved);
-        assert_eq!(saved.get_i32("achievement-stat-timesLaunched"), 1);
-        assert_eq!(saved.get_i32("achievement-stat-unitsDestroyed"), 1_234);
-        assert!(saved.get_bool("achievement-buildT5"));
-
-        // ...and the next boot sees the incremented stat plus the old values.
-        let reloaded = load_service(&saved);
-        assert_eq!(reloaded.service().get(SStat::TimesLaunched), 1);
-        assert_eq!(reloaded.service().get(SStat::UnitsDestroyed), 1_234);
-        assert!(reloaded.service().unlocked(Achievement::BuildT5));
-    }
-
-    /// The `#[func]` row payloads (`service_stat_rows_json` /
-    /// `service_achievement_rows_json`) keep Java declaration order and expose
-    /// the values/goals the UI tables render.
-    #[test]
-    fn service_rows_json_cover_every_stat_and_achievement() {
-        let mut tracker = ServiceTracker::new();
-        tracker.service_mut().set(SStat::BlocksBuilt, 2_500);
-        tracker.service_mut().unlock(Achievement::Place10kBlocks);
-
-        let stats: serde_json::Value =
-            match serde_json::from_str(&service_stat_rows_json(tracker.service())) {
-                Ok(value) => value,
-                Err(error) => panic!("stat rows JSON: {error}"),
-            };
-        let rows = stats.as_array().map(Vec::as_slice).unwrap_or_default();
-        assert_eq!(rows.len(), SStat::COUNT);
-        assert_eq!(rows[0]["name"], "unitsDestroyed");
-        let blocks = rows
-            .iter()
-            .find(|row| row["name"] == "blocksBuilt")
-            .unwrap_or_else(|| panic!("blocksBuilt row"));
-        assert_eq!(blocks["value"], 2_500);
-
-        let achievements: serde_json::Value =
-            match serde_json::from_str(&service_achievement_rows_json(tracker.service())) {
-                Ok(value) => value,
-                Err(error) => panic!("achievement rows JSON: {error}"),
-            };
-        let rows = achievements
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        assert_eq!(rows.len(), Achievement::COUNT);
-        let placed = rows
-            .iter()
-            .find(|row| row["name"] == "place10kBlocks")
-            .unwrap_or_else(|| panic!("place10kBlocks row"));
-        assert_eq!(placed["unlocked"], serde_json::json!(true));
-        assert_eq!(placed["progress"], 2_500);
-        assert_eq!(placed["goal"], 10_000);
-        assert_eq!(placed["stat"], "blocksBuilt");
-        // Event-only achievements report a `null` stat and zero goal.
-        let event_only = rows
-            .iter()
-            .find(|row| row["name"] == "defeatAttack5Waves")
-            .unwrap_or_else(|| panic!("defeatAttack5Waves row"));
-        assert!(event_only["stat"].is_null());
-        assert_eq!(event_only["goal"], 0);
-    }
-
     /// GAPS #50 follow-up: `planet_bodies` derives the sun/planet rows from the
     /// campaign orbit helpers in the viewed planet's mesh frame. The sun and
     /// its sibling planets are the same solar system, the viewed planet is
@@ -7887,127 +6901,6 @@ mod tests {
         assert!(from_sun.iter().any(|row| row.name == "serpulo"));
     }
 
-    /// PAR-0577 residual: the campaign bus dispatches the play-flow outbox rows
-    /// (`WorldLoadEvent` then `PlayEvent`) and the recorder listeners see both.
-    #[test]
-    fn campaign_bus_dispatches_the_play_flow_outbox() {
-        let mut bus = event::Events::new();
-        let log = Rc::new(RefCell::new(FiredEvents::new()));
-        install_event_listeners(&mut bus, &log);
-
-        let mut session = PlaySession::new(Rules::default());
-        let mut epoch = RulesEpoch::new();
-        let _ = play_map(&mut session, Rules::default(), None, |_| false, &mut epoch);
-        let rows = session.take_event_rows();
-        assert_eq!(
-            rows.iter()
-                .map(event::EventRow::class_name)
-                .collect::<Vec<_>>(),
-            vec!["WorldLoadEvent", "PlayEvent"]
-        );
-        assert_eq!(dispatch_event_rows(&mut bus, rows), 2);
-
-        let fired = log.borrow_mut().take();
-        assert_eq!(
-            fired.iter().map(|row| row.class).collect::<Vec<_>>(),
-            vec!["WorldLoadEvent", "PlayEvent"]
-        );
-        assert_eq!(log.borrow().count("WorldLoadEvent"), 1);
-        assert_eq!(log.borrow().count("PlayEvent"), 1);
-        assert_eq!(log.borrow().total(), 2);
-        assert!(session.take_event_rows().is_empty(), "outbox drained");
-    }
-
-    /// A `GameEvent` row routes to its own listener and records its payload; a
-    /// `SimEvent` row (`Logic.play`'s `PlayEvent`) routes through the queued
-    /// arm of the same bus.
-    #[test]
-    fn campaign_bus_routes_game_and_sim_rows_with_payloads() {
-        let mut bus = event::Events::new();
-        let log = Rc::new(RefCell::new(FiredEvents::new()));
-        install_event_listeners(&mut bus, &log);
-
-        let planet = PlanetId::new(0);
-        dispatch_event_rows(
-            &mut bus,
-            [
-                event::EventRow::Game(event::GameEvent::SectorLaunchEvent(
-                    event::SectorLaunchEvent { planet, sector: 15 },
-                )),
-                event::EventRow::Sim(event::SimEvent::PlayEvent(event::PlayEvent)),
-                event::EventRow::Game(event::GameEvent::PlayerJoin(event::PlayerJoin {
-                    player: 7,
-                })),
-                event::EventRow::Game(event::GameEvent::ResearchEvent(event::ResearchEvent {
-                    content: event::EventContent::Item(3),
-                })),
-            ],
-        );
-
-        let fired = log.borrow_mut().take();
-        let classes: Vec<&str> = fired.iter().map(|row| row.class).collect();
-        assert_eq!(
-            classes,
-            vec![
-                "SectorLaunchEvent",
-                "PlayEvent",
-                "PlayerJoin",
-                "ResearchEvent"
-            ]
-        );
-        assert_eq!(fired[0].detail, "0:15");
-        assert_eq!(fired[2].detail, "player 7");
-        assert_eq!(fired[3].detail, "item 3");
-    }
-
-    /// `EventContent` models item/liquid/unit only; a block research node has no
-    /// payload (reported as a mind-core residual, not silently mis-typed).
-    #[test]
-    fn research_payload_covers_item_liquid_and_unit_only() {
-        assert_eq!(
-            event_content_of(ContentRef::new(ContentType::Item, 3)),
-            Some(event::EventContent::Item(3))
-        );
-        assert_eq!(
-            event_content_of(ContentRef::new(ContentType::Liquid, 1)),
-            Some(event::EventContent::Liquid(1))
-        );
-        assert_eq!(
-            event_content_of(ContentRef::new(ContentType::Unit, 2)),
-            Some(event::EventContent::Unit(2))
-        );
-        assert_eq!(
-            event_content_of(ContentRef::new(ContentType::Block, 2)),
-            None
-        );
-        assert_eq!(event_content_detail(event::EventContent::Unit(2)), "unit 2");
-    }
-
-    /// The fired-event record is bounded by `EVENT_QUEUE_CAPACITY` (a
-    /// never-draining host cannot grow it without bound) but keeps counting.
-    #[test]
-    fn fired_events_record_is_bounded_and_counted() {
-        let mut log = FiredEvents::new();
-        for _ in 0..(event::EVENT_QUEUE_CAPACITY + 5) {
-            log.record("PlayerJoin", "player 1");
-        }
-        assert_eq!(log.len(), event::EVENT_QUEUE_CAPACITY);
-        assert_eq!(log.total(), (event::EVENT_QUEUE_CAPACITY + 5) as u64);
-        assert_eq!(
-            log.count("PlayerJoin"),
-            (event::EVENT_QUEUE_CAPACITY + 5) as u64
-        );
-        let retained = log.take();
-        assert_eq!(
-            retained.last().map(|row| row.class),
-            Some("PlayerJoin"),
-            "newest row is retained"
-        );
-        log.clear();
-        assert!(log.is_empty());
-        assert_eq!(log.total(), 0);
-    }
-
     /// Finding #8: the `UnitCount` row filter counts live units by content
     /// type and team only (a same-type unit on another team does not count).
     #[test]
@@ -8026,48 +6919,5 @@ mod tests {
         assert_eq!(count_unit_rows(&rows, "mace", 1), 1);
         assert_eq!(count_unit_rows(&rows, "flare", 1), 0);
         assert_eq!(count_unit_rows(&[], "dagger", 1), 0);
-    }
-
-    /// Finding #9: the directory-mtime memo only serves a value under the key
-    /// it was stored with, never caches an unreadable directory, and clears.
-    #[test]
-    fn dir_memo_invalidates_on_key_change_and_clear() {
-        use std::time::{Duration, SystemTime};
-
-        let first = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-        let second = first + Duration::from_secs(1);
-        let mut memo = DirMemo::<u32>::default();
-        assert!(memo.get(Some(first)).is_none(), "empty memo");
-        assert!(memo.get(None).is_none(), "no key never hits");
-
-        memo.store(Some(first), 7);
-        assert_eq!(memo.get(Some(first)), Some(&7));
-        assert!(memo.get(Some(second)).is_none(), "new mtime reloads");
-        assert!(memo.get(None).is_none(), "unreadable dir bypasses");
-
-        // A fresh key replaces the value.
-        memo.store(Some(second), 9);
-        assert_eq!(memo.get(Some(second)), Some(&9));
-        assert!(memo.get(Some(first)).is_none());
-
-        // An unreadable directory is never cached.
-        memo.store(None, 11);
-        assert_eq!(memo.get(Some(second)), Some(&9));
-
-        memo.clear();
-        assert!(memo.get(Some(second)).is_none());
-    }
-
-    /// Finding #9 key reader: an existing directory yields a key, a missing one
-    /// yields `None` (so the caller reloads instead of pinning empty output).
-    #[test]
-    fn dir_mtime_key_reads_existing_and_missing_directories() {
-        assert!(dir_mtime_key(&std::env::temp_dir()).is_some());
-        assert!(
-            dir_mtime_key(std::path::Path::new(
-                "/definitely/not/a/mind-campaign-directory"
-            ))
-            .is_none()
-        );
     }
 }
