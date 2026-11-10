@@ -7,6 +7,7 @@
 pub mod game_over;
 pub mod load;
 pub mod paused;
+pub mod util_b;
 
 use crate::ui::dialog::DialogController;
 
