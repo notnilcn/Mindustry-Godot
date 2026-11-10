@@ -15,6 +15,8 @@ use crate::world::blocks::defense::turrets::advanced;
 
 use super::{ItemAmmo, LiquidAmmo, PowerAmmo, TurretAmmo, TurretConfig, TurretKind};
 
+// ---- content registration (plan 10 owns turret ammo; §4/§6.1) ----
+
 /// Registers the plan-10 turret-ammo fixture bullets (`Blocks.java`
 /// `ammoTypes`) used by the M5 oracle. Only the `duo` ammo set is ported so
 /// far; the remaining vanilla turret ammo is a tracked M5/M6 content delta.

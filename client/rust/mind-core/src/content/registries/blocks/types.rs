@@ -7,6 +7,7 @@ use crate::content::id::{LiquidId, UnitTypeId};
 use crate::content::registries::planets::EnvFlag;
 use crate::content::stacks::{ItemStack, LiquidStack, PayloadStack};
 
+/// `BuildVisibility` variant tag (plan 02 §6.1; no runtime predicates in metadata).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BuildVisibility {
     /// `BuildVisibility.hidden`.
