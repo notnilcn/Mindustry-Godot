@@ -16,20 +16,24 @@
 //! `wavetime`/`gameOver`/`won`/`enemies`/`sector`); the base phase/tick header
 //! stays plan 05's [`crate::game::State`].
 
+use super::campaign_rules::CampaignApply;
 use super::map_markers::MapMarkers;
 use super::map_objectives::MapObjectivesRuntime;
 use super::planet::Planet;
 use super::rules::Rules;
 use super::rules_event::{RulesEpoch, apply_rules_load};
-use super::sector::Sector;
+use super::sector::{CoreSnapshot, Sector, SectorInfoState};
 use super::teams::Teams;
+use super::tech_tree;
 use super::universe::Campaign;
-use crate::content::{ContentRegistry, PlanetId};
+use crate::content::{ContentRef, ContentRegistry, ContentType, PlanetId};
 use crate::ecs::TeamId;
 use crate::event::{self as events, SimEvent};
 use crate::game::State;
+use crate::io::SaveMeta;
 use crate::io::json::content_serde::SectorKey;
-use crate::io::json::rules::GameStats;
+use crate::io::json::rules::{GameStats, SectorInfo};
+use crate::io::settings::SettingsStore;
 
 /// `(planet, dense sector id)` runtime handle.
 pub type SectorRef = (PlanetId, u16);
@@ -261,6 +265,38 @@ impl PlaySession {
         self.spawn_count = 0;
         self.is_spawning = false;
         self.sector = None;
+    }
+
+    /// `SaveSlot.load` meta half (`Saves.java:314-328`): the saved rules/wave,
+    /// wave timer and stats replace the live session's, and the loaded match is
+    /// playing (`readMeta`/`readRules`).
+    ///
+    /// Extracted from the free `apply_loaded_meta` (`mind-gdext`
+    /// `campaign.rs:7323-7355` at `291e30a8`; adopted by X01).
+    pub fn apply_save_meta(&mut self, meta: &SaveMeta) {
+        if let Ok(rules) =
+            serde_json::from_str::<Rules>(&crate::io::json::quote_bare_keys(&meta.rules_json))
+        {
+            self.rules = rules;
+        } else {
+            log::warn!("load: rules JSON did not parse; session rules kept");
+        }
+        self.wave = meta.wave;
+        if let Some(wavetime) = meta
+            .tags
+            .get("wavetime")
+            .and_then(|value| value.parse::<f32>().ok())
+        {
+            self.wavetime = wavetime;
+        }
+        if let Some(stats) = meta
+            .tags
+            .get("stats")
+            .and_then(|value| serde_json::from_str::<GameStats>(value).ok())
+        {
+            self.stats = stats;
+        }
+        self.phase = State::Playing;
     }
 }
 
@@ -634,6 +670,277 @@ pub fn apply_save_load_campaign_rules(rules: &mut Rules) {
     rules.allow_edit_rules = false;
 }
 
+/// `SaveVersion.readRules` + `World.setSectorRules` (T5): the loaded
+/// preset/generated map (or sector save) rules replace the session rules
+/// wholesale, then the planet `ruleSetter`, the preset overlays and the
+/// campaign load overrides are re-applied.
+///
+/// `has_preset` restores the preset's capture win wave on a fresh launch
+/// (`SectorPreset.rules` = `winWave = captureWave`); `resumed` keeps the wave
+/// record `SectorInfo.write` copied in `play_sector` and re-applies the
+/// `SaveLoadEvent` overrides (`Logic.java:73-91`).
+///
+/// Extracted from the free `adopt_map_rules` (`mind-gdext`
+/// `campaign.rs:7250-7288` at `291e30a8`; adopted by X01).
+pub fn adopt_map_rules(
+    session: &mut PlaySession,
+    map: &Rules,
+    planet: &Planet,
+    registry: &ContentRegistry,
+    has_preset: bool,
+    preset_no_lighting: bool,
+    resumed: bool,
+) {
+    let kept = session.rules.clone();
+    let mut rules = map.clone();
+    // Empty spawns fall back to the generated/default waves.
+    if rules.spawns.is_empty() {
+        rules.spawns = kept.spawns.clone();
+    }
+    rules.sector = kept.sector.clone();
+    rules.loadout = kept.loadout.clone();
+    planet.apply_rules(registry, &mut rules, false, true);
+    if has_preset && !resumed {
+        rules.win_wave = kept.win_wave;
+        rules.waves = kept.waves;
+        rules.attack_mode = kept.attack_mode;
+    }
+    if resumed {
+        rules.waves = kept.waves;
+        rules.wave_spacing = kept.wave_spacing;
+        rules.win_wave = kept.win_wave;
+        rules.attack_mode = kept.attack_mode;
+    }
+    // Preset `noLighting` (PAR-0059) survives the wholesale copy.
+    if !kept.lighting && preset_no_lighting {
+        rules.lighting = false;
+    }
+    apply_world_load_campaign_rules(&mut rules, planet);
+    if resumed {
+        apply_save_load_campaign_rules(&mut rules);
+    }
+    session.rules = rules;
+}
+
+/// The played sector's `sectorCaptureReplacements` (`Planet.sectorCaptureReplacements`,
+/// `Planet.java`; `pump_runtime`'s capture arm): map rules applied when a
+/// capture landed.
+///
+/// The caller keeps the `SectorCapture` event gate (`pump_runtime` 1027-1044 at
+/// `291e30a8`).
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn capture_replacements(
+    registry: &ContentRegistry,
+    session: &PlaySession,
+) -> Vec<(String, String)> {
+    let planet = session.sector.map(|(planet, _)| planet);
+    planet
+        .and_then(|planet| registry.planet(planet))
+        .map(|planet| planet.sector_capture_replacements.clone())
+        .unwrap_or_default()
+}
+
+/// One campaign sector launch, decided (`Control.playSector`'s branch
+/// selection, `Control.java:449-470`). The facade keeps the host reads, the
+/// corrupt-save handling, the toasts and the side effects.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectorLaunch {
+    /// A save with a live core: load it (`play_sector`).
+    pub resume: bool,
+    /// A lost sector's save qualified for the no-core replay
+    /// (`!clearSave && spawnPosition != 0 && sectorDataMatches`; PAR-0084).
+    pub lost_replay: bool,
+    /// The record had an associated save.
+    pub has_save: bool,
+    /// The sector preset (`SectorPreset.rules` overlay input).
+    pub preset: Option<crate::content::SectorId>,
+    /// The preset def name (`SectorInfo.sectorDataMatches`).
+    pub preset_name: Option<String>,
+    /// The preset def's `noLighting` (PAR-0059).
+    pub preset_no_lighting: bool,
+    /// The record's packed spawn position (`SectorInfo.spawnPosition`).
+    pub spawn_position: i32,
+}
+
+/// Why [`select_sector_launch`] rejected a launch (`start_sector`'s early
+/// `return false`s; the facade keeps the log/toast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchReject {
+    /// The planet has no sector with that id (`start_sector`: "sector out of
+    /// range").
+    SectorOutOfRange,
+    /// `presetRequireUnlock` and the preset is not unlocked (C-9/GAP-12).
+    LockedPreset,
+}
+
+/// `Control.playSector`'s decision core (`start_sector_with_loadout` at
+/// `mind-gdext` `campaign.rs:1453-1551` at `291e30a8`): validate the locked
+/// preset, then pick the resume/lost-replay/fresh branch.
+///
+/// The caller resolves the planet name and the live-core count first; the
+/// host, registry and record side effects stay in the facade (adopted by X01).
+pub fn select_sector_launch(
+    campaign: &Campaign,
+    registry: &ContentRegistry,
+    planet: PlanetId,
+    sector: u16,
+    no_live_core: bool,
+) -> Result<SectorLaunch, LaunchReject> {
+    let Some(record) = campaign.sector(planet, sector) else {
+        return Err(LaunchReject::SectorOutOfRange);
+    };
+    let always_unlocked = record.preset_always_unlocked;
+    let require_unlock = record.preset_require_unlock;
+    let preset = record.preset;
+    let has_save = record.has_save();
+    let spawn_position = record.info.info.spawn_position;
+    let had_no_core = !record.info.info.has_core;
+    let preset_no_lighting = record.preset_no_lighting;
+    let tech_unlocked = preset.is_none_or(|preset| {
+        tech_tree::content_unlocked(registry, ContentRef::of(ContentType::Sector, preset))
+    });
+    if require_unlock && !always_unlocked && !tech_unlocked {
+        return Err(LaunchReject::LockedPreset);
+    }
+    // `Control.playSector`'s branch selection (`Control.java:449-470`): the
+    // normal load path is a save with a live core; a save whose sector was
+    // lost (`no_live_core || had_no_core`) takes the no-core branch, which
+    // replays only when `!clearSave && spawnPosition != 0 &&
+    // sectorDataMatches` (PAR-0084).
+    let no_core_branch = no_live_core || had_no_core;
+    let clear_save = campaign
+        .planet(planet)
+        .is_some_and(|planet| planet.campaign_rules.clear_sector_on_lose);
+    let preset_name = preset.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
+    // Deviation: the preset def carries no map dimensions, so the record's own
+    // size is passed; the effective test is the preset name
+    // (`SectorInfo.sectorDataMatches`, `SectorInfo.java:98-103`).
+    let data_matches = record.sector_data_matches(
+        preset_name.as_deref(),
+        record.info.info.last_width,
+        record.info.info.last_height,
+    );
+    let lost_replay =
+        has_save && no_core_branch && !clear_save && spawn_position != 0 && data_matches;
+    // Java's load branch: a save that is not in the no-core branch.
+    let resume = has_save && !no_core_branch;
+    Ok(SectorLaunch {
+        resume,
+        lost_replay,
+        has_save,
+        preset,
+        preset_name,
+        preset_no_lighting,
+        spawn_position,
+    })
+}
+
+/// `Control.playSector` (`Control.java:437-448`): quiet-unlock the preset (no
+/// unlock event) and record the planet's last sector.
+///
+/// The two writes share the one settings store. `store` is the concrete
+/// [`SettingsStore`] because `Campaign::set_last_sector` persists through it;
+/// the unlock write wraps it in a [`tech_tree::SettingsUnlockStore`].
+///
+/// Extracted from `mind-gdext` `campaign.rs:1503-1520` at `291e30a8` (adopted
+/// by X01).
+pub fn begin_sector_launch(
+    campaign: &mut Campaign,
+    registry: &mut ContentRegistry,
+    settings: &mut SettingsStore,
+    planet: PlanetId,
+    sector: u16,
+) {
+    let preset = campaign
+        .sector(planet, sector)
+        .and_then(|record| record.preset);
+    let preset_name = preset.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
+    if let Some(preset) = preset
+        && let Some(name) = preset_name.as_deref()
+        && let Some(fields) =
+            tech_tree::unlock_fields_mut(registry, ContentRef::of(ContentType::Sector, preset))
+    {
+        fields.quiet_unlock(name, &mut tech_tree::SettingsUnlockStore::new(settings));
+    }
+    if let Some(planet) = campaign.planet_mut(planet) {
+        planet.set_last_sector(settings, sector);
+    }
+}
+
+/// `Sector.isBeingPlayed` (`Sector.java:148-151`): a launch clears every
+/// previous flag before the new sector starts (`start_sector`, 1628-1634 at
+/// `291e30a8`).
+///
+/// H01 adds `Campaign::clear_being_played`; X01 must prefer it and C01 removes
+/// this copy.
+pub fn clear_being_played_for_launch(campaign: &mut Campaign) {
+    for planet in campaign.planets.values_mut() {
+        for sector in &mut planet.sectors {
+            sector.being_played = false;
+        }
+    }
+}
+
+/// The live sector record for `SectorInfo.prepare` + `SectorInfo.saveInfo`
+/// (`persist_sector_record_in` 4984-5056 at `291e30a8`): prepare from the live
+/// core snapshot, then copy the wave/rules fields.
+///
+/// The caller writes the returned record into the live campaign, the facade
+/// copy and the settings store; the host's core snapshot read stays in the
+/// facade (finding #1 made `registry` explicit, which this signature keeps).
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn live_sector_record(
+    session: &PlaySession,
+    campaign: &Campaign,
+    registry: &ContentRegistry,
+    snapshot: Option<&CoreSnapshot>,
+) -> Option<SectorInfo> {
+    let (planet, sector_id) = session.sector?;
+    let mut record = campaign.sector(planet, sector_id)?.info.info.clone();
+    if let Some(snapshot) = snapshot {
+        // `SectorInfo.prepare` `lastPresetName` (`SectorInfo.java:226-228`).
+        let preset = campaign
+            .sector(planet, sector_id)
+            .and_then(|sector| sector.preset);
+        let preset_name =
+            preset.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
+        let mut prepared = SectorInfoState {
+            info: record,
+            ..Default::default()
+        };
+        prepared.prepare(snapshot, true, preset_name.as_deref());
+        record = prepared.info;
+    }
+    record.wave = session.wave;
+    record.waves = session.rules.waves;
+    record.wave_spacing = session.rules.wave_spacing;
+    record.win_wave = session.rules.win_wave;
+    record.attack = session.rules.attack_mode;
+    Some(record)
+}
+
+/// `PlanetDialog.rules` -> `Planet.applyRules(state.rules)` (`Planet.java:308-309`):
+/// re-apply the played planet's campaign rules after a rules edit
+/// (`set_campaign_rule`'s "re-apply if the played planet" half, 5980-6050 /
+/// 6080-6130 at `291e30a8`).
+///
+/// The caller checks that the edited planet is the played one and mirrors the
+/// session rules into the live runtime; `None` when no sector is being played
+/// or the planet record is missing.
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn reapply_planet_rules(
+    session: &mut PlaySession,
+    campaign: &Campaign,
+    registry: &ContentRegistry,
+) -> Option<CampaignApply> {
+    let planet = session.sector.map(|(planet, _)| planet)?;
+    let record = campaign.planet(planet)?;
+    Some(record.apply_rules(registry, &mut session.rules, false, true))
+}
+
 /// `Logic.checkGameState()` (campaign + non-campaign branches).
 pub fn check_game_state(session: &mut PlaySession, campaign: &mut Campaign) -> Vec<PlayEvent> {
     if session.is_campaign() {
@@ -895,18 +1202,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
-    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
-    use crate::game::planet::EmptyNeighborhood;
-
-    fn content() -> ContentRegistry {
-        let bundle = MemoryBundle::new();
-        let store = MemoryUnlockStore::new();
-        create_base_content(&bundle, &store, true).expect("content boot")
-    }
-
-    fn campaign(registry: &ContentRegistry) -> Campaign {
-        Campaign::from_registry(registry, &EmptyNeighborhood)
-    }
+    use crate::game::test_support::{campaign, raw_registry as content};
 
     /// T5: `apply_world_load_campaign_rules` transcribes the campaign half of
     /// `Logic`'s WorldLoadEvent (`Logic.java:105-125`): the wave team gets
@@ -1485,5 +1781,269 @@ mod tests {
         let (_, spawn_index) = run_wave_campaign(&mut session);
         assert_eq!(spawn_index, 4, "wave 5 -> getSpawned(4)");
         assert_eq!(session.wave, 6);
+    }
+
+    // --- campaign API (W2-H02) ---
+
+    #[test]
+    fn capture_replacements_read_the_played_planet() {
+        let registry = content();
+        let planet = registry.planet_id("serpulo").unwrap();
+        let mut session = PlaySession::new(Rules::default());
+        assert!(capture_replacements(&registry, &session).is_empty());
+        session.sector = Some((planet, 0));
+        assert_eq!(
+            capture_replacements(&registry, &session),
+            registry
+                .planet(planet)
+                .unwrap()
+                .sector_capture_replacements
+                .clone()
+        );
+    }
+
+    /// PAR-0037/PAR-0030 + T5: a preset map's rules replace `state.rules`
+    /// wholesale in Java (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`
+    /// -> `SaveVersion.readRules`), so the adopted rules must carry the
+    /// objective graph, its flags and the `waveTimer` gate into the session or
+    /// the tutorial launches as a wave sector.
+    #[test]
+    fn adopt_map_rules_carries_objectives_and_wave_timer() {
+        let registry = content();
+        let objectives = crate::io::json::objectives::MapObjectives::from_json(
+            r#"[{"class":"Item","amount":15,"markers":[{"class":"Text","text":"@gz.mine"}]}]"#,
+        )
+        .expect("fixture objectives");
+        let map = Rules {
+            wave_timer: false,
+            wave_sending: false,
+            objectives,
+            objective_flags: std::iter::once("spawnWave".to_owned()).collect(),
+            ..Rules::default()
+        };
+        let planet_def = registry.planet_by_name("serpulo").expect("serpulo");
+        let planet = Planet::from_def(&registry, planet_def, 0.0);
+        let mut session = PlaySession::new(Rules::default());
+        adopt_map_rules(&mut session, &map, &planet, &registry, true, false, false);
+        assert!(!session.rules.wave_timer, "map waveTimer:false must win");
+        assert!(
+            !session.rules.wave_sending,
+            "map waveSending:false must win (canSkipWave gate - PAR-0030)"
+        );
+        assert_eq!(session.rules.objectives.len(), 1);
+        assert!(session.rules.objective_flags.contains("spawnWave"));
+        // The serpulo ruleSetter re-applied after the wholesale copy.
+        assert_eq!(session.rules.wave_team, 2);
+        assert!(session.rules.core_destroy_clear);
+    }
+
+    /// `SaveSlot.load` meta half: rules, wave, wave timer and stats replace the
+    /// live session's and the match becomes playing.
+    #[test]
+    fn apply_save_meta_replaces_rules_wave_and_stats() {
+        let mut session = PlaySession::new(Rules::default());
+        let mut tags = crate::io::StringMap::new();
+        tags.insert("wavetime".to_owned(), "42.5".to_owned());
+        tags.insert("stats".to_owned(), r#"{"wavesLasted":6}"#.to_owned());
+        let meta = SaveMeta {
+            version: 1,
+            timestamp: 0,
+            time_played: 0,
+            build: 0,
+            map_name: String::new(),
+            wave: 7,
+            rules_json: r#"{"waveTeam":9,"waveSpacing":12}"#.to_owned(),
+            tags,
+            mods: Vec::new(),
+        };
+        session.apply_save_meta(&meta);
+        assert_eq!(session.rules.wave_team, 9);
+        assert_eq!(session.rules.wave_spacing, 12.0);
+        assert_eq!(session.wave, 7);
+        assert_eq!(session.wavetime, 42.5);
+        assert_eq!(session.stats.waves_lasted, 6);
+        assert_eq!(session.phase, State::Playing);
+    }
+
+    #[test]
+    fn select_sector_launch_rejects_unknown_and_locked_sectors() {
+        let mut registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        assert_eq!(
+            select_sector_launch(&campaign, &registry, planet, u16::MAX, false),
+            Err(LaunchReject::SectorOutOfRange)
+        );
+        // `groundZero` is always unlocked, so a fresh record launches.
+        let zero = registry.sector_by_name("groundZero").expect("groundZero");
+        let launch = select_sector_launch(&campaign, &registry, zero.planet, zero.sector, false)
+            .expect("groundZero launches");
+        assert!(!launch.resume && !launch.lost_replay && !launch.has_save);
+        assert_eq!(launch.preset, Some(zero.id));
+        assert_eq!(launch.preset_name.as_deref(), Some("groundZero"));
+        // A locked preset is rejected while `presetRequireUnlock` holds.
+        let locked = campaign
+            .planet(planet)
+            .expect("serpulo record")
+            .sectors
+            .iter()
+            .find(|sector| {
+                sector.preset.is_some()
+                    && sector.preset_require_unlock
+                    && !sector.preset_always_unlocked
+            })
+            .map(|sector| sector.id)
+            .expect("a locked preset sector");
+        assert_eq!(
+            select_sector_launch(&campaign, &registry, planet, locked, false),
+            Err(LaunchReject::LockedPreset)
+        );
+        // Unlocking the preset lifts the gate.
+        let preset = campaign
+            .sector(planet, locked)
+            .and_then(|sector| sector.preset)
+            .expect("preset");
+        let name = registry
+            .sector(preset)
+            .map(|def| def.name.clone())
+            .expect("preset def");
+        let mut store = crate::content::MemoryUnlockStore::new();
+        tech_tree::unlock_fields_mut(&mut registry, ContentRef::of(ContentType::Sector, preset))
+            .expect("preset unlock fields")
+            .unlock(&name, &mut store);
+        let launch = select_sector_launch(&campaign, &registry, planet, locked, false)
+            .expect("the unlocked preset launches");
+        assert_eq!(launch.preset, Some(preset));
+    }
+
+    #[test]
+    fn select_sector_launch_picks_the_resume_and_lost_replay_branches() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry.sector_by_name("groundZero").expect("g0").sector;
+        {
+            let sector = campaign.sector_mut(planet, sector_id).expect("sector");
+            sector.save = Some("sector-test".to_owned());
+            sector.info.info.has_core = true;
+        }
+        // A live core resumes the save.
+        let launch =
+            select_sector_launch(&campaign, &registry, planet, sector_id, false).expect("resume");
+        assert!(launch.resume && launch.has_save && !launch.lost_replay);
+        // No live core plus a matching preset name and spawn position replays
+        // the lost sector (PAR-0084).
+        {
+            let sector = campaign.sector_mut(planet, sector_id).expect("sector");
+            sector.info.info.spawn_position = 1;
+            sector.info.info.last_preset_name = sector.preset_name.clone();
+        }
+        let launch = select_sector_launch(&campaign, &registry, planet, sector_id, true)
+            .expect("lost replay");
+        assert!(launch.lost_replay && !launch.resume);
+        assert_eq!(launch.spawn_position, 1);
+        // `clearSectorOnLose` suppresses the replay.
+        campaign
+            .planet_mut(planet)
+            .expect("serpulo record")
+            .campaign_rules
+            .clear_sector_on_lose = true;
+        let launch =
+            select_sector_launch(&campaign, &registry, planet, sector_id, true).expect("no replay");
+        assert!(!launch.lost_replay && !launch.resume);
+    }
+
+    #[test]
+    fn begin_sector_launch_unlocks_the_preset_and_clears_the_played_flags() {
+        let mut registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry.sector_by_name("groundZero").expect("g0").sector;
+        // A previous sector still flagged as played.
+        campaign
+            .sector_mut(planet, sector_id)
+            .expect("sector")
+            .being_played = true;
+        clear_being_played_for_launch(&mut campaign);
+        assert!(
+            campaign
+                .planet(planet)
+                .expect("serpulo record")
+                .sectors
+                .iter()
+                .all(|sector| !sector.being_played)
+        );
+        // A locked preset is quiet-unlocked (no unlock event) and recorded.
+        let locked = campaign
+            .planet(planet)
+            .expect("serpulo record")
+            .sectors
+            .iter()
+            .find(|sector| {
+                sector.preset.is_some()
+                    && sector.preset_require_unlock
+                    && !sector.preset_always_unlocked
+            })
+            .map(|sector| sector.id)
+            .expect("a locked preset sector");
+        let preset = campaign
+            .sector(planet, locked)
+            .and_then(|sector| sector.preset)
+            .expect("preset");
+        let mut settings = SettingsStore::default();
+        begin_sector_launch(&mut campaign, &mut registry, &mut settings, planet, locked);
+        assert!(tech_tree::content_unlocked(
+            &registry,
+            ContentRef::of(ContentType::Sector, preset)
+        ));
+        assert_eq!(
+            campaign.planet(planet).expect("serpulo record").last_sector,
+            locked
+        );
+    }
+
+    #[test]
+    fn live_sector_record_copies_the_live_wave_and_rules() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry.sector_by_name("groundZero").expect("g0").sector;
+        let mut session = PlaySession::new(Rules::default());
+        assert_eq!(
+            live_sector_record(&session, &campaign, &registry, None),
+            None,
+            "no played sector -> no record"
+        );
+        session.sector = Some((planet, sector_id));
+        session.wave = 12;
+        session.rules.waves = true;
+        session.rules.wave_spacing = 45.0;
+        session.rules.win_wave = 30;
+        session.rules.attack_mode = true;
+        let record = live_sector_record(&session, &campaign, &registry, None).expect("record");
+        assert_eq!(record.wave, 12);
+        assert!(record.waves);
+        assert_eq!(record.wave_spacing, 45.0);
+        assert_eq!(record.win_wave, 30);
+        assert!(record.attack);
+    }
+
+    #[test]
+    fn reapply_planet_rules_applies_the_played_planets_rules() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry.sector_by_name("groundZero").expect("g0").sector;
+        let mut session = PlaySession::new(Rules::default());
+        assert!(
+            reapply_planet_rules(&mut session, &campaign, &registry).is_none(),
+            "no played sector -> nothing re-applied"
+        );
+        session.sector = Some((planet, sector_id));
+        let applied = reapply_planet_rules(&mut session, &campaign, &registry)
+            .expect("the played planet re-applies");
+        // `Planet.applyRules` writes the planet identity and default env.
+        assert_eq!(session.rules.planet, "serpulo");
+        let _ = applied;
     }
 }
