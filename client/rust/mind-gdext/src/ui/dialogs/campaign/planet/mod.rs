@@ -8,9 +8,9 @@
 //! [`MindDialog`] shell: the first-run campaign chooser, the planet/difficulty
 //! rail, the globe input (drag / wheel / tap), the collapsible sector list and
 //! the selected-sector readout with its in-panel action button. Static
-//! structure lives in the dialog scene; every row here is rebuilt from the
-//! `MindCampaign` read models (`campaign_views_json`, `launch_dialog_json`)
-//! and the `MindPreview` map registry, so the controller stays UI-only.
+//! structure lives in the dialog scene; every row here is rebuilt from the typed
+//! `MindCampaign` read models (`campaign_views`/`launch_plan`) and the
+//! `MindPreview` map registry, so the controller stays UI-only.
 
 mod chooser;
 mod globe_input;

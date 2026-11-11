@@ -12,8 +12,10 @@
 //! mesh drawn with the ported `planetgrid` shader, and the selected sector
 //! highlighted from the grid corner geometry. All data comes from
 //! `MindCampaign.planet_view` (the Godot-free `mind_core::render::g3d`
-//! topology), `planet_light`, `planet_mesh` and `planet_clouds`; `MindUi`
-//! supplies the `atmosphere` graphics setting.
+//! topology) and the typed `CampaignViews.sectors` markers pushed through
+//! `set_sector_views`; `planet_light`, `planet_mesh` and `planet_clouds` come
+//! from the same facade, and `MindUi` supplies the `atmosphere` graphics
+//! setting.
 //!
 //! The class has no signals: the GDScript base it ports defines none, and the
 //! driving `PlanetDialog` controller polls the read-only properties instead.
