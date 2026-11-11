@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T01:52:30Z",
+  "updated": "2026-11-11T03:33:10Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1510,6 +1510,44 @@
       "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt - && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- run-all --tier T0 && tools/run-cpu-intensive-task.sh --goldens --check",
       "expected": "432/432 mind-gdext lib tests pass (436 minus the 4 deleted moved-logic tests); mind-core tests pass; scoped clippy clean; api-surface diff empty (104 MindCampaign funcs, 2 signals); 115/115 parity goldens, T0 4/4, no golden drift; dialog_sweep_check reports failed=0",
       "risk": "Behaviour-sensitive spots: the sector-launch branch decision now runs before the corrupt-save discard (flags corrected), the GameOver/SectorLose local being_played clear was removed (apply_sector_loss clears the same runtime), and Campaign::clear_saves/clear_being_played now do the write on the live campaign. The real gate is the in-engine campaign smoke: start Ground Zero, save/quit/load, research a node, open the launch dialog on Frozen Forest, capture a sector, and compare campaign_views_json/get_tech_state/launch_dialog_json with the pre-X01 build.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261111-033310",
+      "created_at": "2026-11-11T03:33:10Z",
+      "agent": "refactor-T01",
+      "branch": "main",
+      "head": "d808d329",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/ui/campaign,client/rust/mind-gdext/src/campaign",
+      "summary": "Add typed campaign view-models and producer methods, and keep every campaign *_json #[func] byte-identical (W4-T01)",
+      "files": [
+        "client/rust/mind-core/src/ui/campaign/mod.rs",
+        "client/rust/mind-core/src/ui/campaign/research_tree.rs",
+        "client/rust/mind-core/src/ui/campaign/launch_plan.rs",
+        "client/rust/mind-core/src/ui/campaign/sector_state.rs",
+        "client/rust/mind-gdext/src/campaign/views.rs",
+        "client/rust/mind-gdext/src/campaign/views_snapshot_tests.rs",
+        "client/rust/mind-gdext/src/campaign/testdata/research_tree_serpulo.json",
+        "client/rust/mind-gdext/src/campaign/testdata/launch_plan_frozen_forest.json",
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/campaign/research.rs",
+        "client/rust/mind-gdext/src/campaign/launch.rs",
+        "client/rust/mind-gdext/src/campaign/sectors.rs",
+        "client/rust/mind-gdext/src/campaign/text.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "dialog-sweep",
+        "sim-goldens"
+      ],
+      "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib campaign && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib ui:: && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt - && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- run-all --tier T0 && tools/run-cpu-intensive-task.sh --goldens --check",
+      "expected": "438/438 mind-gdext lib tests pass (432 base + 6 snapshot/typed-view tests); mind-core 3299 lib tests (3291 base + 8 model tests) and all targets pass; scoped clippy clean; api-surface diff empty (104 MindCampaign funcs, 2 signals); 115/115 parity goldens, T0 4/4, no golden drift; dialog_sweep_check reports failed=0; research tree/launch/sector-state JSON unchanged (campaign/testdata snapshots).",
+      "risk": "The Godot-facing payloads are the risk: research_tree_json/launch_dialog_json are now serialized from typed structs (field order/float formatting pinned by campaign/testdata), campaign_views_json still serializes the untouched CampaignViews, and get_sector_state is a VarDictionary rebuilt from SectorStateView (engine-gated key/type test; no-sector sentinel gating). The in-engine campaign smoke should compare research_tree_json/launch_dialog_json/get_sector_state/campaign_views_json against a pre-T01 build.",
       "status": "pending"
     }
   ]
