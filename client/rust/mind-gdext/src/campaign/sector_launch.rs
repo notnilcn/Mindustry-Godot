@@ -196,7 +196,7 @@ impl MindCampaign {
         // T2: `readMeta`'s resume fields from the save the host just decoded.
         let resume_static_fog = self.take_resume_meta(&launch);
         // Adopt the loaded map/save rules wholesale (T5).
-        self.adopt_loaded_map_rules(&mut campaign, &registry, planet_id, sector_id, &launch);
+        self.adopt_loaded_map_rules(&campaign, &registry, planet_id, sector_id, &launch);
         // Fresh generations get terrain weather; resumed saves keep theirs.
         self.adopt_fresh_weather(&planet_name, &launch);
         // `Logic.play` installs the map objective executor from the final rules;
@@ -334,6 +334,7 @@ impl MindCampaign {
     /// the per-branch inputs the decision read (the replaced block computed them
     /// inline). Values are re-derived from the same sources
     /// [`play::select_sector_launch`] reads so the line stays byte-identical.
+    #[allow(clippy::too_many_arguments)]
     fn log_launch_branch(
         &self,
         campaign: &Campaign,
@@ -380,6 +381,7 @@ impl MindCampaign {
     /// H05 T2/PAR-0084: the lost-sector replay — prime the generator extras from
     /// the live record, replay through the host and mark the record as having a
     /// core again. Returns the restored building survivors.
+    #[allow(clippy::too_many_arguments)]
     fn replay_lost_sector(
         &mut self,
         campaign: &mut Campaign,
@@ -667,7 +669,7 @@ impl MindCampaign {
     /// cutscene unless `skipcoreanimation` or a PvP rule set (PAR-0131), then
     /// record the runtime state and reset the pump tick. `ctx` is the caller's
     /// log prefix (`start_sector`/`start_loaded_world`).
-    fn finish_launch(
+    pub(super) fn finish_launch(
         &mut self,
         installed: bool,
         events: &[mind_core::game::play::PlayEvent],
