@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T00:21:57Z",
+  "updated": "2026-11-11T01:52:30Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1481,6 +1481,35 @@
       "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt -",
       "expected": "436/436 mind-gdext lib tests pass (inventory identical to the branch base); clippy -D warnings clean; api-surface diff empty; the four editor views still resolve /root/Spine/MindEditor and the editor dialogs still round-trip rows",
       "risk": "Behaviour-sensitive borrow rewrites: the editor's with_world hands the closure a destructured &mut MapEditor (a missed content guard would now no-op instead of returning), and the four editor views now re-resolve the facade through to_gd().upcast::<Node>() instead of base().get_node_or_null (same node). UI is unaffected (no manifest or .tscn edit); ui-widgets-check guards the dialog root wiring.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261111-015230",
+      "created_at": "2026-11-11T01:52:30Z",
+      "agent": "refactor-X01",
+      "branch": "main",
+      "head": "6b5443b3",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-gdext/src/campaign,client/rust/mind-core/src/game",
+      "summary": "Make MindCampaign a thin facade over the H01/H02 campaign APIs and decompose the giant campaign functions (W3-X01)",
+      "files": [
+        "client/rust/mind-gdext/src/campaign.rs",
+        "client/rust/mind-gdext/src/campaign",
+        "client/rust/mind-core/src/game/play.rs",
+        "client/rust/mind-core/src/game/tech_tree.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "dialog-sweep",
+        "sim-goldens"
+      ],
+      "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt - && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- run-all --tier T0 && tools/run-cpu-intensive-task.sh --goldens --check",
+      "expected": "432/432 mind-gdext lib tests pass (436 minus the 4 deleted moved-logic tests); mind-core tests pass; scoped clippy clean; api-surface diff empty (104 MindCampaign funcs, 2 signals); 115/115 parity goldens, T0 4/4, no golden drift; dialog_sweep_check reports failed=0",
+      "risk": "Behaviour-sensitive spots: the sector-launch branch decision now runs before the corrupt-save discard (flags corrected), the GameOver/SectorLose local being_played clear was removed (apply_sector_loss clears the same runtime), and Campaign::clear_saves/clear_being_played now do the write on the live campaign. The real gate is the in-engine campaign smoke: start Ground Zero, save/quit/load, research a node, open the launch dialog on Frozen Forest, capture a sector, and compare campaign_views_json/get_tech_state/launch_dialog_json with the pre-X01 build.",
       "status": "pending"
     }
   ]
