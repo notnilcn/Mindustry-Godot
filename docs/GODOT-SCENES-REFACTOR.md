@@ -13,7 +13,7 @@
   `MindSimHost`, `MindNet`, `MindInput` (+ `DesktopBridge`), `MindUiRoot`, `MindAudio`, `MindCampaign`,
   `MindStateInspector`, `MindMenuBackground`, `MindMenuFlyers`, `MindLandingCore`.
 - **Final greps** (2026-11-05, `client/rust/mind-gdext/src`): `"/root/Spine` = **143** lines = **139** code +
-  **4** recipe comments (`sim_host.rs:2159-2162`); `"\.\./` = **0**. Remaining code: **92** UI controllers +
+  **4** recipe comments (`sim_host/config.rs:263`); `"\.\./` = **0**. Remaining code: **92** UI controllers +
   **45** render-pass children + **2** outside buckets (`mods.rs`, `editor/editor_renderer.rs`).
 - **Verified** (orchestrator runs): `--build` exit 0 (39 s); headless `game.tscn` boot exit 0 with 0 `missing required`
   warnings and 0 ERROR/SCRIPT ERROR; SceneTree probe `CHECKED 16 nodes, null deps: 0`; `SHADERCHECK: total=30
@@ -40,15 +40,15 @@
 ## 3. Current state
 
 Read-only greps on `godot-scenes-refactor`, paths relative to `client/rust/mind-gdext/src` — **216** violations over 66 files (188 absolute + 28
-parent-relative), bucketed by **who owns the node**; 3 fall outside all three buckets at the baseline (`mods.rs:1`, `editor/editor_renderer.rs:1`, `input/desktop.rs:1`).
+parent-relative), bucketed by **who owns the node**; 3 fall outside all three buckets at the baseline (`mods.rs:1`, `editor/editor_renderer.rs:1`, `input/desktop/mod.rs:1`).
 
-**Final state after S2–S4 (2026-11-05):** `"/root/Spine` = **143** lines = **139** code + **4** comment lines (all four in `sim_host.rs:2159-2162`, the MCP
+**Final state after S2–S4 (2026-11-05):** `"/root/Spine` = **143** lines = **139** code + **4** comment lines (all four in `sim_host/config.rs:263`, the MCP
 recipe block); `"\.\./` = **0**. Remaining code lookups: **(b) 92** + **(c) 45** + **outside 2** (`mods.rs`, `editor/editor_renderer.rs`; the
 `input/desktop.rs` lookup was migrated). **73** code lookups removed in total.
 
 | Pattern | Matches | Verdict |
 |---|---|---|
-| `"/root/Spine` | **188** in 64 files (184 code + 4 in a `//` recipe block at `sim_host.rs:2145-2148` at the baseline; **2159-2162** final) | violation |
+| `"/root/Spine` | **188** in 64 files (184 code + 4 in a `//` recipe block at `sim_host/config.rs:254-257` at the baseline; **2159-2162** final) | violation |
 | `"\.\./` | **28** in 10 files | violation |
 | `"/root/Mind*` | **52** (`MindUi` 28, `MindAssets` 17, `MindHud` 4, `MindMods` 3) | allowed autoload |
 | `"/root/StdbConnector` | **2** | allowed autoload |
@@ -216,7 +216,7 @@ camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host
 · `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing: `MindAudio` has no required deps (all five are optional),
 `MindLandingCore` is all-optional, and `MindStateInspector`'s camera/audio/editor are optional too.
 
-**Known baseline (pre-existing, not caused by this refactor):** scoped clippy currently fails on `clippy::collapsible_if` at `client/rust/mind-gdext/src/editor/mod.rs:2138` — `if let Some(current) = self.file.as_ref() {` wrapping a single `if !current.starts_with(&dir)` at :2139, in the editor facade S2–S4 do not touch. Do not fix it here; S5 recorded it in the `CI_PENDING.json` risk note and left it to the CI fixer.
+**Known baseline (pre-existing, not caused by this refactor):** scoped clippy currently fails on `clippy::collapsible_if` at `client/rust/mind-gdext/src/editor/api_patches.rs:464` — `if let Some(current) = self.file.as_ref() {` wrapping a single `if !current.starts_with(&dir)` at :2139, in the editor facade S2–S4 do not touch. Do not fix it here; S5 recorded it in the `CI_PENDING.json` risk note and left it to the CI fixer.
 
 **Actual verification (S5 closeout, 2026-11-05).** Recorded from the orchestrator's runs (S5 did not re-run them):
 
@@ -226,7 +226,7 @@ camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host
 - One-off SceneTree probe (no repo file added) over all 16 wired nodes' exported refs — `CHECKED 16 nodes, null deps: 0`.
 - Oracles — `SHADERCHECK: total=30 failed=0`; `UICHECK: failed=0`; `LAYOUTCHECK: failed=0`; `DIALOGCHECK: failed=0`.
 - Rust — `cargo check -p mind-gdext` green; `cargo fmt --all -- --check` green; scoped clippy green with
-  `-A clippy::collapsible_if` (the `editor/mod.rs:2138` baseline above remains pre-existing and was not fixed here).
+  `-A clippy::collapsible_if` (the `editor/api_patches.rs:464` baseline above remains pre-existing and was not fixed here).
 - `cargo test -p mind-gdext --lib` — **185 passed / 17 failed**; every failure is "Godot engine not available" in
   engine-dependent UI helper tests (pre-existing environment limitation: this crate has no engine in `cargo test`).
 - `CI_PENDING.json` — one entry (`CP-20261105-042043`, `--agent godot-scenes-refactor`, area `client/rust/mind-gdext/src`,
@@ -258,7 +258,7 @@ camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host
 - [x] `MindUiRoot` accessors replace the `../Ui/UiRoot/...` strings in `MindInput`/`MindAudio`/`MindLandingCore`; `hud_fragment(name)` covers block_config/block_inventory/console/chat.
 - [x] Structure stays in `.tscn`; no new code-instantiated node without `// code-instantiated: <reason>`.
 - [x] `#[func]`/`#[signal]`/class names unchanged (append-only); `set_<field>` collisions checked.
-- [x] `--cargo-check -p mind-gdext`, scoped clippy (baseline `editor/mod.rs:2138` recorded) and `cargo fmt --check` run; headless boot clean of the §7 warnings.
+- [x] `--cargo-check -p mind-gdext`, scoped clippy (baseline `editor/api_patches.rs:464` recorded) and `cargo fmt --check` run; headless boot clean of the §7 warnings.
 - [x] `CI_PENDING.json` entry via `python3 tools/ci_pending.py add` (gates `fmt,clippy,cargo-check,godot-import,ui-widgets-check,ui-layout-check,dialog-sweep-check,shaders-check`); `/root/Mind*` lookups not counted as violations.
 
 Deferred follow-ups, intentionally left unchecked:

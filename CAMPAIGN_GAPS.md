@@ -91,7 +91,7 @@ top-left HUD shows the objective class text (`Objective.text()`), not `gz.*`.
   silent from objective 2 onward. Objective 6's "place turrets here" highlights
   are missing too. (This is the reported "tooltip not progressing to the
   conveyors" symptom; objective 1 *does* complete.)
-- **Godot evidence.** `gx/campaign.rs:3493-3497` destructures only
+- **Godot evidence.** `client/rust/mind-core/src/ui/campaign/research_tree.rs:545-549` destructures only
   `ObjectiveMarker::ShapeText` and `continue`s on every other marker class.
   `gx/render/objective_markers.rs` (whole file) implements only the ShapeText
   polyline+label pass. Worse, `objective_markers.rs:90-92` calls
@@ -172,7 +172,7 @@ top-left HUD shows the objective class text (`Objective.text()`), not `gz.*`.
 - **Status.** **Fixed at HEAD (2026-11-06) — in-engine verified on Godot, `PAR-0492`.** `timer_text` now computes `(duration × objectiveTimerMultiplier − countup) / 60` and formats `m:ss`; a paused countup of 120 ticks renders `Enemies approaching in 58`. No Java frame of objective 12 was obtainable (the full parent chain `16→…→0` is required; the class-mod and save-transfer attempts are documented in `runs/PAR-0492/20261106-140000-run.md`), so the ledger item stays `verified`, not `twin-verified`.
 
 ### CG-TUT-05 — Prompt text ignores `.mobile` variants and map locales — **P2**
-- `gx/campaign.rs:3526-3541` (`localized_marker_text`) does only
+- `client/rust/mind-gdext/src/campaign/research.rs` (`localized_marker_text`) does only
   `bundle.get(key)`. Java `MapObjectives.fetchText` checks map locales first and
   then `key + ".mobile"` (`up/game/MapObjectives.java:806-828`); bundle keys
   `gz.mine` / `gz.mine.mobile` exist at
@@ -212,7 +212,7 @@ are in presentation and in the marker class set.
 See [CG-TUT-01](#cg-tut-01--tutorial-prompt-disappears-after-the-drill-only-shapetext-markers-are-drawn--p0).
 Also affects custom maps, the editor's marker preview and any objective that
 uses `Point`, `Shape`, `Text`, `Line`, `Texture`, `Quad` or `Light` markers
-(`gx/campaign.rs:3493-3497`, `gx/render/objective_markers.rs`).
+(`client/rust/mind-core/src/ui/campaign/research_tree.rs:545-549`, `gx/render/objective_markers.rs`).
 
 ### CG-OBJ-02 — Marker label redraw is tied to the 0.2 s JSON poll
 See [CG-TUT-02](#cg-tut-02--world-prompt-jitters-while-walking-5-hz-screen-space-re-projection--p1).
@@ -241,7 +241,7 @@ Headline: the port **runs** the campaign logic, not just a read model.
 `sector_capture` (`mc/game/play.rs:583-700`), auto turns
 (`mc/game/runtime.rs:519-530`), `SectorInfo.prepare/write`
 (`mc/game/sector.rs:434-509`), lost-sector `SectorDamage(1f)` replay
-(`mc/sim/runtime.rs:2130-2205`, `gx/campaign.rs:1042`), abandon
+(`mc/sim/runtime.rs:2130-2205`, `gx/campaign/pump.rs:172`), abandon
 (`mc/game/runtime.rs:314-325`) and invasion scheduling
 (`mc/game/universe.rs:725-816`) are wired to the live sim. The gaps below are
 state/ordering deltas, not a missing subsystem.
@@ -255,7 +255,7 @@ state/ordering deltas, not a missing subsystem.
   `delta_ticks / 60.0` (**seconds**), then `:264` computes
   `interval = save_interval_seconds * 60.0` (seconds²) and compares
   `self.time > interval` (`:265`). Called with the raw `saveinterval` default
-  60 (`gx/campaign.rs:534`, `saves.rs:32`), so the threshold is 3600 s. The
+  60 (`gx/campaign/planet_view.rs:484`, `saves.rs:32`), so the threshold is 3600 s. The
   comment at `saves.rs:259-263` wrongly asserts the setting is minutes, and the
   unit test at `saves.rs:664-712` bakes the error in.
 - **Java evidence.** `up/game/Saves.java:217-219` — `time += Time.delta` is in
@@ -271,11 +271,11 @@ state/ordering deltas, not a missing subsystem.
 - **Symptom.** Build in sector A, launch to B, return to A: A reloads from the
   last autosave. With CG-SECTOR-01 that is up to an hour of building gone
   (SectorInfo item snapshots survive; buildings/units do not).
-- **Godot evidence.** `gx/campaign.rs:919-937` (`start_sector_with_loadout`)
+- **Godot evidence.** `gx/campaign/runtime.rs:78` (`start_sector_with_loadout`)
   clears `current_map_name`/`playtesting_map`, mirrors the runtime campaign and
   replaces the runtime — no save of the outgoing slot.
   `mc/game/saves.rs:347-371` then repoints `Saves.current` at the destination.
-  The only pre-switch save is app exit (`gx/campaign.rs:3934-3954`).
+  The only pre-switch save is app exit (`gx/campaign/sectors.rs:90`).
 - **Java evidence.** `up/core/Control.java:437-441` — every `playSector` starts
   with `if(saves.getCurrent() != null && state.isGame()){ saves.getCurrent().save();
   saves.resetSave(); }`.
@@ -291,7 +291,7 @@ state/ordering deltas, not a missing subsystem.
 - **Godot evidence.** `mc/io/json/rules.rs:1057` defines `resources:
   Vec<String>`, defaulted empty at `:1109`; no writer exists in
   `mind-core`/`mind-gdext` (readers only: `mc/ui/campaign.rs:1054-1056`,
-  `gx/ui/dialogs/batch_campaign2.rs:3517`, `gx/ui/dialogs/batch_c.rs:2215`).
+  `gx/ui/dialogs/schematics/subdialogs.rs:582`, `gx/ui/dialogs/campaign/planet/sector_panel.rs:212`).
   `SectorInfoState::prepare` (`mc/game/sector.rs:434-479`) does not fill it.
 - **Java evidence.** `up/core/World.java:306-329` (`setSectorRules`) scans every
   non-dark tile for floor/overlay/wall drops and liquids, then
@@ -308,7 +308,7 @@ state/ordering deltas, not a missing subsystem.
 - **Godot evidence.** `mc/game/play.rs:396` `apply_sector_preset_rules` never
   touches `wave_spacing`; `logic_play` computes `wavetime` at `:505-514` from
   the current `rules.wave_spacing`; the destination map rules only arrive later
-  in `gx/campaign.rs:1141-1160` (`adopt_map_rules`), which replaces
+  in `gx/campaign/pump.rs:133` (`adopt_map_rules`), which replaces
   `rules.wave_spacing` but not `session.wavetime` (the resumed path restores
   `wavetime` separately at `:1113-1116`).
 - **Java evidence.** `up/core/Control.java:573-587` loads the sector (generator
@@ -321,7 +321,7 @@ state/ordering deltas, not a missing subsystem.
 - **Status.** Likely.
 
 ### CG-SECTOR-05 — Off-play capture/loss toasts are absent — **P2**
-- `gx/campaign.rs:1864-1868` documents the missing seam;
+- `gx/campaign/sector_launch.rs:69` documents the missing seam;
   `toast_campaign_events` (`:1871-1879`) handles only `SectorInvasion`, and
   `CampaignEvent` (`mc/game/universe.rs:281-300`) has only
   `Turn`/`SectorInvasion`. Java toasts `sector.capture` / `sector.lost` for
@@ -331,11 +331,11 @@ state/ordering deltas, not a missing subsystem.
 
 ### CG-SECTOR-06 — Planet/launch views can read a stale facade campaign copy — **P2 (likely)**
 - `gx/campaign.rs:3303-3306` (`campaign_views_json`) reads `self.campaign`;
-  `pump_runtime` mirrors it only when events fire (`gx/campaign.rs:791-812`).
+  `pump_runtime` mirrors it only when events fire (`gx/campaign/runtime.rs:17`).
   Live per-tick deltas are folded into `runtime.campaign`
   (`mc/game/runtime.rs:600-612`), so item/production/`beingPlayed` rows can lag
   between events. The record-level getter does prefer the runtime copy
-  (`gx/campaign.rs:2056-2068`). Java has one live `Sector.info`
+  (`gx/campaign/map_play.rs:24`). Java has one live `Sector.info`
   (`up/game/Universe.java:193-261`).
 - **Verification.** With a base live, compare
   `campaign_views_json("serpulo")` vs `sector_record_json("serpulo", id)` for
@@ -368,14 +368,14 @@ from file names instead of save meta.
   the launch record (`items`, `wave`, `attempts`, `spawnPosition`,
   `storageCapacity`, `bestCoreType`) was never written. Clean quits work;
   crashes expose the whole first session.
-- **Godot evidence.** `gx/campaign.rs:1415` finishes `start_sector` with
+- **Godot evidence.** `gx/campaign/sector_launch.rs:75` finishes `start_sector` with
   `persist()`, which writes planet rules/stats + universe but no sector record.
   `persist_sector_record_in` (`:4041-4056`) is the only `SectorInfo::prepare`
   caller and is reached only from autosave (`:559`), capture (`:609`),
   game-over (`:638`) and `reset_to_menu` (`:4009`). On resume,
   `record.info.write_to_state(...)` (`:1267`) and
   `write_record_items_to_core` (`:1316`) read that still-default record;
-  `gx/sim_host.rs:7998` clears the core module first. Defaults are
+  `gx/sim_host/hover.rs:282` clears the core module first. Defaults are
   `has_core: true`, empty `items`, `wave: 1` (`mc/io/json/rules.rs:1102-1114`).
 - **Java evidence.** `up/core/Control.java:587` calls
   `saves.saveSector(sector)` on every `playNewSector`; `Saves.java:253-264,
@@ -391,21 +391,21 @@ from file names instead of save meta.
 - **Symptom.** Load any save from the Load dialog, play, quit: nothing is
   written (no autosave, no exit save), playtime does not advance, and the pause
   label reads `@quit` instead of `@save.quit`.
-- **Godot evidence.** `gx/campaign.rs:3878-3911` `load_slot` applies meta and
+- **Godot evidence.** `gx/campaign/database.rs:226` `load_slot` applies meta and
   sets `total_playtime` but never `Saves::set_current_by_file`;
   `mc/game/saves.rs:235-262` gates playtime and autosave on
-  `self.current.is_some()`; `gx/campaign.rs:3934-3953` `run_exit_save` requires
+  `self.current.is_some()`; `gx/campaign/sectors.rs:90` `run_exit_save` requires
   `get_current()`.
 - **Java evidence.** `up/game/Saves.java:319-324` (`SaveSlot.load` sets
   `current = this`); `:204-231` (playtime/autosave keyed on `current`);
   `up/core/Control.java:599-610` (exit saves `getCurrent()`).
 - **Note.** Campaign `start_sector` avoids this because it calls
-  `set_current_by_file` (`gx/campaign.rs:1392-1395`); the bug bites
+  `set_current_by_file` (`gx/campaign/sector_launch.rs:50-53`); the bug bites
   custom-game/imported saves and every Load-dialog load.
 - **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0487` (similarity 70.9).** `load_slot` now calls `adopt_loaded_slot` (`Saves::set_current_by_file` + meta playtime), mirroring `SaveSlot.load`; the pause menu reads `Save & Quit` and the exit save writes the loaded slot. Unit test `loaded_slot_becomes_current_and_autosaves`. See `runs/PAR-0487/`.
 
 #### CG-SAVE-03 — Resuming a base wipes the stored launch loadout/resources — **P2**
-- `gx/ui/dialogs/batch_c.rs:2930-2945` calls `clear_loadout_info` for every
+- `gx/ui/dialogs/campaign/planet/sector_panel.rs:858` calls `clear_loadout_info` for every
   plain `start_sector` branch, including a resume; Java only clears in the
   free-launch branch (`up/ui/dialogs/PlanetDialog.java:1396-1403`, resume at
   `:1449`). Clears `launch-resources-seq` + `lastloadout-<core>`
@@ -419,7 +419,7 @@ from file names instead of save meta.
   (`up/io/SaveVersion.java:139-146,170-183`). **Status.** Code-confirmed.
 
 #### CG-SAVE-05 — Sector saves are attached by canonical filename only — **P2**
-- `gx/campaign.rs:296-303` derives `sector.save` from
+- `gx/campaign.rs:142-149` derives `sector.save` from
   `NativeFs.exists(paths.sector_save(planet, id))`; `assign_sector_saves`
   (`mc/game/saves.rs:149-223`) only plans remaps and never sets `sector.save`.
   Java associates from save meta (`up/game/Saves.java:120-186`), so a copy under
@@ -428,7 +428,7 @@ from file names instead of save meta.
 
 #### CG-SAVE-06 — A base is inferred from file existence, not a readable save — **P1 (likely)**
 - With a sector file present but undecodable, the planet page offers Resume;
-  `gx/sim_host.rs:3475-3545` falls through to `generate_sector` silently and the
+  `gx/sim_host/world_load.rs:305` falls through to `generate_sector` silently and the
   stale record items are stocked into the new core. Java catches
   `SaveException`, deletes the slot and shows `@save.corrupted`
   (`up/core/Control.java:555-561`). The same asymmetry hides such files from
@@ -446,18 +446,18 @@ from file names instead of save meta.
 
 Serpulo node data is fully wired: 223/223 nodes resolve with Java-identical
 depths (`mc/content/tech/mod.rs:886-888`), and `research_tree_json` feeds the
-graph (`gx/campaign.rs:2500-2660`). The gaps are launch-loadout and
+graph (`gx/campaign/pump.rs:61`). The gaps are launch-loadout and
 dependency-objective behaviour.
 
 ### CG-TECH-01 — Configure Loadout manual resource editor is inert — **P1**
 - **Symptom.** In `LaunchLoadoutDialog`, turn `@resources.max` off, press
   `@resources`, edit amounts, confirm: the amounts are not carried into the
   launch and the dialog rows never refresh.
-- **Godot evidence.** `gx/ui/dialogs/batch_campaign2.rs:2879` calls
+- **Godot evidence.** `gx/ui/dialogs/schematics/files.rs:283` calls
   `campaign.has_method("set_launch_resources")`, but `MindCampaign` has no such
-  method (only `update_launch_resources_json`, `gx/campaign.rs:5068`);
+  method (only `update_launch_resources_json`, `gx/campaign/lifecycle.rs:365`);
   `loadout_seed` (`:2541`) reads `campaign_json("get_launch_resources")`, which
-  returns a `PackedInt32Array` (`gx/campaign.rs:5020`) while `campaign_json`
+  returns a `PackedInt32Array` (`gx/campaign/lifecycle.rs:365`) while `campaign_json`
   casts to `GString` (`gx/ui/dialog.rs:405`); and `loadout_changed` (`:2886`,
   declared `gx/ui/dialog.rs:825`) has no listener, so the parent launch dialog
   is never rebuilt.
@@ -473,11 +473,11 @@ dependency-objective behaviour.
 - **Symptom.** Once the launcher's best core is foundation/nucleus, the picker
   offers those schematics but only the staged resources are charged; the
   schematic's block requirements are never removed from the source sector.
-- **Godot evidence.** `gx/ui/dialogs/batch_c.rs:2693` searches
+- **Godot evidence.** `gx/ui/dialogs/campaign/planet/sector_panel.rs:520` searches
   `campaign_section("loadouts")`, built by `mc/ui/campaign.rs:1719-1722,1746`
-  from `planet.default_core` only; the picker at `gx/campaign.rs:5304-5320`
+  from `planet.default_core` only; the picker at `gx/campaign/accelerator.rs:203-219`
   offers every schematic whose core fits the launcher. So
-  `launch_cost = planet_loadout_launch_stacks(...)` (`batch_c.rs:2858`) sees an
+  `launch_cost = planet_loadout_launch_stacks(...)` (`campaign/planet/sector_panel.rs:820`) sees an
   empty row for larger-core schematics.
 - **Java evidence.** `up/ui/dialogs/PlanetDialog.java:1405-1412` selects the
   launcher core (or planet default when schematics are disallowed) and charges
@@ -502,7 +502,7 @@ dependency-objective behaviour.
 - **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0497` (similarity 77.8).** `tech/mod.rs` now builds `content_dependencies()` (`BlockDef::get_dependencies` = cost items + non-optional `ConsumeItems`; `UnitType::get_dependencies` = reconstructor + `researchRequirements`), deduped and prepended as `Research` objectives before the explicit ones (roots too). `BlockDef::get_dependencies` finally has a production caller. `parity/golden_content.json` was regenerated (tech `objectives` only). See `runs/PAR-0497/`.
 
 ### CG-TECH-04 — Last-used loadout is not restored — **P2**
-- `gx/campaign.rs:5173` seeds the dialog from the core default
+- `gx/campaign/accelerator.rs:70` seeds the dialog from the core default
   (`loadout_index.filter(valid).or(default_index)`); `get_last_loadout`
   (`:5358`) has no caller. Java seeds from `universe.getLoadout(core)` /
   `LaunchLoadoutDialog.java:162`, persisted as `lastloadout-<core>`.
@@ -511,13 +511,13 @@ dependency-objective behaviour.
 ### CG-TECH-05 — `allowLaunchSchematics` is ignored by the launch picker — **P2**
 - Only definitions exist (`mc/content/registries/planets.rs:287`,
   `sectors.rs:136`, `mc/game/sector.rs:698`); the `mind-gdext` launch path
-  (`gx/campaign.rs:5120,5320-5336`) always uses the launcher's best core and the
+  (`gx/campaign/accelerator.rs:17,5320-5336`) always uses the launcher's best core and the
   full schematic grid. Java `PlanetDialog.java:1405` +
   `LaunchLoadoutDialog.java:167-196` gate on the destination.
 - **Status.** Code-confirmed.
 
 ### CG-TECH-06 — Tech-tree root-selector button is always shown and no-ops with one tree — **P2**
-- `gx/ui/dialogs/batch_campaign2.rs:1542` uses
+- `gx/ui/dialogs/campaign/research.rs:837` uses
   `visible = !tree.root.is_empty()`; `research_open_root_selector` returns early
   when `roots.len() <= 1` (`:983-990`). Java's visibility is the count of
   selectable roots (`up/ui/dialogs/ResearchDialog.java:108`). Fresh Serpulo
@@ -525,7 +525,7 @@ dependency-objective behaviour.
 - **Status.** **Refuted at HEAD (2026-11-06) — in-engine verified on both clients, `PAR-0496` (similarity 78.6).** Erekir's root content `core-bastion` is `alwaysUnlocked` (`Blocks.java:3196`, ported `storage.rs:120`), so Java's `roots.count(!(requiresUnlock && !unlockedHost))` is **2** and the Java dialog shows the same title button; the port's `research_tree_json("serpulo").roots` is `[serpulo, erekir]` (2 rows), so its picker opens too. The dead-button case needs a genuinely single/locked root (a mod/MP state). Java's exact predicate (`root_select_visible(rows, selected_root_locked) = rows − selected_locked > 1`) and a unit test are landed anyway, but there is no vanilla user-visible gap. See `runs/PAR-0496/`.
 
 ### CG-TECH-07 — `selectable` uses the SP unlock flag while `locked` uses `Rules.researched` — **P2 (MP)**
-- `gx/campaign.rs:2561-2566` (`selectable` = `content_unlocked`, SP) vs
+- `gx/campaign/planet_view.rs:17` (`selectable` = `content_unlocked`, SP) vs
   `:2770` (`locked` = `unlocked_with_rules`). Java uses `unlockedHost()` for
   both (`up/ui/dialogs/ResearchDialog.java:403-406`,
   `up/ctype/UnlockableContent.java:274-286`). In a host-authoritative campaign a
@@ -541,10 +541,10 @@ dependency-objective behaviour.
   Resume: the port re-enters from the last save, discarding everything since
   (and resetting the wave timer). Java hides the page and continues the live
   world.
-- **Godot evidence.** `gx/ui/dialogs/batch_c.rs:2581` routes `"resume" | "go"`
+- **Godot evidence.** `gx/ui/dialogs/campaign/planet/sector_panel.rs:573` routes `"resume" | "go"`
   to `planet_launch(..., resume=true)`; `:2815` unconditionally calls
   `prime_sector_load` (`:2835`) and `host.load_sector` (`:2881`) before the
-  `resume && play_sector` branch (`:2894`). `gx/sim_host.rs:3459`
+  `resume && play_sector` branch (`:2894`). `gx/sim_host/world_load.rs:289`
   (`load_sector_world`) drops the live runtime and reads
   `user://saves/sector-<planet>-<id>.msav`.
 - **Java evidence.** `up/ui/dialogs/PlanetDialog.java:1373` —
@@ -558,7 +558,7 @@ dependency-objective behaviour.
 - **Symptom.** On Serpulo with 2+ bases the player cannot see which base is
   exposed to an enemy base, which sectors are shielded, where exports go, or
   which sector they are currently playing (besides the selection ring).
-- **Godot evidence.** `gx/ui/planet.rs:1125` `rebuild_markers` only builds
+- **Godot evidence.** `gx/ui/planet/scene.rs:530` `rebuild_markers` only builds
   rings/fills/icons (`:1202` `status_color`, `:1288` `add_icon`); no arc
   primitive exists. `mc/ui/campaign.rs:169` `SectorView` exposes only
   `shielded: bool`; `shield_target` stops at `mc/game/sector.rs:556`.
@@ -574,9 +574,9 @@ dependency-objective behaviour.
 - **Symptom.** Hovering a locked numbered sector shows nothing; Java shows
   `⊗ Core Foundation required` or the defense icon + "Shielded" under the
   cursor. New players read the map as broken.
-- **Godot evidence.** `gx/ui/dialogs/batch_c.rs:3385` `planet_update_hover` sets
+- **Godot evidence.** `gx/ui/dialogs/campaign/planet/launch.rs:131` `planet_update_hover` sets
   the label only when `sector_tile == tile && !row_bool(&sector, "locked")`
-  (`:3403`); `gx/ui/planet.rs:1646` hides empty labels. Neither
+  (`:3403`); `gx/ui/planet/overlays.rs:293` hides empty labels. Neither
   `sector.foundationrequired` nor `sector.shielded` is referenced anywhere in
   `client/rust/**` (both keys exist in `parity/bundle_keys.json`).
 - **Java evidence.** `up/ui/dialogs/PlanetDialog.java:962-976`
@@ -590,9 +590,9 @@ dependency-objective behaviour.
 - **Symptom.** Capturing Serpulo's last sector does nothing in-game in the port;
   Java shows the campaign-complete overlay ~2 s later, with the planet name,
   playtime and `@menu`/`@continue`.
-- **Godot evidence.** `gx/campaign.rs:612` emits `campaign_complete`, but no node
+- **Godot evidence.** `gx/campaign.rs:316` emits `campaign_complete`, but no node
   connects it; the only presentation path is
-  `gx/ui/dialogs/batch_c.rs:1602` (`planet_maybe_show_campaign_complete`),
+  `gx/ui/dialogs/campaign/planet/page.rs:170` (`planet_maybe_show_campaign_complete`),
   queued from opening the planet page (`:1560`).
 - **Java evidence.** `up/core/Control.java:175-181` schedules
   `ui.campaignComplete.show(e.sector.planet)` 2 s after an initial final-sector
@@ -603,7 +603,7 @@ dependency-objective behaviour.
 - **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0491` (similarity 81.4).** `MindUiRoot::ready` connects `MindCampaign.campaign_complete`; the receiver schedules a one-shot `SceneTreeTimer` (2.0 s = Java `Time.run(120)`), closes the planet page if open, and opens `campaign_complete`. The dialog also gained the missing playtime row (JSON `FLOAT` was panicking in `to::<i64>()`), live bundle planet naming, and Java's `@menu`/`@continue` button row. Evidence: emit at the menu → overlay shown 2.7 s later; the Java real path (`Vars.logic.sectorCapture` on sector 217) shows the same overlay. See `runs/PAR-0491/`.
 
 ### CG-UI-05 — Loss on Normal never offers the difficulty guide — **P2**
-- `gx/ui/dialogs/batch_b.rs:1308` (`continue_pressed`) only closes the game-over
+- `gx/ui/dialogs/game/game_over.rs:412` (`continue_pressed`) only closes the game-over
   dialog and opens the planet page; no `difficultyguide` setting/string exists
   in `client/rust/**`. Java `GameOverDialog.java:107-125` shows the one-time
   `@difficulty.guide.*` prompt after 2 attempts on Normal and links into the
@@ -613,21 +613,21 @@ dependency-objective behaviour.
 ### CG-UI-06 — Accelerator destination picker lacks its mode chrome — **P2**
 - Java `PlanetDialog.java:721-728` shows the `@sectors.launchselect` banner in
   `planetLaunch` mode, hides `@techtree` (`:316`) and fades the sector panel
-  (`:369-370`). Godot `gx/ui/dialogs/batch_c.rs:2014,2058` always builds
+  (`:369-370`). Godot `gx/ui/dialogs/campaign/planet/page.rs:599,2058` always builds
   Back + panel + Tech Tree; only the placeholder `@sectors.select` exists
   (`:2100`).
 - **Status.** Code-confirmed.
 
 ### CG-UI-07 — Escape closes the planet page instead of clearing the sector selection — **P2**
-- `gx/ui/dialogs/batch_c.rs:3335` `planet_handle_reveal_escape` returns unless
+- `gx/ui/dialogs/campaign/planet/launch.rs:228` `planet_handle_reveal_escape` returns unless
   `new_presets.len() > 1` and never clears `selected_sector`; `:561`
-  `blocks_escape` only covers `chooser_active`, so `gx/ui/root.rs:1675-1683`
+  `blocks_escape` only covers `chooser_active`, so `gx/ui/root/messages.rs:71-79`
   closes the dialog. Java `PlanetDialog.java:91-102` deselects first, then
   hides.
 - **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0502` (similarity 57.7; the delta is the pre-existing planet-globe rendering).** `planet_escape_step` ports Java's reveal-truncate → deselect → fall-through-to-hide; `PlanetDialog::blocks_escape` runs it so the first Escape keeps the page (footer children 6→5, dialog visible) and the second hides it. Probe: `{visible:true, footer:5}` then `{visible:false}`; Java shows the same two-step. See `runs/PAR-0502/`.
 
 ### CG-UI-08 — No "available" toast when a capture makes tech nodes available — **P2 (likely)**
-- Captures toast only unlocked content (`gx/campaign.rs:836-853`); Java also
+- Captures toast only unlocked content (`gx/campaign/launch.rs:212-229`); Java also
   toasts every node whose `SectorComplete` objectives just became satisfied but
   still needs items (`up/core/Control.java:161-174`, bundle key `available`).
   No `"available"` lookup exists in `client/rust/**`.
@@ -645,7 +645,7 @@ finding.
   (shale/snow/sand/basalt boulders); `fungalPass`/`taintedWoods`/`coastline`
   lose ~30 scatters each. Terrain is walkable/buildable where Java has solid
   boulders.
-- **Godot evidence.** `gx/sim_host.rs:10675` `load_preset_map_grid` →
+- **Godot evidence.** `gx/sim_host/command_panel.rs:21` `load_preset_map_grid` →
   `load_grid_file` (`:10703`) → `decode_save_bytes` (`:10718`), which passes
   `filter_seed = None` (`mc/io/sim_io.rs:766`); `apply_filters` is only called
   inside `filter_seed.inspect(...)` in `decode_bytes_inner`
@@ -661,7 +661,7 @@ finding.
 - **Status.** **Fixed at HEAD (2026-11-06) — twin-verified, `PAR-0483` (similarity 74.4).** Three defects had to land together: the preset path now resolves the map and calls `load_map_grid_file` (→`decode_map_bytes`) with a recorded `next_map_gen_seed()`; `Map::filters` quotes the bare-key Arc JSON before the strict parse (previously every shipped preset tag failed and silently fell back to the default stack); and `filters::builtin::block_id` uses Java's `SaveVersion.fallback` chain so `flooronto:sand` resolves to `sand-floor` instead of `air`. Probe: fresh GZ boulders **0 → 107** (Java 118), seed `-1 → 13842768`, authored ore 618 intact. See `runs/PAR-0483/`.
 
 ### CG-GEN-02 — Preset sectors bypass candidate resolution and the core invariant — **P2**
-- `gx/sim_host.rs:10695-10705` builds exactly one path
+- `gx/sim_host/command_panel.rs:41-51` builds exactly one path
   (`{assets}/maps/{owner_name}/{map_name}.msav`), logs `preset map missing` and
   falls back to `generate_sector` (`:3506-3524`). The ported helpers
   `resolve_candidate` (`mc/maps/generators/file_map.rs:26`) and `require_core`
@@ -674,7 +674,7 @@ finding.
 - `mc/game/sector.rs:64` `core_snapshot_of` never fills `light_coverage`;
   `SectorInfoState::prepare` copies the 0.0 default (`:457`). Readers are
   starved: `mc/maps/planet/serpulo.rs:630` (`light_scl = sector.light_coverage`)
-  and `gx/campaign.rs:5801` (`SectorGlow`). Java
+  and `gx/campaign/saves.rs:173` (`SectorGlow`). Java
   `SectorInfo.java:230-237` sums `lightRadius * efficiency` over default-team
   `emitLight` buildings + units; `SerpuloPlanetGenerator.java:152-176` paints
   the glow.
@@ -684,7 +684,7 @@ finding.
 - `mc/maps/planet/serpulo.rs:1647` calls
   `trim_dark(tiles, content, |_, _| 0.0)`; `trim_dark`
   (`mc/maps/basic.rs:933-958`) therefore never sets a wall. The sector polygon
-  is attached only after generation (`gx/sim_host.rs:3551-3563`), so the
+  is attached only after generation (`gx/sim_host/world_load.rs:885-897`), so the
   `World.getDarkness` edge+polygon terms Java uses
   (`up/maps/generators/BasicGenerator.java:451-462`,
   `up/core/World.java:484-536`) cannot be evaluated at trim time.
@@ -696,7 +696,7 @@ finding.
 - **Symptom (claimed).** `saltFlats`/`tarFields`/`atolls` sandstorm, `taintedWoods`
   sporestorm + always-fog, `sunkenPier` fog, etc. never play as authored; the
   sector gets terrain-derived weather instead.
-- **Godot evidence (claimed).** `gx/campaign.rs:1160-1176` overwrites
+- **Godot evidence (claimed).** `gx/campaign/pump.rs:422-438` overwrites
   `rules.weather` with `add_weather` after loading the map, so the authored
   `weather:[…]` (with `minFrequency`/`always`/cooldown) is lost on a fresh launch.
 - **Java evidence (claimed).** `up/core/World.java:266,303` runs `setSectorRules`
@@ -716,7 +716,7 @@ finding.
 - **Status.** Code-confirmed.
 
 ### CG-GEN-07 — Hidden submission sector labels leak internal ids — **P2**
-- `mc/ui/campaign.rs:890-905` + `gx/ui/dialogs/batch_c.rs:820-832` render
+- `mc/ui/campaign.rs:890-905` + `gx/ui/dialogs/campaign/planet/reads.rs:93-105` render
   `"sector-serpulo-76"` instead of `"76"` for hidden submission cells; Java
   `Sector.name()` (`up/type/Sector.java:153-161`) gates on
   `requireUnlock || showHidden`.
@@ -753,7 +753,7 @@ finding.
 - **Status.** **Fixed at HEAD (2026-11-06) — in-engine verified on Godot (`PAR-0484`); ledger `verified`, not twin (Java leg blocked).** Storage helpers (`item_holder`/`has_items`/`item_count`) resolve a linked storage's module through its core, `StorageBehavior::remove_stack` dispatches to the core behavior, and the unloader's provider/take path uses them. This is a route-level equivalent of Java's `t.items = items` aliasing, not a component alias (the R2 decision is documented in the module). Before/after on a custom sandbox GZ map: core stayed `{copper:150}`, turret ammo 0 → core `{copper:127}`, turret ammo 30 at tick 12 096, lane visibly loaded. Three unit tests; no duplication. The Java in-engine leg is unreachable here (fresh custom-game starts have no usable builder and campaign GZ locks container/unloader). See `runs/PAR-0484/`.
 
 ### CG-ECON-02 — Core-items HUD/state read the first core in entity order, not the player's core — **P1**
-- `gx/sim_host.rs:10242-10269` (`core_items_json`) returns the first
+- `gx/sim_host/overlay.rs:357-384` (`core_items_json`) returns the first
   `CoreBlock` module with no team filter; the team-filtered sibling
   `player_core_items` is at `:6860-6887`. Java `CoreItemsDisplay.java:33` uses
   `player.team().core()` (`Team.java:83-85`). On attack sectors or maps with a
@@ -801,7 +801,7 @@ finding.
 - **Status.** **Fixed at HEAD (2026-11-06) — `verified` on code + unit tests (`PAR-0504`); no in-engine burn capture.** `incinerate_effect` now rolls the view-only `RngStream::Fx` at 30%, gates on `Building.was_visible`, computes `Edges.getFacingEdge` midpoints with `BlockDef.size`, and emits `Fx.coreBurn` through a shared `emit_core_burn_at`; the linked-storage path burns only when the linked core is full and latches `CoreBuild.no_effect` (no double emit), matching `StorageBlock.java:40-71`. `storage_block` tests 5/5. The planned sandbox burst + `MindFx.dump_effects` probe is documented in `runs/PAR-0504/` for a future in-engine pass.
 
 ### CG-ECON-07 — Fresh Ground Zero core stock is empty at HEAD (no gap) — **refuted**
-- `gx/campaign.rs:1060-1070` clears `rules.loadout` for an empty payload;
+- `gx/campaign/pump.rs:133` clears `rules.loadout` for an empty payload;
   `mc/game/play.rs:330-380` clears then re-adds the loadout; the map's authored
   `loadout:[]` and Java `Logic.play` produce the same empty core. The earlier
   PAR-0056 "100 copper" divergence does not reproduce on the player-facing
@@ -914,7 +914,7 @@ tolerance). They are recorded so future gap hunts do not re-audit them.
 - Hint `Skip` and `<name>-hint-done` persistence match Java
   (`gx/ui/fragments/hints.rs:220-240`, `gx/ui/ui_host.rs:785-800`).
 - `waveTimer:false` / `waveSending:false` tutorial rules and the skip-button
-  gate match (`gx/campaign.rs:6335-6365`, `gx/ui/fragments/hud.rs:563-580`).
+  gate match (`gx/campaign/launch.rs:105`, `gx/ui/fragments/hud.rs:563-580`).
 - `limitMapArea` is a pathing/render bound in Java too; not a placement rule.
 - Minimap/light marker channels are unimplemented, but Ground Zero's markers
   all default `minimap = -1`, so they are not tutorial-visible.
@@ -935,7 +935,7 @@ tolerance). They are recorded so future gap hunts do not re-audit them.
   single-root mod/MP states.
 - The first-run `@campaign.select` chooser does **not** reappear: the flag is
   written and flushed through the shared settings store
-  (`gx/ui/dialogs/batch_c.rs:649-658,1373`, `gx/ui/ui_host.rs:819-825`), so
+  (`gx/ui/dialogs/campaign/planet/mod.rs:237-246,1373`, `gx/ui/ui_host.rs:819-825`), so
   quitting from the chooser and relaunching skips it (CG-SAVE-08 refuted).
 - Preset `winWave`/`captureWave`, baseparts/base catalogs, enemy-base
   generation, capture replacements and authored core/items match.

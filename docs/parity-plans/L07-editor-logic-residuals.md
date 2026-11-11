@@ -56,7 +56,7 @@ sees.
   - World processors show an icon tag through `Fonts.unicodeToName`
     (`ui/Fonts.java:121-123`).
 - Port: "Deferred: the logic font rasterizer is not ported yet"
-  (`mind-gdext/src/display_context.rs:130`); the icon tag is deferred (`sim_host.rs:8508`).
+  (`mind-gdext/src/display_context.rs:130`); the icon tag is deferred (`sim_host/plans.rs:226`).
 - Change: rasterise the logic bitmap font (`assets/fonts/`) into the CPU display raster, and
   port the `unicodeToName` table.
 - Accept: a processor printing text and `printchar` glyphs to a display matches Java.

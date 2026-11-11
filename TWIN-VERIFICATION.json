@@ -12870,11 +12870,11 @@
           "../Mindustry/core/src/mindustry/entities/comp/EffectStateComp.java:20"
         ],
         "godot": [
-          "client/rust/mind-core/src/sim/unit_runtime.rs:127",
-          "client/rust/mind-core/src/sim/unit_runtime.rs:91",
+          "client/rust/mind-core/src/sim/unit_runtime/payload_units.rs:44",
+          "client/rust/mind-core/src/sim/unit_runtime/mod.rs:92",
           "client/rust/mind-core/src/combat/bullet/mod.rs:560",
           "client/rust/mind-gdext/src/fx.rs:427",
-          "client/rust/mind-gdext/src/sim_host.rs:294"
+          "client/rust/mind-gdext/src/sim_host/mod.rs:89"
         ]
       },
       "action": {
@@ -12927,8 +12927,8 @@
         ],
         "godot": [
           "client/rust/mind-gdext/src/audio/mod.rs:243",
-          "client/rust/mind-gdext/src/sim_host.rs:97",
-          "client/rust/mind-core/src/sim/mod.rs:193",
+          "client/rust/mind-gdext/src/sim_host/types.rs:76",
+          "client/rust/mind-core/src/sim/mod.rs:201",
           "client/rust/mind-core/src/audio/music.rs:478"
         ]
       },
@@ -12952,8 +12952,8 @@
           "../Mindustry/core/src/mindustry/world/Block.java:1374"
         ],
         "godot": [
-          "client/rust/mind-core/src/sim/runtime.rs:241",
-          "client/rust/mind-core/src/sim/runtime.rs:319",
+          "client/rust/mind-core/src/sim/runtime/block_runtime.rs:86",
+          "client/rust/mind-core/src/sim/runtime/block_runtime.rs:164",
           "client/rust/mind-core/src/world/harness.rs:398",
           "client/rust/mind-core/src/audio/sim.rs:88"
         ]
@@ -13185,7 +13185,7 @@
           "landing loads assets/maps/serpulo/hidden/76.msav with sector.generateEnemyBase=true (attack sector)"
         ],
         "godot": [
-          "same position in the port: the cell has no preset, no enemy-base colour/marker, and the planet page marks it locked; sector id 76 can never resolve assets/maps/serpulo/hidden/76.msav (load_preset_map_grid needs a preset, sim_host.rs:1747-1782)"
+          "same position in the port: the cell has no preset, no enemy-base colour/marker, and the planet page marks it locked; sector id 76 can never resolve assets/maps/serpulo/hidden/76.msav (load_preset_map_grid needs a preset, sim_host/state.rs:444-479)"
         ]
       },
       "similarity": 52.8,
@@ -13242,7 +13242,7 @@
         ],
         "godot": [
           "same flow: launch_loadout emits the chosen `index`, planet_dialog forwards it to _launch, but _launch drops the parameter and calls the 2-arg start_sector",
-          "every launch carries the empty loadout (campaign.rs:533-534 clears rules.loadout), so the selection has no effect"
+          "every launch carries the empty loadout (campaign/planet_view.rs:483-484 clears rules.loadout), so the selection has no effect"
         ]
       }
     },
@@ -13258,7 +13258,7 @@
           "client/rust/mind-core/src/world/blocks/defense/behaviors.rs:424",
           "client/rust/mind-core/src/combat/harness.rs:1084",
           "client/rust/mind-core/src/world/behavior/mod.rs:573",
-          "client/rust/mind-core/src/sim/unit_runtime.rs:594"
+          "client/rust/mind-core/src/sim/unit_runtime/mod.rs:420"
         ]
       },
       "action": {
@@ -13283,8 +13283,8 @@
         ],
         "godot": [
           "client/rust/mind-core/src/content/registries/blocks/turrets.rs:27",
-          "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:945",
-          "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:1271",
+          "client/rust/mind-core/src/world/blocks/defense/turrets/config.rs:408",
+          "client/rust/mind-core/src/world/blocks/defense/turrets/config.rs:443",
           "parity/reports/jvm_golden_diff.md:45"
         ]
       },
@@ -13361,8 +13361,8 @@
         ],
         "godot": [
           "client/rust/mind-core/src/io/entity/registry.rs:55",
-          "client/rust/mind-core/src/io/sim_io.rs:188",
-          "client/rust/mind-core/src/io/sim_io.rs:108",
+          "client/rust/mind-core/src/io/sim_io/entities.rs:40",
+          "client/rust/mind-core/src/io/sim_io/mod.rs:101",
           "client/rust/mind-core/src/combat/fires.rs:267",
           "client/rust/mind-core/src/combat/puddles.rs:66"
         ]
@@ -13390,8 +13390,8 @@
           "client/rust/mind-core/src/combat/puddles.rs:236",
           "client/rust/mind-core/src/combat/fires.rs:146",
           "client/rust/mind-core/src/combat/harness.rs:181",
-          "client/rust/mind-core/src/sim/unit_runtime.rs:491",
-          "client/rust/mind-core/src/sim/unit_runtime.rs:603"
+          "client/rust/mind-core/src/sim/unit_runtime/mod.rs:313",
+          "client/rust/mind-core/src/sim/unit_runtime/mod.rs:425"
         ]
       },
       "action": {
@@ -13430,7 +13430,7 @@
         ],
         "godot": [
           "Godot: tap a message block -> config_spec sets text:true only for BlockKind::LogicBlock (desktop.rs:1400) and the block has no items/liquids, so the fragment takes the options branch and renders only the clear row + X (block_config_fragment.gd:58-100); there is no pencil and no editor.",
-          "Even if the field appeared, a 'string' submit is lowered to ConfigValue::String (input/mod.rs:884) and then to SimValue::Content(value) (command_emit.rs:254), so resolve_config rejects arbitrary text as an unknown content name (sim/runtime.rs:214-231); MessageBehavior::configured already accepts ConfigValue::String (logic/blocks/message.rs:56-70).",
+          "Even if the field appeared, a 'string' submit is lowered to ConfigValue::String (input/glue_mobile.rs:218) and then to SimValue::Content(value) (command_emit.rs:254), so resolve_config rejects arbitrary text as an unknown content name (sim/runtime/block_runtime.rs:59-76); MessageBehavior::configured already accepts ConfigValue::String (logic/blocks/message.rs:56-70).",
           "Tap an illuminator -> the same empty panel and no behavior stores a colour: default_behavior has no LightBlock arm (behavior/mod.rs:498-605)."
         ]
       }
@@ -13458,7 +13458,7 @@
         ],
         "godot": [
           "Godot: MindInput does toggle command mode on the Shift edge (desktop.rs:526-532; PAR-0063 verified the keyboard state), but no GDScript or scene references command mode at all (grep client/ui for command_mode/selectedUnits is empty); placement_fragment.gd only ever builds the category rail and block grid (lines 107-204, scene lines 19-45), so holding Shift leaves the block palette unchanged with no unit list, stance row or command buttons.",
-          "The selection event exists (MindInput.selection_changed, input/mod.rs:195) but nothing listens to it in the UI layer."
+          "The selection event exists (MindInput.selection_changed, input/mod.rs:147) but nothing listens to it in the UI layer."
         ]
       }
     },
@@ -13640,7 +13640,7 @@
         ],
         "godot": [
           "Launch the Godot client, custom game, place a micro-processor, tap it -> a block config panel with a single-line `LineEdit` (block_config_fragment.gd:64).",
-          "Type `set x 1` and press OK -> nothing is stored: configure_building maps the kind to ConfigValue::String (input/mod.rs:877-885) and LogicBlockBehavior ignores String for non-privileged processors (logic_block.rs:539-548).",
+          "Type `set x 1` and press OK -> nothing is stored: configure_building maps the kind to ConfigValue::String (input/glue_mobile.rs:211-219) and LogicBlockBehavior ignores String for non-privileged processors (logic_block.rs:539-548).",
           "grep client/ui + client/scenes for MindLogic consumers -> none; dialogs_manifest.json has no `logic` entry and client/ui/dialogs/ has no logic dialog."
         ]
       },
@@ -13717,7 +13717,7 @@
           "Processor `set t @tick` then print/sense t -> t increases every tick; @time/@second/@wave/@waveNumber/@mapw/@maph/@server/@client all track live state (GlobalVars.java:192-230)."
         ],
         "godot": [
-          "Same program in the live client -> t stays 0 forever: @tick is initialized to 0 (globals.rs:192) and GlobalVars::update/update_world has no caller outside mind-headless (only logic_scenarios.rs:145); Sim::tick (sim/mod.rs:383-398) never touches globals.",
+          "Same program in the live client -> t stays 0 forever: @tick is initialized to 0 (globals.rs:192) and GlobalVars::update/update_world has no caller outside mind-headless (only logic_scenarios.rs:145); Sim::tick (sim/spine/apply.rs:17-32) never touches globals.",
           "Executor::refresh_globals (executor/mod.rs:1813-1834) reads the ECS GlobalVars resource every run, so the stale values are exactly what a running processor observes."
         ]
       },
@@ -13769,7 +13769,7 @@
         ],
         "godot": [
           "Place a switch and tap it -> a config panel with only Clear and X (config_spec returns options=[] and text=false because SwitchBehavior declares no Bool config kind), and the switch's enabled state never changes.",
-          "configure_building (input/mod.rs:874-896) can map kind=bool, but no GDScript path sends it: block_config_fragment.gd only submits string (line 72), content (99) and none (88)."
+          "configure_building (input/glue_mobile.rs:208-230) can map kind=bool, but no GDScript path sends it: block_config_fragment.gd only submits string (line 72), content (99) and none (88)."
         ]
       }
     },
@@ -13826,8 +13826,8 @@
           "Launch the Java client on a sector without a stored map (planet generator path). Observe: a player core with the launch loadout at the spawn, derelict ruins scattered around ore, and (for enemy-base sectors) enemy core loadouts with walls and cleared unit paths."
         ],
         "godot": [
-          "Start a campaign sector whose planet cell has no preset (MindSimHost.load_sector falls from load_preset_map_grid to mind_core::maps::planet::generate_sector, sim_host.rs:956-975).",
-          "Count core blocks / enemy blocks: zero cores and no base structures; also check MindSimHost's sector rules report player_cores == 0 so the campaign records no capture (campaign.rs:583-590).",
+          "Start a campaign sector whose planet cell has no preset (MindSimHost.load_sector falls from load_preset_map_grid to mind_core::maps::planet::generate_sector, sim_host/mod.rs:412-431).",
+          "Count core blocks / enemy blocks: zero cores and no base structures; also check MindSimHost's sector rules report player_cores == 0 so the campaign records no capture (campaign.rs:283-290).",
           "Editor route: Editor -> Sector Generate Apply additionally returns false ('awaits the plan-06 load_sector host'), so the generated preview is not even reachable there."
         ]
       },
@@ -13858,7 +13858,7 @@
         "godot": [
           "Menu -> Play -> Custom Game: the selected map panel is a placeholder glyph (custom_game_dialog.gd:223-237) with a 'preview placeholder' comment; Editor -> maps rows are name-only buttons.",
           "Run `get_node(\"/root/Spine/MindPreview\").call(\"texture_for\", <map path>)`: no UI ever calls it, and MindPreview.refresh() only reloads the registry (preview.rs:126-128) without running PreviewPipeline.load_previews/create_all_previews, so no preview PNG/cache is ever generated.",
-          "Save a map in the editor: MindEditor.save uses save_editor_map (no PreviewPipeline; editor/mod.rs:1011-1058) unlike maps_glue::save_map_e2e, so the saved map still has no preview."
+          "Save a map in the editor: MindEditor.save uses save_editor_map (no PreviewPipeline; editor/api_filters.rs:143-190) unlike maps_glue::save_map_e2e, so the saved map still has no preview."
         ]
       },
       "similarity": 46.1,
@@ -13944,7 +13944,7 @@
           "../Mindustry/core/src/mindustry/core/NetServer.java:906"
         ],
         "godot": [
-          "client/rust/mind-gdext/src/sim_host.rs:186",
+          "client/rust/mind-gdext/src/sim_host/types.rs:165",
           "client/rust/mind-gdext/src/net/relay.rs:22"
         ]
       },
@@ -13956,7 +13956,7 @@
         ],
         "godot": [
           "Start an online client (godot --path client -- --db); host a match via MindNet.create_match (or the paused Host dialog) and drive the session to in_lobby/in_game.",
-          "Place a block with the normal input path (left click on the world, GUI not consumed; MindSimHost.unhandled_input -> apply_command, sim_host.rs:186-191).",
+          "Place a block with the normal input path (left click on the world, GUI not consumed; MindSimHost.unhandled_input -> apply_command, sim_host/types.rs:165-170).",
           "Read MindNet.last_applied_command_id()/relay_queue_depth() and `spacetime sql mindustry \"SELECT command_id,kind FROM match_command ORDER BY command_id DESC LIMIT 3\"`: the local sim changed but no match_command row for the local action exists.",
           "On a second identity in the match read get_state_json(): the tile is unchanged; a foreign send_command_json({\"op\":\"place\",\"block\":\"conveyor\"}) is ignored because relay.rs kind_to_sim only maps PlaceBlock/BreakBlock and block_id only resolves \"router\"."
         ]
@@ -14042,7 +14042,7 @@
           "In a live match call get_node(\"/root/MindUi\").player_list_json(): it is hard-coded \"[]\" (ui_host.rs:559) even though MindNet.get_members_json() has rows; the fragment therefore renders only @players.notfound (player_list_fragment.gd:53-72).",
           "Call MindUi.player_action(\"peer\",\"kick\"): always false (ui_host.rs:547-554); PlayerListModel::dispatch also returns RelayUnavailable (player_list.rs:151-163), so no admin reducer (Connector::admin_kick/admin_ban/admin_switch_team, connector.rs:824-934) is ever sent and `spacetime sql mindustry \"SELECT action FROM admin_action_log ...\"` stays empty.",
           "Open admins/bans (or ui.open_dialog(\"admins\",\"\")): the dialogs read _context.admins/_context.banned (admins_dialog.gd:30, bans_dialog.gd:29) but player_list_fragment._open passes \"\" (player_list_fragment.gd:97-100), so they always show @server.admins.none / @server.bans.none; trace has no reducer/view at all (only the dialog shell trace_dialog.gd:25-34).",
-          "Press Tab: the player_list binding (binding.rs:769) falls through `_ => {}` (desktop.rs:599) - there is no live toggle; a kicked peer also never sees my_kick (waves.rs:37, never bound in net/mod.rs:222-234).",
+          "Press Tab: the player_list binding (binding.rs:769) falls through `_ => {}` (desktop.rs:599) - there is no live toggle; a kicked peer also never sees my_kick (waves.rs:37, never bound in net/mod.rs:237-249).",
           {
             "tool": "shell",
             "params": {
@@ -14097,8 +14097,8 @@
           "../Mindustry/core/src/mindustry/core/NetServer.java:547"
         ],
         "godot": [
-          "client/rust/mind-gdext/src/net/mod.rs:338",
-          "client/rust/mind-gdext/src/net/mod.rs:798",
+          "client/rust/mind-gdext/src/net/mod.rs:353",
+          "client/rust/mind-gdext/src/net/mod.rs:818",
           "client/rust/mind-stdb/src/snapshot.rs:296"
         ]
       },
@@ -14109,9 +14109,9 @@
         ],
         "godot": [
           "Client A hosts (create_match) and starts the match; client B joins with MindNet.join_match(id, \"\").",
-          "On B read session_state()/get_match_state_json() plus SimHost.get_tick()/get_checksum(): B reaches in_game but nothing loads the match's map/seed (join_match only drives the session state machine, net/mod.rs:338-367; drain_match_rows only mirrors JSON, net/mod.rs:662-684).",
-          "Read MindNet.snapshot_progress() and `spacetime sql mindustry \"SELECT snapshot_id FROM match_snapshot\"`: progress stays 0 and no snapshot request happens; request_snapshot is only triggered on an in-game desync (net/mod.rs:798-801).",
-          "Force the request path (MindNet.request_snapshot()): the Snapshot wave is subscribed but no my_match_snapshot_chunks binder exists (attach_binders, net/mod.rs:222-234) and SnapshotProgress/reassemble have no live caller (snapshot.rs:296/517; SaveIo::load_bytes is used only for campaign map files, sim_host.rs:1798), so the blob is never reassembled or applied."
+          "On B read session_state()/get_match_state_json() plus SimHost.get_tick()/get_checksum(): B reaches in_game but nothing loads the match's map/seed (join_match only drives the session state machine, net/mod.rs:353-382; drain_match_rows only mirrors JSON, net/mod.rs:682-704).",
+          "Read MindNet.snapshot_progress() and `spacetime sql mindustry \"SELECT snapshot_id FROM match_snapshot\"`: progress stays 0 and no snapshot request happens; request_snapshot is only triggered on an in-game desync (net/mod.rs:818-821).",
+          "Force the request path (MindNet.request_snapshot()): the Snapshot wave is subscribed but no my_match_snapshot_chunks binder exists (attach_binders, net/mod.rs:237-249) and SnapshotProgress/reassemble have no live caller (snapshot.rs:296/517; SaveIo::load_bytes is used only for campaign map files, sim_host/state.rs:495), so the blob is never reassembled or applied."
         ]
       }
     },
@@ -14125,7 +14125,7 @@
           "../Mindustry/core/src/mindustry/core/NetServer.java:1083"
         ],
         "godot": [
-          "client/rust/mind-headless/src/server/commands.rs:378",
+          "client/rust/mind-headless/src/server/commands/console.rs:378",
           "client/rust/mind-headless/src/server/net_host.rs:277",
           "client/rust/mind-headless/src/server/dedicated.rs:193"
         ]
@@ -14562,8 +14562,8 @@
         ],
         "godot": [
           "client/ui/dialogs/map_play_dialog.gd:88",
-          "client/rust/mind-gdext/src/campaign.rs:662",
-          "client/rust/mind-gdext/src/sim_host.rs:939"
+          "client/rust/mind-gdext/src/campaign.rs:356",
+          "client/rust/mind-gdext/src/sim_host/mod.rs:397"
         ]
       },
       "action": {
@@ -14574,7 +14574,7 @@
         "godot": [
           "Godot: same flow, or open map_play directly; select Sandbox and press Play.",
           "map_play_dialog.gd:88-99 emits play_requested (grep: no listeners anywhere) and calls MindCampaign.start_map(name) because start_map_mode does not exist (line 95 probes has_method; only this file mentions the name).",
-          "campaign.rs:662-668 start_map clones session.rules, sets mode_name and calls play_map - the map name is never resolved to terrain and the mode is never applied; the sim host is not reloaded (only load_sector at sim_host.rs:939 loads a grid, and only for campaign sectors).",
+          "campaign.rs:356-362 start_map clones session.rules, sets mode_name and calls play_map - the map name is never resolved to terrain and the mode is never applied; the sim host is not reloaded (only load_sector at sim_host/mod.rs:397 loads a grid, and only for campaign sectors).",
           "Observe: the previously loaded world stays (or an empty menu world), and rules keep the prior session values - sandbox shows no infinite resources, PvP/attack flags never set."
         ]
       },
@@ -14676,7 +14676,7 @@
           "reference: control a payload unit, press [ near a ground unit/block: InputHandler.tryPickupPayload picks it up and the payload list grows; ] drops it (PayloadComp.pickup/dropLastPayload)"
         ],
         "godot": [
-          "in-game: with a carrier unit, press [ (pickupCargo binding) or ] -> the client logs `relay command rejected by sim: command unsupported: payload` (input/desktop.rs:542-543 routes the binding to RemoteAction::Payload; sim/mod.rs:635-644 returns CommandError::Unsupported(\"payload\"))",
+          "in-game: with a carrier unit, press [ (pickupCargo binding) or ] -> the client logs `relay command rejected by sim: command unsupported: payload` (input/desktop/mod.rs:394-395 routes the binding to RemoteAction::Payload; sim/spine/world_config.rs:56-65 returns CommandError::Unsupported(\"payload\"))",
           "code: unit PayloadComp carries only `capacity` (entities/comp/unit/comp.rs:249-254) and sim/world_apply.rs:17-18 documents the pickup/drop runtime as unported"
         ]
       },
@@ -16495,7 +16495,7 @@
     "PAR-0365": {
       "title": "Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)",
       "status": "reference-verified",
-      "evidence": "Independent read-only audit (HEAD 96b1873a): UnitType.parts landed in 1e0003af. render/unit_parts.rs:189-232 runs the 3-phase live pass (Under/Over/OverAdditive per band) for unit parts and weapon parts; :577-614 part_params carries mount.warmup/reload/smoothReload/heat/recoil/charge/life; :617-635 draw_weapon_parts draws under/over parts with Weapon.layerOffset and part_recoil; wired at render.rs:1030-1049 (UnitParts-{band}-{phase} nodes); content feed UnitDraw.parts = def.parts (sim_host.rs:6121) with the 31 Erekir DrawPartSpecs; test weapon_part_params_carry_the_mount_state (mind-core/src/fx/parts/weapons.rs:404-423). Java mapping Weapon.java:236-278 matches. Minor unported: Java applyColor team tint on parts. Live pixel leg not run.",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): UnitType.parts landed in 1e0003af. render/unit_parts.rs:189-232 runs the 3-phase live pass (Under/Over/OverAdditive per band) for unit parts and weapon parts; :577-614 part_params carries mount.warmup/reload/smoothReload/heat/recoil/charge/life; :617-635 draw_weapon_parts draws under/over parts with Weapon.layerOffset and part_recoil; wired at render.rs:1030-1049 (UnitParts-{band}-{phase} nodes); content feed UnitDraw.parts = def.parts (sim_host/plans.rs:187) with the 31 Erekir DrawPartSpecs; test weapon_part_params_carry_the_mount_state (mind-core/src/fx/parts/weapons.rs:404-423). Java mapping Weapon.java:236-278 matches. Minor unported: Java applyColor team tint on parts. Live pixel leg not run.",
       "commits": "1e0003af"
     },
     "PAR-0366": {
@@ -16505,7 +16505,7 @@
         {
           "at": "2026-11-02T15:54:11Z",
           "by": "orch-c:audit2",
-          "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
+          "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host/pump.rs:225), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host/pump.rs:223-224 documents them as unmodelled."
         },
         {
           "at": "2026-11-06T22:56:03Z",
@@ -16574,7 +16574,7 @@
     "PAR-0368": {
       "title": "`drawCrawl` segments (renale/latum) not drawn",
       "status": "reference-verified",
-      "evidence": "drawCrawl is implemented (landed in 92ba15aa) and independently audited this session: mind-core/src/render/unit_draw.rs::crawl_draw_ops (:229) is covered by test crawl_draw_ops_follow_java_order_and_geometry (:1206), which asserts Java UnitType.java:1902-1937 order/geometry (outline pass over all segments before the body, slerp(segmentRot -> rotation, i/(segments-1)), sin(crawlTime + i*phase, scl, mag) offset along the rotation, per-segment cell, segments==1 fallback); the view (mind-gdext/src/render/units.rs:657-706) emits <name>-segment-outline{i}/-segment{i}/-segment-cell{i} (Java:1195-1197) and skips the carrier drawCell for Crawlc (units.rs:807-808 vs Java:1541); the CrawlComp feed is sim_host.rs:5901-5917. Minor unported sub-ops not part of this item: head crawlTime composition (Java:1905-1907, unreachable for vanilla segment children) and the isPayload segmentRot override (Java:1532-1534). Live pixel leg not run.",
+      "evidence": "drawCrawl is implemented (landed in 92ba15aa) and independently audited this session: mind-core/src/render/unit_draw.rs::crawl_draw_ops (:229) is covered by test crawl_draw_ops_follow_java_order_and_geometry (:1206), which asserts Java UnitType.java:1902-1937 order/geometry (outline pass over all segments before the body, slerp(segmentRot -> rotation, i/(segments-1)), sin(crawlTime + i*phase, scl, mag) offset along the rotation, per-segment cell, segments==1 fallback); the view (mind-gdext/src/render/units.rs:657-706) emits <name>-segment-outline{i}/-segment{i}/-segment-cell{i} (Java:1195-1197) and skips the carrier drawCell for Crawlc (units.rs:807-808 vs Java:1541); the CrawlComp feed is sim_host/inspect.rs:458. Minor unported sub-ops not part of this item: head crawlTime composition (Java:1905-1907, unreachable for vanilla segment children) and the isPayload segmentRot override (Java:1532-1534). Live pixel leg not run.",
       "commits": "92ba15aa"
     },
     "PAR-0369": {
@@ -16859,7 +16859,7 @@
     "PAR-0399": {
       "title": "Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible",
       "status": "reference-verified",
-      "evidence": "Independent read-only audit (HEAD 96b1873a): the live explosion view half landed in 9e51cfb4. sim_host.rs:949-971 installs HostExplosionSink on the /root/Spine/MindFx bus inside install_sim_seams (rerun after every sim swap at :756,3175,3731); fx/explosion_sink.rs:38-100 emits the explode effect, shake, scorch decal and Sounds.explosion; generator.rs:718 and power/behavior.rs:153 fire it on onDestroyed/meltdown/explode_on_full; tests explosion_sink.rs:169 host_sink_emits_effect_shake_scorch_and_sound and :196. Generic block-break FX goes separately through the live FxSink (sim/mod.rs:1243 BREAK_BLOCK), so no Java explosion path is inert. Only nuance: the test does not assert the AudioEvent::At sound branch; live pixel/audio leg not run.",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the live explosion view half landed in 9e51cfb4. sim_host/mod.rs:405-427 installs HostExplosionSink on the /root/Spine/MindFx bus inside install_sim_seams (rerun after every sim swap at :756,3175,3731); fx/explosion_sink.rs:38-100 emits the explode effect, shake, scorch decal and Sounds.explosion; generator.rs:718 and power/behavior.rs:153 fire it on onDestroyed/meltdown/explode_on_full; tests explosion_sink.rs:169 host_sink_emits_effect_shake_scorch_and_sound and :196. Generic block-break FX goes separately through the live FxSink (sim/spine/placement.rs:205 BREAK_BLOCK), so no Java explosion path is inert. Only nuance: the test does not assert the AudioEvent::At sound branch; live pixel/audio leg not run.",
       "commits": "9e51cfb4"
     },
     "PAR-0400": {
@@ -16977,7 +16977,7 @@
       "title": "Planet orbit line drawn in the wrong plane (near-horizontal) vs Java renderOrbit's parent-XZ circle (PlanetRenderer.java:171-179)",
       "status": "reference-verified",
       "similarity": 52.3,
-      "evidence": "Independent read-only audit (HEAD 96b1873a): the orbit plane landed in 9ca2138c (ancestor of HEAD). orbit.rs:175-203 orbit_center_in_planet_frame computes the parent-XZ circle centre (parent position minus the planet position rotated by +getRotation, mirroring Planet.getTransform/lookAt); campaign.rs:5649-5684 feeds that centre into the orbits rows; planet.rs:951+ build_orbits builds the loop as centre + (cos*r, 0, sin*r) with 10*radius points as a closed LINE_STRIP (PlanetRenderer.java:171-179 XZ loop around parent.position); test orbit.rs:252 serpulo_orbit_center_is_the_sun_in_mesh_frame (6 orbit tests green in the landing commit). The old near-horizontal plane is gone; the only remaining diff is Java's uiAlpha<=0.02 visibility gate vs the port's alpha material (cosmetic).",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the orbit plane landed in 9ca2138c (ancestor of HEAD). orbit.rs:175-203 orbit_center_in_planet_frame computes the parent-XZ circle centre (parent position minus the planet position rotated by +getRotation, mirroring Planet.getTransform/lookAt); campaign/lifecycle.rs:207-242 feeds that centre into the orbits rows; planet/scene.rs:356+ build_orbits builds the loop as centre + (cos*r, 0, sin*r) with 10*radius points as a closed LINE_STRIP (PlanetRenderer.java:171-179 XZ loop around parent.position); test orbit.rs:252 serpulo_orbit_center_is_the_sun_in_mesh_frame (6 orbit tests green in the landing commit). The old near-horizontal plane is gone; the only remaining diff is Java's uiAlpha<=0.02 visibility gate vs the port's alpha material (cosmetic).",
       "commits": "9ca2138c"
     },
     "PAR-0421": {
@@ -17124,7 +17124,7 @@
         {
           "at": "2026-11-06T15:28:53Z",
           "by": "hx-host",
-          "text": "Code audit against the Java sources (no visual leg; nothing landed). (1) atmosphere.gdshader is line-for-line atmosphere.frag (rayIntersection/miePhase/rayleighPhase/density/optic/inScatter identical); port-only code is the gamma-space composite and 'depth_test_disabled, depth_draw_never'. (2) depthMask(false) is NOT the cause: Java Planet.drawAtmosphere sets Gl.depthMask(false) with the depth test on, the port disables the test and draws the additive sphere after the opaque body, so nothing writes depth in either path. (3) Light frame is the live lead: Java AtmosphereShader.apply sets u_light = planet.getLightNormal() = normalize(solarSystem.position - position), i.e. the UNROTATED world-frame sun, while Java's body (HexMesh.preRender) sets lightDir = same vector .rotate(Vec3.Y, getRotation()). The port passes the BODY's rotated mesh-frame planet_light.light_dir to both the body (planet.rs:1140) and the atmosphere (planet.rs:1148, 986), so its rim tracks the body's lit hemisphere instead of Java's world sun; they differ whenever getRotation() != 0. (4) Why this matters for 'rim on the dark side': night-side suppression in atmosphere.frag comes ONLY from exp(-n*(PEAK*color+FLARE)) in inScatter, where n is the optical depth of the outer-sphere ray toward l; rayleighPhase(0.75*(1+cc)) never reaches zero, so a light vector in the wrong frame (vs u_rcampos/u_campos, set from the planet-scene camera at planet.rs:1110-1112) leaves the geometric attenuation evaluating the wrong hemisphere and the shell glows all round. (5) Fix shape if the frame call is 'mesh frame': keep light_dir for the atmosphere but either rotate the shader's eye/dir into the world frame or feed getLightNormal unrotated and convert the camera uniforms; it is a uniform/frame decision that needs a Java+Godot frame pair at getRotation()!=0 (compare rim azimuth against the body terminator), so it was not landed blind. Shader file is in this packet's ownership for the follow-up."
+          "text": "Code audit against the Java sources (no visual leg; nothing landed). (1) atmosphere.gdshader is line-for-line atmosphere.frag (rayIntersection/miePhase/rayleighPhase/density/optic/inScatter identical); port-only code is the gamma-space composite and 'depth_test_disabled, depth_draw_never'. (2) depthMask(false) is NOT the cause: Java Planet.drawAtmosphere sets Gl.depthMask(false) with the depth test on, the port disables the test and draws the additive sphere after the opaque body, so nothing writes depth in either path. (3) Light frame is the live lead: Java AtmosphereShader.apply sets u_light = planet.getLightNormal() = normalize(solarSystem.position - position), i.e. the UNROTATED world-frame sun, while Java's body (HexMesh.preRender) sets lightDir = same vector .rotate(Vec3.Y, getRotation()). The port passes the BODY's rotated mesh-frame planet_light.light_dir to both the body (planet/scene.rs:545) and the atmosphere (planet/scene.rs:553, 986), so its rim tracks the body's lit hemisphere instead of Java's world sun; they differ whenever getRotation() != 0. (4) Why this matters for 'rim on the dark side': night-side suppression in atmosphere.frag comes ONLY from exp(-n*(PEAK*color+FLARE)) in inScatter, where n is the optical depth of the outer-sphere ray toward l; rayleighPhase(0.75*(1+cc)) never reaches zero, so a light vector in the wrong frame (vs u_rcampos/u_campos, set from the planet-scene camera at planet/scene.rs:515-517) leaves the geometric attenuation evaluating the wrong hemisphere and the shell glows all round. (5) Fix shape if the frame call is 'mesh frame': keep light_dir for the atmosphere but either rotate the shader's eye/dir into the world frame or feed getLightNormal unrotated and convert the camera uniforms; it is a uniform/frame decision that needs a Java+Godot frame pair at getRotation()!=0 (compare rim azimuth against the body terminator), so it was not landed blind. Shader file is in this packet's ownership for the follow-up."
         }
       ]
     },
@@ -17193,7 +17193,7 @@
       "status": "verified",
       "evidence": [
         "client/rust/mind-gdext/src/ui/hud.rs:376-489 (sector_display + PAR-0442 comment)",
-        "client/rust/mind-gdext/src/ui/dialogs/batch_b.rs:1070-1092 (headline)",
+        "client/rust/mind-gdext/src/ui/dialogs/game/game_over.rs:168-190 (headline)",
         "runs/PAR-0442/godot/20261103-001721-02-live-gameover-headline.png (prior live leg: Sector Ground Zero lost!)"
       ],
       "claimed_by": "hx-ui",
@@ -17232,7 +17232,7 @@
     "PAR-0445": {
       "title": "Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)",
       "status": "reference-verified",
-      "evidence": "Independent read-only audit (HEAD 96b1873a): the Load-layout Save dialog landed in a053dc9a and was carried into the native-Rust UI. ui/dialogs/batch_h.rs:72 maps save to LoadDialogController::save(); :948 title @savegame; :965-1000 builds the load layout with the @save.search LineEdit at :978 and the mode filter toggles (:1065); :1196 the two-column card grid (viewport width / 470, the Java 470 clamp); :1050 the New Save button (@save.new, node new_save) sits in the button row; :1553 asks @save.overwrite. The Save dialog is no longer a plain text list; it extends the Load layout as upstream.",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the Load-layout Save dialog landed in a053dc9a and was carried into the native-Rust UI. ui/dialogs/net/host.rs:35 maps save to LoadDialogController::save(); :948 title @savegame; :965-1000 builds the load layout with the @save.search LineEdit at :978 and the mode filter toggles (:1065); :1196 the two-column card grid (viewport width / 470, the Java 470 clamp); :1050 the New Save button (@save.new, node new_save) sits in the button row; :1553 asks @save.overwrite. The Save dialog is no longer a plain text list; it extends the Load layout as upstream.",
       "commits": "a053dc9a"
     },
     "PAR-0446": {
@@ -17299,7 +17299,7 @@
       },
       "area": "combat/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:751-830; core/src/mindustry/type/Weapon.java:471-489; core/src/mindustry/content/Blocks.java:3420-3421,3583,3734-3735,3847-3848",
-      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:2042-2198; client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:1943-1957; client/rust/mind-core/src/weapons/mod.rs:77-90,139-150,700-713; client/rust/mind-core/src/weapons/pattern.rs:103-113,163-183",
+      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/update.rs:198-354; client/rust/mind-core/src/world/blocks/defense/turrets/update.rs:99-113; client/rust/mind-core/src/weapons/mod.rs:77-90,139-150,700-713; client/rust/mind-core/src/weapons/pattern.rs:103-113,163-183",
       "evidence": "Turret.shoot now defers pattern shots with delay>0 through a per-turret pending queue (TurretState.pending = Java queuedBullets, Turret.java:751-830) drained at the top of the turret update; the extracted TurretBuild.bullet() (Turret.java:785-828) recomputes muzzle/angle/lifetime/targetPos and restores the emission barrel (Turret.java:788-795); charging() is now 'pending non-empty && firstShotDelay>0' (Turret.java:718-720) which gates updateShooting, shouldTurn()/moveWhileCharging (Turret.java:672-674; lancer Blocks.java:3594) and no longer pauses reload (reloadWhileCharging default true, Turret.java:88). Java refs: Turret.java:718-720,742,751-830; Weapon.java:471-489 as the analogous unit-vehicle branch; Blocks.java:3420-3421 (scatter shots=2 shotDelay=5), 3583 (lancer firstShotDelay=40), 3733-3734 (swarmer ShootBarrel shots=4 shotDelay=5), 3846-3847 (salvo shots=4 shotDelay=3). New tests in turrets/mod.rs: multi_shot_patterns_fire_on_their_delayed_ticks (salvo T/+3/+6/+9, swarmer T/+5/+10/+15), scatter_fires_one_shot_per_delayed_tick (T/+5), lancer_charges_before_its_delayed_shot (40-tick charge, charge ramp 0.5 at tick 20, frozen rotation, reload continues, exactly 1 bullet at T+40). Pre-fix source with only the tests re-added fails: salvo ticks [0] instead of [0,3,6,9]; scatter [0] instead of [0,5]; lancer spawns a bullet on the queue tick (bullets_created=1). After the fix cargo test -p mind-core passes 2834 tests.",
       "acceptance": "Add a mind-core turret test in client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs tests: CombatHarness::new(48,16,7), place a copper-wall as target in range, spawn_test_turret(\"scatter\", tx, ty, 1), feed scrap via handle_item, then tick and record harness.bullets.len() per tick. Expected after the fix (Java Blocks.java:3420-3421): exactly 1 new bullet on the first firing tick and the 2nd exactly 5 ticks later — assert deltas [(T,+1),(T+5,+1)] and not [+2 at T]. Repeat with \"salvo\" (plain(4,3.0,0.0)) => +1 at T, T+3, T+6, T+9, and with \"lancer\" (shoot.first_shot_delay = 40.0) => no bullet for 40 ticks after reload completes, then 1, with TurretState.charge rising 1/40 per tick during the charge (charging() true). Also cargo test -p mind-core combat/weapons must stay green.",
       "commits": "4e6b02fe",
@@ -17336,14 +17336,14 @@
       },
       "area": "campaign/sector-rules",
       "java": "core/src/mindustry/type/Sector.java:125-127,core/src/mindustry/type/SectorPreset.java:112-120,core/src/mindustry/maps/SectorSubmissions.java:82",
-      "rust": "client/rust/mind-core/src/game/sector.rs:701-704,client/rust/mind-core/src/content/registries/sectors.rs:488-506,client/rust/mind-core/src/ui/campaign.rs:939,1310",
-      "evidence": "Java Sector.isShielded() asks whether the *preset's* shield list has an uncaptured sector: 'return preset != null && preset.shieldSectors.size > 0 && !isCaptured() && preset.shieldSectors.contains(s -> !s.isCaptured());'. SectorSubmissions.java:82 gives sector 27 the list [246,244,242], so 27 is shielded while any of the three megabases is uncaptured, and stops being shielded once all three are captured. SectorPreset.init sets the *reverse* visual link on the providers only: 'for(var other : shieldSectors){ other.shieldTarget = sector; }' (used by PlanetDialog.java:519 to draw the arc). The Rust port reuses that reverse link as the gate: 'pub fn is_shielded(&self) -> bool { self.shield_target.is_some() && !self.is_captured(None) }', and registries/sectors.rs link() writes 'sector.shield_target = Some(target)' onto 246/244/242. Result is exactly inverted: 246/244/242 report is_shielded() forever (they have shield_target and can never be captured, so !is_captured stays true) and sector 27 never reports it. The gate is live: ui/campaign.rs:1310 'let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded();' sets view.selectable=false, and :939 'shielded: sector.is_shielded()'. Player-visible: the three endgame megabase sectors are permanently unselectable, and Stormrider can be launched without capturing them (Java's PlanetDialog.java:424 'if(sector.isShielded()) return false;').",
+      "rust": "client/rust/mind-core/src/game/sector.rs:701-704,client/rust/mind-core/src/content/registries/sectors.rs:488-506,client/rust/mind-core/src/ui/campaign/mod.rs:662,1310",
+      "evidence": "Java Sector.isShielded() asks whether the *preset's* shield list has an uncaptured sector: 'return preset != null && preset.shieldSectors.size > 0 && !isCaptured() && preset.shieldSectors.contains(s -> !s.isCaptured());'. SectorSubmissions.java:82 gives sector 27 the list [246,244,242], so 27 is shielded while any of the three megabases is uncaptured, and stops being shielded once all three are captured. SectorPreset.init sets the *reverse* visual link on the providers only: 'for(var other : shieldSectors){ other.shieldTarget = sector; }' (used by PlanetDialog.java:519 to draw the arc). The Rust port reuses that reverse link as the gate: 'pub fn is_shielded(&self) -> bool { self.shield_target.is_some() && !self.is_captured(None) }', and registries/sectors.rs link() writes 'sector.shield_target = Some(target)' onto 246/244/242. Result is exactly inverted: 246/244/242 report is_shielded() forever (they have shield_target and can never be captured, so !is_captured stays true) and sector 27 never reports it. The gate is live: ui/campaign/mod.rs:1033 'let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded();' sets view.selectable=false, and :939 'shielded: sector.is_shielded()'. Player-visible: the three endgame megabase sectors are permanently unselectable, and Stormrider can be launched without capturing them (Java's PlanetDialog.java:424 'if(sector.isShielded()) return false;').",
       "acceptance": "cargo test -p mind-core --lib shield_gate (new test in content/registries/sectors.rs or game/sector.rs): build the campaign from the registry, then assert planet.sectors[27].is_shielded()==true while 246/244/242 are uncaptured and each of 246/244/242 .is_shielded()==false; then mark all three captured (save=Some, info.has_core=true, waves=false, attack=false) and assert sectors[27].is_shielded()==false. Also assert mind-core::ui::campaign's sector view for 246 has selectable==true once captured and 27 shielded==true beforehand (existing sector-view test helpers).",
       "notes": [
         {
           "at": "2026-11-02T14:37:05Z",
           "by": "orch-b:checker1",
-          "text": "shield_target must stay as the visual arc source (PlanetDialog.java:519 uses sec.shieldTarget for the arc to the guarded sector); only the gate is wrong. Suggested fix: append a resolved shield-provider id list to the runtime Sector (e.g. shield_sectors: Vec<u16> copied from preset.shield_sectors in game/planet.rs:167 next to shield_target) and make the gate take the planet, e.g. is_shielded_in(&Planet) = !shield_sectors.is_empty() && !is_captured(None) && shield_sectors.any(|id| !planet.sector(id).is_captured(None)); update ui/campaign.rs:939/1310. Unrelated residual seen in the same file, NOT part of this item: game/sector.rs threat_bucket compares preset_difficulty == 10.0 but SectorDifficulty.unreasonable = 13 (SectorDifficulty.java:13, content/registries/sectors.rs:31 UNREASONABLE=13), so Stormrider's 'threat.unreasonable' band is dead code and it shows 'eradication'."
+          "text": "shield_target must stay as the visual arc source (PlanetDialog.java:519 uses sec.shieldTarget for the arc to the guarded sector); only the gate is wrong. Suggested fix: append a resolved shield-provider id list to the runtime Sector (e.g. shield_sectors: Vec<u16> copied from preset.shield_sectors in game/planet.rs:167 next to shield_target) and make the gate take the planet, e.g. is_shielded_in(&Planet) = !shield_sectors.is_empty() && !is_captured(None) && shield_sectors.any(|id| !planet.sector(id).is_captured(None)); update ui/campaign/mod.rs:662/1310. Unrelated residual seen in the same file, NOT part of this item: game/sector.rs threat_bucket compares preset_difficulty == 10.0 but SectorDifficulty.unreasonable = 13 (SectorDifficulty.java:13, content/registries/sectors.rs:31 UNREASONABLE=13), so Stormrider's 'threat.unreasonable' band is dead code and it shows 'eradication'."
         },
         {
           "at": "2026-11-02T14:44:50Z",
@@ -17558,7 +17558,7 @@
       "area": "logic",
       "java": "core/src/mindustry/logic/LExecutor.java:680-717 + core/src/mindustry/game/Team.java:17,166-185",
       "rust": "client/rust/mind-core/src/logic/executor/mod.rs:1175-1200 + client/rust/mind-core/src/logic/access.rs:337-345",
-      "evidence": "access::sense gained a LogicObject::Team arm (Team.sense/senseObject, J/game/Team.java:170-184): @id=Num(id), @color=Num(team_color_bits)=rgba8888/f64::from_bits encoding shared with the building team-colour row (BuildingComp.java:2104), @name=Obj(Str(registry name)). Executor Sensor target match widened to LogicObject::Team; sense_content returns Senseable default 0 for Team (J/logic/Senseable.java:12-14). Tests: logic::tests::team_senses_id_color_name (access::sense direct) and sim::logic_campaign_tests::sensor_reads_team_properties (processor set t @sharded + sensor id/col/nm; id==1, name==\"sharded\", col==Team registry bits==Java Pal.accent ffd37f bits). Both FAIL pre-fix (Obj(None) vs Num(1.0); Some(0.0) vs Some(1.0)) and pass post-fix; cargo test -p mind-core logic = 218 passed; bash tools/build.sh exit 0. Commits 8626c710 (fix) + 94347c19 (unit test).",
+      "evidence": "access::sense gained a LogicObject::Team arm (Team.sense/senseObject, J/game/Team.java:170-184): @id=Num(id), @color=Num(team_color_bits)=rgba8888/f64::from_bits encoding shared with the building team-colour row (BuildingComp.java:2104), @name=Obj(Str(registry name)). Executor Sensor target match widened to LogicObject::Team; sense_content returns Senseable default 0 for Team (J/logic/Senseable.java:12-14). Tests: logic::tests::team_senses_id_color_name (access::sense direct) and sim::logic_campaign_tests::sensors::sensor_reads_team_properties (processor set t @sharded + sensor id/col/nm; id==1, name==\"sharded\", col==Team registry bits==Java Pal.accent ffd37f bits). Both FAIL pre-fix (Obj(None) vs Num(1.0); Some(0.0) vs Some(1.0)) and pass post-fix; cargo test -p mind-core logic = 218 passed; bash tools/build.sh exit 0. Commits 8626c710 (fix) + 94347c19 (unit test).",
       "acceptance": "Run the executor over 'set t @sharded / sensor id = t @id / sensor col = t @color / sensor nm = t @name': id must be 1 (Team.sharded id, Team.java:34), nm must be the object string sharded (Java Team.name, not the localized form), and col must equal f64::from_bits(team.color.to_rgba8888() as u64) per logic::globals::rgba_to_double_bits — today all three are null. Add the same case as a logic/tests.rs assertion plus a sim/logic_campaign_tests.rs check.",
       "commits": "8626c710,94347c19"
     },
@@ -17587,7 +17587,7 @@
       },
       "area": "maps",
       "java": "core/src/mindustry/maps/Maps.java:200-268,464-489",
-      "rust": "client/rust/mind-core/src/maps/mod.rs:313-376, client/rust/mind-gdext/src/editor/mod.rs:2150-2185",
+      "rust": "client/rust/mind-core/src/maps/mod.rs:313-376, client/rust/mind-gdext/src/editor/api_patches.rs:476-511",
       "commits": "188d732c",
       "verification": "cargo test -p mind-core --lib maps:: -> 87 passed, 0 failed (incl. new maps::tests::save_map_replaces_same_name_and_finds_free_file); cargo test -p mind-core --lib editor::maps_glue -> 6 passed; cargo test -p mind-headless --test maps_editor_golden -> 2 passed (maps_roundtrip_matches_golden); cargo fmt --all -- --check -> ok; bash tools/build.sh -> exit 0; Java Maps.java:200-268 (saveMap reuse/remove/findFile) + Maps.java:464-489 (findFile sanitize/_N)",
       "notes": [
@@ -17683,7 +17683,7 @@
       },
       "area": "combat/turrets",
       "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:640-652; core/src/mindustry/entities/comp/UnitComp.java:80-82,84-86",
-      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:2323-2336; client/rust/mind-core/src/combat/bullet/mod.rs:1382-1388; client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:1182-1200,1568-1590",
+      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/build_turret.rs:72-85; client/rust/mind-core/src/combat/bullet/mod.rs:1382-1388; client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:1182-1200,1568-1590",
       "evidence": "turrets/mod.rs findEnemy: air-only branch accept predicate is !unit_is_grounded (elevation<0.001, physics-flying excluded; new helper next to unit_is_flying) instead of !unit_is_flying; general branch now (grounded||target_air)&&(!grounded||target_ground) per Java. Java refs: Turret.java:640-652, UnitComp.java:80-86, UnitType.java:566. Tests: air_only_turret_targets_aircraft_over_ground, air_only_turret_rejects_grounded_only, air_only_turret_accepts_mid_band_elevation, general_turret_targets_ground_and_air, ground_only_turret_rejects_mid_band_elevation (fail-before: 3 FAILED reverted predicate; pass-after: 41 turret tests ok, cargo test -p mind-core combat 237 ok, tools/build.sh exit 0).",
       "acceptance": "CombatHarness test: place an air-only turret (scatter, target_air=true/target_ground=false) with one grounded and one flying unit of the enemy team both in range; the chosen target must be the flying unit (today it is the grounded one). With only grounded units in range the turret must have no target. Add a unit test for the new grounded predicate (elevation < 0.001, physics flying excluded) and one for the elevation band (0.05 treated as neither). cargo test -p mind-core combat/turrets green.",
       "commits": "4186a24b62af24429ba79e222df7f31fe0e44183"
@@ -17713,7 +17713,7 @@
       },
       "area": "input",
       "java": "core/src/mindustry/ui/fragments/HudFragment.java:461-467;core/src/mindustry/input/Binding.java:92",
-      "rust": "client/rust/mind-gdext/src/input/desktop.rs:822-1108;client/rust/mind-gdext/src/input/desktop.rs:1080-1097",
+      "rust": "client/rust/mind-gdext/src/input/desktop/keys.rs:110;client/rust/mind-gdext/src/input/desktop/actions.rs:36-53",
       "evidence": "Java HudFragment.java:461-467 + canSkipWave :1234-1236; port now dispatches skip_wave in DesktopBridge::dispatch_action through the same gate as the HUD button (WaveGate::can_skip_wave = waves && wave_sending && !is_spawning && enemies<=0 && has_core, shared with _refresh_skip_button) and the same path (Effect::SkipWave -> MindCampaign.run_wave, as _on_skip_wave); dialog/text-focus guards are the existing handle() text_focus/ui_dialog gates. Tests: skip_wave_gate_matches_the_skip_button + skip_wave_key_dispatches_and_respects_the_gate; cd client/rust && CARGO_TARGET_DIR=client/bin/rust cargo test -p mind-gdext skip_wave -> 2 passed; bash tools/build.sh ok.",
       "acceptance": "Rebind skip_wave to K (Settings->Controls), launch a campaign sector with waves, press K: MindSimHost.get_wave() increments by 1 exactly like clicking the HUD skip button; with a dialog open or a text field focused the key is ignored (Java guards); a headless/unit seam can prove dispatch_action('skip_wave') reaches the same run_wave path as _on_skip_wave.",
       "commits": "195b29fa"
@@ -17897,7 +17897,7 @@
       },
       "area": "render",
       "java": "core/src/mindustry/world/Block.java:344,350-351,493-495",
-      "rust": "client/rust/mind-gdext/src/sim_host.rs:4937-5035 (light_sources, environment_light, floor_light_sources) ; client/rust/mind-core/src/content/registries/blocks/mod.rs:1366-1371,2343-2349,2100-2170 (BlockSpec/BlockDef fields + java_light_defaults) ; client/rust/mind-gdext/src/render/light.rs:1-19 (S16-5 note)",
+      "rust": "client/rust/mind-gdext/src/sim_host/player.rs:303-401 (light_sources, environment_light, floor_light_sources) ; client/rust/mind-core/src/content/registries/blocks/spec.rs:162-167,2343-2349,2100-2170 (BlockSpec/BlockDef fields + java_light_defaults) ; client/rust/mind-gdext/src/render/light.rs:1-19 (S16-5 note)",
       "evidence": [
         "cargo test -p mind-core --lib light => 19 passed (light_radius_and_color_follow_the_java_table)",
         "cargo test -p mind-gdext --lib light => 3 passed (block_light_sources_use_the_block_light_fields, floor_light_sources_follow_the_java_table, stamp_is_brightest_at_the_center)",
@@ -21578,7 +21578,7 @@
         ]
       },
       "severity": "P0",
-      "gap": "Godot MindCampaign.objective_markers_json forwards only ObjectiveMarker::ShapeText (gx/campaign.rs:3493-3497); groundZero objectives 2+ use Text markers, so after the drill the conveyor/turret prompts are never drawn. MindObjectiveMarkers.process also skips queue_redraw when the list is empty (gx/render/objective_markers.rs:90-92), leaving the drill prompt frozen. Java draws every marker class per frame (MapObjectives.java:1094-1129, Renderer.java:352-360).",
+      "gap": "Godot MindCampaign.objective_markers_json forwards only ObjectiveMarker::ShapeText (client/rust/mind-core/src/ui/campaign/research_tree.rs:545-549); groundZero objectives 2+ use Text markers, so after the drill the conveyor/turret prompts are never drawn. MindObjectiveMarkers.process also skips queue_redraw when the list is empty (gx/render/objective_markers.rs:90-92), leaving the drill prompt frozen. Java draws every marker class per frame (MapObjectives.java:1094-1129, Renderer.java:352-360).",
       "evidence": [
         "runs/PAR-0477/godot/20261106-132422-03-text-marker-conveyor-prompt.png",
         "runs/PAR-0477/java/20261106-133656-03-text-marker-conveyor-prompt.png",
@@ -22654,7 +22654,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/campaign.rs:919-937 start_sector_with_loadout replaces the runtime with no outgoing-slot save; Java Control.java:437-441 saves saves.getCurrent() in playSector.",
+      "gap": "gx/campaign/runtime.rs:78 start_sector_with_loadout replaces the runtime with no outgoing-slot save; Java Control.java:437-441 saves saves.getCurrent() in playSector.",
       "source": "CAMPAIGN_GAPS.md#cg-sector-02",
       "evidence": [
         "runs/PAR-0481/godot/20261106-140155-01-resumed-after-switch.png",
@@ -22779,7 +22779,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/campaign.rs:1160-1176 overwrites rules.weather with add_weather after load; Java World.java:266,303 adds weather before SaveIO.load and SaveVersion.readRules replaces rules with the authored map rules.",
+      "gap": "gx/campaign/pump.rs:422-438 overwrites rules.weather with add_weather after load; Java World.java:266,303 adds weather before SaveIO.load and SaveVersion.readRules replaces rules with the authored map rules.",
       "source": "CAMPAIGN_GAPS.md#cg-gen-05",
       "similarity": 74.4,
       "images": {
@@ -22917,7 +22917,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/sim_host.rs:10675-10718 load_preset_map_grid -> decode_save_bytes(filter_seed=None); apply_filters only runs inside filter_seed.inspect (mc/io/sim_io.rs:850). Java FileMapGenerator.java:71-82 applies map.filters() on preset load.",
+      "gap": "gx/sim_host/command_panel.rs:21-64 load_preset_map_grid -> decode_save_bytes(filter_seed=None); apply_filters only runs inside filter_seed.inspect (mc/io/sim_io.rs:850). Java FileMapGenerator.java:71-82 applies map.filters() on preset load.",
       "source": "CAMPAIGN_GAPS.md#cg-gen-01",
       "similarity": 74.4,
       "images": {
@@ -23076,7 +23076,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/sim_host.rs:10242-10269 core_items_json has no team filter; Java CoreItemsDisplay.java:33 uses player.team().core().",
+      "gap": "gx/sim_host/overlay.rs:357-384 core_items_json has no team filter; Java CoreItemsDisplay.java:33 uses player.team().core().",
       "source": "CAMPAIGN_GAPS.md#cg-econ-02",
       "fix": "sim_host.rs core_items_json(sim, content, team) filters comp.team.0 == team; the #[func] passes self.player_team(). Doc cites CoreItemsDisplay.java:33 player.team().core() (Team.java:83-85).",
       "evidence": [
@@ -23313,7 +23313,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "start_sector finishes with persist() (gx/campaign.rs:1415) but never writes the sector record; resume reads the still-default record (campaign.rs:1267,1316; sim_host.rs:7998). Java saves the sector on playNewSector and prepares info on every save.",
+      "gap": "start_sector finishes with persist() (gx/campaign/sector_launch.rs:75) but never writes the sector record; resume reads the still-default record (campaign/pump.rs:216,1316; sim_host/hover.rs:282). Java saves the sector on playNewSector and prepares info on every save.",
       "source": "CAMPAIGN_GAPS.md#cg-save-01",
       "similarity": 68.4,
       "images": {
@@ -23490,7 +23490,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/campaign.rs:3878-3911 load_slot does not set Saves.current; mc/game/saves.rs:235-262 gates autosave/playtime on current.is_some(); Java Saves.java:319-324 sets current = this.",
+      "gap": "gx/campaign/database.rs:226 load_slot does not set Saves.current; mc/game/saves.rs:235-262 gates autosave/playtime on current.is_some(); Java Saves.java:319-324 sets current = this.",
       "source": "CAMPAIGN_GAPS.md#cg-save-02",
       "similarity": 70.9,
       "images": {
@@ -23509,7 +23509,7 @@
         "godot t5-load.msav mtime 13:48:28 -> 13:49:24 on Save & Quit; java 0.msav 13:52:16 -> 13:53:24",
         "both pause menus render \"Save & Quit\" after a Load-dialog load"
       ],
-      "fix": "client/rust/mind-gdext/src/campaign.rs load_slot: after applying the meta it now calls adopt_loaded_slot (Saves.set_current_by_file + total_playtime from meta), mirroring SaveSlot.load (Saves.java:319-324); the autosave cadence, playtime accrual, exit save and the @save.quit pause label all key on Saves.current. Unit test campaign::tests::loaded_slot_becomes_current_and_autosaves."
+      "fix": "client/rust/mind-gdext/src/campaign.rs load_slot: after applying the meta it now calls adopt_loaded_slot (Saves.set_current_by_file + total_playtime from meta), mirroring SaveSlot.load (Saves.java:319-324); the autosave cadence, playtime accrual, exit save and the @save.quit pause label all key on Saves.current. Unit test campaign::saves::tests::loaded_slot_becomes_current_and_autosaves."
     },
     "PAR-0488": {
       "title": "Configure Loadout manual resource editor is inert",
@@ -24067,7 +24067,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/ui/dialogs/batch_campaign2.rs:2879 calls missing set_launch_resources; :2541 reads PackedInt32Array through a GString cast; loadout_changed has no listener. Java LaunchLoadoutDialog.java:138-141 round-trips updateLaunchResources and rebuilds.",
+      "gap": "gx/ui/dialogs/schematics/files.rs:283 calls missing set_launch_resources; :2541 reads PackedInt32Array through a GString cast; loadout_changed has no listener. Java LaunchLoadoutDialog.java:138-141 round-trips updateLaunchResources and rebuilds.",
       "source": "CAMPAIGN_GAPS.md#cg-tech-01",
       "similarity": 84.1,
       "images": {
@@ -24121,7 +24121,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/ui/dialogs/batch_c.rs:2693,2858 resolves launch_cost from campaign_views.loadouts built from planet.default_core (mc/ui/campaign.rs:1719-1746), while the picker offers every core <= launcher core (gx/campaign.rs:5304-5320); Java PlanetDialog.java:1405-1412 charges the chosen loadout's requirements.",
+      "gap": "gx/ui/dialogs/campaign/planet/sector_panel.rs:520,2858 resolves launch_cost from campaign_views.loadouts built from planet.default_core (mc/ui/campaign.rs:1719-1746), while the picker offers every core <= launcher core (gx/campaign/accelerator.rs:203-219); Java PlanetDialog.java:1405-1412 charges the chosen loadout's requirements.",
       "source": "CAMPAIGN_GAPS.md#cg-tech-02",
       "fix": "Launch charge is priced from the picker's selected schematic, not the planet-default-core loadout list. gx/campaign.rs `launch_dialog_json` now reports `launch_cost` = the selected schematic's requirements + staged resources (Java `from.removeItems(loadout.requirements()); from.removeItems(universe.getLaunchResources())`, PlanetDialog.java:1409-1410), plus the picker `core` and `selected_file`; batch_c.rs `planet_launch` charges `plan.launch_cost` (was `planet_find_loadout_row` over the default-core `loadouts` section, which has no row for a larger-core schematic) and stamps `plan.core` in the payload. New helpers `launch_core_name`/`launch_requirements`/`launch_total`/`schematic_placeable_on_planet`. launch_dialog_json also gates the grid on allowLaunchSchematics (PAR-0509) and seeds from the last-used loadout (PAR-0508).",
       "evidence": [
@@ -24284,7 +24284,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/ui/dialogs/batch_c.rs:2581,2815,2881 routes resume through prime_sector_load + host.load_sector; Java PlanetDialog.java:1373 hides the page when sector.isBeingPlayed().",
+      "gap": "gx/ui/dialogs/campaign/planet/sector_panel.rs:573,2815,2881 routes resume through prime_sector_load + host.load_sector; Java PlanetDialog.java:1373 hides the page when sector.isBeingPlayed().",
       "source": "CAMPAIGN_GAPS.md#cg-ui-01",
       "similarity": 38.5,
       "images": {
@@ -24412,7 +24412,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/campaign.rs:612 emits campaign_complete with no listener; only the planet-page path batch_c.rs:1602 shows it. Java Control.java:175-181 schedules CampaignCompleteDialog 2 s after the final capture.",
+      "gap": "gx/campaign.rs:316 emits campaign_complete with no listener; only the planet-page path campaign/planet/page.rs:170 shows it. Java Control.java:175-181 schedules CampaignCompleteDialog 2 s after the final capture.",
       "source": "CAMPAIGN_GAPS.md#cg-ui-04",
       "similarity": 81.4,
       "images": {
@@ -24880,7 +24880,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/ui/planet.rs:1125 rebuild_markers has no arc primitive; mc/ui/campaign.rs:169 SectorView lacks shield_target. Java PlanetDialog.java:503-545 renderOverProjections + :481-486 current fill.",
+      "gap": "gx/ui/planet/scene.rs:530 rebuild_markers has no arc primitive; mc/ui/campaign.rs:169 SectorView lacks shield_target. Java PlanetDialog.java:503-545 renderOverProjections + :481-486 current fill.",
       "source": "CAMPAIGN_GAPS.md#cg-ui-02",
       "claimed_by": "camp-globe",
       "claimed_at": "2026-11-06T07:56:39Z",
@@ -25096,7 +25096,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/ui/dialogs/batch_c.rs:3403 suppresses the hover label for locked sectors; sector.foundationrequired / sector.shielded are unused in client/rust. Java PlanetDialog.java:962-976 + SerpuloPlanetGenerator.java:114-123.",
+      "gap": "gx/ui/dialogs/campaign/planet/launch.rs:131 suppresses the hover label for locked sectors; sector.foundationrequired / sector.shielded are unused in client/rust. Java PlanetDialog.java:962-976 + SerpuloPlanetGenerator.java:114-123.",
       "source": "CAMPAIGN_GAPS.md#cg-ui-03",
       "similarity": 55.9,
       "images": {
@@ -25240,7 +25240,7 @@
         ]
       },
       "severity": "P2",
-      "gap": "gx/ui/dialogs/batch_campaign2.rs:1542 uses visible = !tree.root.is_empty(); Java ResearchDialog.java:108 visible = selectable-root count > 1; fresh Serpulo profile shows a dead \"Serpulo\" button",
+      "gap": "gx/ui/dialogs/campaign/research.rs:837 uses visible = !tree.root.is_empty(); Java ResearchDialog.java:108 visible = selectable-root count > 1; fresh Serpulo profile shows a dead \"Serpulo\" button",
       "source": "CAMPAIGN_GAPS.md#cg-tech-06",
       "similarity": 78.6,
       "images": {
@@ -25846,7 +25846,7 @@
       },
       "severity": "P2",
       "source": "CAMPAIGN_GAPS.md#cg-tech-03 (found while twin-verifying PAR-0497)",
-      "gap": "campaign.rs:2873 research_parent_unlocked finds the FIRST tech node whose content matches (`nodes.iter().find`); Java Objectives.Research.display (Objectives.java:26-31) reads content.techNode, which the TechNode constructor overwrites on every creation, i.e. the LAST node built (Erekir tree builds after Serpulo). Concrete: silicon has a Serpulo node under graphite (locked on a fresh profile) and an Erekir node under sand (alwaysUnlocked); Java prints \"Research Silicon\", the port prints \"Research ???\" — visible in runs/PAR-0497 (core-foundation popup, second objective row) vs the Java frame. Fix: resolve the node via UnlockFields.tech_node (set_tech_node already overwrites, i.e. the last node) instead of scanning.",
+      "gap": "campaign/research.rs:16 research_parent_unlocked finds the FIRST tech node whose content matches (`nodes.iter().find`); Java Objectives.Research.display (Objectives.java:26-31) reads content.techNode, which the TechNode constructor overwrites on every creation, i.e. the LAST node built (Erekir tree builds after Serpulo). Concrete: silicon has a Serpulo node under graphite (locked on a fresh profile) and an Erekir node under sand (alwaysUnlocked); Java prints \"Research Silicon\", the port prints \"Research ???\" — visible in runs/PAR-0497 (core-foundation popup, second objective row) vs the Java frame. Fix: resolve the node via UnlockFields.tech_node (set_tech_node already overwrites, i.e. the last node) instead of scanning.",
       "similarity": 92.1,
       "images": {
         "java": [
@@ -26610,7 +26610,7 @@
         ]
       },
       "severity": "P2",
-      "gap": "gx/ui/dialogs/batch_c.rs:3335 planet_handle_reveal_escape returns unless new_presets.len() > 1 and never clears selected_sector; :561 blocks_escape only covers chooser_active, so gx/ui/root.rs:1675-1683 closes the dialog. Java PlanetDialog.java:91-102 deselects first (selected != null -> select(null)), then hides on the next Escape.",
+      "gap": "gx/ui/dialogs/campaign/planet/launch.rs:228 planet_handle_reveal_escape returns unless new_presets.len() > 1 and never clears selected_sector; :561 blocks_escape only covers chooser_active, so gx/ui/root/messages.rs:71-79 closes the dialog. Java PlanetDialog.java:91-102 deselects first (selected != null -> select(null)), then hides on the next Escape.",
       "source": "CAMPAIGN_GAPS.md#cg-ui-07",
       "similarity": 57.7,
       "images": {
@@ -27300,7 +27300,7 @@
         ]
       },
       "severity": "P1",
-      "gap": "gx/campaign.rs:296-303 sets sector.save from NativeFs.exists(sector file); gx/sim_host.rs:3475-3545 load_sector_world falls through to generate_sector on an undecodable file and stocks the stale record into the fresh core; mc/io/save/slot.rs:305-314 hides the file from Saves.slots. Java SaveIO.isSaveValid filters Saves.load and Control.java:555-561 catches SaveException (sector.save=null, slot.delete, @save.corrupted, replay).",
+      "gap": "gx/campaign.rs:142-149 sets sector.save from NativeFs.exists(sector file); gx/sim_host/world_load.rs:305 load_sector_world falls through to generate_sector on an undecodable file and stocks the stale record into the fresh core; mc/io/save/slot.rs:305-314 hides the file from Saves.slots. Java SaveIO.isSaveValid filters Saves.load and Control.java:555-561 catches SaveException (sector.save=null, slot.delete, @save.corrupted, replay).",
       "source": "CAMPAIGN_GAPS.md#cg-save-06",
       "similarity": 57.1,
       "images": {
@@ -27395,7 +27395,7 @@
         ]
       },
       "severity": "P2",
-      "gap": "gx/campaign.rs:296-303 derives sector.save from NativeFs.exists(paths.sector_save(planet,id)); mc/game/saves.rs:149-223 assign_sector_saves only plans remaps and never sets sector.save. Java Saves.java:120-186 associates from save meta, so a copy under another name still resumes.",
+      "gap": "gx/campaign.rs:142-149 derives sector.save from NativeFs.exists(paths.sector_save(planet,id)); mc/game/saves.rs:149-223 assign_sector_saves only plans remaps and never sets sector.save. Java Saves.java:120-186 associates from save meta, so a copy under another name still resumes.",
       "source": "CAMPAIGN_GAPS.md#cg-save-05",
       "similarity": 56.3,
       "images": {
@@ -27441,7 +27441,7 @@
         ]
       },
       "severity": "P2",
-      "gap": "batch_c.rs:2930-2945 calls clear_loadout_info for every plain start_sector branch including a resume; Java only clears on free launch (PlanetDialog.java:1396-1403, resume :1449)",
+      "gap": "campaign/planet/sector_panel.rs:858 calls clear_loadout_info for every plain start_sector branch including a resume; Java only clears on free launch (PlanetDialog.java:1396-1403, resume :1449)",
       "source": "CAMPAIGN_GAPS.md#cg-save-03",
       "affected": "gx/ui/dialogs/batch_c.rs,gx/campaign.rs,mc/game/universe.rs",
       "fix": "`planet_launch` now calls `Universe.clearLoadoutInfo` only on the free-launch branch: new predicate `planet_launch_clears_loadout(resume, launcher, loadout)` = `!resume && launcher < 0 && loadout < 0` (PlanetDialog.java:1396-1403). A resume/go of a sector with a base (`control.playSector(sector)`, PlanetDialog.java:1449) and a launcher launch keep `launch-resources-seq` and `lastloadout-<core>`. The dead `play_sector` branch (MindCampaign has no such binding; `start_sector` picks resume from the sector record) was removed.",
@@ -27484,7 +27484,7 @@
         ]
       },
       "severity": "P2",
-      "gap": "gx/campaign.rs:5173 seeds launch loadout from core default; get_last_loadout (:5358) has no caller. Java seeds from universe.getLoadout(core)/LaunchLoadoutDialog.java:162, persisted as lastloadout-<core>",
+      "gap": "gx/campaign/accelerator.rs:70 seeds launch loadout from core default; get_last_loadout (:5358) has no caller. Java seeds from universe.getLoadout(core)/LaunchLoadoutDialog.java:162, persisted as lastloadout-<core>",
       "source": "CAMPAIGN_GAPS.md#cg-tech-04",
       "affected": "gx/campaign.rs,gx/ui/dialogs/batch_campaign2.rs",
       "fix": "LaunchLoadoutDialog seeds the picker from `Universe.getLoadout(core)` instead of the core default: new `Universe::get_loadout_index` (mc/game/universe.rs) resolves `lastloadout-<core>` by `File.nameWithoutExtension()` among `Schematics.getLoadouts(core)`, falls back to the core's first loadout and to `core-shard`'s first (Universe.java:129-148), and tolerates a pre-existing full-path value. `launch_confirm` now persists the bare file stem (was the full path) via `update_loadout`, so the next launch restores it.",
@@ -28447,7 +28447,7 @@
         {
           "at": "2026-11-06T13:42:19Z",
           "by": "hx-defense",
-          "text": "WIRING HANDOFF for mc/world/blocks/defense/turrets/mod.rs::update_build (~2035-2107). (1) Team queue scan: when build_target.is_none(), read CampaignRuntime.session.teams[team].plans (game/teams.rs:129), call build_turret_plans::scan_team_rebuild_queue(plans, |p| within(p.x*8, p.y*8, range), |p| Build.validPlace(...) && (rules.infiniteResources || team items has p.block requirements)); on Some push the returned BuildPlan to state.build_plans (or set build_target) and build_turret_plans::rotate_plan_to_tail(plans, index); record last_plan. (2) Following builders: if still no target, Units.nearby(team, x, y, range) -> first unit with canBuild() && activelyBuilding() whose build plan resolves to a ConstructBuild within range -> copy its plan to the front of state.build_plans (BuildTurret.java:178-195). (3) Validate the current plan each tick: lastPlan.removed, ConstructState.current == plan.block, valid_place/valid_break; drop when invalid (BuildTurret.java:209-226); also drop the plan if another team PLAYER has a breaking plan at the same pos (BuildTurret.java:196-208). (4) Deconstruct: route BuildPlan.breaking plans to plan 07's deconstruct path (ConstructState::deconstruct + deconstruct_step/remove_block_raw, sim/builder.rs:755-...), not construct_step. (5) shouldConsume already implemented (turrets/behavior.rs:258) - stale sub-item."
+          "text": "WIRING HANDOFF for mc/world/blocks/defense/turrets/mod.rs::update_build (~2035-2107). (1) Team queue scan: when build_target.is_none(), read CampaignRuntime.session.teams[team].plans (game/teams.rs:129), call build_turret_plans::scan_team_rebuild_queue(plans, |p| within(p.x*8, p.y*8, range), |p| Build.validPlace(...) && (rules.infiniteResources || team items has p.block requirements)); on Some push the returned BuildPlan to state.build_plans (or set build_target) and build_turret_plans::rotate_plan_to_tail(plans, index); record last_plan. (2) Following builders: if still no target, Units.nearby(team, x, y, range) -> first unit with canBuild() && activelyBuilding() whose build plan resolves to a ConstructBuild within range -> copy its plan to the front of state.build_plans (BuildTurret.java:178-195). (3) Validate the current plan each tick: lastPlan.removed, ConstructState.current == plan.block, valid_place/valid_break; drop when invalid (BuildTurret.java:209-226); also drop the plan if another team PLAYER has a breaking plan at the same pos (BuildTurret.java:196-208). (4) Deconstruct: route BuildPlan.breaking plans to plan 07's deconstruct path (ConstructState::deconstruct + deconstruct_step/remove_block_raw, sim/builder/update.rs:356-...), not construct_step. (5) shouldConsume already implemented (turrets/behavior.rs:258) - stale sub-item."
         },
         {
           "at": "2026-11-06T15:36:35Z",
@@ -28801,8 +28801,8 @@
       "gap": "Bans and Admins rendered bare text rows with no unban/unadmin action or confirm; Trace printed unformatted scalar rows and dropped the TraceInfo ips/names history lists (ui/dialogs/misc.rs).",
       "fix": "Bans/Admins now render 400x80 Tex.button PlayerInfo rows (bans: IP + name; admins: last name) with an Icon.cancel action that runs showConfirm (@confirmunban / @confirmunadmin with the name) and routes unban/unadmin through the new MindUi.admin_action relay seam (signal + method returning false with no listener, so nothing is faked) before re-rendering. Trace now formats trace.playername/ip/language/id through tm_format with one @copy button per field, formats the four scalar lines (modded/mobile/times joined/kicked), and renders the @trace.ips/@trace.names history panes indented 20 px like TraceDialog.java:52-63.",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/dialogs/misc.rs:231-580 (roster parse/kinds/style/rows/confirm/apply)",
-        "client/rust/mind-gdext/src/ui/dialogs/misc.rs:676-760 (trace copy rows + formatted scalars + lists)",
+        "client/rust/mind-gdext/src/ui/dialogs/net/roster.rs:41 (roster parse/kinds/style/rows/confirm/apply)",
+        "client/rust/mind-gdext/src/ui/dialogs/net/trace.rs:80-164 (trace copy rows + formatted scalars + lists)",
         "client/rust/mind-gdext/src/ui/ui_host.rs:171-175,613-635 (admin_action signal/method)",
         "cargo test -p mind-gdext --lib ui::dialogs::misc::tests -> 8 passed",
         "godot --headless res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK failed=0 (bans/admins/traces build+show+hide)"
@@ -29063,13 +29063,13 @@
       "claimed_by": "hx-abilitydraw",
       "claimed_at": "2026-11-06T22:36:55Z",
       "severity": "P2",
-      "gap": "cargo test -p mind-gdext --lib audio fails at HEAD f11557ea in ui::dialogs::batch_f::tests::audio_stream_name_uses_the_dp_prefix: VarDictionary::new() panics \"Godot engine not available; make sure you are not calling it from unit/doc tests\" (godot-ffi-0.5.5/src/lib.rs:625). The test is in gx/ui (not owned by hx-audio); it makes the packet-mandated audio test filter red even though all 13 audio tests pass. Fix: drop the VarDictionary construction from that test or gate it behind an engine-only harness.",
-      "source": "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4603",
+      "gap": "cargo test -p mind-gdext --lib audio fails at HEAD f11557ea in ui::dialogs::editor::map_assets::audio::tests::audio_stream_name_uses_the_dp_prefix: VarDictionary::new() panics \"Godot engine not available; make sure you are not calling it from unit/doc tests\" (godot-ffi-0.5.5/src/lib.rs:625). The test is in gx/ui (not owned by hx-audio); it makes the packet-mandated audio test filter red even though all 13 audio tests pass. Fix: drop the VarDictionary construction from that test or gate it behind an engine-only harness.",
+      "source": "client/rust/mind-gdext/src/ui/dialogs/editor/map_assets/helpers.rs:565",
       "evidence": [
         "cargo test -p mind-gdext --lib audio -> 15 passed; 0 failed (was 1 failed: audio_stream_name_uses_the_dp_prefix)",
-        "client/rust/mind-gdext/src/ui/dialogs/batch_f.rs:4610-4623"
+        "client/rust/mind-gdext/src/ui/dialogs/editor/util.rs:1156"
       ],
-      "fix": "Rewrote client/rust/mind-gdext/src/ui/dialogs/batch_f.rs::tests::audio_stream_name_uses_the_dp_prefix to be engine-free (test-only change): removed the VarDictionary construction that panicked in a plain cargo test and asserts the dialog pure naming rule (dp- + name with spaces->underscores, lowercased) plus the engine-free map_assets_format_seconds. Engine-free sibling tests found and filed as PAR-0586.",
+      "fix": "Rewrote client/rust/mind-gdext/src/ui/dialogs/editor/map_assets/audio.rs::tests::audio_stream_name_uses_the_dp_prefix to be engine-free (test-only change): removed the VarDictionary construction that panicked in a plain cargo test and asserts the dialog pure naming rule (dp- + name with spaces->underscores, lowercased) plus the engine-free map_assets_format_seconds. Engine-free sibling tests found and filed as PAR-0586.",
       "notes": [
         {
           "at": "2026-11-06T22:56:07Z",
@@ -29433,8 +29433,8 @@
       "gap": "JoinDialog never rendered host.version/versionType and safeConnect never compared builds: rows listed only address+ping+matches, and clicking a match always emitted join_requested. Java JoinDialog.java:267,778-791 builds getVersionString (server.version + @server.outdated/@server.outdated.client) and safeConnect (:675-681) refuses a differing build with the scarlet KickReason + @server.versions.",
       "fix": "JoinDialog now renders each ready server row's getVersionString (server.version plus @server.outdated / @server.outdated.client, nothing when equal) from the probe RelayMatch.build_id/protocol_version, and safeConnect gates both connect paths: a differing protocol/build shows the scarlet @server.kicked.clientOutdated or @server.kicked.serverOutdated plus @server.versions modal instead of joining. Version order is numeric per component over build_id with protocol_version as the numeric gate.",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/dialogs/batch_b.rs:2286-2530 (JoinVersion, join_build_cmp, join_version_line, join_safe_connect, join_abort_on_version, probe/public match readers)",
-        "batch_b.rs:2095-2110 (row version label) and 2412-2427 + 2441-2456 (safeConnect gates)",
+        "client/rust/mind-gdext/src/ui/dialogs/net/join/mod.rs:504 (JoinVersion, join_build_cmp, join_version_line, join_safe_connect, join_abort_on_version, probe/public match readers)",
+        "net/join/mod.rs:323-338 (row version label) and 2412-2427 + 2441-2456 (safeConnect gates)",
         "cargo test -p mind-gdext --lib ui::dialogs::batch_b::tests -> 3 passed",
         "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (join builds/shows/hides)"
       ],
@@ -29476,7 +29476,7 @@
       "gap": "MindSimHost.take_io_responses_json had no consumer anywhere in the client, so a failed save (PausedDialog.java:211, SaveDialog.java:55, PlanetDialog.java:1391) never reached ui.showException(\"[accent]\" + @savefail, e).",
       "fix": "MindUiRoot::process drains MindSimHost.take_io_responses_json and, for a kind=save response carrying an error, opens the savefail modal through the shared showText prompt with UI.java's body ([accent]@savefail[] newline [lightgray](error)). Responses stay queued while another prompt is up so a failure is never dropped. This ports UI.showException for the three Java save call sites into the existing full_text/showText path (a dedicated scene would need ui/dialogs_manifest.json, outside this packet's ownership).",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/root.rs:265-275 (process drain), 776-830 (drain_save_failures), 2295-2302 (save_failure_markup)",
+        "client/rust/mind-gdext/src/ui/root/mod.rs:280-290 (process drain), 776-830 (drain_save_failures), 2295-2302 (save_failure_markup)",
         "cargo test -p mind-gdext --lib ui::root::tests -> 6 passed (incl. save_failure_markup_matches_show_exception)",
         "dialog sweep -> DIALOGCHECK: failed=0 (full_text prompt path builds/shows/hides)"
       ],
@@ -29518,7 +29518,7 @@
       "gap": "batch_e.rs objective_editor fell through to a verbatim label for kind=marker and kind=verts, and objective_seq_editor listed each element as variant_text(element) with no editor. Java MapObjectivesDialog describes both (defaultInterpreter for ObjectiveMarker subclasses, Vertices interpreter :280-320) and the Seq interpreter delegates to the element interpreter (:335-402).",
       "fix": "Objective editors now take a get/set ObjectiveValue sink so one interpreter renders the objective field, Seq elements and marker sub-fields. Seq(Marker) elements render the marker class button plus the marker class's field rows (marker_classes_json/marker_default_json), Vertices renders one row per vertex with tile-scaled x/y, a colour picker over the packed ABGR f32 bits (alpha clamped to 254 so the JSON number stays finite) and u/v, Vec2 axes display with the TilePos scale, and alignment writes through the sink. The raw variant_text fallbacks for marker/verts/seq elements are gone.",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/dialogs/batch_e.rs:4544-4730 (ObjectiveValue sink, field/element/dict scopes), 4694-5000 (interpreter), 4996-5214 (Seq + marker + Vertices)",
+        "client/rust/mind-gdext/src/ui/dialogs/editor/map_objectives/list.rs:687 (ObjectiveValue sink, field/element/dict scopes), 4694-5000 (interpreter), 4996-5214 (Seq + marker + Vertices)",
         "cargo test -p mind-gdext --lib ui::dialogs::batch_e::tests -> 2 passed (verts ABGR bits round-trip)",
         "dialog sweep -> DIALOGCHECK: failed=0 (map_objectives builds/shows/hides)"
       ],
@@ -29560,7 +29560,7 @@
       "gap": "EffectsDialog EffectCell drew a fake HSV wash over the checker; LogicFx entries were listed but never rendered. Java EffectCell.draw calls effect.render inside a clipped batch, looping via act() (EffectsDialog.java:166-235).",
       "fix": "EffectsDialog now parents one shared MindFx Node2D over the dialog. Hovering a cell moves the host to the cell centre (scale = cell / calculateSize bounds), ticks the pool at 20 Hz and respawns that cell's LogicFx->Fx field every 0.4 s, so the real effect renders live over the checker; the HSV wash remains only as a no-host fallback. Documented deviation: the hovered cell animates, while Java renders all cells simultaneously through per-cell batches (no UI-side per-cell batch exists).",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/dialogs/batch_a.rs:2240-2320 (EffectsPreview, effects_fx_name, scale), 2340-2450 (preview host + hover wiring), 2500-2585 (checker/fallback)",
+        "client/rust/mind-gdext/src/ui/dialogs/settings/keybind.rs:656 (EffectsPreview, effects_fx_name, scale), 2340-2450 (preview host + hover wiring), 2500-2585 (checker/fallback)",
         "cargo test -p mind-gdext --lib ui::dialogs::batch_a::tests -> 2 passed",
         "dialog sweep -> DIALOGCHECK: failed=0 (effects builds/shows/hides; shared MindFx host created)"
       ],
@@ -29599,10 +29599,10 @@
       "claimed_at": "2026-11-06T15:14:54Z",
       "severity": "P2",
       "source": "GAPS.md#46",
-      "gap": "GAPS.md claims the EffectStatement content picker and PlaySoundStatement sound picker are raw text fields. At f11557ea they are already showSelectTable equivalents: content_picker maps 9 statement fields (ubind unit, playsound sound, status/weather/setprop/sensor/setmarker/ulocate) and picker_button/open_picker dispatch to icon grids and the sound browser (batch_j.rs:102-124,2192-2263,5124+). No raw text field renders for those fields.",
+      "gap": "GAPS.md claims the EffectStatement content picker and PlaySoundStatement sound picker are raw text fields. At f11557ea they are already showSelectTable equivalents: content_picker maps 9 statement fields (ubind unit, playsound sound, status/weather/setprop/sensor/setmarker/ulocate) and picker_button/open_picker dispatch to icon grids and the sound browser (logic/editor/consts.rs:53,2192-2263,5124+). No raw text field renders for those fields.",
       "fix": "No source change needed at f11557ea: the content picker and sound picker in the logic statement editor are already list pickers (content_picker maps ubind/playsound/status/weather/setprop/sensor/setmarker/ulocate, picker_button renders the pencil and open_picker dispatches to icon grids or the sound browser). Added a regression test pinning the mapping and discriminator gates so the fields cannot silently regress to raw text.",
       "evidence": [
-        "client/rust/mind-gdext/src/ui/dialogs/batch_j.rs:102-124 (content_picker table), 2192-2263 (picker_button/open_picker), 5124-5250 (open_sound_picker)",
+        "client/rust/mind-gdext/src/ui/dialogs/logic/editor/consts.rs:53 (content_picker table), 2192-2263 (picker_button/open_picker), 5124-5250 (open_sound_picker)",
         "cargo test -p mind-gdext --lib ui::dialogs::batch_j::tests -> 1 passed (content_and_sound_fields_have_list_pickers)"
       ],
       "notes": [
@@ -30623,7 +30623,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib batch_campaign2::tests::schematic"
+              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::schematics::files::tests::schematic"
             }
           },
           {
@@ -30643,7 +30643,7 @@
       "fix": "batch_campaign2.rs ports the missing SchematicsDialog pieces. (1) Tag editor (Java showAllTags, 488-615): @schematic.edittags overlay with per-tag move up/down (tags.swap), schematic.tagged count whose label selects the tag filter, rename (@schematic.renametag with @schematic.tagexists duplicate check, rewriting every schematic label + selectedTags), delete (@schematic.tagdelconfirm, strips the label from every .msch), plus new text tag (@schematic.addtag) and icon tag (@schematic.icontag) creators. The global list still persists to settings `schematic-tags` (schematics_save_tags). (2) Per-schematic tags (Java buildTags, 617-698): the edit view owns a chip row (label + remove X + add button); the add panel lists the global tags the schematic lacks and can also create text/icon tags and assign them. Per-schematic labels persist in the .msch labels array (Java s.save() -> Schematics.saveChanges), so the read model + filter see them after a rebuild. (3) Icon tags: Vars.accessibleIcons (31 fontello glyphs via kit::icons) + content icons from icons.properties (MindAssets.icon_names/unicode_str/icon_texture), each stored as the single PUA char Java stores; existing tags are skipped and icon tags render as an atlas texture / icon-font glyph in the filter row, chips and panels. (4) Edit view (Java showEdit, 329-365): @schematic.edit overlay with the tag chips, @name field (400x55), @editor.description TextEdit (400x140), @ok disabled on an empty name and @cancel; OK writes tags.name + tags.description into the .msch (Schematic.save) and Enter in the name field submits. The description shows in SchematicInfoDialog because schematic_views reads tags.description. (5) .msch file I/O: showImport (@editor.import: @load.clipboard with the Java bXNjaAB gate via readBase64, @import.file through a runtime FileDialog *.msch multi-select) and showExport (@editor.export: @copy.clipboard via writeBase64, @export.file save dialog with a sanitized default name); imports go through Schematics.findFile naming + Schematics.add (steam id stripped), then @schematic.saved, new labels join the global list and the info dialog opens. Delete removes the .msch; renaming moved into the edit view. Mod schematics are read-only. Persistence backend: MindCampaign has no schematic mutators, so the dialog rewrites the .msch with mind_core::game::schematics::{read,write} + MindSimHost.content_registry; campaign_call(delete_schematic/export_schematic) is still attempted first so a future facade takes over.",
       "evidence": [
         "cargo check -p mind-gdext -> exit 0 (no warnings from batch_campaign2.rs)",
-        "cargo test -p mind-gdext --lib batch_campaign2::tests::schematic -> 8 passed, 0 failed (free_path sanitize/suffix, label add/remove/replace, tag swap bounds, available-tags order, icon-tag PUA detection, clipboard bXNjaAB gate, empty-name gate, schematic.tagged count)",
+        "cargo test -p mind-gdext --lib ui::dialogs::schematics::files::tests::schematic -> 8 passed, 0 failed (free_path sanitize/suffix, label add/remove/replace, tag swap bounds, available-tags order, icon-tag PUA detection, clipboard bXNjaAB gate, empty-name gate, schematic.tagged count)",
         "dialog sweep: tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: ok schematics: button row exists / shows / hides (fade completes) / reshows; failed=0",
         "headless boot: tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0",
         "rustfmt --edition 2024 --check client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs -> clean",
@@ -31271,7 +31271,7 @@
       "claimed_by": "hx-mod4",
       "claimed_at": "2026-11-07T00:04:43Z",
       "severity": "P2",
-      "gap": "cargo test -p mind-gdext --lib batch_f at HEAD 6d891f27 (after the PAR-0541 audio fix) still FAILS 3 tests: ui::dialogs::batch_f::tests::processor_markup_matches_java (batch_f.rs:4558), count_fields_counts_leaves (:4624) and schematics_fall_back_to_the_first_row (:4632). All construct VarDictionary/VarArray in a plain cargo test, so godot-ffi panics 'Godot engine not available' (godot-ffi-0.5.5/src/lib.rs:625). The audio test was fixed engine-free in PAR-0541; these three need the same treatment (pure assertions or an engine-only harness).",
+      "gap": "cargo test -p mind-gdext --lib batch_f at HEAD 6d891f27 (after the PAR-0541 audio fix) still FAILS 3 tests: ui::dialogs::editor::map_processors::tests::processor_markup_matches_java (editor/util.rs:1143), count_fields_counts_leaves (:4624) and schematics_fall_back_to_the_first_row (:4632). All construct VarDictionary/VarArray in a plain cargo test, so godot-ffi panics 'Godot engine not available' (godot-ffi-0.5.5/src/lib.rs:625). The audio test was fixed engine-free in PAR-0541; these three need the same treatment (pure assertions or an engine-only harness).",
       "source": "cargo test -p mind-gdext --lib batch_f",
       "evidence": [
         "cargo test -p mind-gdext --lib batch_f -> 9 passed; 0 failed",
@@ -31312,7 +31312,7 @@
       "claimed_by": "hx-mod4",
       "claimed_at": "2026-11-07T00:04:43Z",
       "severity": "P2",
-      "gap": "PAR-0366 ported Ability.draw for ArmorPlate/UnitSpawn/MoveLightning (v146), but the mod content loader never produces those kinds: resolve_ability_kind (mind-core/src/mods/json/mod.rs:4102) lists neither ArmorPlateAbility, MoveLightningAbility nor UnitSpawnAbility; parse_ability (mod.rs:2071) explicitly warns+skips ArmorPlateAbility, and MoveLightning/UnitSpawn would raise 'unknown ability'. parse_ability_fields (mod.rs:2084) also reads none of healthMultiplier/spawnTime/spawnX/spawnY/chance/length/minSpeed/maxSpeed/alternate/heatRegion/bullet, so even after mapping the specs would be defaults. Vanilla omura UnitSpawnAbility was declared in PAR-0366 (standard.rs); mod workflows (JSON mods/patch data) remain unable to declare any of the three.",
+      "gap": "PAR-0366 ported Ability.draw for ArmorPlate/UnitSpawn/MoveLightning (v146), but the mod content loader never produces those kinds: resolve_ability_kind (mind-core/src/mods/json/mod.rs:4102) lists neither ArmorPlateAbility, MoveLightningAbility nor UnitSpawnAbility; parse_ability (spine/command_dispatch.rs:83) explicitly warns+skips ArmorPlateAbility, and MoveLightning/UnitSpawn would raise 'unknown ability'. parse_ability_fields (spine/command_dispatch.rs:96) also reads none of healthMultiplier/spawnTime/spawnX/spawnY/chance/length/minSpeed/maxSpeed/alternate/heatRegion/bullet, so even after mapping the specs would be defaults. Vanilla omura UnitSpawnAbility was declared in PAR-0366 (standard.rs); mod workflows (JSON mods/patch data) remain unable to declare any of the three.",
       "source": "PAR-0366 residual; mind-core/src/mods/json/mod.rs",
       "evidence": [
         "cargo test -p mind-core --lib mods -> 167 passed; 0 failed",
@@ -31945,7 +31945,7 @@
       "source": "PAR-0296 note; docs/L06-sim-campaign-residuals_summary.md T7",
       "fix": "pump_accelerator_launch now drives AcceleratorBuild.beginLaunch/updateLaunch from the shared LaunchSequence (charge 220 / switch 334 / total 340): the charge tick spawns the 20-bolt burst as Fx.lightning polylines (mind_core::render::accelerator::launch_bolts + combat::lightning::view_polyline, the unobstructed Lightning.create walk) and schedules the 13 coreLandDust rings at charge+i*2 (launch_sequence.dust_ring/dust_rays; each ray snaps to its tile corner and is tinted with the floor mapColor * (1.7 + range(0.15)) via MindFx.spawn_view_effect); updateLaunch rolls its per-tick bolt from LaunchSequence::lightning_chance; beginLaunch white cover is wired through MindUiRoot.fade_in_node().start_white(30/60) at total-30. Tests: campaign timeline (13 rings, 155 outer rays, chance 0.46), 20 bolts with 2-12-point polylines, charge-only lightning chance, dust ring geometry/chances, view_polyline determinism. Residual visual legs: the sim-damage branches (Lightning.create needs a CombatCtx; a MindSimHost::spawn_lightning seam is required), the drawLaunch ascending-core sprite/thrusters and the clouds overlay (render/accelerator.rs has the cutscene phase but no display-scale/cloudColor data; ui/landing.rs, outside this packet, holds the reusable CoreBlock drawLanding template).",
       "evidence": [
-        "cargo test -p mind-gdext --lib campaign::tests (16 passed)",
+        "cargo test -p mind-gdext --lib campaign (16 passed)",
         "cargo test -p mind-core --lib accelerator (17 passed)",
         "cargo test -p mind-core --lib lightning (22 passed, incl. view_polyline)",
         "cargo check -p mind-gdext clean",
@@ -31956,7 +31956,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "cargo test -p mind-gdext --lib campaign::tests"
+              "cmd": "cargo test -p mind-gdext --lib campaign"
             }
           },
           {
