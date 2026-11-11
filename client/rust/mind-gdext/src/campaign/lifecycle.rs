@@ -96,12 +96,10 @@ impl MindCampaign {
         // T1: `Sector.isBeingPlayed` (`Sector.java:148-151`) is false once the
         // game state leaves `isGame()`; clear it on the live campaign so the
         // sector produces offline from the next turn on.
-        if let Some((planet, sector_id)) = self.session.sector {
-            self.with_campaign_mut(|campaign, _settings| {
-                if let Some(sector) = campaign.sector_mut(planet, sector_id) {
-                    sector.being_played = false;
-                }
-            });
+        // `Campaign::clear_being_played` (H01): every launch clears the whole
+        // grid, so the played sector is the only one that can carry the flag.
+        if self.session.sector.is_some() {
+            self.with_campaign_mut(|campaign, _settings| campaign.clear_being_played());
         }
         // `StateChangeEvent(menu)`: clears current/playtime (`logic.reset`).
         self.saves.on_state_change(State::Menu);
@@ -372,64 +370,56 @@ impl MindCampaign {
         let Some((planet, sector_id)) = self.session.sector else {
             return;
         };
-        let Some(planet_name) = registry
-            .and_then(|registry| registry.planet(planet))
-            .map(|record| record.name.clone())
-        else {
+        let Some(registry) = registry else {
             return;
         };
-        let wave = self.session.wave;
-        let rules = self.session.rules.clone();
-        // `SectorInfo.prepare(sector)` (`SaveVersion.writeMeta`): the live core
-        // snapshot lands in the record before it is written (PAR-0082).
+        let Some(planet_name) = registry.planet(planet).map(|record| record.name.clone()) else {
+            return;
+        };
         let default_team = self.session.rules.default_team;
         let snapshot = self
             .host()
             .and_then(|host| host.bind().campaign_core_snapshot(default_team));
-        // The live runtime owns the authoritative record (the campaign tick
-        // folds the core/production deltas into it); the facade clone only
-        // mirrors on events, so read the runtime's copy when the caller holds
-        // it (or the host does).
-        let source = match &runtime {
-            Some(live) => live
-                .campaign
-                .sector(planet, sector_id)
-                .map(|sector| sector.info.info.clone()),
-            None => self.runtime_or_facade_record(planet, sector_id),
+        // `play::live_sector_record` (H02) is the record half: prepare from the
+        // live core snapshot (PAR-0082) then copy the wave/rules fields. The
+        // live runtime owns the authoritative record (the campaign tick folds
+        // the core/production deltas into it); the facade clone only mirrors on
+        // events, so read the runtime's copy when the caller holds it (or the
+        // host does), else fall back to the facade copy.
+        let record = match runtime.as_deref_mut() {
+            Some(live) => {
+                play::live_sector_record(&self.session, &live.campaign, registry, snapshot.as_ref())
+            }
+            None => {
+                let live = self
+                    .read_live_campaign(|campaign| {
+                        play::live_sector_record(
+                            &self.session,
+                            campaign,
+                            registry,
+                            snapshot.as_ref(),
+                        )
+                    })
+                    .flatten();
+                live.or_else(|| {
+                    play::live_sector_record(
+                        &self.session,
+                        self.campaign.as_ref()?,
+                        registry,
+                        snapshot.as_ref(),
+                    )
+                })
+            }
         };
-        let Some(mut record) = source else {
+        let Some(record) = record else {
             return;
         };
-        if let Some(snapshot) = snapshot {
-            // `SectorInfo.prepare` `lastPresetName` (`SectorInfo.java:226-228`).
-            let preset = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(planet, sector_id))
-                .and_then(|sector| sector.preset);
-            let preset_name = preset.and_then(|preset| {
-                registry
-                    .and_then(|registry| registry.sector(preset))
-                    .map(|def| def.name.clone())
-            });
-            let mut prepared = mind_core::game::sector::SectorInfoState {
-                info: record,
-                ..Default::default()
-            };
-            prepared.prepare(&snapshot, true, preset_name.as_deref());
-            record = prepared.info;
-        }
-        record.wave = wave;
-        record.waves = rules.waves;
-        record.wave_spacing = rules.wave_spacing;
-        record.win_wave = rules.win_wave;
-        record.attack = rules.attack_mode;
         // Java has one object graph (`Vars.universe`): the prepared record is
         // THE live record. Without writing it back, the next runtime->facade
         // mirror overwrites the facade with the unprepared copy and the
         // lost-sector replay's `sectorDataMatches` (`SectorInfo.java:98-103`)
         // fails on an in-process re-attack (H04 V1).
-        if let Some(live) = &mut runtime
+        if let Some(live) = runtime
             && let Some(sector) = live.campaign.sector_mut(planet, sector_id)
         {
             sector.info.info = record.clone();
@@ -449,38 +439,16 @@ impl MindCampaign {
         self.flush_settings("sector record flush failed");
     }
 
-    /// The live runtime's sector record when a host is attached, else the
-    /// facade copy's record.
-    fn runtime_or_facade_record(
-        &self,
-        planet: mind_core::content::PlanetId,
-        sector_id: u16,
-    ) -> Option<mind_core::io::json::rules::SectorInfo> {
-        let facade_record = || {
-            self.campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(planet, sector_id))
-                .map(|sector| sector.info.info.clone())
-        };
-        self.read_live_campaign(|campaign| {
-            campaign
-                .sector(planet, sector_id)
-                .map(|sector| sector.info.info.clone())
-        })
-        .flatten()
-        .or_else(facade_record)
-    }
-
     /// Shared `SettingsMenuDialog` clear-campaign-saves body (`only` scopes to
     /// one planet; `None` covers every planet).
     fn clear_campaign_saves_for(&mut self, only: Option<PlanetId>) -> bool {
         let Some(registry) = self.registry.take() else {
             return false;
         };
-        // T1: read the planet list from the mirrored (live) campaign; the
+        // T1: count the planet list on the mirrored (live) campaign; the
         // clearing runs on the live campaign through `with_campaign_mut`.
         self.mirror_runtime_campaign();
-        let planets: Vec<(PlanetId, String)> = self
+        let planets = self
             .campaign
             .as_ref()
             .map(|campaign| {
@@ -488,33 +456,27 @@ impl MindCampaign {
                     .planets
                     .values()
                     .filter(|planet| only.is_none_or(|target| target == planet.id))
-                    .map(|planet| (planet.id, planet.name.clone()))
-                    .collect()
+                    .count()
             })
-            .unwrap_or_default();
-        if planets.is_empty() {
+            .unwrap_or(0);
+        if planets == 0 {
             self.registry = Some(registry);
             return false;
         }
         let paths = self.paths.clone();
-        let Some(()) = self.with_campaign_mut(|campaign, settings| {
-            for (id, name) in &planets {
-                campaign.clear_stats(*id);
-                let Some(planet) = campaign.planet_mut(*id) else {
-                    continue;
-                };
-                for sector in &mut planet.sectors {
-                    sector.save = None;
-                    sector.being_played = false;
-                    sector.clear_info(settings, name);
-                    let file = paths.sector_save(name, sector.id as u32);
-                    delete_save_and_backup(&file);
-                }
-            }
-        }) else {
+        // `Campaign::clear_saves` (H01): the in-memory half (stats + every
+        // sector's save/beingPlayed/record) and the `[file, backup]` list in
+        // facade order; the filesystem deletion stays here, errors ignored like
+        // `Slot.delete`.
+        let Some(files) = self
+            .with_campaign_mut(|campaign, settings| campaign.clear_saves(settings, &paths, only))
+        else {
             self.registry = Some(registry);
             return false;
         };
+        for file in &files {
+            let _ = NativeFs.delete(file);
+        }
 
         // Re-list saves (a slot may have been written this session) and drop
         // the matching sector slots.
@@ -527,7 +489,7 @@ impl MindCampaign {
         self.registry = Some(registry);
         self.push_campaign_to_runtime();
         self.persist();
-        log::info!("cleared campaign saves for {} planet(s)", planets.len());
+        log::info!("cleared campaign saves for {planets} planet(s)");
         true
     }
 }

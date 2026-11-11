@@ -109,45 +109,9 @@ impl MindCampaign {
 
         let grid = PlanetGrid::create(def.sector_tiles as usize);
         let outline = OUTLINE_RAD * def.radius;
-
-        let tile_points: Vec<[f32; 3]> = grid.tiles.iter().map(|tile| tile.v).collect();
-        let tiles = vec3_array(&tile_points);
-        let corner_points: Vec<[f32; 3]> = grid.corners.iter().map(|corner| corner.v).collect();
-        let corners = vec3_array(&corner_points);
-        let mut tile_corners = Array::<PackedInt32Array>::new();
-        for tile in &grid.tiles {
-            let mut ids = PackedInt32Array::new();
-            for corner in &tile.corners {
-                ids.push(*corner as i32);
-            }
-            tile_corners.push(&ids);
-        }
-
-        let line_mesh = build_planet_grid(&grid, u32::MAX, outline);
-        let lines = vec3_array(&line_mesh.vertices);
-
-        let mut presets = VarDictionary::new();
-        let path = format!(
-            "{}/planets/{name}.json",
-            crate::assets::loader::resolve_assets_dir()
-        );
-        if FileAccess::file_exists(&path) {
-            let text = FileAccess::get_file_as_string(&path).to_string();
-            match serde_json::from_str::<serde_json::Value>(&mind_core::io::json::quote_bare_keys(
-                &text,
-            )) {
-                Ok(value) => {
-                    if let Some(entries) = value.get("presets").and_then(|v| v.as_object()) {
-                        for (preset, index) in entries {
-                            if let Some(index) = index.as_u64() {
-                                presets.set(preset.as_str(), index as i64);
-                            }
-                        }
-                    }
-                }
-                Err(error) => log::warn!("[campaign] planet data {path}: {error}"),
-            }
-        }
+        // The render-plane arrays + the preset -> sector-index remap.
+        let (tiles, corners, tile_corners, lines) = grid_arrays(&grid, outline);
+        let presets = load_preset_remap(&name);
 
         let icon = def.icon_color;
         out.set("name", name);
@@ -186,48 +150,8 @@ impl MindCampaign {
         atmos.set("rad_in", def.atmosphere_rad_in);
         atmos.set("rad_out", def.atmosphere_rad_out);
         out.set("atmosphere", &atmos);
-        // `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): every
-        // visible planet with a parent draws a `lineLoop` of `radius * 10`
-        // points around its parent's position at `orbitRadius`, colour
-        // `Pal.gray` with alpha = `params.uiAlpha`, skipped when
-        // `!planet.drawOrbit`. The port's view frame keeps the current planet
-        // at the origin in its mesh frame, so each centre is
-        // `(parent.position - planet.position).rotate(Y, getRotation())`.
-        let planets = registry.planets();
-        let orbit = mind_core::render::g3d::orbit::orbit_radii(planets);
-        let seconds = self.universe_secondsf();
-        let system = mind_core::render::g3d::orbit::solar_system(planets, def.id.index());
-        let mut orbits = Array::<VarDictionary>::new();
-        for (index, body) in planets.iter().enumerate() {
-            let Some(parent) = body.parent else {
-                continue;
-            };
-            if !body.visible || !body.draw_orbit {
-                continue;
-            }
-            if mind_core::render::g3d::orbit::solar_system(planets, index) != system {
-                continue;
-            }
-            let radius = orbit.get(index).copied().unwrap_or(0.0);
-            if radius <= 0.0 {
-                continue;
-            }
-            // In the viewed planet's mesh frame (the frame the port renders the
-            // globe and places the camera in), not raw world space: Java's
-            // planet + camera are rotated by `getRotation()` while the orbit
-            // stays in world space (L03 T2, PAR-0420).
-            let center = mind_core::render::g3d::orbit::orbit_center_in_planet_frame(
-                planets,
-                &orbit,
-                parent.index(),
-                def.id.index(),
-                seconds,
-            );
-            let mut row = VarDictionary::new();
-            row.set("radius", radius);
-            row.set("center", Vector3::new(center[0], center[1], center[2]));
-            orbits.push(&row);
-        }
+        // `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`).
+        let orbits = orbit_rows(registry.planets(), def.id, self.universe_secondsf());
         out.set("orbits", &orbits);
         out.set("tiles", &tiles);
         out.set("corners", &corners);
@@ -411,6 +335,106 @@ fn rgba8(packed: u32) -> Color {
         (packed >> 8) as u8,
         packed as u8,
     )
+}
+
+/// The globe's render-plane arrays: tile centres, corners, per-tile corner ids
+/// and the grid-line mesh (`MeshBuilder.buildPlanetGrid` at `outlineRad *
+/// radius`).
+fn grid_arrays(
+    grid: &PlanetGrid,
+    outline: f32,
+) -> (
+    PackedVector3Array,
+    PackedVector3Array,
+    Array<PackedInt32Array>,
+    PackedVector3Array,
+) {
+    let tile_points: Vec<[f32; 3]> = grid.tiles.iter().map(|tile| tile.v).collect();
+    let tiles = vec3_array(&tile_points);
+    let corner_points: Vec<[f32; 3]> = grid.corners.iter().map(|corner| corner.v).collect();
+    let corners = vec3_array(&corner_points);
+    let mut tile_corners = Array::<PackedInt32Array>::new();
+    for tile in &grid.tiles {
+        let mut ids = PackedInt32Array::new();
+        for corner in &tile.corners {
+            ids.push(*corner as i32);
+        }
+        tile_corners.push(&ids);
+    }
+    let line_mesh = build_planet_grid(grid, u32::MAX, outline);
+    let lines = vec3_array(&line_mesh.vertices);
+    (tiles, corners, tile_corners, lines)
+}
+
+/// `assets/planets/<name>.json`'s `presets` map: the preset -> grid-index remap
+/// the planet mesh and the sector dialog read (an unreadable/missing file
+/// leaves the dictionary empty; a parse error logs the file path).
+fn load_preset_remap(name: &str) -> VarDictionary {
+    let mut presets = VarDictionary::new();
+    let path = format!(
+        "{}/planets/{name}.json",
+        crate::assets::loader::resolve_assets_dir()
+    );
+    if FileAccess::file_exists(&path) {
+        let text = FileAccess::get_file_as_string(&path).to_string();
+        match serde_json::from_str::<serde_json::Value>(&mind_core::io::json::quote_bare_keys(
+            &text,
+        )) {
+            Ok(value) => {
+                if let Some(entries) = value.get("presets").and_then(|v| v.as_object()) {
+                    for (preset, index) in entries {
+                        if let Some(index) = index.as_u64() {
+                            presets.set(preset.as_str(), index as i64);
+                        }
+                    }
+                }
+            }
+            Err(error) => log::warn!("[campaign] planet data {path}: {error}"),
+        }
+    }
+    presets
+}
+
+/// `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): every visible
+/// planet with a parent draws a `lineLoop` around its parent's position at
+/// `orbitRadius` (`Pal.gray`, alpha `params.uiAlpha`), skipped when
+/// `!planet.drawOrbit` or the body belongs to another solar system. In the
+/// viewed planet's mesh frame (the frame the port renders the globe and places
+/// the camera in), each centre is
+/// `(parent.position - planet.position).rotate(Y, getRotation())` — Java's
+/// planet + camera are rotated by `getRotation()` while the orbit stays in
+/// world space (L03 T2, PAR-0420).
+fn orbit_rows(planets: &[PlanetDef], viewed: PlanetId, seconds: f32) -> Array<VarDictionary> {
+    let orbit = mind_core::render::g3d::orbit::orbit_radii(planets);
+    let system = mind_core::render::g3d::orbit::solar_system(planets, viewed.index());
+    let mut orbits = Array::<VarDictionary>::new();
+    for (index, body) in planets.iter().enumerate() {
+        let Some(parent) = body.parent else {
+            continue;
+        };
+        if !body.visible || !body.draw_orbit {
+            continue;
+        }
+        if mind_core::render::g3d::orbit::solar_system(planets, index) != system {
+            continue;
+        }
+        let radius = orbit.get(index).copied().unwrap_or(0.0);
+        if radius <= 0.0 {
+            continue;
+        }
+        let center = mind_core::render::g3d::orbit::orbit_center_in_planet_frame(
+            planets,
+            &orbit,
+            parent.index(),
+            viewed.index(),
+            seconds,
+        );
+        let mut row = VarDictionary::new();
+        row.set("radius", radius);
+        row.set("center", Vector3::new(center[0], center[1], center[2]));
+        orbits.push(&row);
+    }
+    orbits
 }
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.

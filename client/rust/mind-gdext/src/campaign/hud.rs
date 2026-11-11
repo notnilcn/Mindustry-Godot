@@ -75,12 +75,13 @@ impl MindCampaign {
             &(self.session.wave_core_count() as i64).to_variant(),
         );
         if let Some((planet, sector)) = self.session.sector {
+            // `Campaign::planet_name` (H01): the campaign's planet name.
             let planet_name = self
                 .campaign
                 .as_ref()
-                .and_then(|campaign| campaign.planet(planet))
-                .map(|planet| planet.name.clone())
-                .unwrap_or_default();
+                .and_then(|campaign| campaign.planet_name(planet))
+                .unwrap_or_default()
+                .to_owned();
             let preset_name = self
                 .campaign
                 .as_ref()

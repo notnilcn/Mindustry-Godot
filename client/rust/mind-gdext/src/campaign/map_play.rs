@@ -211,65 +211,34 @@ impl MindCampaign {
             return false;
         }
         let mut installed = false;
-        if let Some(mut host) = self.host() {
-            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign)
-                // Same shared service (GAPS #68): a custom map match counts
-                // into the one tracker too.
-                .with_service(self.service.clone());
-            if let Some(registry) = self.registry.take() {
-                runtime.set_unlocked_content(collect_unlocked(&registry));
-                host.bind_mut().install_campaign_runtime(runtime);
-                // A custom map has no save to resume: the launch path applies
-                // the loadout (`Logic.play` starting items; `Logic.java:277-285`).
-                let sync = host.bind_mut().sync_campaign_session(&registry, true);
-                self.registry = Some(registry);
-                if sync.is_some() {
-                    let _ = with_host_runtime(self.host(), |runtime| {
-                        self.session = runtime.session.clone();
-                    });
-                    installed = true;
-                }
+        if let Some(mut host) = self.host()
+            && let Some(registry) = self.registry.take()
+        {
+            // `CampaignRuntime::install` (H02): the shared `Vars.service`
+            // tracker (GAPS #68, a custom map match counts into the one tracker
+            // too) plus the registry's unlocked-content cache.
+            let runtime = CampaignRuntime::install(
+                self.session.clone(),
+                campaign,
+                self.service.clone(),
+                &registry,
+            );
+            host.bind_mut().install_campaign_runtime(runtime);
+            // A custom map has no save to resume: the launch path applies
+            // the loadout (`Logic.play` starting items; `Logic.java:277-285`).
+            let sync = host.bind_mut().sync_campaign_session(&registry, true);
+            self.registry = Some(registry);
+            if sync.is_some() {
+                let _ = with_host_runtime(self.host(), |runtime| {
+                    self.session = runtime.session.clone();
+                });
+                installed = true;
             }
         }
         // `Trigger.newGame` (`Control.java:198-222`): spawn the player at the
-        // best core so `player.unit()` is live after the launch.
-        if installed
-            && let Some(mut host) = self.host()
-            && !host.bind_mut().spawn_player_unit()
-        {
-            log::warn!("start_loaded_world: player unit spawn failed");
-        }
-        // The core drops in with the 160-tick landing cutscene unless
-        // `skipcoreanimation` or a PvP rule set (PAR-0131).
-        let new_game = events
-            .iter()
-            .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame));
-        if installed
-            && new_game
-            && !settings_hub::with_settings(|store| store.get_bool("skipcoreanimation", false))
-            && !self.session.rules.pvp
-            // Read the core position in its own statement: a `host.bind()`
-            // temporary in the let-chain would stay borrowed across the camera
-            // call below (re-entrant `bind_mut` panic).
-            && let Some((core_x, core_y, core_block)) = self.host().and_then(|host| {
-                let guard = host.bind();
-                guard
-                    .best_core_position_px()
-                    .map(|(x, y)| (x, y, guard.best_core_block()))
-            })
-            && let Some(mut camera) = wiring::optional(&self.camera)
-        {
-            camera.bind_mut().show_landing(core_x, core_y, core_block);
-            // G07 T7: `Trigger.newGame` audio — `coreLand.at(camera)` +
-            // `Musics.land` (`Control.java:198-222`).
-            if let Some(mut audio) = wiring::optional(&self.audio) {
-                audio.bind_mut().play_landing();
-            }
-        }
-        self.runtime_installed = installed;
-        if let Some(host) = self.host() {
-            self.last_pump_tick = host.bind().get_tick().max(0) as u64;
-        }
+        // best core so `player.unit()` is live after the launch, then the
+        // landing cutscene (shared with `start_sector_with_loadout`).
+        self.finish_launch(installed, &events, "start_loaded_world");
         installed
     }
 

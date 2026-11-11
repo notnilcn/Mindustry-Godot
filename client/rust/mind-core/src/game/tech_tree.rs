@@ -459,6 +459,11 @@ pub struct UnlockOutcome {
     /// Whether an auto-unlock added a block (the palette rebuild signal,
     /// `PlacementFragment.java:92-96`).
     pub any_block: bool,
+    /// Number of produced/liquid/unit refs the first pass unlocked (the
+    /// facade's `"campaign unlock: N produced, M auto-unlocked"` log count).
+    pub produced: usize,
+    /// Number of contents the campaign auto-unlock pass added (same log).
+    pub auto: usize,
 }
 
 /// Applies the queued production/liquid/unit unlocks
@@ -506,7 +511,9 @@ pub fn apply_pending_unlocks(
         }
     }
     if !newly.is_empty() {
+        outcome.produced = newly.len();
         let auto = check_campaign_auto_unlocks(registry, store, campaign);
+        outcome.auto = auto.len();
         for content in auto {
             if content.type_ == ContentType::Block {
                 outcome.any_block = true;

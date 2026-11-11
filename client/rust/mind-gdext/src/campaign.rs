@@ -36,37 +36,36 @@ use mind_core::event;
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::gamemode::Gamemode;
+use mind_core::game::launch::LaunchPayload;
 use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
+#[cfg(test)]
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
-    PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
-    play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
+    self, PlaySession, play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::{CampaignRuntime, UnlockRef, on_captured_sector};
+use mind_core::game::runtime::{CampaignRuntime, apply_resume_record, on_captured_sector};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
 use mind_core::game::schematics::Schematics;
 use mind_core::game::service::{AchievementRow, ServiceTracker};
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
-use mind_core::game::universe::{Campaign, TurnContext, launch_plan};
+use mind_core::game::universe::{Campaign, TurnContext};
 use mind_core::game::waves::WaveMapHooks;
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
+use mind_core::io::SaveIo;
 use mind_core::io::fs::{NativeFs, Paths, SAVE_EXTENSION};
 use mind_core::io::json::quote_bare_keys;
-use mind_core::io::json::rules::GameStats;
 use mind_core::io::save::slot::{SaveSlot, list_save_slots as list_slot_files};
 use mind_core::io::settings::{KEY_SAVE_INTERVAL, SettingsStore};
-use mind_core::io::{SaveIo, SaveMeta};
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::ui::content_stats::{Cell, StatCtx, content_stats as compute_content_stats};
-use mind_core::world::modules::ItemModule;
 
 use crate::audio::MindAudio;
 use crate::camera::MindCamera2D;
@@ -336,29 +335,21 @@ impl MindCampaign {
                 if self.saves.had_serpulo_remaps {
                     self.flush_settings("sector remap settings flush failed");
                 }
-                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-                settings_hub::with_settings(|settings| campaign.load_all(settings));
-                // `Saves.load` assigns sector save slots from save **meta**
-                // (`Saves.java:120-186`): a readable slot backs the sector its
-                // rules name, so a copy under another name still resumes
-                // (CG-SAVE-05). `Saves::slots` only holds files whose meta
-                // decoded (main or backup; `SaveIO.isSaveValid`), so an
-                // undecodable file can no longer manufacture a base that the
-                // load path would silently regenerate (CG-SAVE-06).
-                let assignments = self.saves.sector_save_assignments(&registry);
-                let applied =
-                    mind_core::game::saves::apply_sector_saves(&mut campaign, &assignments);
+                // `Campaign::boot` (H01): `from_registry` -> `load_all` ->
+                // `Saves.load`'s save-**meta** sector assignment
+                // (`Saves.java:120-186`, CG-SAVE-05/06) -> base coverage
+                // (`Planet.init`, `Planet.java:469-471`; H05 T1). `Saves::slots`
+                // only holds files whose meta decoded (main or backup;
+                // `SaveIO.isSaveValid`), so an undecodable file can no longer
+                // manufacture a base that the load path would silently
+                // regenerate.
+                let (campaign, applied) = settings_hub::with_settings(|settings| {
+                    Campaign::boot(&registry, settings, &self.saves)
+                });
                 log::info!(
                     "sector saves assigned from meta: {applied} of {} readable slot(s)",
                     self.saves.slots.len()
                 );
-                // `Planet.init` (`Planet.java:469-471`) recomputes base coverage
-                // after `sector.loadInfo`; run it once more now that the stored
-                // infos and save files are on the sectors, so boot threat and
-                // `hasEnemyBase` match Java (H05 T1).
-                for planet in campaign.planets.values_mut() {
-                    planet.update_base_coverage_from_neighbors();
-                }
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;
@@ -393,16 +384,4 @@ impl MindCampaign {
     /// the palette). Never emitted while a host bind is held.
     #[signal]
     fn block_unlocked();
-}
-
-/// Unlocked content names of the registry (map objective `Research`/`Produce`).
-fn collect_unlocked(registry: &ContentRegistry) -> Vec<String> {
-    registry
-        .tech()
-        .nodes
-        .iter()
-        .filter_map(|node| node.content)
-        .filter(|content| tech_tree::content_unlocked(registry, *content))
-        .filter_map(|content| tech_tree::content_name(registry, content))
-        .collect()
 }
