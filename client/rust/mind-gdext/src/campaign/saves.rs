@@ -87,10 +87,12 @@ impl MindCampaign {
         if let Ok(bytes) = NativeFs.read(std::path::Path::new(native.to_string().as_str()))
             && let Ok(meta) = SaveIo::get_meta_bytes(&bytes)
         {
-            apply_loaded_meta(&mut self.session, &meta);
+            // `PlaySession::apply_save_meta` (H02): the saved rules/wave/timer/
+            // stats replace the live session's.
+            self.session.apply_save_meta(&meta);
             self.saves.total_playtime = meta.time_played;
             let _ = with_host_runtime(self.host(), |runtime| {
-                apply_loaded_meta(&mut runtime.session, &meta);
+                runtime.session.apply_save_meta(&meta);
             });
         } else {
             log::warn!("load_slot: `{path}` meta unavailable; session rules not applied");
@@ -452,33 +454,6 @@ impl MindCampaign {
             .into_iter()
             .find(|slot| slot.index() == stem)
     }
-}
-
-/// `SaveSlot.load` meta half (`Saves.java:314-328`): the saved rules/wave,
-/// wave timer and stats replace the live session's, and the loaded match is
-/// playing (`readMeta`/`readRules`).
-fn apply_loaded_meta(session: &mut PlaySession, meta: &SaveMeta) {
-    if let Ok(rules) = serde_json::from_str::<Rules>(&quote_bare_keys(&meta.rules_json)) {
-        session.rules = rules;
-    } else {
-        log::warn!("load: rules JSON did not parse; session rules kept");
-    }
-    session.wave = meta.wave;
-    if let Some(wavetime) = meta
-        .tags
-        .get("wavetime")
-        .and_then(|value| value.parse::<f32>().ok())
-    {
-        session.wavetime = wavetime;
-    }
-    if let Some(stats) = meta
-        .tags
-        .get("stats")
-        .and_then(|value| serde_json::from_str::<GameStats>(value).ok())
-    {
-        session.stats = stats;
-    }
-    session.phase = State::Playing;
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).

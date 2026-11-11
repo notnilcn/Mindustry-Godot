@@ -212,12 +212,16 @@ impl MindCampaign {
         }
         let mut installed = false;
         if let Some(mut host) = self.host() {
-            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign)
-                // Same shared service (GAPS #68): a custom map match counts
-                // into the one tracker too.
-                .with_service(self.service.clone());
             if let Some(registry) = self.registry.take() {
-                runtime.set_unlocked_content(tech_tree::unlocked_content_names(&registry));
+                // `CampaignRuntime::install` (H02): the shared `Vars.service`
+                // tracker (GAPS #68, a custom map match counts into the one
+                // tracker too) plus the registry's unlocked-content cache.
+                let runtime = CampaignRuntime::install(
+                    self.session.clone(),
+                    campaign,
+                    self.service.clone(),
+                    &registry,
+                );
                 host.bind_mut().install_campaign_runtime(runtime);
                 // A custom map has no save to resume: the launch path applies
                 // the loadout (`Logic.play` starting items; `Logic.java:277-285`).

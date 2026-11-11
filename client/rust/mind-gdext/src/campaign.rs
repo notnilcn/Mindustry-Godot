@@ -40,13 +40,13 @@ use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
 #[cfg(test)]
 use mind_core::game::planet::EmptyNeighborhood;
+use mind_core::game::launch::LaunchPayload;
 use mind_core::game::play::{
-    self, PlaySession, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
-    play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
+    self, PlaySession, play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::{CampaignRuntime, on_captured_sector};
+use mind_core::game::runtime::{CampaignRuntime, apply_resume_record, on_captured_sector};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -59,10 +59,9 @@ use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths, SAVE_EXTENSION};
 use mind_core::io::json::quote_bare_keys;
-use mind_core::io::json::rules::GameStats;
 use mind_core::io::save::slot::{SaveSlot, list_save_slots as list_slot_files};
 use mind_core::io::settings::{KEY_SAVE_INTERVAL, SettingsStore};
-use mind_core::io::{SaveIo, SaveMeta};
+use mind_core::io::SaveIo;
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;

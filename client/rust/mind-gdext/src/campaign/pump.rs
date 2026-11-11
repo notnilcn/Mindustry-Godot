@@ -62,30 +62,36 @@ impl MindCampaign {
         let Some(registry) = self.registry.take() else {
             return false;
         };
-        // `ctx` reads the live session (runtime copy while a sector runs).
-        let ctx = with_host_runtime(self.host(), |runtime| TurnContext {
-            current_planet: runtime.session.sector.map(|(planet, _)| planet),
-            current_sector: runtime.session.sector,
-            playing_rules: Some((
-                runtime.session.rules.waves,
-                runtime.session.rules.attack_mode,
-            )),
-            current_wave: runtime.session.wave,
-        })
-        .unwrap_or_default();
-        let Some(report) = self.with_campaign_mut(|campaign, settings| {
-            let turn = campaign.universe.turn;
-            campaign.run_turn(
-                &registry,
-                settings,
-                &ctx,
-                &mut JavaRandom::new(turn as u64 + 1),
-            )
-        }) else {
-            self.registry = Some(registry);
-            return false;
+        // `CampaignRuntime::run_turn_now` (H02): the manual turn path that never
+        // checks `turn_due`; it seeds `JavaRandom::new(turn + 1)` with the live
+        // `TurnContext` and applies the played-sector invasions to its session.
+        let live = with_host_runtime(self.host(), |runtime| {
+            settings_hub::with_settings(|settings| runtime.run_turn_now(&registry, settings))
+        });
+        let report = match live {
+            Some(report) => report,
+            None => {
+                // Menu/harness facade without a live runtime: `with_host_runtime`
+                // yielded no context, so the turn runs with
+                // `TurnContext::default()` (the replaced `unwrap_or_default`).
+                let Some(report) = self.with_campaign_mut(|campaign, settings| {
+                    let turn = campaign.universe.turn;
+                    campaign.run_turn(
+                        &registry,
+                        settings,
+                        &TurnContext::default(),
+                        &mut JavaRandom::new(turn as u64 + 1),
+                    )
+                }) else {
+                    self.registry = Some(registry);
+                    return false;
+                };
+                report
+            }
         };
-        // Played-sector invasions hit the live session rules (T4: `Universe.java:550-555`).
+        // Played-sector invasions hit the live session rules (T4:
+        // `Universe.java:550-555`); `run_turn_now` already applied them, so the
+        // facade only mirrors the resulting rules.
         if report.events.iter().any(|event| {
             matches!(
                 event,
@@ -93,7 +99,6 @@ impl MindCampaign {
             )
         }) {
             let _ = with_host_runtime(self.host(), |runtime| {
-                mind_core::game::runtime::apply_played_invasions(runtime, &report.events);
                 self.session.rules = runtime.session.rules.clone();
             });
         }
@@ -352,39 +357,28 @@ impl MindCampaign {
         }
 
         // Auto campaign turns (`Universe.update` turnCounter).
+        // `CampaignRuntime::run_due_turn` (H02) clears `turn_due`, seeds
+        // `JavaRandom::new(turn + 1)`, runs the turn and applies the
+        // played-sector invasions to the live session (T4).
         if runtime.turn_due {
-            runtime.turn_due = false;
-            let mut turn_events = Vec::new();
-            if let (Some(registry), Some(campaign)) =
-                (self.registry.as_ref(), Some(&mut runtime.campaign))
-            {
-                let turn = campaign.universe.turn;
-                let mut rand = JavaRandom::new(turn as u64 + 1);
-                let ctx = TurnContext {
-                    current_planet: runtime.session.sector.map(|(planet, _)| planet),
-                    current_sector: runtime.session.sector,
-                    playing_rules: Some((
-                        runtime.session.rules.waves,
-                        runtime.session.rules.attack_mode,
-                    )),
-                    current_wave: runtime.session.wave,
-                };
-                let report = settings_hub::with_settings(|settings| {
-                    campaign.run_turn(registry, settings, &ctx, &mut rand)
-                });
+            let report = self.registry.as_ref().and_then(|registry| {
+                settings_hub::with_settings(|settings| runtime.run_due_turn(registry, settings))
+            });
+            if let Some(report) = report {
                 log::info!(
                     "campaign turn {} ({} event(s))",
                     report.turn,
                     report.events.len()
                 );
-                turn_events = report.events;
                 dirty = true;
-            }
-            // Played-sector invasions restart the live waves (T4).
-            mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
-            // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
-            if !turn_events.is_empty() {
-                self.toast_campaign_events(&turn_events);
+                // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+                if !report.events.is_empty() {
+                    self.toast_campaign_events(&report.events);
+                }
+            } else {
+                // No registry (content boot failed / data cleared): the turn is
+                // skipped but the flag still clears, like the replaced block.
+                runtime.turn_due = false;
             }
         }
 
