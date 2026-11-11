@@ -18,12 +18,11 @@ use super::ai_arms::boost::boost_arm;
 use super::ai_arms::builder::builder_arm;
 use super::ai_arms::cargo::cargo_arm;
 use super::ai_arms::ground_flying::ground_flying_arm;
+use super::ai_arms::missile::missile_arm;
 use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_arms::player::player_arm;
 use super::ai_arms::suicide::suicide_arm;
-use super::ai_weapons::{
-    AiWeaponCtx, command_ai_weapon_pass, logic_ai_weapon_pass, update_ai_weapons,
-};
+use super::ai_weapons::{command_ai_weapon_pass, logic_ai_weapon_pass};
 use super::command_queue::pop_live_command_queue;
 use super::deaths::has_core_of_team;
 use super::physics::rebuild_avoidance;
@@ -414,90 +413,7 @@ pub fn unit_update_system(world: &mut World) {
                 face_target(world, &runtime.content, entity, mount_target);
             }
         } else if slot.kind == AiKind::Missile {
-            // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
-            // the shooter's aim, always move forward, die on enemy-building
-            // contact or at the `TimedKill` lifetime.
-            let shooter = world
-                .get::<MissileShooter>(entity)
-                .map(|shooter| shooter.0)
-                .unwrap_or(None);
-            // `AIController.target` snapshot from the shot's aimed entity
-            // (`BulletType.create` `target`; `MissileAI.java:33-36`).
-            let target = world
-                .get::<crate::ai::types::missile::MissileTarget>(entity)
-                .map(|target| target.0)
-                .unwrap_or(None);
-            let mut state = MissileAi {
-                unit: Some(entity),
-                target,
-                shooter,
-            };
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                let _ = update_missile(&mut ctx, entity, &mut state);
-            }
-            if let Some(mut stored) = world.get_mut::<MissileShooter>(entity) {
-                stored.0 = state.shooter;
-            }
-            // `AIController.updateTargeting` -> `updateWeapons`
-            // (AIController.java:114-116, 172-238): a controllable weapon finds
-            // its own target within `weapon.range()`. For the scathe missile the
-            // shoot-on-death explosion is a proximity fuse against ground units
-            // (`findTarget(mountX, mountY, wrange, bullet.collidesAir,
-            // bullet.collidesGround)`).
-            let mount_target = {
-                let def = world
-                    .get::<UnitTypeComp>(entity)
-                    .and_then(|comp| runtime.content.unit(comp.type_id));
-                def.and_then(|def| {
-                    let weapon = def.weapons.first()?;
-                    let range = weapon.range();
-                    let (air, ground) = runtime
-                        .content
-                        .bullet(weapon.bullet.id)
-                        .map(|bullet| (bullet.collides_air, bullet.collides_ground))
-                        .unwrap_or((false, true));
-                    let (x, y) = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y))?;
-                    queries.closest_target(
-                        world,
-                        team,
-                        x,
-                        y,
-                        range,
-                        air,
-                        ground,
-                        true,
-                        def.target_under_blocks,
-                    )
-                })
-            };
-            update_ai_weapons(
-                world,
-                &runtime.content,
-                &queries,
-                entity,
-                team,
-                AiWeaponCtx {
-                    main_target: mount_target,
-                    retarget: true,
-                    flying_find: false,
-                    core_override: None,
-                    should_shoot: true,
-                    ..Default::default()
-                },
-            );
+            missile_arm(world, &mut runtime, &queries, entity, team);
         } else if slot.kind == AiKind::Suicide {
             suicide_arm(world, &mut runtime, &queries, entity, team);
         } else if slot.kind == AiKind::Builder && !builder_falls_back(world, team) {
