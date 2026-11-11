@@ -151,7 +151,11 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         root.bind_mut().add(&description).grow_x().pad_bottom(5.0);
         root.bind_mut().row();
     }
-    sector_stats_value_line(&mut root, "@sectors.time", &format_millis(stats.playtime_ms));
+    sector_stats_value_line(
+        &mut root,
+        "@sectors.time",
+        &format_millis(stats.playtime_ms),
+    );
     if stats.attempts > 0 {
         sector_stats_value_line(&mut root, "@sectors.attempts", &stats.attempts.to_string());
     }
@@ -191,7 +195,12 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
     }
     sector_stats_stat_section(&mut root, "@sectors.production", &stats.production, &[]);
     let export_trailing: Vec<&SectorStatRef> = stats.destination.iter().collect();
-    sector_stats_stat_section(&mut root, "@sectors.export", &stats.export, &export_trailing);
+    sector_stats_stat_section(
+        &mut root,
+        "@sectors.export",
+        &stats.export,
+        &export_trailing,
+    );
     if sector.has_base {
         let import_sources: Vec<&SectorStatRef> = stats.import_sources.iter().collect();
         sector_stats_stat_section(&mut root, "@sectors.import", &stats.import, &import_sources);

@@ -8,16 +8,18 @@
 //! persists across rebuilds (Java `collapsed` field); used items flash accent
 //! (`shine` map keyed by item name).
 
-use godot::builtin::{Side, VarArray, VarDictionary, VariantType};
+use godot::builtin::{Side, VarArray, VarDictionary};
 use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::{GrowDirection, LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
-    Button, HBoxContainer, IPanelContainer, Label, PanelContainer, RichTextLabel, ScrollContainer,
-    StyleBox, StyleBoxTexture, VBoxContainer,
+    Button, HBoxContainer, IPanelContainer, Json, Label, PanelContainer, RichTextLabel,
+    ScrollContainer, StyleBox, StyleBoxTexture, VBoxContainer,
 };
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
+use mind_core::ui::campaign::ResearchItemRow;
+use std::collections::HashSet;
 
 use crate::ui::kit;
 use crate::ui::kit::styles;
@@ -134,8 +136,30 @@ impl MindResearchItemsDisplay {
     /// Rebuilds the rows; `items` is `research_tree_json.items` (item-id order)
     /// and `shine` marks item names whose amount just changed (flash accent ->
     /// white).
+    ///
+    /// # ABI shim
+    ///
+    /// The untyped `#[func]` form is the MCP/test surface; it deserializes into
+    /// the typed rows and renders those.
     #[func]
     pub fn rebuild(&mut self, items: VarArray, shine: VarDictionary) {
+        let text = Json::stringify(&items.to_variant());
+        let rows = serde_json::from_str::<Vec<ResearchItemRow>>(&text.to_string()).unwrap_or_else(
+            |error| {
+                log::warn!("[ui] research items row shape: {error}");
+                Vec::new()
+            },
+        );
+        let shine: HashSet<String> = shine
+            .keys_array()
+            .iter_shared()
+            .map(|value| crate::gdutil::variant::to_text_godot(&value))
+            .collect();
+        self.rebuild_rows(&rows, &shine);
+    }
+
+    /// Rebuilds the rows from the typed item pool (`ResearchTreeView.items`).
+    pub fn rebuild_rows(&mut self, rows: &[ResearchItemRow], shine: &HashSet<String>) {
         let Some(mut list) = self.list.clone() else {
             return;
         };
@@ -143,21 +167,16 @@ impl MindResearchItemsDisplay {
             let mut child = child;
             child.queue_free();
         }
-        for row_variant in items.iter_shared() {
-            let Ok(row_data) = row_variant.try_to::<VarDictionary>() else {
-                continue;
-            };
-            let amount = dict_i64(&row_data, "amount", 0);
-            if amount <= 0 {
+        for row_data in rows {
+            if row_data.amount <= 0 {
                 continue;
             }
-            let item_name = dict_string(&row_data, "item", "");
+            let item_name = row_data.item.clone();
             // code-instantiated: one row per item with a positive pool amount.
             let mut row = HBoxContainer::new_alloc();
             row.add_theme_constant_override("separation", 4);
-            let text = dict_string(&row_data, "text", &amount.to_string());
-            let mut amount_label: Gd<RichTextLabel> = factory::label(&text).upcast();
-            if shine.contains_key(item_name.as_str()) {
+            let mut amount_label: Gd<RichTextLabel> = factory::label(&row_data.text).upcast();
+            if shine.contains(&item_name) {
                 // `Actions.color(Pal.accent -> white, 0.75s, Interp.fade)`.
                 amount_label.set_modulate(styles::ACCENT);
                 let mut tween = amount_label.create_tween();
@@ -173,8 +192,7 @@ impl MindResearchItemsDisplay {
             let mut icon = factory::image(&format!("item-{item_name}-ui"));
             icon.set_custom_minimum_size(Vector2::new(ROW_ICON_SIZE, ROW_ICON_SIZE));
             row.add_child(&icon);
-            let name = dict_string(&row_data, "name", &item_name);
-            let mut name_label: Gd<RichTextLabel> = factory::label(&name).upcast();
+            let mut name_label: Gd<RichTextLabel> = factory::label(&row_data.name).upcast();
             name_label.add_theme_color_override("default_color", NAME_GRAY);
             row.add_child(&name_label);
             list.add_child(&row);
@@ -267,65 +285,5 @@ impl MindResearchItemsDisplay {
         let mut minimum = scroll.get_custom_minimum_size();
         minimum.y = content.min(self.max_height);
         scroll.set_custom_minimum_size(minimum);
-    }
-}
-
-/// `row.get(key, default)` with the given fallback.
-fn dict_string(dict: &VarDictionary, key: &str, fallback: &str) -> String {
-    match dict.get(key) {
-        Some(value) => variant_text(&value),
-        None => fallback.to_string(),
-    }
-}
-
-/// `int(row.get(key, default))`.
-fn dict_i64(dict: &VarDictionary, key: &str, fallback: i64) -> i64 {
-    dict.get(key)
-        .map(|value| variant_i64(&value))
-        .unwrap_or(fallback)
-}
-
-/// GDScript `str(value)`.
-fn variant_text(value: &Variant) -> String {
-    match value.get_type() {
-        VariantType::STRING => value
-            .try_to::<GString>()
-            .map(|text| text.to_string())
-            .unwrap_or_default(),
-        VariantType::STRING_NAME => value
-            .try_to::<StringName>()
-            .map(|text| text.to_string())
-            .unwrap_or_default(),
-        VariantType::INT => value
-            .try_to::<i64>()
-            .map(|number| number.to_string())
-            .unwrap_or_default(),
-        VariantType::FLOAT => value
-            .try_to::<f64>()
-            .map(|number| number.to_string())
-            .unwrap_or_default(),
-        _ => format!("{value}"),
-    }
-}
-
-/// GDScript `int(value)`: JSON numbers (`float`) and numeric strings convert.
-fn variant_i64(value: &Variant) -> i64 {
-    match value.get_type() {
-        VariantType::INT => value.try_to::<i64>().unwrap_or_default(),
-        VariantType::FLOAT => value
-            .try_to::<f64>()
-            .map(|number| number as i64)
-            .unwrap_or_default(),
-        VariantType::BOOL => {
-            if value.try_to::<bool>().unwrap_or(false) {
-                1
-            } else {
-                0
-            }
-        }
-        VariantType::STRING | VariantType::STRING_NAME => {
-            variant_text(value).trim().parse().unwrap_or_default()
-        }
-        _ => 0,
     }
 }

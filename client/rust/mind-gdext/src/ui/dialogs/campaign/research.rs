@@ -5,13 +5,12 @@
 //! Upstream: ui/dialogs/ResearchDialog.java
 
 use super::util::*;
-use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::widgets::research_items_display::MindResearchItemsDisplay;
 use crate::ui::kit::widgets::research_view::MindResearchView;
 use crate::ui::kit::{self, MindLabel, styles};
-use godot::builtin::{Side, VarDictionary, VariantType};
+use godot::builtin::{Side, VarDictionary};
 use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::text_server::AutowrapMode;
 use godot::classes::{
@@ -19,7 +18,9 @@ use godot::classes::{
     StyleBoxTexture, TextureRect, VBoxContainer,
 };
 use godot::prelude::*;
+use mind_core::ui::campaign::{ResearchNodeRow, ResearchTreeView};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// The dialog controllers in this batch.
@@ -47,7 +48,7 @@ struct ResearchState {
     items_display: Option<Gd<MindResearchItemsDisplay>>,
     popup: Option<Gd<PanelContainer>>,
     hovered: i64,
-    tree: VarDictionary,
+    tree: Option<ResearchTreeView>,
     last_root: String,
     deferred: Deferred,
 }
@@ -287,21 +288,27 @@ fn research_update_title_button(state: &Rc<RefCell<ResearchState>>) {
         let mut child = child;
         child.queue_free();
     }
-    let icon_region = row_str(&st.tree, "root_icon");
-    let type_name = row_str(&st.tree, "root_type");
-    if let Some(mut icon) = factory::content_icon(&icon_region, &type_name, RESEARCH_ICON_SIZE) {
+    let Some(tree) = st.tree.as_ref() else {
+        return;
+    };
+    let icon_region = tree.root_icon.as_str();
+    let type_name = tree.root_type.as_str();
+    if let Some(mut icon) = factory::content_icon(icon_region, type_name, RESEARCH_ICON_SIZE) {
         icon.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
         icon.set_mouse_filter(MouseFilter::IGNORE);
         holder.add_child(&icon);
     }
-    rich(&label).set_text(&gs(row_str(&st.tree, "root_title")));
+    rich(&label).set_text(&gs(tree.root_title.as_str()));
 }
 
 /// Java `titleTable.button` click: the `@techtree.select` picker.
 fn research_open_root_selector(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
     let (roots, selected) = {
         let st = state.borrow();
-        (row_arr(&st.tree, "roots"), row_str(&st.tree, "root"))
+        let Some(tree) = st.tree.as_ref() else {
+            return;
+        };
+        (tree.roots.clone(), tree.root.clone())
     };
     if roots.len() <= 1 {
         return;
@@ -329,10 +336,10 @@ fn research_open_root_selector(dialog: &mut MindDialog, state: &Rc<RefCell<Resea
             &callable,
         );
     }
-    let mut context = VarDictionary::new();
-    context.set("roots", &roots.to_variant());
-    context.set("selected", &gs(selected));
-    open_dialog("research_root_select", &context);
+    // `ResearchRootRow` serializes to the same `{name,title,type,icon,selected}`
+    // rows the old context carried.
+    let context = serde_json::json!({ "roots": roots, "selected": selected });
+    open_dialog_json("research_root_select", &context.to_string());
 }
 
 /// `rebuildTree(node)`: switch tree, reset the view.
@@ -353,19 +360,18 @@ fn research_select_root(
         return;
     }
     close_dialog("research_root_select");
-    let tree = dialog.campaign_json("research_tree_json", &[gs(root_name).to_variant()]);
-    if tree.is_empty() {
+    let Some(tree) = campaign_research_tree(dialog, root_name) else {
         return;
-    }
+    };
     let Some(mut view) = view else {
         return;
     };
-    view.bind_mut().set_tree(tree.clone());
+    view.bind_mut().set_tree_view(&tree);
     view.bind_mut().reset_view();
     {
         let mut st = state.borrow_mut();
-        st.last_root = row_opt_str(&tree, "root").unwrap_or_else(|| root_name.to_string());
-        st.tree = tree;
+        st.last_root = tree.root.clone();
+        st.tree = Some(tree);
     }
     research_update_title_button(state);
 }
@@ -376,22 +382,21 @@ fn research_on_node_pressed(
     state: &Rc<RefCell<ResearchState>>,
     index: i64,
 ) {
-    let view = {
+    let (view, tree) = {
         let st = state.borrow();
-        st.view.clone()
+        (st.view.clone(), st.tree.clone())
     };
-    let Some(mut view) = view else {
+    let (Some(mut view), Some(tree)) = (view, tree) else {
         return;
     };
-    let node = view.bind().node_at(index);
-    if node.is_empty() {
+    let Some(node) = node_at_index(&tree, index) else {
         return;
-    }
-    let content = row_str(&node, "content");
+    };
+    let content = node.content.clone();
     if content.is_empty() {
         return;
     }
-    if !row_bool(&node, "locked") || !row_bool(&node, "can_spend") {
+    if !node.locked || !node.can_spend {
         return;
     }
     let Some(mut campaign) = dialog.campaign_node() else {
@@ -408,67 +413,49 @@ fn research_on_node_pressed(
         return;
     }
     // Requirement amounts that changed flash (`ResearchDialog.spend` shine).
-    let mut previous_have = VarDictionary::new();
-    for req_variant in row_arr(&node, "reqs").iter_shared() {
-        let Ok(req) = req_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        previous_have.set(
-            &gs(row_str(&req, "item")),
-            &gs(row_text(&req, "have")).to_variant(),
-        );
+    let mut previous_have: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for req in &node.reqs {
+        previous_have.insert(req.item.clone(), req.have.clone());
     }
-    let was_locked = row_bool_or(&node, "locked", true);
+    let was_locked = node.locked;
     let last_root = {
         let st = state.borrow();
         st.last_root.clone()
     };
     // Lock state and layout positions change after a spend (Java `treeLayout`
     // runs from `unlock`); re-fetch the same tree.
-    let tree = dialog.campaign_json("research_tree_json", &[gs(last_root).to_variant()]);
-    if tree.is_empty() {
+    let Some(tree) = campaign_research_tree(dialog, &last_root) else {
         return;
-    }
-    let mut shine = VarDictionary::new();
+    };
+    let mut shine: HashSet<String> = HashSet::new();
     let mut unlocked_now = false;
-    for node_variant in row_arr(&tree, "nodes").iter_shared() {
-        let Ok(refreshed) = node_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_str(&refreshed, "content") != content {
+    for refreshed in &tree.nodes {
+        if refreshed.content != content {
             continue;
         }
-        unlocked_now = !row_bool_or(&refreshed, "locked", true);
-        for req_variant in row_arr(&refreshed, "reqs").iter_shared() {
-            let Ok(req) = req_variant.try_to::<VarDictionary>() else {
-                continue;
-            };
-            let item_name = row_str(&req, "item");
-            let before = previous_have
-                .get(&gs(item_name.as_str()))
-                .map(|value| to_text_godot(&value))
-                .unwrap_or_default();
-            if previous_have.contains_key(&gs(item_name.as_str()))
-                && before != row_text(&req, "have")
+        unlocked_now = !refreshed.locked;
+        for req in &refreshed.reqs {
+            let item_name = req.item.as_str();
+            if let Some(before) = previous_have.get(item_name)
+                && *before != req.have
             {
-                shine.set(&gs(item_name), &true.to_variant());
+                shine.insert(req.item.clone());
             }
         }
         break;
     }
-    view.bind_mut().set_tree(tree.clone());
+    view.bind_mut().set_tree_view(&tree);
     research_raise_overlays(state);
     {
         let st = state.borrow();
         if let Some(mut items) = st.items_display.clone() {
-            items
-                .bind_mut()
-                .rebuild(row_arr(&tree, "items"), shine.clone());
+            items.bind_mut().rebuild_rows(&tree.items, &shine);
         }
     }
     {
         let mut st = state.borrow_mut();
-        st.tree = tree;
+        st.tree = Some(tree);
     }
     research_update_title_button(state);
     let hovered = {
@@ -484,25 +471,33 @@ fn research_on_node_pressed(
     }
 }
 
+/// The typed node at `index` (`ResearchTreeView.nodes` is depth-first pre-order
+/// and `index` addresses that array).
+fn node_at_index(tree: &ResearchTreeView, index: i64) -> Option<ResearchNodeRow> {
+    if index < 0 {
+        return None;
+    }
+    tree.nodes.get(index as usize).cloned()
+}
+
 /// `ResearchDialog.java:490-501`: hover shows the info table for visible nodes.
 fn research_on_node_hovered(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<ResearchState>>,
     index: i64,
 ) {
-    let view = {
+    let visible = {
         let st = state.borrow();
-        st.view.clone()
+        let Some(tree) = st.tree.as_ref() else {
+            return;
+        };
+        node_at_index(tree, index).is_some_and(|node| node.visible)
     };
-    let Some(view) = view else {
-        return;
-    };
-    let node = view.bind().node_at(index);
-    if node.is_empty() || !row_bool_or(&node, "visible", true) {
+    if !visible {
         return;
     }
     state.borrow_mut().hovered = index;
-    research_rebuild_popup(dialog, state, &VarDictionary::new());
+    research_rebuild_popup(dialog, state, &HashSet::new());
 }
 
 fn research_on_node_exited(
@@ -586,7 +581,7 @@ fn research_free_popup(state: &Rc<RefCell<ResearchState>>) {
 fn research_rebuild_popup(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<ResearchState>>,
-    shine: &VarDictionary,
+    shine: &HashSet<String>,
 ) {
     research_free_popup(state);
     let (hovered, view) = {
@@ -599,12 +594,11 @@ fn research_rebuild_popup(
     let Some(view) = view else {
         return;
     };
-    let node = view.bind().node_at(hovered);
-    if node.is_empty() {
+    let Some(node) = view.bind().node_row(hovered) else {
         return;
-    }
-    let selectable = row_bool(&node, "selectable");
-    let locked = row_bool_or(&node, "locked", true);
+    };
+    let selectable = node.selectable;
+    let locked = node.locked;
     // code-instantiated: hover info table (Java `infoTable`).
     let mut popup = PanelContainer::new_alloc();
     let mut box_ = StyleBoxTexture::new_gd();
@@ -650,7 +644,7 @@ fn research_rebuild_popup(
         // code-instantiated: `Icon.info` button (`ui.content.show`).
         let mut info = factory::glyph_button("info", "i", "flati");
         info.set_custom_minimum_size(Vector2::new(50.0, 0.0));
-        let content = row_str(&node, "content");
+        let content = node.content.clone();
         let callable = Callable::from_fn("research_info", move |_args: &[&Variant]| {
             crate::ui::dialogs::batch_a::open_content_info(&content);
         });
@@ -662,7 +656,7 @@ fn research_rebuild_popup(
     desc.add_theme_constant_override("separation", 2);
     row.add_child(&desc);
     let name_text = if selectable {
-        row_str(&node, "name")
+        node.name.clone()
     } else {
         String::from("???")
     };
@@ -674,14 +668,14 @@ fn research_rebuild_popup(
     if locked {
         if selectable {
             research_build_requirement_rows(&mut desc, &node, shine);
-        } else if !row_arr(&node, "objectives").is_empty() {
+        } else if !node.objectives.is_empty() {
             // code-instantiated: incomplete objective rows (`@complete` block).
             let complete = factory::label(&kit::tm("@complete").to_string());
             desc.add_child(&complete);
-            for objective in row_arr(&node, "objectives").iter_shared() {
+            for objective in &node.objectives {
                 let mut objective_row = HBoxContainer::new_alloc();
                 objective_row.add_theme_constant_override("separation", 3);
-                let objective_label = factory::label(&format!("> {}", to_text_godot(&objective)));
+                let objective_label = factory::label(&format!("> {}", objective));
                 rich(&objective_label).add_theme_color_override("default_color", TEXT_GRAY);
                 objective_row.add_child(&objective_label);
                 let glyph = glyph_control("cancel", 18.0, PAL_REMOVE);
@@ -694,9 +688,9 @@ fn research_rebuild_popup(
         desc.add_child(&completed);
     }
     // `rebuild`: description wrap 270 px when longer than 20 chars.
-    let description = row_str(&node, "description");
-    if selectable && row_bool_or(&node, "inline_description", false) && !description.is_empty() {
-        let description_label = factory::label(&description);
+    let description = node.description.as_str();
+    if selectable && node.inline_description && !description.is_empty() {
+        let description_label = factory::label(description);
         let mut description_rich = rich(&description_label);
         description_rich.add_theme_color_override("default_color", TEXT_GRAY);
         if description.chars().count() > 20 {
@@ -713,23 +707,19 @@ fn research_rebuild_popup(
 /// `ResearchDialog.java:682-736`: progress line + one row per unfinished stack.
 fn research_build_requirement_rows(
     desc: &mut Gd<VBoxContainer>,
-    node: &VarDictionary,
-    shine: &VarDictionary,
+    node: &ResearchNodeRow,
+    shine: &HashSet<String>,
 ) {
-    let progress = row_i64_or(node, "progress", -1);
+    let progress = node.progress;
     if progress >= 0 {
         let text = kit::tm_format("@research.progress", &[progress.to_string().as_str()]);
         let progress_label = factory::label(&text.to_string());
         rich(&progress_label).add_theme_color_override("default_color", TEXT_GRAY);
         desc.add_child(&progress_label);
     }
-    for req_variant in row_arr(node, "reqs").iter_shared() {
-        let Ok(req) = req_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        let item_name = row_str(&req, "item");
-        let has = row_bool_or(&req, "has", false);
-        let target = if has { TEXT_GRAY } else { PAL_REMOVE };
+    for req in &node.reqs {
+        let item_name = req.item.as_str();
+        let target = if req.has { TEXT_GRAY } else { PAL_REMOVE };
         // code-instantiated: one requirement row (`list.image` + labels).
         let mut req_row = HBoxContainer::new_alloc();
         req_row.add_theme_constant_override("separation", 3);
@@ -741,15 +731,12 @@ fn research_build_requirement_rows(
         icon.set_stretch_mode(godot::classes::texture_rect::StretchMode::KEEP_ASPECT_CENTERED);
         icon.set_expand_mode(godot::classes::texture_rect::ExpandMode::IGNORE_SIZE);
         req_row.add_child(&icon);
-        let item_label_text = row_opt_str(&req, "name").unwrap_or_else(|| item_name.clone());
-        let item_label = factory::label(&item_label_text);
+        let item_label = factory::label(&req.name);
         rich(&item_label).add_theme_color_override("default_color", TEXT_GRAY);
         req_row.add_child(&item_label);
-        let have = row_opt_str(&req, "have").unwrap_or_else(|| String::from("0"));
-        let need = row_opt_str(&req, "need").unwrap_or_else(|| String::from("0"));
-        let amount_label = factory::label(&format!(" {have} / {need}"));
+        let amount_label = factory::label(&format!(" {} / {}", req.have, req.need));
         rich(&amount_label).add_theme_color_override("default_color", target);
-        if shine.contains_key(item_name.as_str()) {
+        if shine.contains(item_name) {
             // `Actions.color(Pal.accent -> targetColor, 0.75s)`.
             let mut amount_canvas: Gd<CanvasItem> = amount_label.clone().upcast();
             amount_canvas.set_modulate(styles::ACCENT);
@@ -820,10 +807,9 @@ fn research_install_tick(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchSta
 fn research_shown(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
     // Java `shown`: the planet page's planet, else the played sector's planet.
     let planet = dialog.context_string("planet").to_string();
-    let tree = dialog.campaign_json("research_tree_json", &[gs(planet).to_variant()]);
-    if tree.is_empty() {
+    let Some(tree) = campaign_research_tree(dialog, &planet) else {
         return;
-    }
+    };
     let view = {
         let st = state.borrow();
         st.view.clone()
@@ -831,7 +817,7 @@ fn research_shown(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
     let Some(mut view) = view else {
         return;
     };
-    view.bind_mut().set_tree(tree.clone());
+    view.bind_mut().set_tree_view(&tree);
     research_raise_overlays(state);
     let view_control: Gd<Control> = view.clone().upcast();
     let view_height = view_control.get_size().y;
@@ -839,10 +825,10 @@ fn research_shown(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
         let st = state.borrow();
         if let Some(mut items) = st.items_display.clone() {
             items.bind_mut().max_height = 60.0f32.max(view_height - 120.0);
-            items.bind_mut().rebuild_items(row_arr(&tree, "items"));
+            items.bind_mut().rebuild_rows(&tree.items, &HashSet::new());
         }
     }
-    let root_name = row_str(&tree, "root");
+    let root_name = tree.root.clone();
     let last_root = {
         let st = state.borrow();
         st.last_root.clone()
@@ -852,18 +838,16 @@ fn research_shown(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
         view.bind_mut().reset_view();
         state.borrow_mut().last_root = root_name;
     }
-    {
-        let mut st = state.borrow_mut();
-        st.tree = tree.clone();
-    }
-    research_update_title_button(state);
     // Java evaluates the button's `visible` lambda against `TechTree.roots`
     // (`ResearchDialog.java:108`), not "a tree is loaded": with one selectable
     // tree the button is dead.
-    let selected_locked = row_rows(&tree, "nodes")
-        .first()
-        .is_some_and(|root| row_bool(root, "locked"));
-    let visible = root_select_visible(row_rows(&tree, "roots").len(), selected_locked);
+    let selected_locked = tree.nodes.first().is_some_and(|root| root.locked);
+    let visible = root_select_visible(tree.roots.len(), selected_locked);
+    {
+        let mut st = state.borrow_mut();
+        st.tree = Some(tree);
+    }
+    research_update_title_button(state);
     if let Some(mut button) = state.borrow().title_button.clone() {
         button.set_visible(visible);
     }
@@ -901,14 +885,6 @@ fn research_hidden(dialog: &mut MindDialog) {
     if planet.has_method("refresh_page") {
         planet.call_deferred("refresh_page", &[]);
     }
-}
-
-/// `row.get(key, "")` coerced to a string (GDScript `str(...)`).
-fn row_text(row: &VarDictionary, key: &str) -> String {
-    row.get(key)
-        .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| to_text_godot(&value))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

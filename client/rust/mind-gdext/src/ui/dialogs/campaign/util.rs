@@ -7,7 +7,6 @@
 use crate::MindPreview;
 use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::MindDialog;
-use mind_core::ui::campaign::{CampaignViews, SectorStatsView, SectorView};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, styles};
 use godot::builtin::{Side, VarArray, VarDictionary, VariantType};
@@ -17,6 +16,7 @@ use godot::classes::{
     StyleBoxEmpty, StyleBoxFlat, Texture2D, TextureRect,
 };
 use godot::prelude::*;
+use mind_core::ui::campaign::{CampaignViews, ResearchTreeView, SectorStatsView, SectorView};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -63,6 +63,17 @@ pub(in crate::ui::dialogs) fn campaign_views_of(
 /// [`campaign_views_of`] for the played planet (`campaign_views()`).
 pub(in crate::ui::dialogs) fn campaign_views_live(dialog: &MindDialog) -> Option<CampaignViews> {
     campaign_views_of(dialog, "")
+}
+
+/// The research dialog's typed tree payload (`campaign_research_tree`): the
+/// `research_tree(root)` producer, with `root` empty for the played sector's
+/// tree. `None` when the campaign facade is absent or the tree is missing.
+pub(in crate::ui::dialogs) fn campaign_research_tree(
+    dialog: &MindDialog,
+    root: &str,
+) -> Option<ResearchTreeView> {
+    let campaign = dialog.campaign()?;
+    campaign.bind().research_tree(root)
 }
 
 /// The `SectorView` for `planet`/`sector_id` in a projection (`Sector.isBeingPlayed`
@@ -225,6 +236,14 @@ pub(in crate::ui::dialogs) fn gs(text: impl AsRef<str>) -> GString {
 
 /// Calls a `MindUi` method when both the autoload and the method exist.
 pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::ui_call;
+/// Opens a registered dialog through `MindUi` with an already-serialized JSON
+/// context (`serde_json` output, so typed rows keep their exact field names).
+pub(in crate::ui::dialogs) fn open_dialog_json(name: &str, context_json: &str) {
+    let _ = ui_call(
+        "open_dialog",
+        &[gs(name).to_variant(), gs(context_json).to_variant()],
+    );
+}
 
 /// Calls a `MindUi` method returning a bool (`false` when absent).
 pub(in crate::ui::dialogs) fn ui_bool(method: &str, args: &[Variant]) -> bool {
@@ -295,9 +314,7 @@ pub(in crate::ui::dialogs) fn open_dialog(name: &str, context: &VarDictionary) {
 ///
 /// Reads the typed `MindCampaign.launch_resource_stacks` producer (T01); empty
 /// when the campaign facade is absent.
-pub(in crate::ui::dialogs) fn campaign_launch_stacks(
-    dialog: &MindDialog,
-) -> Vec<(String, i32)> {
+pub(in crate::ui::dialogs) fn campaign_launch_stacks(dialog: &MindDialog) -> Vec<(String, i32)> {
     let Some(mut campaign) = dialog.campaign() else {
         return Vec::new();
     };
