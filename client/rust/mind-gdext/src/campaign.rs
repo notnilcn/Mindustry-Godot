@@ -41,12 +41,12 @@ use mind_core::game::objectives::{CampaignObjectiveContext, Objective, Objective
 #[cfg(test)]
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
-    self, PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
+    self, PlaySession, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
     play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::{CampaignRuntime, UnlockRef, on_captured_sector};
+use mind_core::game::runtime::{CampaignRuntime, on_captured_sector};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -67,7 +67,6 @@ use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::ui::content_stats::{Cell, StatCtx, content_stats as compute_content_stats};
-use mind_core::world::modules::ItemModule;
 
 use crate::audio::MindAudio;
 use crate::camera::MindCamera2D;
@@ -386,16 +385,4 @@ impl MindCampaign {
     /// the palette). Never emitted while a host bind is held.
     #[signal]
     fn block_unlocked();
-}
-
-/// Unlocked content names of the registry (map objective `Research`/`Produce`).
-fn collect_unlocked(registry: &ContentRegistry) -> Vec<String> {
-    registry
-        .tech()
-        .nodes
-        .iter()
-        .filter_map(|node| node.content)
-        .filter(|content| tech_tree::content_unlocked(registry, *content))
-        .filter_map(|content| tech_tree::content_name(registry, content))
-        .collect()
 }

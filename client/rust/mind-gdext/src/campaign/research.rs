@@ -19,11 +19,10 @@ impl MindCampaign {
         let Some(mut registry) = self.registry.take() else {
             return false;
         };
-        let Some(content_ref) = registry.tech().nodes.iter().find_map(|node| {
-            let content = node.content?;
-            (tech_tree::content_name(&registry, content).as_deref() == Some(target.as_str()))
-                .then_some(content)
-        }) else {
+        // `ResearchDialog`'s node lookup: content name -> content + node
+        // (`tech_tree::node_for_content_name`, H02).
+        let Some((content_ref, node_ref)) = tech_tree::node_for_content_name(&registry, &target)
+        else {
             self.registry = Some(registry);
             return false;
         };
@@ -31,48 +30,8 @@ impl MindCampaign {
             self.registry = Some(registry);
             return true;
         }
-        let Some(node_ref) = registry
-            .tech()
-            .nodes
-            .iter()
-            .position(|node| node.content == Some(content_ref))
-            .map(|index| mind_core::content::tech::TechNodeRef(index as u32))
-        else {
-            self.registry = Some(registry);
-            return false;
-        };
-
-        // Real inventory: `ResearchDialog.rebuildItems` aggregates the stored
-        // items of the tree root's planets; the sector being played reads its
-        // live core module instead (`Sector.items` -> default-team items), so
-        // it is not double-counted.
-        let default_team = self.session.default_team();
-        let root_ref = registry
-            .tech()
-            .node(node_ref)
-            .and_then(|node| node.root_node)
-            .unwrap_or(node_ref);
-        let planets = root_planets(&registry, root_ref);
-        // T1: reads (`research_inventory`/`ctx`) must see the live campaign.
-        self.mirror_runtime_campaign();
-        let (mut items, mut sector_entries, mut played_items) =
-            self.research_inventory(&registry, &planets);
-
-        let campaign_snapshot = self.campaign.clone();
-        let Some(campaign_ref) = campaign_snapshot.as_ref() else {
-            self.registry = Some(registry);
-            return false;
-        };
-        let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
-        if !tech_tree::can_spend(&registry, node_ref, &items, &ctx) {
-            self.registry = Some(registry);
-            return false;
-        }
-        let outcome = settings_hub::with_settings(|settings| {
-            let mut store = SettingsUnlockStore::new(settings);
-            tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false)
-        });
-        let Ok(result) = outcome else {
+        // `ResearchDialog.rebuildItems` inventory + `ResearchDialog.spend`.
+        let Some((result, inv)) = self.spend_research(&mut registry, node_ref) else {
             self.registry = Some(registry);
             return false;
         };
@@ -91,91 +50,30 @@ impl MindCampaign {
         }
 
         // Deduct the spent stacks exactly like `ResearchDialog.rebuildItems`'s
-        // `ItemSeq.add(item, -amount)`: percentage removal from the other
-        // sectors in order, then the remainder from the active sector last
-        // (its live core module while playing; `Sector.removeItem`).
-        let campaign_sector_active = self.session.is_campaign() && self.session.sector.is_some();
-        // T1: sector-record removals are applied to the live campaign after the
-        // loop (one `with_campaign_mut`), with the Java `saveInfo` flush.
-        let mut record_updates: Vec<(PlanetId, u16, String, i32)> = Vec::new();
-        for spent in &result.spent {
-            let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
-                continue;
-            };
-            let others: Vec<i32> = sector_entries
-                .iter()
-                .map(|(_, entry)| {
-                    entry
-                        .iter()
-                        .find(|(entry_name, _)| entry_name == &name)
-                        .map(|(_, amount)| *amount)
-                        .unwrap_or(0)
-                })
-                .collect();
-            let current = campaign_sector_active.then(|| {
-                played_items
-                    .iter()
-                    .find(|(entry_name, _)| entry_name == &name)
-                    .map(|(_, amount)| *amount)
-                    .unwrap_or(0)
-            });
-            let (removals, current_removal) =
-                tech_tree::distribute_removal(spent.amount, current, &others);
-            for (index, to_remove) in removals.iter().enumerate() {
-                if *to_remove <= 0 {
-                    continue;
-                }
-                let ((planet, sector), entry) = &mut sector_entries[index];
-                let (planet, sector) = (*planet, *sector);
-                if let Some((_, amount)) =
-                    entry.iter_mut().find(|(entry_name, _)| entry_name == &name)
-                {
-                    *amount -= *to_remove;
-                }
-                let updated = entry
-                    .iter()
-                    .find(|(entry_name, _)| entry_name == &name)
-                    .map(|(_, amount)| *amount)
-                    .unwrap_or(0);
-                record_updates.push((planet, sector, name.clone(), updated));
-            }
-            if current_removal > 0
-                && let Some(mut host) = self.host()
-            {
+        // `ItemSeq.add(item, -amount)` (`tech_tree::plan_research_removal`, H02):
+        // percentage removal from the other sectors in order, then the
+        // remainder from the active sector last (its live core module while
+        // playing; `Sector.removeItem`).
+        let (record_updates, core_removals) =
+            tech_tree::plan_research_removal(&inv, &result.spent, &registry);
+        let default_team = self.session.default_team();
+        for (name, amount) in &core_removals {
+            if let Some(mut host) = self.host() {
                 host.bind_mut()
-                    .remove_player_core_items(default_team, &name, current_removal);
-                if let Some((_, amount)) = played_items
-                    .iter_mut()
-                    .find(|(entry_name, _)| entry_name == &name)
-                {
-                    *amount -= current_removal;
-                }
+                    .remove_player_core_items(default_team, name, *amount);
             }
         }
-        // Apply the record removals on the live campaign (`Sector.removeItems`
-        // -> `addItems` -> `saveInfo()`; `Sector.java:207-231`).
-        if !record_updates.is_empty() {
-            self.with_campaign_mut(|campaign, settings| {
-                for (planet, sector_id, name, updated) in &record_updates {
-                    let planet_name = campaign
-                        .planet_name(*planet)
-                        .unwrap_or_default()
-                        .to_owned();
-                    campaign.edit_sector(settings, &planet_name, *sector_id, |record| {
-                        record.info.info.items.insert(name.clone(), *updated);
-                    });
-                }
-            });
-        }
+        self.apply_research_record_updates(&record_updates);
+
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
         let mut unlocked_content: Vec<ContentRef> = result.unlocked.clone();
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
         {
             let unlocked = settings_hub::with_settings(|settings| {
-                let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
                 let mut store = SettingsUnlockStore::new(settings);
-                tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx)
+                // `tech_tree::check_campaign_auto_unlocks` (H02).
+                tech_tree::check_campaign_auto_unlocks(&mut registry, &mut store, campaign_ref)
             });
             unlocked_content.extend(unlocked.iter().copied());
             log::info!("research auto-unlocked {} content", unlocked.len());
@@ -311,9 +209,18 @@ impl MindCampaign {
         }
         let bounds = [minx, miny + NODE_SIZE * 1.5, maxx - minx, maxy - miny];
 
-        // The global item pool (`rebuildItems` + `ItemsDisplay`).
-        let planets = root_planets(registry, tree.root);
-        let (items, _, _) = self.research_inventory(registry, &planets);
+        // The global item pool (`rebuildItems` + `ItemsDisplay`):
+        // `tech_tree::research_inventory` over the root's planets.
+        let planets = tech_tree::root_planets(registry, tree.root);
+        let played_items = self.played_core_items(self.session.default_team());
+        let inv = tech_tree::research_inventory(
+            registry,
+            campaign,
+            &planets,
+            self.session.sector,
+            &played_items,
+        );
+        let items = &inv.pool;
         let mut items_json: Vec<serde_json::Value> = Vec::new();
         for index in 0..registry.items().len() {
             let id = ItemId::new(index as u16);
@@ -565,59 +472,88 @@ impl MindCampaign {
 }
 
 impl MindCampaign {
-    /// `ResearchDialog.rebuildItems` inventory for `planets` (Java
-    /// `rootPlanets`): the stored items of every based, non-frozen sector plus
-    /// the active sector's live core module. Returns the pool, the per-other-
-    /// sector rows (planet order, then sector id) and the active sector's core
-    /// rows.
-    fn research_inventory(
-        &self,
-        registry: &ContentRegistry,
-        planets: &[PlanetId],
-    ) -> (ItemModule, SectorInventory, Vec<(String, i32)>) {
-        let mut items = ItemModule::with_items(registry.items().len());
-        let mut played_items: Vec<(String, i32)> = Vec::new();
-        if self.session.is_campaign()
-            && let Some(host) = self.host()
-        {
-            for (name, amount) in host.bind().player_core_items(self.session.default_team()) {
-                if let Some(id) = registry.item_id(&name) {
-                    items.add(id, amount.max(0), i32::MAX);
-                }
-                played_items.push((name, amount.max(0)));
-            }
+    /// `research`'s inventory + spend step (`ResearchDialog.rebuildItems` ->
+    /// `ResearchDialog.spend`): the tree root's planets (`tech_tree::
+    /// root_planets`), the live item pool (`tech_tree::research_inventory`) and
+    /// the spend result. `None` when the node cannot be spent (the caller
+    /// restores the registry and returns false).
+    fn spend_research(
+        &mut self,
+        registry: &mut ContentRegistry,
+        node_ref: TechNodeRef,
+    ) -> Option<(tech_tree::SpendResult, tech_tree::ResearchInventory)> {
+        let root_ref = registry
+            .tech()
+            .node(node_ref)
+            .and_then(|node| node.root_node)
+            .unwrap_or(node_ref);
+        let planets = tech_tree::root_planets(registry, root_ref);
+        // T1: reads (`research_inventory`/`ctx`) must see the live campaign.
+        self.mirror_runtime_campaign();
+        let played_items = self.played_core_items(self.session.default_team());
+        let campaign_snapshot = self.campaign.clone();
+        let campaign_ref = campaign_snapshot.as_ref()?;
+        // Real inventory: `rebuildItems` aggregates the stored items of the
+        // tree root's planets; the sector being played reads its live core
+        // module instead (`Sector.items` -> default-team items), so it is not
+        // double-counted.
+        let inv = tech_tree::research_inventory(
+            registry,
+            campaign_ref,
+            &planets,
+            self.session.sector,
+            &played_items,
+        );
+        // `spend` mutates the pool; the planner only reads `inv.sectors` /
+        // `inv.played_items`, so hand it a copy and keep the inventory intact.
+        let mut pool = inv.pool.clone();
+        let ctx = CampaignObjectiveContext::new(registry, campaign_ref);
+        if !tech_tree::can_spend(registry, node_ref, &pool, &ctx) {
+            return None;
         }
-        let played_sector = self.session.sector;
-        let mut sector_entries: SectorInventory = Vec::new();
-        if let Some(campaign) = self.campaign.as_ref() {
-            for planet in campaign.planets.values() {
-                if !planets.contains(&planet.id) {
-                    continue;
-                }
-                for sector in &planet.sectors {
-                    if !sector.has_base() || sector.is_frozen(None) {
-                        continue;
-                    }
-                    if played_sector == Some((planet.id, sector.id)) {
-                        continue;
-                    }
-                    let entry: Vec<(String, i32)> = sector
-                        .info
-                        .info
-                        .items
-                        .iter()
-                        .map(|(name, amount)| (name.clone(), *amount))
-                        .collect();
-                    for (name, amount) in &entry {
-                        if let Some(id) = registry.item_id(name) {
-                            items.add(id, (*amount).max(0), i32::MAX);
-                        }
-                    }
-                    sector_entries.push(((planet.id, sector.id), entry));
-                }
-            }
+        let outcome = settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
+            tech_tree::spend(registry, node_ref, &mut pool, &mut store, &ctx, false)
+        });
+        let result = outcome.ok()?;
+        Some((result, inv))
+    }
+
+    /// The default team's live core rows (`Sector.items` while playing), clamped
+    /// at 0 like the `ResearchDialog.rebuildItems` pool read; empty outside a
+    /// live campaign match.
+    fn played_core_items(&self, default_team: u8) -> Vec<(String, i32)> {
+        if !self.session.is_campaign() {
+            return Vec::new();
         }
-        (items, sector_entries, played_items)
+        let Some(host) = self.host() else {
+            return Vec::new();
+        };
+        host.bind()
+            .player_core_items(default_team)
+            .into_iter()
+            .map(|(name, amount)| (name, amount.max(0)))
+            .collect()
+    }
+
+    /// `research`'s sector-record half: apply `plan_research_removal`'s
+    /// `(planet, sector, item, amount)` updates on the live campaign in one
+    /// `with_campaign_mut` (`Sector.removeItems` -> `saveInfo`).
+    fn apply_research_record_updates(&mut self, updates: &[(PlanetId, u16, String, i32)]) {
+        if updates.is_empty() {
+            return;
+        }
+        self.with_campaign_mut(|campaign, settings| {
+            for (planet, sector_id, name, updated) in updates {
+                let planet_name = campaign
+                    .planet_name(*planet)
+                    .unwrap_or_default()
+                    .to_owned();
+                campaign.edit_sector(settings, &planet_name, *sector_id, |record| {
+                    record.info.info.items.insert(name.clone(), *updated);
+                });
+            }
+        });
     }
 
     /// `bundle("techtree." + name, name)` for a tree/root name.
@@ -678,26 +614,4 @@ impl MindCampaign {
         };
         (complete, self.bundle.format(key, &[argument.as_str()]))
     }
-}
-
-/// Off-play-sector inventory rows of `ResearchDialog.rebuildItems`
-/// (`Vec<(sector, rows)>`).
-type SectorInventory = Vec<(SectorRef, Vec<(String, i32)>)>;
-
-/// Java `rootPlanets` for a tree root (`ResearchDialog.rebuildItems`): planets
-/// whose `techTree == lastNode` or `lastNode.planet == planet`; vanilla trees
-/// carry the planet on the root, fallback serpulo.
-fn root_planets(registry: &ContentRegistry, root_ref: TechNodeRef) -> Vec<PlanetId> {
-    let mut planets: Vec<PlanetId> = registry
-        .tech()
-        .node(root_ref)
-        .and_then(|node| node.planet)
-        .into_iter()
-        .collect();
-    if planets.is_empty()
-        && let Some(serpulo) = registry.planet_id("serpulo")
-    {
-        planets.push(serpulo);
-    }
-    planets
 }

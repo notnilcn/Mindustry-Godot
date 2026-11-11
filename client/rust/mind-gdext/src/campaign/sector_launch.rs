@@ -409,7 +409,7 @@ impl MindCampaign {
                 // tracker goes into the live runtime, so the campaign systems
                 // keep counting into the same achievement/stat graph.
                 .with_service(self.service.clone());
-            runtime.set_unlocked_content(collect_unlocked(&registry));
+            runtime.set_unlocked_content(tech_tree::unlocked_content_names(&registry));
             host.bind_mut().install_campaign_runtime(runtime);
             // `Schematics.placeLaunchLoadout` (PAR-0085 step 5): a launcher
             // launch replaces the map's core with the loadout schematic's core

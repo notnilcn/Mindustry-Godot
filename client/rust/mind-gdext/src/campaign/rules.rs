@@ -179,29 +179,30 @@ impl MindCampaign {
             return false;
         };
         let Some(updated) = self.with_campaign_mut(|campaign, _settings| {
-            let Some(record) = campaign.planet_mut(planet_id) else {
-                return false;
-            };
-            record.campaign_rules = rules.clone();
-            true
+            let present = campaign.planet(planet_id).is_some();
+            // `Campaign::set_campaign_rules` (H01): the planet-rules write half.
+            campaign.set_campaign_rules(planet_id, rules);
+            present
         }) else {
             return false;
         };
         if !updated {
             return false;
         }
-        // Re-apply on the played planet (`Planet.applyRules(state.rules)`).
+        // Re-apply on the played planet (`Planet.applyRules(state.rules)`;
+        // `play::reapply_planet_rules`, H02).
         if self
             .session
             .sector
             .is_some_and(|(played, _)| played == planet_id)
             && let Some(registry) = self.registry.take()
         {
-            let applied = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.planet(planet_id))
-                .map(|record| record.apply_rules(&registry, &mut self.session.rules, false, true));
+            let applied = match self.campaign.as_ref() {
+                Some(campaign) => {
+                    play::reapply_planet_rules(&mut self.session, campaign, &registry)
+                }
+                None => None,
+            };
             if let Some(applied) = applied {
                 if applied.rts_swapped {
                     log::info!("campaign rule `{key}` triggered the RTS-AI swap");
@@ -247,11 +248,10 @@ impl MindCampaign {
             return false;
         };
         let Some(found) = self.with_campaign_mut(|campaign, _settings| {
-            let Some(planet_record) = campaign.planet_mut(planet_id) else {
-                return false;
-            };
-            planet_record.campaign_rules = rules;
-            true
+            let present = campaign.planet(planet_id).is_some();
+            // `Campaign::set_campaign_rules` (H01): the planet-rules write half.
+            campaign.set_campaign_rules(planet_id, rules);
+            present
         }) else {
             self.registry = Some(registry);
             return false;
@@ -261,14 +261,11 @@ impl MindCampaign {
             return false;
         }
         // `PlanetDialog.rules` -> `Planet.applyRules(state.rules)`
-        // (`Planet.java:308-309`); the facade mirrors the live campaign now.
-        let applied = self
-            .campaign
-            .as_ref()
-            .and_then(|campaign| campaign.planet(planet_id))
-            .map(|planet_record| {
-                planet_record.apply_rules(&registry, &mut self.session.rules, false, true)
-            });
+        // (`Planet.java:308-309`); `play::reapply_planet_rules` (H02).
+        let applied = match self.campaign.as_ref() {
+            Some(campaign) => play::reapply_planet_rules(&mut self.session, campaign, &registry),
+            None => None,
+        };
         let Some(applied) = applied else {
             self.registry = Some(registry);
             return false;

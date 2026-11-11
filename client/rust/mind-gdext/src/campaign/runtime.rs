@@ -94,7 +94,7 @@ impl MindCampaign {
         let unlocked = self
             .registry
             .as_ref()
-            .map(collect_unlocked)
+            .map(tech_tree::unlocked_content_names)
             .unwrap_or_default();
         let _ = with_host_runtime(self.host(), |runtime| {
             runtime.set_unlocked_content(unlocked);

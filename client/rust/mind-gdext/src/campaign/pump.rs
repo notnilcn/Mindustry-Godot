@@ -291,69 +291,30 @@ impl MindCampaign {
         }
 
         // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
-        // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
-        // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        // `UnlockEvent` -> `Control.java:160-174`). `tech_tree::
+        // apply_pending_unlocks` (H02) resolves the queued refs on the registry,
+        // persists each unlock and runs `checkAutoUnlocks()`; the log, the
+        // toast/palette signals and the facade buffer stay here.
         let mut unlocked_block = false;
         let mut unlocked_content: Vec<ContentRef> = Vec::new();
         if !runtime.pending_unlocks.is_empty()
             && let Some(registry) = registry.as_mut()
         {
-            let mut newly: Vec<String> = Vec::new();
-            for unlock in std::mem::take(&mut runtime.pending_unlocks) {
-                let (content, name) = match unlock {
-                    UnlockRef::Item(id) => (
-                        ContentRef::of(ContentType::Item, id),
-                        registry.item(id).map(|c| c.name.clone()),
-                    ),
-                    UnlockRef::Liquid(id) => (
-                        ContentRef::of(ContentType::Liquid, id),
-                        registry.liquid(id).map(|c| c.name.clone()),
-                    ),
-                    UnlockRef::Unit(id) => (
-                        ContentRef::of(ContentType::Unit, id),
-                        registry.unit(id).map(|c| c.name.clone()),
-                    ),
-                };
-                let Some(name) = name else {
-                    continue;
-                };
-                let unlocked = settings_hub::with_settings(|settings| {
-                    let mut store = SettingsUnlockStore::new(settings);
-                    if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
-                        && fields.unlock(&name, &mut store)
-                    {
-                        true
-                    } else {
-                        false
-                    }
-                });
-                if unlocked {
-                    unlocked_content.push(content);
-                    newly.push(name);
-                }
-            }
-            if !newly.is_empty() {
-                let auto = settings_hub::with_settings(|settings| {
-                    let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
-                    let mut store = SettingsUnlockStore::new(settings);
-                    tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
-                });
+            let unlocks = std::mem::take(&mut runtime.pending_unlocks);
+            let outcome = settings_hub::with_settings(|settings| {
+                let mut store = SettingsUnlockStore::new(settings);
+                tech_tree::apply_pending_unlocks(registry, &mut store, &runtime.campaign, unlocks)
+            });
+            if !outcome.names.is_empty() {
                 log::info!(
                     "campaign unlock: {} produced, {} auto-unlocked",
-                    newly.len(),
-                    auto.len()
+                    outcome.produced,
+                    outcome.auto
                 );
-                for content in auto {
-                    if content.type_ == ContentType::Block {
-                        unlocked_block = true;
-                    }
-                    unlocked_content.push(content);
-                    if let Some(name) = tech_tree::content_name(registry, content) {
-                        newly.push(name);
-                    }
-                }
-                self.unlocked_since_last_take.extend(newly);
-                let unlocked = collect_unlocked(registry);
+                unlocked_block = outcome.any_block;
+                unlocked_content = outcome.contents;
+                self.unlocked_since_last_take.extend(outcome.names);
+                let unlocked = tech_tree::unlocked_content_names(registry);
                 runtime.set_unlocked_content(unlocked);
                 dirty = true;
             }
@@ -483,9 +444,10 @@ impl MindCampaign {
             return;
         };
         let unlocked = settings_hub::with_settings(|settings| {
-            let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
             let mut store = SettingsUnlockStore::new(settings);
-            tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
+            // `tech_tree::check_campaign_auto_unlocks` (H02): the shared
+            // `CampaignObjectiveContext` + `check_auto_unlocks` block.
+            tech_tree::check_campaign_auto_unlocks(registry, &mut store, &runtime.campaign)
         });
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());

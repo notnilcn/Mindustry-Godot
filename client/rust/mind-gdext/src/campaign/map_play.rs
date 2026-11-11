@@ -217,7 +217,7 @@ impl MindCampaign {
                 // into the one tracker too.
                 .with_service(self.service.clone());
             if let Some(registry) = self.registry.take() {
-                runtime.set_unlocked_content(collect_unlocked(&registry));
+                runtime.set_unlocked_content(tech_tree::unlocked_content_names(&registry));
                 host.bind_mut().install_campaign_runtime(runtime);
                 // A custom map has no save to resume: the launch path applies
                 // the loadout (`Logic.play` starting items; `Logic.java:277-285`).
