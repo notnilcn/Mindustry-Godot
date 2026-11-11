@@ -92,6 +92,7 @@ pub fn unit_by_id(world: &World, id: i32) -> Option<Entity> {
 }
 
 mod ai;
+mod ai_arms;
 mod ai_weapons;
 mod combat_glue;
 mod command_queue;
