@@ -10,24 +10,11 @@ use super::*;
 // dictionary helpers (`Dictionary.get(key, default)` semantics)
 // ---------------------------------------------------------------------------
 
-pub(super) fn dict_string(dict: &VarDictionary, key: &str) -> String {
-    dict.get(key)
-        .and_then(|value| value.try_to::<GString>().ok())
-        .map(|value| value.to_string())
-        .unwrap_or_default()
-}
-
-pub(super) fn dict_bool(dict: &VarDictionary, key: &str, fallback: bool) -> bool {
-    dict.get(key)
-        .and_then(|value| value.try_to::<bool>().ok())
-        .unwrap_or(fallback)
-}
-
-pub(super) fn dict_f64(dict: &VarDictionary, key: &str, fallback: f64) -> f64 {
-    dict.get(key)
-        .and_then(|value| value.try_to::<f64>().ok())
-        .unwrap_or(fallback)
-}
+// Adopted from F1 (`gdutil::variant`): the local bodies were the same
+// `try_to` chains as these helpers.
+pub(super) use crate::gdutil::variant::{
+    dict_bool_try_or as dict_bool, dict_f64_try_or as dict_f64, dict_text_try_or as dict_string,
+};
 
 // ---------------------------------------------------------------------------
 // small node helpers

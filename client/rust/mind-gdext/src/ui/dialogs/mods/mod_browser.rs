@@ -136,7 +136,7 @@ impl DialogController for ModBrowserDialog {
         dialog.apply_button_overlay(true);
         browser_add_http(dialog, &self.state);
         browser_build(dialog, &self.state);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         browser_connect(dialog, &self.state);
         let mut st = self.state.borrow_mut();
         st.game_build = i64::from(mods_i32("game_build"));
@@ -379,7 +379,7 @@ fn browser_build(dialog: &mut MindDialog, state: &Rc<RefCell<BrowserState>>) {
     }
 
     // code-instantiated: the listing rows are data-driven from `mods.json`.
-    let mut list = MindTable::new_alloc();
+    let mut list = factory::table();
     list.set_h_size_flags(SizeFlags::EXPAND_FILL);
     list.set_v_size_flags(SizeFlags::EXPAND_FILL);
     {

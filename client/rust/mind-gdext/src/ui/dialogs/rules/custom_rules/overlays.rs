@@ -492,8 +492,7 @@ pub(super) fn overlay_open(
     let mut panel_root = PanelContainer::new_alloc();
     panel_root.set_theme_type_variation("defaultDialog");
     panel_root.set_custom_minimum_size(Vector2::new(width, 0.0));
-    let mut layout = VBoxContainer::new_alloc();
-    layout.add_theme_constant_override("separation", 6);
+    let mut layout = factory::vbox(6);
     let title_label = factory::styled_label(
         &kit::markup_text(&kit::t(title).to_string()).to_string(),
         "techLabel",

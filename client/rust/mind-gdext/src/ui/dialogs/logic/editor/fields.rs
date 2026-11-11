@@ -31,8 +31,7 @@ pub(super) fn field_row(
         flow.add_theme_constant_override("v_separation", 2);
         flow.upcast()
     } else {
-        let mut hbox = HBoxContainer::new_alloc();
-        hbox.add_theme_constant_override("separation", 4);
+        let hbox = factory::hbox(4);
         hbox.upcast()
     };
     fields_box.set_mouse_filter(MouseFilter::PASS);

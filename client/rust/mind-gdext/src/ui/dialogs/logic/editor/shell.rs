@@ -44,8 +44,7 @@ pub(super) fn build(dialog: &mut MindDialog, state: &Rc<RefCell<LogicState>>) {
     scroll.add_child(&center);
     // code-instantiated: one element per statement; the count is the program
     // length (`DragLayout`, `space = 10`).
-    let mut list = VBoxContainer::new_alloc();
-    list.add_theme_constant_override("separation", ELEMENT_SPACE);
+    let mut list = factory::vbox(ELEMENT_SPACE);
     list.set_custom_minimum_size(Vector2::new(target_width(dialog), 0.0));
     center.add_child(&list);
     {

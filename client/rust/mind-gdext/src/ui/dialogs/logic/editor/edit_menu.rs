@@ -26,8 +26,7 @@ pub(super) fn open_edit_menu(dialog: &mut MindDialog, state: &Rc<RefCell<LogicSt
     let mut panel = PanelContainer::new_alloc();
     panel.add_theme_stylebox_override("panel", &button_box(state));
     margin.add_child(&panel);
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 0);
+    let mut column = factory::vbox(0);
     panel.add_child(&column);
     column.add_child(&edit_row(&dialog_gd, state, "cancel", "@clear", |d, s| {
         edit_clear(d, s);

@@ -12,8 +12,8 @@ use crate::ui::kit::{self, MindTable};
 use godot::builtin::{PackedStringArray, VarArray, VarDictionary, VariantType};
 use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::{
-    Button, CenterContainer, ColorRect, Control, DisplayServer, HBoxContainer, Json, LineEdit,
-    Node, PanelContainer, StyleBoxEmpty, VBoxContainer,
+    Button, CenterContainer, ColorRect, Control, DisplayServer, Json, LineEdit, Node,
+    PanelContainer, StyleBoxEmpty, VBoxContainer,
 };
 use godot::global::HorizontalAlignment;
 use godot::prelude::*;
@@ -128,7 +128,7 @@ impl DialogController for CustomRulesDialog {
         dialog.set_title_key("@mode.custom");
         dialog.should_pause = false;
         dialog.enable_full_dialog(true);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         let target = dialog.to_gd();
         let state = self.state.clone();
         let callable = Callable::from_fn("custom_rules_edit", move |_args: &[&Variant]| {
@@ -187,8 +187,7 @@ fn setup(dialog: &mut MindDialog, state: &Rc<RefCell<CustomRulesState>>) {
     dialog.clear_content();
     let mut root = dialog.content_table();
     // code-instantiated: the search row mirrors `Icon.zoom` + field.
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 8);
+    let mut search_row = factory::hbox(8);
     let zoom = factory::glyph_label("zoom", 20, Color::WHITE);
     search_row.add_child(&zoom);
     let search = state.borrow().search.clone();
