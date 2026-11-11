@@ -15,12 +15,17 @@
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::PlanetId;
+use crate::content::{ContentRegistry, PlanetId};
+use crate::ecs::TeamId;
 use crate::game::play::{PlayEvent, PlaySession};
 use crate::game::rules::Rules;
 use crate::game::service::ServiceTracker;
-use crate::game::universe::Campaign;
+use crate::game::tech_tree;
+use crate::game::universe::{Campaign, TurnContext, TurnReport};
+use crate::io::settings::SettingsStore;
 use crate::math::ArcRand;
+use crate::random::JavaRandom;
+use indexmap::IndexMap;
 
 /// Sim ticks per second (fixed rate).
 const TICKS_PER_SECOND: f32 = 60.0;
@@ -141,6 +146,139 @@ impl CampaignRuntime {
     pub fn take_events(&mut self) -> Vec<PlayEvent> {
         std::mem::take(&mut self.events)
     }
+
+    /// Builds the live runtime for a launched sector (`start_sector_with_loadout`
+    /// 1752-1758 and `start_loaded_world` 2131-2137 at `291e30a8`): the session
+    /// and campaign with the host's shared service tracker and the registry's
+    /// unlocked-content cache already installed.
+    ///
+    /// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+    pub fn install(
+        session: PlaySession,
+        campaign: Campaign,
+        service: ServiceTracker,
+        registry: &ContentRegistry,
+    ) -> Self {
+        let mut runtime = Self::new(session, campaign).with_service(service);
+        runtime.set_unlocked_content(tech_tree::unlocked_content_names(registry));
+        runtime
+    }
+
+    /// The live `TurnContext` (`Universe.runTurn` input): the played sector and
+    /// the live rules/wave snapshot. The two facade builds (`pump_runtime`
+    /// 1212-1220 and 2484-2492 at `291e30a8`) are identical.
+    pub fn turn_context(&self) -> TurnContext {
+        TurnContext {
+            current_planet: self.session.sector.map(|(planet, _)| planet),
+            current_sector: self.session.sector,
+            playing_rules: Some((self.session.rules.waves, self.session.rules.attack_mode)),
+            current_wave: self.session.wave,
+        }
+    }
+
+    /// Runs the due campaign turn (`pump_runtime` 1203-1238 at `291e30a8`):
+    /// clears `turn_due`, seeds `JavaRandom::new(turn + 1)`, runs the turn and
+    /// applies the played-sector invasions to the live session.
+    ///
+    /// `None` when no turn is due. The caller keeps the logging, the toasts and
+    /// the persist.
+    pub fn run_due_turn(
+        &mut self,
+        registry: &ContentRegistry,
+        settings: &mut SettingsStore,
+    ) -> Option<TurnReport> {
+        if !self.turn_due {
+            return None;
+        }
+        self.turn_due = false;
+        let report = self.run_turn_seeded(registry, settings);
+        apply_played_invasions(self, &report.events);
+        Some(report)
+    }
+
+    /// Runs one campaign turn regardless of `turn_due` (`MindCampaign::run_turn`
+    /// 2477-2537 at `291e30a8`, the manual turn path which never checks the
+    /// flag): the same seeding and played-invasion application as
+    /// [`Self::run_due_turn`].
+    pub fn run_turn_now(
+        &mut self,
+        registry: &ContentRegistry,
+        settings: &mut SettingsStore,
+    ) -> TurnReport {
+        let report = self.run_turn_seeded(registry, settings);
+        apply_played_invasions(self, &report.events);
+        report
+    }
+
+    /// Shared turn body: seed `JavaRandom` with `turn + 1` (the facade's exact
+    /// seeding, `Universe.runTurn`'s RNG) and run the production/import/
+    /// invasion passes with the live context.
+    fn run_turn_seeded(
+        &mut self,
+        registry: &ContentRegistry,
+        settings: &mut SettingsStore,
+    ) -> TurnReport {
+        let turn = self.campaign.universe.turn;
+        let mut rand = JavaRandom::new(turn as u64 + 1);
+        let ctx = self.turn_context();
+        self.campaign.run_turn(registry, settings, &ctx, &mut rand)
+    }
+}
+
+/// The `SaveLoadEvent` resume record path (`start_sector_with_loadout`
+/// 1800-1846 at `291e30a8`): write the stored record into the live session
+/// (`SectorInfo.write`), refill the default team's inventory from the returned
+/// stacks, then re-apply the planet rules.
+///
+/// Returns the item stacks (`IndexMap<String, i32>`) that the facade writes
+/// into the live core through the host; `None` when the registry has no such
+/// planet. The caller carries the launch ownership into the runtime campaign
+/// and persists afterwards.
+///
+/// Extracted from `mind-gdext` `campaign.rs` (adopted by X01).
+pub fn apply_resume_record(
+    runtime: &mut CampaignRuntime,
+    registry: &ContentRegistry,
+    settings: &mut SettingsStore,
+    planet: PlanetId,
+    sector: u16,
+) -> Option<IndexMap<String, i32>> {
+    let planet_name = registry.planet(planet).map(|def| def.name.clone())?;
+    let CampaignRuntime {
+        session, campaign, ..
+    } = runtime;
+    let allow_waves = campaign
+        .planet(planet)
+        .is_some_and(|planet| planet.allow_waves);
+    let wave_core = session.wave_core_count() > 0;
+    let default_team = session.rules.default_team;
+    let mut core_items = None;
+    if let Some(record) = campaign.sector_mut(planet, sector) {
+        let capture_wave = record.preset_capture_wave;
+        let capacity = record.info.info.storage_capacity;
+        let items = record
+            .info
+            .write_to_state(wave_core, allow_waves, capture_wave, session);
+        record.info.info.has_core = true;
+        // `Sector.saveInfo()` after the record write (the facade logs nothing
+        // on failure either).
+        let _ = record.save_info(settings, &planet_name);
+        // Keep the session team inventory equal to the core module, like a
+        // fresh launch (`sync_session_with_sim`).
+        let item_count = registry.items().len();
+        let inventory = session.teams.inventory(TeamId(default_team), item_count);
+        inventory.clear();
+        for (name, amount) in &items {
+            if let Some(item) = registry.item_id(name) {
+                inventory.add(item, (*amount).clamp(0, capacity), i32::MAX);
+            }
+        }
+        core_items = Some(items);
+    }
+    if let Some(planet_record) = campaign.planet(planet) {
+        planet_record.apply_rules(registry, &mut session.rules, false, true);
+    }
+    core_items
 }
 
 /// Live match rules from a world, or `None` in test/harness worlds without a
@@ -164,7 +302,9 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub use game_state::{current_sector_captured, game_state_tick_system, on_captured_sector};
+pub use game_state::{
+    capture_played_sector, current_sector_captured, game_state_tick_system, on_captured_sector,
+};
 pub use hooks::{
     CampaignCoreHooks, CampaignCoreQueues, CampaignHookQueues, UnlockRef,
     install_campaign_core_hooks, reset_campaign_core_hooks,

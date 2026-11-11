@@ -11,6 +11,7 @@ pub mod fog;
 pub mod fog_gate;
 pub mod gamemode;
 pub mod landing_pad;
+pub mod launch;
 pub mod launch_payload;
 pub mod map_markers;
 pub mod map_objectives;
