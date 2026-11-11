@@ -466,10 +466,7 @@ pub fn play_new_sector(
     session.sector = Some((planet, sector_id));
     // `World.loadSector` rules half: sector preset + planet campaign rules.
     apply_sector_preset_rules(session, campaign, registry, planet, sector_id);
-    let planet_name = campaign
-        .planet(planet)
-        .map(|planet| planet.name.clone())
-        .unwrap_or_default();
+    let planet_name = campaign.planet_name(planet).unwrap_or_default().to_owned();
     session.rules.sector = Some(SectorKey::format(&planet_name, sector_id));
 
     if let Some(sector) = campaign.sector_mut(planet, sector_id) {
@@ -545,10 +542,7 @@ pub fn play_sector(
     session.reset_world();
     session.sector = Some((planet, sector_id));
     apply_sector_preset_rules(session, campaign, registry, planet, sector_id);
-    let planet_name = campaign
-        .planet(planet)
-        .map(|planet| planet.name.clone())
-        .unwrap_or_default();
+    let planet_name = campaign.planet_name(planet).unwrap_or_default().to_owned();
     session.rules.sector = Some(SectorKey::format(&planet_name, sector_id));
     if let Some(sector) = campaign.sector_mut(planet, sector_id) {
         sector.being_played = true;

@@ -38,9 +38,10 @@ use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::gamemode::Gamemode;
 use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
+#[cfg(test)]
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
-    PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
+    self, PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
     play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
 };
 use mind_core::game::rules::Rules;
@@ -336,29 +337,21 @@ impl MindCampaign {
                 if self.saves.had_serpulo_remaps {
                     self.flush_settings("sector remap settings flush failed");
                 }
-                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-                settings_hub::with_settings(|settings| campaign.load_all(settings));
-                // `Saves.load` assigns sector save slots from save **meta**
-                // (`Saves.java:120-186`): a readable slot backs the sector its
-                // rules name, so a copy under another name still resumes
-                // (CG-SAVE-05). `Saves::slots` only holds files whose meta
-                // decoded (main or backup; `SaveIO.isSaveValid`), so an
-                // undecodable file can no longer manufacture a base that the
-                // load path would silently regenerate (CG-SAVE-06).
-                let assignments = self.saves.sector_save_assignments(&registry);
-                let applied =
-                    mind_core::game::saves::apply_sector_saves(&mut campaign, &assignments);
+                // `Campaign::boot` (H01): `from_registry` -> `load_all` ->
+                // `Saves.load`'s save-**meta** sector assignment
+                // (`Saves.java:120-186`, CG-SAVE-05/06) -> base coverage
+                // (`Planet.init`, `Planet.java:469-471`; H05 T1). `Saves::slots`
+                // only holds files whose meta decoded (main or backup;
+                // `SaveIO.isSaveValid`), so an undecodable file can no longer
+                // manufacture a base that the load path would silently
+                // regenerate.
+                let (campaign, applied) = settings_hub::with_settings(|settings| {
+                    Campaign::boot(&registry, settings, &self.saves)
+                });
                 log::info!(
                     "sector saves assigned from meta: {applied} of {} readable slot(s)",
                     self.saves.slots.len()
                 );
-                // `Planet.init` (`Planet.java:469-471`) recomputes base coverage
-                // after `sector.loadInfo`; run it once more now that the stored
-                // infos and save files are on the sectors, so boot threat and
-                // `hasEnemyBase` match Java (H05 T1).
-                for planet in campaign.planets.values_mut() {
-                    planet.update_base_coverage_from_neighbors();
-                }
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;

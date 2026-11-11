@@ -262,14 +262,12 @@ impl MindCampaign {
                 }
                 mind_core::game::play::PlayEvent::GameOver { .. }
                 | mind_core::game::play::PlayEvent::SectorLose { .. } => {
-                    // `Sector.isBeingPlayed` (`Sector.java:148-151`) is false
-                    // once `state.gameOver` is set; clear it on the runtime copy
-                    // so the sector produces offline on later turns (T1).
-                    if let Some((planet, sector_id)) = runtime.session.sector
-                        && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
-                    {
-                        sector.being_played = false;
-                    }
+                    // `Sector.isBeingPlayed` (`Sector.java:148-151`) is already
+                    // false here: the campaign `GameOverEvent` arm of
+                    // `game_state_tick_system` runs `play::apply_sector_loss`,
+                    // which clears the flag on this same `CampaignRuntime` (the
+                    // pump took that instance out of the host), and the loss
+                    // event is only ever queued by that path. No local clear.
                     // `Control` GameOverEvent (`Control.java:188-195`): save the
                     // game-over state immediately, so a later re-attack loads
                     // the destroyed base (PAR-0084).
@@ -364,16 +362,11 @@ impl MindCampaign {
         // flush (`Sector.saveInfo` after `addItems`).
         if !runtime.pending_info_saves.is_empty() {
             for (planet, sector_id) in std::mem::take(&mut runtime.pending_info_saves) {
-                let planet_name = runtime
-                    .campaign
-                    .planet(planet)
-                    .map(|planet| planet.name.clone())
-                    .unwrap_or_default();
-                if let Some(sector) = runtime.campaign.sector(planet, sector_id) {
-                    settings_hub::with_settings(|settings| {
-                        let _ = sector.save_info(settings, &planet_name);
-                    });
-                }
+                settings_hub::with_settings(|settings| {
+                    let _ = runtime
+                        .campaign
+                        .save_sector_info(settings, planet, sector_id);
+                });
             }
             dirty = true;
         }
@@ -519,9 +512,12 @@ impl MindCampaign {
                 .campaign
                 .as_ref()
                 .and_then(|campaign| campaign.planet(*planet));
-            let planet_name = planet_record
-                .map(|planet| planet.name.clone())
-                .unwrap_or_default();
+            let planet_name = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet_name(*planet))
+                .unwrap_or_default()
+                .to_owned();
             // `Sector.name()` (`Sector.java:153-164`) through the one shared
             // implementation; the record can be missing only if the event's
             // sector is out of range (the port's defensive fallback is the bare

@@ -158,13 +158,12 @@ impl MindCampaign {
             self.with_campaign_mut(|campaign, settings| {
                 for (planet, sector_id, name, updated) in &record_updates {
                     let planet_name = campaign
-                        .planet(*planet)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    if let Some(record) = campaign.sector_mut(*planet, *sector_id) {
+                        .planet_name(*planet)
+                        .unwrap_or_default()
+                        .to_owned();
+                    campaign.edit_sector(settings, &planet_name, *sector_id, |record| {
                         record.info.info.items.insert(name.clone(), *updated);
-                        let _ = record.save_info(settings, &planet_name);
-                    }
+                    });
                 }
             });
         }

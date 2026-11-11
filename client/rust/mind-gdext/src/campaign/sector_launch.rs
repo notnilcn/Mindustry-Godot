@@ -26,10 +26,8 @@ impl MindCampaign {
         let Some(campaign) = self.campaign.as_ref() else {
             return false;
         };
-        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
-            return false;
-        };
-        let Some(record) = campaign.sector(planet_id, sector_id) else {
+        // `Campaign::sector_by_name` (H01): planet name + sector index in one.
+        let Some((_planet_id, record)) = campaign.sector_by_name(&planet_name, sector_id) else {
             return false;
         };
         let extras = mind_core::maps::planet::SectorGenExtras {
@@ -287,11 +285,8 @@ impl MindCampaign {
 
         // `Sector.isBeingPlayed` (`Sector.java:148-151`): only the sector being
         // played reads true; a launch clears every previous flag first (T1).
-        for planet in campaign.planets.values_mut() {
-            for sector in &mut planet.sectors {
-                sector.being_played = false;
-            }
-        }
+        // `Campaign::clear_being_played` (H01).
+        campaign.clear_being_played();
 
         self.reloader = HostReloader::default();
         let events = if resume {

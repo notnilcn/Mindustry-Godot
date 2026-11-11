@@ -487,15 +487,11 @@ impl MindCampaign {
         // record right away (the PAR-0085 launch cost must stick even while
         // a sector runs).
         let Some(true) = self.with_campaign_mut(|campaign, settings| {
-            let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
-                return false;
-            };
-            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
-                return false;
-            };
-            record.remove_items(stacks.iter().cloned());
-            let _ = record.save_info(settings, &planet_name);
-            true
+            campaign
+                .edit_sector(settings, &planet_name, sector_id, |record| {
+                    record.remove_items(stacks.iter().cloned());
+                })
+                .is_some()
         }) else {
             return false;
         };
