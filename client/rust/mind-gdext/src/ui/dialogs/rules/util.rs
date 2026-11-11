@@ -113,22 +113,16 @@ pub(in crate::ui::dialogs) fn dialog_node(name: &str) -> Option<Gd<Node>> {
     kit::tree_root()?.find_child(name)
 }
 
-/// Connects a `MindUi` prompt signal once per dialog node.
+/// Connects a `MindUi` prompt signal once, keeping the rules batch's key.
 pub(in crate::ui::dialogs) fn connect_prompt_once(
     dialog: &mut MindDialog,
     key: &str,
     signal: &str,
     callable: &Callable,
 ) {
-    let Some(mut ui) = kit::ui() else {
-        return;
-    };
-    let meta = format!("_batch_i_{key}");
-    if dialog.base().has_meta(&meta) || !ui.has_signal(signal) {
-        return;
-    }
-    let _ = ui.connect(signal, callable);
-    dialog.base_mut().set_meta(&meta, &true.to_variant());
+    crate::ui::dialogs::common::prompt::connect_prompt_once(
+        dialog, "_batch_i_", key, signal, callable,
+    );
 }
 
 /// Runs `action` on a freshly bound dialog during the idle phase.

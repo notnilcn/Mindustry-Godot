@@ -3,7 +3,7 @@
 //! `io` command bodies: map listing, save/load round-trips, revision/class-id gates and settings checks (plan 04).
 //! Upstream: none (port-only CLI; the oracle has no Java counterpart).
 
-use super::bench::percentile;
+use crate::stats::percentile;
 use super::content::boot_content;
 use super::*;
 

@@ -17,6 +17,7 @@ use mind_core::world::{BlockCounter, BlockTable, BuildRules, TilePos, WorldGrid}
 use smallvec::SmallVec;
 
 use crate::cli::InputCommand;
+use crate::stats::percentile;
 
 /// Exit code: pass.
 const EXIT_PASS: i32 = 0;
@@ -1235,14 +1236,6 @@ fn time_it<B: FnMut()>(iters: u64, warmup: u64, mut body: B) -> (Vec<u64>, u64, 
     let bytes = mind_core::util::alloc::alloc_bytes().saturating_sub(bytes_before);
     samples.sort_unstable();
     (samples, alloc, bytes)
-}
-
-/// Percentile helper (`p` in `0..=100`).
-fn percentile(samples: &[u64], p: usize) -> u64 {
-    if samples.is_empty() {
-        return 0;
-    }
-    samples[(samples.len() * p / 100).min(samples.len() - 1)]
 }
 
 /// `input bench`: the §7d input budgets. `input_idle` additionally asserts zero

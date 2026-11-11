@@ -28,6 +28,7 @@ pub mod registry;
 pub mod render_scenarios;
 pub mod report;
 pub mod server;
+pub mod stats;
 pub mod stdb_scenarios;
 pub mod ui_scenarios;
 pub mod units_scenarios;

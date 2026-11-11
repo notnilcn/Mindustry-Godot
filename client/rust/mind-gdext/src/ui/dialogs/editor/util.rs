@@ -1015,22 +1015,16 @@ pub(in crate::ui::dialogs) fn markup(raw: &str) -> String {
     kit::markup_text(raw).to_string()
 }
 
-/// Connects a `MindUi` prompt signal once.
+/// Connects a `MindUi` prompt signal once, keeping the editor batch's key.
 pub(in crate::ui::dialogs) fn connect_prompt_once(
     dialog: &mut MindDialog,
     key: &str,
     signal: &str,
     callable: &Callable,
 ) {
-    let Some(mut ui) = kit::ui() else {
-        return;
-    };
-    let meta = format!("_batch_f_{key}");
-    if dialog.base().has_meta(&meta) || !ui.has_signal(signal) {
-        return;
-    }
-    let _ = ui.connect(signal, callable);
-    dialog.base_mut().set_meta(&meta, &true.to_variant());
+    crate::ui::dialogs::common::prompt::connect_prompt_once(
+        dialog, "_batch_f_", key, signal, callable,
+    );
 }
 
 /// Re-runs the active controller's `shown` hook on a live dialog handle.
