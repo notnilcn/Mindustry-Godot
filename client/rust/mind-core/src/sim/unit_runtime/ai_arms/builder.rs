@@ -60,5 +60,5 @@ pub(in crate::sim::unit_runtime) fn builder_arm(
     } else if world.get_entity(entity).is_ok() {
         world.entity_mut(entity).insert(state);
     }
-    let _ = command_ai_weapon_pass(world, &runtime.content, &queries, entity, team, true);
+    let _ = command_ai_weapon_pass(world, &runtime.content, queries, entity, team, true);
 }

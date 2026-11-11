@@ -35,7 +35,7 @@ pub(in crate::sim::unit_runtime) fn ground_flying_arm(
         update_flying_ai(
             world,
             &mut *runtime,
-            &queries,
+            queries,
             entity,
             team,
             slot,
@@ -47,7 +47,7 @@ pub(in crate::sim::unit_runtime) fn ground_flying_arm(
         update_ground_ai(
             world,
             &mut *runtime,
-            &queries,
+            queries,
             entity,
             team,
             slot,

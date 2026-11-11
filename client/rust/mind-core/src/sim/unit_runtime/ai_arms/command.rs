@@ -107,7 +107,7 @@ pub(in crate::sim::unit_runtime) fn command_arm(
         let _ = command_ai_weapon_pass(
             world,
             &runtime.content,
-            &queries,
+            queries,
             entity,
             team,
             can_attack && !is_building,
@@ -117,7 +117,7 @@ pub(in crate::sim::unit_runtime) fn command_arm(
         // movement only follows an explicit order (`targetPos`); with none
         // the unit idles in place instead of walking to the core anchor.
         let mount_target =
-            command_ai_weapon_pass(world, &runtime.content, &queries, entity, team, true);
+            command_ai_weapon_pass(world, &runtime.content, queries, entity, team, true);
         // `CommandAI.updateUnit`'s stance handling (T11): boost and
         // pursueTarget (edit `slot` before the movement match).
         let mut slot = slot;

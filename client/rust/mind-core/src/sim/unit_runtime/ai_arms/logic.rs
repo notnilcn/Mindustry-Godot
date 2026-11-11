@@ -48,7 +48,7 @@ pub(in crate::sim::unit_runtime) fn logic_arm(
         logic_ai_weapon_pass(
             world,
             &runtime.content,
-            &queries,
+            queries,
             entity,
             team,
             main_target,

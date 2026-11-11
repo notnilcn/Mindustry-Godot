@@ -90,7 +90,7 @@ pub(in crate::sim::unit_runtime) fn missile_arm(
     update_ai_weapons(
         world,
         &runtime.content,
-        &queries,
+        queries,
         entity,
         team,
         AiWeaponCtx {
