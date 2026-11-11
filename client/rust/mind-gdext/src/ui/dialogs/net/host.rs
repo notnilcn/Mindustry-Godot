@@ -17,12 +17,14 @@ use godot::classes::{
 use godot::obj::NewAlloc;
 use godot::prelude::*;
 
+use crate::gdutil::variant::to_text_lenient;
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::net::util_h::{
-    close_named_dialog, color_rgba32, dialog_node, emit_dialog_signal, generation_live,
-    hide_dialog_node, next_generation, open_named_dialog, push_player_identity, settings_int,
-    settings_put_int, settings_put_text, stored_player_color, stored_player_name, ui_call,
-    ui_show_info, variant_string,
+use crate::ui::dialogs::common::facade::ui_call;
+use crate::ui::dialogs::game::util::{dialog_node, open_named_dialog, ui_show_info};
+use crate::ui::dialogs::net::util::{
+    close_named_dialog, color_rgba32, emit_dialog_signal, generation_live, hide_dialog_node,
+    next_generation, push_player_identity, settings_int, settings_put_int, settings_put_text,
+    stored_player_color, stored_player_name,
 };
 use crate::ui::kit;
 use crate::ui::kit::widgets::factory;
@@ -110,7 +112,7 @@ impl DialogController for HostDialogController {
         let dialog_gd = dialog.to_gd();
         self.state.borrow_mut().generation = next_generation(&dialog_gd, HOST_GENERATION_META);
         host_build(dialog, &self.state);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         host_hook_picker(&dialog_gd, &self.state);
     }
 }
@@ -150,7 +152,7 @@ fn host_build(dialog: &mut MindDialog, state: &Rc<RefCell<HostState>>) {
         let callable = Callable::from_fn("host_store_name", move |args: &[&Variant]| {
             let text = args
                 .first()
-                .map(|value| variant_string(value))
+                .map(|value| to_text_lenient(value))
                 .unwrap_or_default();
             host_store_name(&state_for, &text);
             Variant::nil()

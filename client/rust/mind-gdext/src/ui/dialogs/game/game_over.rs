@@ -18,13 +18,16 @@ use godot::global::HorizontalAlignment;
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
-use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::game::util_b::{
-    STAT_ROWS, campaign_call, defer_action, dialog_press, dict_bool, dict_i64, dict_string,
-    format_millis, is_mobile, net_active, open_named_dialog, padded, sector_state, variant_bool,
-    variant_f64, variant_i64,
+use crate::gdutil::variant::{
+    dict_bool_or, dict_i64_or, dict_text_or, to_bool_lenient, to_f64_lenient, to_i64_lenient,
 };
-use crate::ui::dialogs::net::util::ui_call;
+use crate::ui::dialog::{DialogController, MindDialog};
+use crate::ui::dialogs::common::defer::defer_action;
+use crate::ui::dialogs::common::facade::ui_call;
+use crate::ui::dialogs::game::util::{
+    STAT_ROWS, campaign_call, dialog_press, format_millis, is_mobile, net_active,
+    open_named_dialog, padded, sector_state,
+};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindLabel, MindTable, styles};
 
@@ -165,7 +168,7 @@ impl GameOverDialog {
         // the wave row is gated on waves; every other row always shows.
         for (index, entry) in STAT_ROWS.iter().enumerate() {
             let (key, field) = *entry;
-            if field == "wave" && !dict_bool(&stats, "waves", false) {
+            if field == "wave" && !dict_bool_or(&stats, "waves", false) {
                 continue;
             }
             Self::add_stat_row(&mut rows, &stats, key, field, index);
@@ -202,7 +205,7 @@ impl GameOverDialog {
         if Self::is_campaign(dialog) {
             if dialog
                 .context_value("captured")
-                .map(|value| variant_bool(&value))
+                .map(|value| to_bool_lenient(&value))
                 .unwrap_or(false)
             {
                 return kit::tm("@sector.curcapture").to_string();
@@ -222,9 +225,9 @@ impl GameOverDialog {
     /// `state.isCampaign()`: the dialog context, else the live sector state.
     fn is_campaign(dialog: &MindDialog) -> bool {
         if let Some(value) = dialog.context_value("campaign") {
-            return variant_bool(&value);
+            return to_bool_lenient(&value);
         }
-        dict_bool(&sector_state(), "campaign", false)
+        dict_bool_or(&sector_state(), "campaign", false)
     }
 
     /// `GameOverDialog.java:101-140`: campaign gets `@continue` (planet map) or
@@ -319,7 +322,7 @@ impl GameOverDialog {
         parent.add_child(&padded(&panel, 5.0));
         let target = stats
             .get(field)
-            .map(|value| variant_f64(&value))
+            .map(|value| to_f64_lenient(&value))
             .unwrap_or(0.0);
         let delay = 0.05 * index as f64;
         // Scale + colour: `parallel(scaleTo(1, 1, 0.3f, pow3Out), color(...))`.
@@ -330,7 +333,10 @@ impl GameOverDialog {
         intro.tween_property(&panel, "scale:x", &1.0f32.to_variant(), 0.3);
         let tint_target = bar.clone();
         let tint = Callable::from_fn("gameover_row_tint", move |args: &[&Variant]| {
-            let weight = args.first().map(|value| variant_f64(value)).unwrap_or(0.0);
+            let weight = args
+                .first()
+                .map(|value| to_f64_lenient(value))
+                .unwrap_or(0.0);
             let mut bar = tint_target.clone();
             bar.set_bg_color(styles::ACCENT.lerp(DARKEST_GRAY, weight));
             Variant::nil()
@@ -350,7 +356,10 @@ impl GameOverDialog {
         }
         let value_target = value_label.clone();
         let count = Callable::from_fn("gameover_row_count", move |args: &[&Variant]| {
-            let value = args.first().map(|value| variant_f64(value)).unwrap_or(0.0);
+            let value = args
+                .first()
+                .map(|value| to_f64_lenient(value))
+                .unwrap_or(0.0);
             let mut label = value_target.clone();
             label.set_text(&format!("{}", value as i64));
             Variant::nil()
@@ -403,8 +412,7 @@ fn stats_pane() -> Gd<PanelContainer> {
     box_.set_content_margin(Side::TOP, 13.0);
     box_.set_content_margin(Side::BOTTOM, 13.0);
     pane.add_theme_stylebox_override("panel", &box_);
-    let mut rows = VBoxContainer::new_alloc();
-    rows.add_theme_constant_override("separation", 0);
+    let rows = factory::vbox(0);
     pane.add_child(&rows);
     pane
 }
@@ -444,7 +452,7 @@ fn playtime_row(millis: i64) -> Gd<Control> {
 /// current (Java hides the row then).
 fn current_playtime_ms() -> i64 {
     campaign_call("current_save_playtime_ms", &[])
-        .map(|value| variant_i64(&value))
+        .map(|value| to_i64_lenient(&value))
         .unwrap_or(-1)
 }
 
@@ -557,11 +565,11 @@ fn view_rows(views: &VarDictionary, key: &str) -> Vec<VarDictionary> {
 /// `CampaignRulesDialog` (`ui.campaignRules.show(prev.planet)`).
 fn difficulty_guide_planet() -> Option<String> {
     let state = sector_state();
-    if !dict_bool(&state, "campaign", false) {
+    if !dict_bool_or(&state, "campaign", false) {
         return None;
     }
-    let planet = dict_string(&state, "planet");
-    let sector = dict_i64(&state, "sector", -1);
+    let planet = dict_text_or(&state, "planet");
+    let sector = dict_i64_or(&state, "sector", -1);
     if planet.is_empty() || sector < 0 {
         return None;
     }
@@ -572,23 +580,23 @@ fn difficulty_guide_planet() -> Option<String> {
     let views = campaign_views_for(&planet);
     let allow_campaign_rules = view_rows(&views, "planets")
         .iter()
-        .find(|row| dict_string(row, "name") == planet)
-        .map(|row| dict_bool(row, "allow_campaign_rules", false))
+        .find(|row| dict_text_or(row, "name") == planet)
+        .map(|row| dict_bool_or(row, "allow_campaign_rules", false))
         .unwrap_or(false);
     let attempts = view_rows(&views, "sectors")
         .iter()
-        .find(|row| dict_i64(row, "id", -1) == sector)
+        .find(|row| dict_i64_or(row, "id", -1) == sector)
         .map(|row| {
             row.get("stats")
                 .and_then(|value| value.try_to::<VarDictionary>().ok())
-                .map(|stats| dict_i64(&stats, "attempts", 0))
+                .map(|stats| dict_i64_or(&stats, "attempts", 0))
                 .unwrap_or(0)
         })
         .unwrap_or(0);
     let difficulty = views
         .get("rules")
         .and_then(|value| value.try_to::<VarDictionary>().ok())
-        .map(|rules| dict_string(&rules, "difficulty"))
+        .map(|rules| dict_text_or(&rules, "difficulty"))
         .unwrap_or_default();
     // Java's `&&` evaluates left to right: getBoolOnce only writes when the
     // other three gates pass.

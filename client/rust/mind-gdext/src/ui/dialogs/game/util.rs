@@ -1,39 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
-//! Shared helpers of the old `batch_b.rs` for the in-game menu dialogs. Filled by S07 (docs/PLANS).
+//! Shared helpers of the in-game menu dialogs (the old `batch_b.rs` helper section).
 //! Upstream: none (port-only; shared helpers of the old batch_b)
-
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use godot::classes::{Button, Control, HBoxContainer, Json, Label, MarginContainer, Node};
 use godot::obj::NewAlloc;
 use godot::prelude::*;
 
+use crate::gdutil::variant::to_bool_lenient;
 use crate::ui::dialog::MindDialog;
+use crate::ui::dialogs::common::defer::defer_action;
+use crate::ui::dialogs::common::facade::ui_call;
 use crate::ui::kit;
-
-/// A queued one-shot action (`Callable::call_deferred` payload).
-type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
-
-/// Queues `action` for the idle phase.
-///
-/// A `MindUi` prompt signal (`confirm_result`/`text_input_result`) is emitted
-/// from inside a `MindUi` method, so the answering handler must not call back
-/// into the facade synchronously: `Gd::bind_mut` panics on a re-entrant borrow
-/// (`PAR-0066`).
-pub(in crate::ui::dialogs) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
-    let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
-    let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
-        let queued = slot.borrow_mut().take();
-        if let Some(action) = queued {
-            action();
-        }
-        Variant::nil()
-    });
-    callable.call_deferred(&[]);
-}
 
 /// Queues a dialog action for the idle phase (see [`defer_action`]).
 pub(in crate::ui::dialogs) fn defer_dialog(
@@ -98,24 +77,12 @@ pub(in crate::ui::dialogs) fn open_named_dialog(name: &str, context_json: &str) 
 
 /// Shows a transient info prompt (`ui.showInfo`).
 pub(in crate::ui::dialogs) fn ui_show_info(text: &str) {
-    let Some(mut ui) = kit::ui() else {
-        return;
-    };
-    if !ui.has_method("show_info") {
-        return;
-    }
-    let _ = ui.call("show_info", &[GString::from(text).to_variant()]);
+    let _ = ui_call("show_info", &[GString::from(text).to_variant()]);
 }
 
 /// Shows a confirm prompt (`ui.showConfirm`); answers on `confirm_result`.
 pub(in crate::ui::dialogs) fn ui_show_confirm(text: &str) {
-    let Some(mut ui) = kit::ui() else {
-        return;
-    };
-    if !ui.has_method("show_confirm") {
-        return;
-    }
-    let _ = ui.call("show_confirm", &[GString::from(text).to_variant()]);
+    let _ = ui_call("show_confirm", &[GString::from(text).to_variant()]);
 }
 
 /// Calls a campaign facade method (`None` when the facade or method is absent).
@@ -175,7 +142,7 @@ pub(in crate::ui::dialogs) fn is_mobile() -> bool {
 /// `control.saves.getCurrent().isAutosave()` through the campaign facade.
 pub(in crate::ui::dialogs) fn current_slot_autosave() -> bool {
     campaign_call("current_save_autosave", &[])
-        .map(|value| variant_bool(&value))
+        .map(|value| to_bool_lenient(&value))
         .unwrap_or(false)
 }
 
@@ -191,110 +158,6 @@ pub(in crate::ui::dialogs) fn dialog_node(name: &str) -> Option<Gd<Node>> {
     }
     let root = kit::tree_root()?;
     root.find_child(name)
-}
-
-/// A dictionary value coerced to text (`str(value)`; empty when absent).
-pub(in crate::ui::dialogs) fn dict_string(dict: &VarDictionary, key: &str) -> String {
-    dict.get(key)
-        .map(|value| variant_string(&value))
-        .unwrap_or_default()
-}
-
-/// A dictionary value coerced to an integer.
-pub(in crate::ui::dialogs) fn dict_i64(dict: &VarDictionary, key: &str, default: i64) -> i64 {
-    dict.get(key)
-        .map(|value| variant_i64(&value))
-        .unwrap_or(default)
-}
-
-/// A dictionary value coerced to a boolean.
-pub(in crate::ui::dialogs) fn dict_bool(dict: &VarDictionary, key: &str, default: bool) -> bool {
-    dict.get(key)
-        .map(|value| variant_bool(&value))
-        .unwrap_or(default)
-}
-
-/// `str(value)` for one variant.
-pub(in crate::ui::dialogs) fn variant_string(value: &Variant) -> String {
-    if let Ok(text) = value.try_to::<GString>() {
-        return text.to_string();
-    }
-    if let Ok(flag) = value.try_to::<bool>() {
-        return flag.to_string();
-    }
-    if let Ok(number) = value.try_to::<i64>() {
-        return number.to_string();
-    }
-    if let Ok(number) = value.try_to::<f64>() {
-        return number.to_string();
-    }
-    String::new()
-}
-
-/// `int(value)` for one variant (JSON integers and floats both convert).
-pub(in crate::ui::dialogs) fn variant_i64(value: &Variant) -> i64 {
-    if let Ok(number) = value.try_to::<i64>() {
-        return number;
-    }
-    if let Ok(number) = value.try_to::<f64>() {
-        return number as i64;
-    }
-    if let Ok(flag) = value.try_to::<bool>() {
-        return i64::from(flag);
-    }
-    if let Ok(text) = value.try_to::<GString>() {
-        return text.to_string().trim().parse().unwrap_or(0);
-    }
-    0
-}
-
-/// `float(value)` for one variant.
-pub(in crate::ui::dialogs) fn variant_f64(value: &Variant) -> f64 {
-    if let Ok(number) = value.try_to::<f64>() {
-        return number;
-    }
-    if let Ok(number) = value.try_to::<i64>() {
-        return number as f64;
-    }
-    if let Ok(text) = value.try_to::<GString>() {
-        return text.to_string().trim().parse().unwrap_or(0.0);
-    }
-    0.0
-}
-
-/// `bool(value)` for one variant.
-pub(in crate::ui::dialogs) fn variant_bool(value: &Variant) -> bool {
-    if let Ok(flag) = value.try_to::<bool>() {
-        return flag;
-    }
-    if let Ok(number) = value.try_to::<i64>() {
-        return number != 0;
-    }
-    if let Ok(text) = value.try_to::<GString>() {
-        let text = text.to_string();
-        return text == "true" || text == "1";
-    }
-    false
-}
-
-/// `JSON.parse_string(text)` as an object (`{}` on any other shape).
-pub(in crate::ui::dialogs) fn parse_json_object(text: &str) -> VarDictionary {
-    if text.is_empty() {
-        return VarDictionary::new();
-    }
-    Json::parse_string(text)
-        .try_to::<VarDictionary>()
-        .unwrap_or_default()
-}
-
-/// `JSON.parse_string(text)` as an array (`[]` on any other shape).
-pub(in crate::ui::dialogs) fn parse_json_array(text: &str) -> VarArray {
-    if text.is_empty() {
-        return VarArray::new();
-    }
-    Json::parse_string(text)
-        .try_to::<VarArray>()
-        .unwrap_or_default()
 }
 
 /// `JSON.stringify(value)` for a dictionary.

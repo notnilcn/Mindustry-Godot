@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
-//! Join/host/load/save plumbing shared by the `net` and `game` dialogs. Filled by S07 (docs/PLANS).
+//! Shared helpers of the net dialogs: join/host/load/save plumbing (old
+//! `batch_b.rs`), the host/load/save helper section (old `batch_h.rs`) and the
+//! misc coercion helpers (old `misc.rs`).
 //! Upstream: none (port-only; join/host/load/save shared plumbing)
 
 use godot::prelude::*;
 
+use crate::gdutil::variant::{to_bool_lenient, to_i64_lenient, to_text_lenient};
 use crate::ui::dialog::MindDialog;
-use crate::ui::dialogs::game::util_b::{variant_bool, variant_i64, variant_string};
-use crate::ui::kit;
+use crate::ui::dialogs::common::facade::ui_call;
+use crate::ui::dialogs::game::util::campaign_call;
+use crate::ui::kit::{self, MindTable};
 
 // ---------------------------------------------------------------------------
 // Join / host / load / save shared plumbing (I08)
@@ -40,15 +44,6 @@ pub(in crate::ui::dialogs) const PROBE_POLL_SECONDS: f64 = 10.0 / 60.0;
 /// generation stamped on its node: the previous generation's handlers retire
 /// instead of mutating stale state.
 pub(in crate::ui::dialogs) const JOIN_GENERATION_META: &str = "_mind_join_generation";
-
-/// Calls one `MindUi` method (`None` when the facade or method is absent).
-pub(in crate::ui::dialogs) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
-    let mut ui = kit::ui()?;
-    if !ui.has_method(method) {
-        return None;
-    }
-    Some(ui.call(method, args))
-}
 
 /// Whether `MindUi` exposes `method`.
 pub(in crate::ui::dialogs) fn ui_has_method(method: &str) -> bool {
@@ -84,7 +79,7 @@ pub(in crate::ui::dialogs) fn settings_int(key: &str, default: i64) -> Option<i6
         "settings_get_int",
         &[GString::from(key).to_variant(), default.to_variant()],
     )
-    .map(|value| variant_i64(&value))
+    .map(|value| to_i64_lenient(&value))
 }
 
 /// `Core.settings.put(key, value)` for an integer.
@@ -98,7 +93,7 @@ pub(in crate::ui::dialogs) fn settings_put_int(key: &str, value: i64) {
 /// `Core.settings.getBool(key)` (`None` without `MindUi`).
 pub(in crate::ui::dialogs) fn settings_bool(key: &str) -> Option<bool> {
     ui_call("settings_get_bool", &[GString::from(key).to_variant()])
-        .map(|value| variant_bool(&value))
+        .map(|value| to_bool_lenient(&value))
 }
 
 /// `Core.settings.getString("name")` (`JoinDialog.java:341`).
@@ -152,6 +147,13 @@ pub(in crate::ui::dialogs) fn push_player_identity(name: &str, color: Color) {
     );
 }
 
+/// A campaign facade method's boolean result (`false` when absent).
+pub(in crate::ui::dialogs) fn campaign_bool(method: &str, args: &[Variant]) -> bool {
+    campaign_call(method, args)
+        .map(|value| to_bool_lenient(&value))
+        .unwrap_or(false)
+}
+
 /// `ui.close_dialog(id)`: whether `MindUi` owned the close.
 pub(in crate::ui::dialogs) fn close_named_dialog(id: &str) -> bool {
     let Some(mut ui) = kit::ui() else {
@@ -191,7 +193,7 @@ pub(in crate::ui::dialogs) fn emit_dialog_signal(
 pub(in crate::ui::dialogs) fn next_generation(dialog: &Gd<MindDialog>, key: &str) -> i64 {
     let mut node = dialog.clone();
     let current = if node.has_meta(key) {
-        variant_i64(&node.get_meta(key))
+        to_i64_lenient(&node.get_meta(key))
     } else {
         0
     };
@@ -208,7 +210,80 @@ pub(in crate::ui::dialogs) fn generation_live(
 ) -> bool {
     dialog.is_instance_valid()
         && dialog.has_meta(key)
-        && variant_i64(&dialog.get_meta(key)) == generation
+        && to_i64_lenient(&dialog.get_meta(key)) == generation
+}
+
+/// `UI.showTextInput(title, message, maxLength, defaultText, numeric,
+/// allowEmpty)`.
+pub(in crate::ui::dialogs) fn ui_show_text_input(
+    title: &str,
+    message: &str,
+    max_length: i64,
+    default_text: &str,
+) {
+    let _ = ui_call(
+        "show_text_input",
+        &[
+            GString::from(title).to_variant(),
+            GString::from(message).to_variant(),
+            max_length.to_variant(),
+            GString::from(default_text).to_variant(),
+            false.to_variant(),
+            false.to_variant(),
+        ],
+    );
+}
+
+/// `ui.showErrorMessage` via the shared text prompt (`@error.title`).
+pub(in crate::ui::dialogs) fn ui_show_error(text: &str) {
+    let title = kit::t("@error.title").to_string();
+    let title = kit::markup_text(&title);
+    let body = kit::markup_text(text);
+    let _ = ui_call("show_text", &[title.to_variant(), body.to_variant()]);
+}
+
+/// Replaces (or installs) one lasting `MindUi` signal handler, remembering the
+/// callable on the dialog so an extension reload does not stack duplicates.
+pub(in crate::ui::dialogs) fn install_ui_signal(
+    dialog: &Gd<MindDialog>,
+    signal: &str,
+    meta: &str,
+    callable: &Callable,
+) {
+    let Some(mut ui) = kit::ui() else {
+        return;
+    };
+    if !ui.has_signal(signal) {
+        return;
+    }
+    let mut node = dialog.clone();
+    if node.has_meta(meta) {
+        if let Ok(previous) = node.get_meta(meta).try_to::<Callable>()
+            && ui.is_connected(signal, &previous)
+        {
+            ui.disconnect(signal, &previous);
+        }
+        node.remove_meta(meta);
+    }
+    if !ui.is_connected(signal, callable) {
+        ui.connect(signal, callable);
+    }
+    node.set_meta(meta, &callable.to_variant());
+}
+
+/// Removes and frees every child of a `MindTable` (and drops its cell entries).
+pub(in crate::ui::dialogs) fn clear_table_nodes(table: &mut Gd<MindTable>) {
+    kit::clear_children(table);
+    table.bind_mut().clear();
+}
+
+/// `String.get_file()` + `String.get_basename()`: the file stem of a path.
+pub(in crate::ui::dialogs) fn file_basename(path: &str) -> String {
+    let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match file.rfind('.') {
+        Some(index) if index > 0 => file[..index].to_string(),
+        _ => file.to_string(),
+    }
 }
 
 /// A dictionary value coerced to text, with a fallback (`str(dict.get(key, d))`).
@@ -218,6 +293,33 @@ pub(in crate::ui::dialogs) fn dict_string_or(
     default: &str,
 ) -> String {
     dict.get(key)
-        .map(|value| variant_string(&value))
+        .map(|value| to_text_lenient(&value))
         .unwrap_or_else(|| default.to_string())
+}
+
+/// `Planet.localizedName` (`planet.<name>.name`) for the completion banner.
+pub(in crate::ui::dialogs) fn planet_localized(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+    let key = format!("planet.{name}.name");
+    let localized = kit::t(&format!("@{key}")).to_string();
+    if localized.is_empty() || localized == key {
+        name.to_string()
+    } else {
+        localized
+    }
+}
+
+/// The `Variant` array coerced to a `String` list (`String[]` context rows).
+pub(in crate::ui::dialogs) fn string_array(value: Option<Variant>) -> Vec<String> {
+    value
+        .map(|value| value.to::<VarArray>())
+        .map(|array| {
+            array
+                .iter_shared()
+                .map(|entry| entry.to::<GString>().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
 }

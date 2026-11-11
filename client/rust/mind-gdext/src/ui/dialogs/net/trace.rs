@@ -7,13 +7,13 @@
 //! Upstream: ui/dialogs/TraceDialog.java
 
 use godot::classes::control::SizeFlags;
-use godot::classes::{DisplayServer, HBoxContainer, VBoxContainer};
+use godot::classes::{DisplayServer, VBoxContainer};
 use godot::obj::NewAlloc;
 use godot::prelude::*;
 
+use crate::gdutil::variant::to_text_lenient;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::net::roster::dict_text;
-use crate::ui::dialogs::net::util_misc::variant_text;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
 
@@ -123,7 +123,7 @@ impl DialogController for TraceDialog {
         dialog.set_title_key("@trace");
         dialog.should_pause = false;
         dialog.clear_buttons();
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
@@ -185,8 +185,7 @@ impl DialogController for TraceDialog {
 /// One `TraceDialog` copy row: `Icon.copySmall` 28x28 then the formatted text.
 fn trace_copy_row(table: &mut Gd<MindTable>, key: &str, value: &str) {
     // code-instantiated: trace fields are data-driven from the trace info.
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 4);
+    let mut row = factory::hbox(4);
     let mut button = factory::glyph_button("copy", "@copy", "emptyi");
     button.set_custom_minimum_size(Vector2::new(TRACE_COPY_SIZE, TRACE_COPY_SIZE));
     let value_for_copy = GString::from(value);
@@ -252,7 +251,7 @@ fn list_strings(value: Option<Variant>) -> Vec<String> {
     };
     array
         .iter_shared()
-        .map(|entry| variant_text(&entry))
+        .map(|entry| to_text_lenient(&entry))
         .filter(|entry| !entry.is_empty())
         .collect()
 }
@@ -266,7 +265,7 @@ fn bool_value(value: Option<Variant>) -> bool {
             } else if let Ok(number) = value.try_to::<i64>() {
                 number != 0
             } else {
-                variant_text(&value) == "true"
+                to_text_lenient(&value) == "true"
             }
         }
         None => false,

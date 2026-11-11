@@ -11,14 +11,12 @@ use std::rc::Rc;
 use godot::builtin::Side;
 use godot::classes::control::SizeFlags;
 use godot::classes::text_server::AutowrapMode;
-use godot::classes::{
-    Control, HBoxContainer, PanelContainer, RichTextLabel, StyleBox, StyleBoxTexture,
-};
+use godot::classes::{Control, PanelContainer, RichTextLabel, StyleBox, StyleBoxTexture};
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
 use crate::ui::dialog::MindDialog;
-use crate::ui::dialogs::net::util_misc::defer_action;
+use crate::ui::dialogs::common::defer::defer_action;
 use crate::ui::kit;
 use crate::ui::kit::widgets::factory;
 
@@ -196,7 +194,7 @@ pub(super) fn roster_ready(
     dialog.set_title_key(kind.title_key());
     dialog.should_pause = false;
     dialog.clear_buttons();
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     roster_connect_confirm(dialog, state, kind);
 }
 
@@ -253,8 +251,7 @@ fn roster_row(
     // code-instantiated: roster rows are server-driven admin views.
     let mut panel = PanelContainer::new_alloc();
     panel.add_theme_stylebox_override("panel", &roster_style());
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 0);
+    let mut row = factory::hbox(0);
     let label = factory::label(&kind.row_text(entry));
     let mut label_rich: Gd<RichTextLabel> = label.clone().upcast();
     label_rich.set_autowrap_mode(AutowrapMode::WORD_SMART);

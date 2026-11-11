@@ -11,8 +11,6 @@ pub mod join;
 pub mod roster;
 pub mod trace;
 pub mod util;
-pub mod util_h;
-pub mod util_misc;
 
 use crate::ui::dialog::DialogController;
 

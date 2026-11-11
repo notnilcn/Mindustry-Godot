@@ -26,12 +26,18 @@ use godot::prelude::*;
 
 use mind_core::io::{FileSystem, NativeFs, SaveIo};
 
+use crate::gdutil::variant::{
+    dict_bool_or, dict_i64_or, dict_text_or, to_bool_lenient, to_i64_lenient, to_text_lenient,
+};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::net::util_h::{
-    campaign_bool, campaign_call, clear_table_nodes, close_named_dialog, defer_action, dialog_node,
-    dict_bool, dict_i64, dict_string, emit_dialog_signal, file_basename, format_millis,
-    generation_live, hide_dialog_node, install_ui_signal, next_generation, open_named_dialog,
-    ui_show_confirm, ui_show_error, ui_show_text_input, variant_bool, variant_i64, variant_string,
+use crate::ui::dialogs::common::defer::defer_action;
+use crate::ui::dialogs::game::util::{
+    campaign_call, dialog_node, format_millis, open_named_dialog, ui_show_confirm,
+};
+use crate::ui::dialogs::net::util::{
+    campaign_bool, clear_table_nodes, close_named_dialog, emit_dialog_signal, file_basename,
+    generation_live, hide_dialog_node, install_ui_signal, next_generation, ui_show_error,
+    ui_show_text_input,
 };
 use crate::ui::kit::widgets::border_image::MindBorderImage;
 use crate::ui::kit::widgets::factory;
@@ -195,9 +201,8 @@ fn load_build(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
     let mut root = dialog.content_table();
 
     // code-instantiated: the search row is data-driven from the gamemode list.
-    let mut search_row = HBoxContainer::new_alloc();
     // The Java `search` table has no cell padding (`LoadDialog.java:59-77`).
-    search_row.add_theme_constant_override("separation", 0);
+    let mut search_row = factory::hbox(0);
     // code-instantiated: the zoom glyph is an icon-font run with no static scene.
     let zoom = factory::glyph_label("zoom", 30, Color::WHITE);
     search_row.add_child(&zoom);
@@ -225,7 +230,7 @@ fn load_build(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
     state.borrow_mut().field = Some(field);
 
     // code-instantiated: the save grid is a data-driven list of save slots.
-    let grid = MindTable::new_alloc();
+    let grid = factory::table();
     // `cont.add(pane).growY()` (`LoadDialog.java:82`): the pane is as wide as
     // the slot table (`slots.marginRight(24).marginLeft(20f)`, `:88`) and
     // centred, and the ScrollPane stretches the table over its height,
@@ -240,7 +245,7 @@ fn load_build(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
 
     // Bottom row: `addCloseButton()` then the dialog's own setup button
     // (`LoadDialog.java:47-48,59-60`).
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     load_add_setup_buttons(dialog, &dialog_gd, state);
     load_rebuild_list(dialog, state);
 }
@@ -392,7 +397,7 @@ fn load_rebuild_later(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>) {
 fn load_slot_timestamp(entry: &Variant) -> i64 {
     entry
         .try_to::<VarDictionary>()
-        .map(|slot| dict_i64(&slot, "timestamp_ms", 0))
+        .map(|slot| dict_i64_or(&slot, "timestamp_ms", 0))
         .unwrap_or(0)
 }
 
@@ -446,14 +451,14 @@ fn load_rebuild_list(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
             continue;
         };
         // `SaveSlot.isHidden`: sector saves are hidden from the load list.
-        if dict_bool(&slot, "sector", false) {
+        if dict_bool_or(&slot, "sector", false) {
             continue;
         }
-        let slot_name = dict_string(&slot, "name");
+        let slot_name = dict_text_or(&slot, "name");
         if !needle.is_empty() && !slot_name.to_lowercase().contains(&needle) {
             continue;
         }
-        let mode = dict_string(&slot, "mode");
+        let mode = dict_text_or(&slot, "mode");
         if !mode.is_empty() && hidden.contains(&mode) {
             continue;
         }
@@ -488,7 +493,7 @@ fn load_build_card(
     state: &Rc<RefCell<LoadState>>,
     slot: &VarDictionary,
 ) -> Gd<Button> {
-    let slot_name = dict_string(slot, "name");
+    let slot_name = dict_text_or(slot, "name");
     // code-instantiated: save cards are data-driven from the save-slot listing.
     let mut card = factory::button("");
     card.set_theme_type_variation("grayt");
@@ -539,13 +544,17 @@ fn load_build_card(
     title.add_child(&name_label);
     // `modifyButton`: `Icon.save` autosave toggle, `Icon.trash` delete,
     // `Icon.pencil` rename, `Icon.export` (`LoadDialog.java:105-145`).
-    let mut autosave = load_icon_action("save", "emptyTogglei", dict_bool(slot, "autosave", false));
+    let mut autosave = load_icon_action(
+        "save",
+        "emptyTogglei",
+        dict_bool_or(slot, "autosave", false),
+    );
     {
         let slot_for = slot.clone();
         let callable = Callable::from_fn("load_set_autosave", move |args: &[&Variant]| {
             let pressed = args
                 .first()
-                .map(|value| variant_bool(value))
+                .map(|value| to_bool_lenient(value))
                 .unwrap_or(false);
             load_set_slot_autosave(&slot_for, pressed);
             Variant::nil()
@@ -654,7 +663,7 @@ fn load_resolve_map(map_name: &str, state: &Rc<RefCell<LoadState>>) -> String {
             if let Ok(rows) = listed.try_to::<VarArray>() {
                 for entry in rows.iter_shared() {
                     if let Ok(row) = entry.try_to::<VarDictionary>() {
-                        let name = dict_string(&row, "name");
+                        let name = dict_text_or(&row, "name");
                         if !name.is_empty() {
                             names.insert(name);
                         }
@@ -678,25 +687,34 @@ fn load_format_date(timestamp_ms: i64) -> String {
     let bias = Time::singleton()
         .get_time_zone_from_system()
         .get("bias")
-        .map(|value| variant_i64(&value))
+        .map(|value| to_i64_lenient(&value))
         .unwrap_or(0)
         * 60;
     let dt = Time::singleton().get_datetime_dict_from_unix_time(timestamp_ms / 1000 + bias);
     let month = dt
         .get("month")
-        .map(|value| variant_i64(&value))
+        .map(|value| to_i64_lenient(&value))
         .unwrap_or(1)
         .clamp(1, 12) as usize;
-    let day = dt.get("day").map(|value| variant_i64(&value)).unwrap_or(1);
-    let year = dt.get("year").map(|value| variant_i64(&value)).unwrap_or(0);
-    let hour = dt.get("hour").map(|value| variant_i64(&value)).unwrap_or(0);
+    let day = dt
+        .get("day")
+        .map(|value| to_i64_lenient(&value))
+        .unwrap_or(1);
+    let year = dt
+        .get("year")
+        .map(|value| to_i64_lenient(&value))
+        .unwrap_or(0);
+    let hour = dt
+        .get("hour")
+        .map(|value| to_i64_lenient(&value))
+        .unwrap_or(0);
     let minute = dt
         .get("minute")
-        .map(|value| variant_i64(&value))
+        .map(|value| to_i64_lenient(&value))
         .unwrap_or(0);
     let second = dt
         .get("second")
-        .map(|value| variant_i64(&value))
+        .map(|value| to_i64_lenient(&value))
         .unwrap_or(0);
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -719,10 +737,10 @@ fn load_format_date(timestamp_ms: i64) -> String {
 
 /// `Saves.SaveSlot.previewTexture()` for a slot row (`save_preview_texture`).
 fn load_preview_texture(slot: &VarDictionary) -> Option<Gd<Texture2D>> {
-    let file = dict_string(slot, "file");
+    let file = dict_text_or(slot, "file");
     let mut stem = file_basename(&file);
     if stem.is_empty() {
-        stem = dict_string(slot, "name");
+        stem = dict_text_or(slot, "name");
     }
     if stem.is_empty() {
         return None;
@@ -748,25 +766,25 @@ fn load_icon_action(icon_name: &str, style: &str, is_pressed: bool) -> Gd<Button
 
 /// `_meta_lines`: the map/mode/wave/autosave/playtime/date lines.
 fn load_meta_lines(state: &Rc<RefCell<LoadState>>, slot: &VarDictionary) -> Vec<String> {
-    let mut map_name = dict_string(slot, "map");
+    let mut map_name = dict_text_or(slot, "map");
     if map_name.is_empty() {
-        map_name = load_resolve_map(&dict_string(slot, "map_name"), state);
+        map_name = load_resolve_map(&dict_text_or(slot, "map_name"), state);
     }
-    let mode = dict_string(slot, "mode");
+    let mode = dict_text_or(slot, "mode");
     let mode = if mode.is_empty() {
         mode
     } else {
         kit::t(&format!("@mode.{mode}.name")).to_string()
     };
-    let wave = dict_i64(slot, "wave", 0);
-    let autosave = dict_bool(slot, "autosave", false);
-    let mut playtime = dict_string(slot, "playtime");
+    let wave = dict_i64_or(slot, "wave", 0);
+    let autosave = dict_bool_or(slot, "autosave", false);
+    let mut playtime = dict_text_or(slot, "playtime");
     if slot.contains_key("playtime_ms") {
-        playtime = format_millis(dict_i64(slot, "playtime_ms", 0));
+        playtime = format_millis(dict_i64_or(slot, "playtime_ms", 0));
     }
-    let mut date = dict_string(slot, "date");
-    if date.is_empty() && dict_i64(slot, "timestamp_ms", 0) > 0 {
-        date = load_format_date(dict_i64(slot, "timestamp_ms", 0));
+    let mut date = dict_text_or(slot, "date");
+    if date.is_empty() && dict_i64_or(slot, "timestamp_ms", 0) > 0 {
+        date = load_format_date(dict_i64_or(slot, "timestamp_ms", 0));
     }
     // `String color = "[lightgray]"` (`LoadDialog.java:147`): every meta value is
     // light grey, the mode name stays white.
@@ -851,7 +869,7 @@ fn load_attempt(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, slot: &
     emit_dialog_signal(
         dialog,
         "slot_selected",
-        &[GString::from(dict_string(slot, "name").as_str()).to_variant()],
+        &[GString::from(dict_text_or(slot, "name").as_str()).to_variant()],
     );
     load_load_slot(slot);
     load_close(dialog, LoadKind::Load);
@@ -910,8 +928,7 @@ fn load_failure_panel(
         box_.set_content_margin(side, 12.0);
     }
     panel.add_theme_stylebox_override("panel", &box_);
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 6);
+    let mut column = factory::vbox(6);
     panel.add_child(&column);
     let reason_text =
         kit::markup_text(&format!("[accent]{}", kit::t("@save.corrupted"))).to_string();
@@ -1018,8 +1035,8 @@ fn report_missing_assets() {
         let Ok(row) = entry.try_to::<VarDictionary>() else {
             continue;
         };
-        let kind = dict_string(&row, "type");
-        let path = dict_string(&row, "path");
+        let kind = dict_text_or(&row, "type");
+        let path = dict_text_or(&row, "path");
         body.push_str(&format!("\n[accent]{kind}: [lightgray]{path}"));
     }
     if let Some(mut ui) = kit::ui()
@@ -1120,10 +1137,10 @@ fn load_load_slot(slot: &VarDictionary) {
 
 /// The file stem used by the main `save_slot`/`load_slot` calls.
 fn load_slot_stem(slot: &VarDictionary) -> String {
-    let file = dict_string(slot, "file");
+    let file = dict_text_or(slot, "file");
     let stem = file_basename(&file);
     if stem.is_empty() {
-        dict_string(slot, "name")
+        dict_text_or(slot, "name")
     } else {
         stem
     }
@@ -1154,14 +1171,14 @@ fn load_rename_slot(state: &Rc<RefCell<LoadState>>, slot: &VarDictionary) {
         &kit::t("@save.rename").to_string(),
         &kit::t("@save.rename.text").to_string(),
         64,
-        &dict_string(slot, "name"),
+        &dict_text_or(slot, "name"),
     );
 }
 
 /// `Icon.export`: `FileChooser.export(slot.getName(), "msav", slot::exportFile)`;
 /// a save with embedded assets must be loaded first (`@save.export.needsload`).
 fn load_export_slot(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, slot: &VarDictionary) {
-    if dict_bool(slot, "external_assets", false) {
+    if dict_bool_or(slot, "external_assets", false) {
         ui_show_error(&kit::t("@save.export.needsload").to_string());
         return;
     }
@@ -1257,7 +1274,7 @@ fn load_on_file_chosen(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, 
     }
     close_named_dialog("file_chooser");
     let result = campaign_call("import_save", &[GString::from(path).to_variant()])
-        .map(|value| variant_string(&value))
+        .map(|value| to_text_lenient(&value))
         .unwrap_or_default();
     // `_close_chooser()` then the result branch; errors keep the dialog open.
     let imported = result.is_empty();
@@ -1292,7 +1309,7 @@ fn load_connect_prompts(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>)
         let callable = Callable::from_fn("load_confirm_result", move |args: &[&Variant]| {
             let confirmed = args
                 .first()
-                .map(|value| variant_bool(value))
+                .map(|value| to_bool_lenient(value))
                 .unwrap_or(false);
             let generation = state_for.borrow().generation;
             if !generation_live(&dialog_for, LOAD_GENERATION_META, generation) {

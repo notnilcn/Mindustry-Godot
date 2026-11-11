@@ -20,18 +20,20 @@ use godot::global::HorizontalAlignment;
 use godot::obj::NewAlloc;
 use godot::prelude::*;
 
+use crate::gdutil::variant::{
+    dict_i64_or, dict_text_or, parse_array, parse_json_object, to_bool_lenient, to_text_lenient,
+};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::game::util_b::{
-    dialog_node, dict_i64, dict_string, open_named_dialog, parse_json_array, parse_json_object,
-    ui_show_confirm, ui_show_info, variant_bool, variant_string,
+use crate::ui::dialogs::game::util::{
+    dialog_node, open_named_dialog, ui_show_confirm, ui_show_info,
 };
 use crate::ui::dialogs::net::util::{
     DEFAULT_DB_NAME, DEFAULT_SERVER_ADDRESS, DEFAULT_SERVER_PORT, IP_SETTING, JOIN_GENERATION_META,
     PLAYER_COLOR_SETTING, PLAYER_NAME_MAX_LENGTH, PLAYER_NAME_SETTING, PROBE_POLL_SECONDS,
-    SERVERS_SETTING, close_named_dialog, color_rgba32, dict_string_or, emit_dialog_signal,
-    generation_live, hide_dialog_node, next_generation, push_player_identity, settings_bool,
-    settings_put_int, settings_put_text, settings_text, stored_player_color, stored_player_name,
-    ui_has_method,
+    SERVERS_SETTING, clear_table_nodes, close_named_dialog, color_rgba32, dict_string_or,
+    emit_dialog_signal, generation_live, hide_dialog_node, next_generation, push_player_identity,
+    settings_bool, settings_put_int, settings_put_text, settings_text, stored_player_color,
+    stored_player_name, ui_has_method,
 };
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable, styles};
@@ -199,7 +201,7 @@ fn join_build_header(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>) {
         let callable = Callable::from_fn("join_store_name", move |args: &[&Variant]| {
             let text = args
                 .first()
-                .map(|value| variant_string(value))
+                .map(|value| to_text_lenient(value))
                 .unwrap_or_default();
             join_store_name(&state_for, &text);
             Variant::nil()
@@ -260,7 +262,7 @@ fn join_build_add_panel(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>)
         let callable = Callable::from_fn("join_store_ip", |args: &[&Variant]| {
             let text = args
                 .first()
-                .map(|value| variant_string(value))
+                .map(|value| to_text_lenient(value))
                 .unwrap_or_default();
             settings_put_text(IP_SETTING, &text);
             Variant::nil()
@@ -335,7 +337,7 @@ fn join_build_sections(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>) 
         state.borrow_mut().global_nodes = nodes;
         // code-instantiated: the community body lists the active server's public
         // `all_matches` rows; it is Java's community list minus the remote fetch.
-        let mut list = MindTable::new_alloc();
+        let mut list = factory::table();
         list.set_h_size_flags(SizeFlags::EXPAND_FILL);
         global.add_child(&list);
         state.borrow_mut().global_list = Some(list);
@@ -403,7 +405,7 @@ fn join_add_section(
             let callable = Callable::from_fn("join_search", move |args: &[&Variant]| {
                 let text = args
                     .first()
-                    .map(|value| variant_string(value))
+                    .map(|value| to_text_lenient(value))
                     .unwrap_or_default();
                 join_on_search_changed(&dialog_for, &state_for, &text);
                 Variant::nil()
@@ -445,26 +447,16 @@ fn join_rebuild_servers(state: &Rc<RefCell<JoinState>>, dialog: &Gd<MindDialog>)
     if let Some(mut body) = local
         && body.is_instance_valid()
     {
-        clear_container(&mut body);
+        kit::clear_children(&mut body);
         join_build_server_row(state, dialog, &mut body, DEFAULT_SERVER_ADDRESS, -1);
     }
     if let Some(mut body) = remote
         && body.is_instance_valid()
     {
-        clear_container(&mut body);
+        kit::clear_children(&mut body);
         for (index, entry) in servers.iter().enumerate() {
             join_build_server_row(state, dialog, &mut body, &entry.ip, index as i64);
         }
-    }
-}
-
-/// Removes + frees every child of a container (immediate rebuilds must not stack
-/// deferred frees).
-fn clear_container(container: &mut Gd<VBoxContainer>) {
-    for child in container.get_children().iter_shared() {
-        let mut child = child.clone();
-        container.remove_child(&child);
-        child.queue_free();
     }
 }
 
@@ -589,7 +581,7 @@ fn join_build_server_content(
 ) {
     let probe = parse_json_object(&join_probe_json(address));
     let state_name = dict_string_or(&probe, "state", "none");
-    let ping = dict_i64(&probe, "ping_ms", -1);
+    let ping = dict_i64_or(&probe, "ping_ms", -1);
     let matches = probe
         .get("matches")
         .and_then(|value| value.try_to::<VarArray>().ok())
@@ -622,16 +614,16 @@ fn join_build_server_content(
                     let Ok(row) = entry.try_to::<VarDictionary>() else {
                         continue;
                     };
-                    let match_id = dict_i64(&row, "match_id", 0);
+                    let match_id = dict_i64_or(&row, "match_id", 0);
                     if match_id <= 0 {
                         continue;
                     }
                     let label = format!(
                         "{}  {}  {}/{}",
-                        dict_string(&row, "map_id"),
-                        dict_string(&row, "mode_name"),
-                        dict_i64(&row, "player_count", 0),
-                        dict_i64(&row, "max_players", 0),
+                        dict_text_or(&row, "map_id"),
+                        dict_text_or(&row, "mode_name"),
+                        dict_i64_or(&row, "player_count", 0),
+                        dict_i64_or(&row, "max_players", 0),
                     );
                     let mut button = factory::button(&label);
                     let dialog_for = dialog.clone();
@@ -681,16 +673,16 @@ fn join_rebuild_public(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>) 
         let Ok(row) = row_variant.try_to::<VarDictionary>() else {
             continue;
         };
-        let match_id = dict_i64(&row, "match_id", 0);
+        let match_id = dict_i64_or(&row, "match_id", 0);
         if match_id <= 0 {
             continue;
         }
         let label = format!(
             "{}  {}  {}/{}",
-            dict_string(&row, "map_id"),
-            dict_string(&row, "mode_name"),
-            dict_i64(&row, "player_count", 0),
-            dict_i64(&row, "max_players", 0),
+            dict_text_or(&row, "map_id"),
+            dict_text_or(&row, "mode_name"),
+            dict_i64_or(&row, "player_count", 0),
+            dict_i64_or(&row, "max_players", 0),
         );
         if !search.is_empty() && !label.to_lowercase().contains(&search) {
             continue;
@@ -737,17 +729,6 @@ fn join_rebuild_public(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>) 
     let _ = list.call_deferred("sort_now", &[]);
 }
 
-/// Removes + frees a table's children before a rebuild (the immediate
-/// `MindTable.clear_children` the GDScript relied on for its empty-state test).
-fn clear_table_nodes(table: &mut Gd<MindTable>) {
-    for child in table.get_children().iter_shared() {
-        let mut child = child.clone();
-        table.remove_child(&child);
-        child.queue_free();
-    }
-    table.bind_mut().clear();
-}
-
 /// Live `all_matches` rows from `MindNet` (empty when absent or offline).
 fn join_public_matches() -> VarArray {
     let Some(mut net) = kit::net() else {
@@ -760,7 +741,7 @@ fn join_public_matches() -> VarArray {
         .call("get_public_matches_json", &[])
         .try_to::<GString>()
         .unwrap_or_default();
-    parse_json_array(&text.to_string())
+    parse_array(&text.to_string())
 }
 
 /// Polls every row's probe and returns one signature over their rendered state.
@@ -828,14 +809,14 @@ fn join_public_match(match_id: i64) -> Option<VarDictionary> {
     join_public_matches()
         .iter_shared()
         .filter_map(|entry| entry.try_to::<VarDictionary>().ok())
-        .find(|row| dict_i64(row, "match_id", 0) == match_id)
+        .find(|row| dict_i64_or(row, "match_id", 0) == match_id)
 }
 
 /// `RelayMatch.build_id`/`protocol_version` of one row.
 fn join_match_version(row: &VarDictionary) -> (String, i64) {
     (
-        dict_string(row, "build_id"),
-        dict_i64(row, "protocol_version", 0),
+        dict_text_or(row, "build_id"),
+        dict_i64_or(row, "protocol_version", 0),
     )
 }
 
@@ -1045,7 +1026,7 @@ fn join_connect_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<JoinState>>)
     let callable = Callable::from_fn("join_confirm_result", move |args: &[&Variant]| {
         let confirmed = args
             .first()
-            .map(|value| variant_bool(value))
+            .map(|value| to_bool_lenient(value))
             .unwrap_or(false);
         let generation = state_for.borrow().generation;
         if !generation_live(&dialog_for, JOIN_GENERATION_META, generation) {
@@ -1222,17 +1203,17 @@ fn join_load_servers(state: &Rc<RefCell<JoinState>>) {
     if let Some(text) = settings_text(SERVERS_SETTING, "")
         && !text.is_empty()
     {
-        for entry in parse_json_array(&text).iter_shared() {
+        for entry in parse_array(&text).iter_shared() {
             let Ok(row) = entry.try_to::<VarDictionary>() else {
                 continue;
             };
-            let ip = dict_string(&row, "ip");
+            let ip = dict_text_or(&row, "ip");
             if ip.is_empty() {
                 continue;
             }
             servers.push(JoinServer {
                 ip,
-                port: dict_i64(&row, "port", 0),
+                port: dict_i64_or(&row, "port", 0),
             });
         }
     }
