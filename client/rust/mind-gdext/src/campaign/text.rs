@@ -133,30 +133,6 @@ impl MindCampaign {
             .unwrap_or_default()
     }
 
-    /// `UnlockableContent.emoji()` through the `MindAssets` `Iconc` table
-    /// (`Fonts.getUnicodeStr`); empty when the content has no icon.
-    fn content_emoji(&self, name: &str) -> String {
-        self.assets_string("unicode_str", &[GString::from(name).to_variant()])
-            .unwrap_or_default()
-    }
-
-    /// `Content.emoji() + " " + Content.localizedName` (no leading space when
-    /// the emoji is unknown).
-    pub(super) fn emoji_content_name(
-        &self,
-        registry: &ContentRegistry,
-        content: ContentRef,
-    ) -> String {
-        let name = tech_tree::content_name(registry, content).unwrap_or_default();
-        let emoji = self.content_emoji(&name);
-        let localized = self.localized_content_name(content.type_.name(), &name);
-        if emoji.is_empty() {
-            localized
-        } else {
-            format!("{emoji} {localized}")
-        }
-    }
-
     /// `SectorPreset.localizedName`.
     pub(super) fn sector_localized_name(&self, registry: &ContentRegistry, id: SectorId) -> String {
         let name = registry
@@ -164,15 +140,6 @@ impl MindCampaign {
             .map(|record| record.name.clone())
             .unwrap_or_default();
         self.localized_content_name("sector", &name)
-    }
-
-    /// `Planet.localizedName`.
-    pub(super) fn planet_localized_name(&self, registry: &ContentRegistry, id: PlanetId) -> String {
-        let name = registry
-            .planet(id)
-            .map(|record| record.name.clone())
-            .unwrap_or_default();
-        self.localized_content_name("planet", &name)
     }
 
     /// A `/root` autoload node by name (`Core.scene`-style singleton lookup;
