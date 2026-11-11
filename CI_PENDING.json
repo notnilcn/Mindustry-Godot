@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T04:19:31Z",
+  "updated": "2026-11-11T05:34:04Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1644,6 +1644,58 @@
       "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt -, then godot4 --headless --path client res://scenes/tools/dialog_sweep_check.tscn and res://scenes/tools/ui_widgets_check.tscn",
       "expected": "437/437 mind-gdext lib tests pass (inventory 438 -> 437: one dead-helper test deleted with its helper); scoped clippy -D warnings clean; workspace --all-targets check ok; api-surface diff empty (104 MindCampaign funcs, 2 signals); dialog_sweep_check failed=0; ui_widgets_check passes. Every campaign dialog renders the same layout/text/tooltips/ids.",
       "risk": "The dialogs are code-built UI (no unit test covers the widget tree), so the in-engine sweep is the real gate: research tree/zoom/hover popup, planet page rail + sector list + launch flow, campaign rules toggles, sector stats, schematics cards/tags/info, custom game. Watch for bind() panics if a dialog is ever shown synchronously from inside a MindCampaign method (all current paths are deferred); the typed view producers are called with the guard dropped before any UI call. The MindPlanetView/MindResearchView ABI #[func]s still accept their untyped dictionaries (rows are projected/deserialized at that boundary).",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261111-053403",
+      "created_at": "2026-11-11T05:34:03Z",
+      "agent": "refactor-C01",
+      "branch": "main",
+      "head": "c75cc2bb",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core,client/rust/mind-gdext,client/rust/mind-headless,docs,parity",
+      "summary": "Refactor programme W0-W5: shims deleted, helpers promoted, docs/ledgers updated",
+      "files": [
+        "client/rust/mind-core/src/game",
+        "client/rust/mind-core/src/sim",
+        "client/rust/mind-core/src/ui",
+        "client/rust/mind-core/src/mods",
+        "client/rust/mind-core/src/io",
+        "client/rust/mind-core/src/content",
+        "client/rust/mind-core/src/world/blocks",
+        "client/rust/mind-gdext/src/campaign",
+        "client/rust/mind-gdext/src/sim_host",
+        "client/rust/mind-gdext/src/editor",
+        "client/rust/mind-gdext/src/input",
+        "client/rust/mind-gdext/src/net",
+        "client/rust/mind-gdext/src/ui",
+        "client/rust/mind-gdext/src/gdutil",
+        "client/rust/mind-headless/src",
+        "TWIN-VERIFICATION.json",
+        "CAMPAIGN_GAPS.md",
+        "docs/GODOT-SCENES-REFACTOR.md",
+        "client/AGENTS.md"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "parity",
+        "goldens",
+        "spine",
+        "godot-build",
+        "godot-import",
+        "shaders-check",
+        "ui-layout-check",
+        "ui-widgets-check",
+        "dialog-sweep",
+        "boundary"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --ci",
+      "expected": "every stage green: fmt/clippy/cargo-check/cargo-test, parity 115/115, goldens --check no drift, spine T0 4/4, godot build+import, shaders/ui-layout/ui-widgets/dialog-sweep checks failed=0, boundary audit clean",
+      "risk": "Whole-programme sweep: the dialog group tree + deleted batch shims (dialog-sweep/ui-widgets), the sim/game module splits (goldens/spine), and the ledger rewrites (parity report consumers). Run the Godot gates in the main checkout only after all W5 merges.",
       "status": "pending"
     }
   ]
