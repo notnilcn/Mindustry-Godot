@@ -500,8 +500,8 @@ pub(crate) use crate::ui::dialogs::common::defer::Deferred;
 /// Installs the per-frame hook once (deferred queue drain + `tick`).
 ///
 /// Keeps the campaign batch's original meta key (`_campaign2_frame_<key>`) and
-/// callable name (`campaign2_frame`); `batch_campaign2.rs` re-exports this and
-/// `editor/editor_maps.rs` / `logic/canvas_edit.rs` call it (RULES §4).
+/// callable name (`campaign2_frame`). The editor/canvas dialogs install the same
+/// pair through [`crate::ui::dialogs::common::defer::install_frame_tick`].
 pub(crate) fn install_frame_tick(
     dialog: &mut MindDialog,
     key: &str,

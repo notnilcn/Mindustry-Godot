@@ -5,7 +5,7 @@
 //! Upstream: ui/dialogs/CanvasEditDialog.java, world/blocks/logic/CanvasBlock.java
 
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::batch_campaign2::{Deferred, install_frame_tick};
+use crate::ui::dialogs::common::defer::Deferred;
 use crate::ui::dialogs::rules::util::*;
 use crate::ui::kit;
 use crate::ui::kit::widgets::factory;
@@ -181,9 +181,16 @@ impl DialogController for CanvasEditDialog {
         build_canvas(dialog, &self.state);
         let target = dialog.to_gd();
         let state = self.state.clone();
-        install_frame_tick(dialog, "canvas_edit", Deferred::default(), move || {
-            canvas_tick(&state, &target);
-        });
+        // The campaign batch's original meta key/callable name stay verbatim
+        // (UI ABI); callers no longer route through the deleted shim.
+        crate::ui::dialogs::common::defer::install_frame_tick(
+            dialog,
+            "_campaign2_frame_",
+            "campaign2_frame",
+            "canvas_edit",
+            Deferred::default(),
+            move || canvas_tick(&state, &target),
+        );
     }
 
     /// `shown()`: seed the surface from `SimHost.logic_canvas_sync`.

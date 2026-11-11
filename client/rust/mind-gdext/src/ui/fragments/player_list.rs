@@ -31,7 +31,7 @@ use godot::global::Key;
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
-use crate::ui::dialogs::misc::trace_context_json;
+use crate::ui::dialogs::net::trace::trace_context_json;
 use crate::ui::kit;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;

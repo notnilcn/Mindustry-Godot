@@ -646,7 +646,7 @@ fn research_rebuild_popup(
         info.set_custom_minimum_size(Vector2::new(50.0, 0.0));
         let content = node.content.clone();
         let callable = Callable::from_fn("research_info", move |_args: &[&Variant]| {
-            crate::ui::dialogs::batch_a::open_content_info(&content);
+            crate::ui::dialogs::settings::util::open_content_info(&content);
         });
         info.connect("pressed", &callable);
         row.add_child(&info);
