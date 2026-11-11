@@ -167,11 +167,7 @@ impl DesktopBridge {
         let Some(end) = self.raw_cursor_tile() else {
             return;
         };
-        if let Some(mut host) = self.host.clone() {
-            let _ = host
-                .bind_mut()
-                .queue_team_rebuild(start.0, start.1, end.0, end.1);
-        }
+        let _ = self.with_host_mut(|host| host.queue_team_rebuild(start.0, start.1, end.0, end.1));
         // `if(!keyDown(schematicSelect)){ schemX = schemY = -1 }`.
         if !self.key_down(bindings, ids::SCHEMATIC_SELECT) {
             self.schem_start = None;
@@ -186,7 +182,7 @@ impl DesktopBridge {
         y: i32,
         value: mind_core::world::config::ConfigValue,
     ) {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = tile_i16(x, y) else {
             return;
         };
         let Some(host) = self.host.clone() else {
@@ -229,15 +225,13 @@ impl DesktopBridge {
 
     /// `Block.saveConfig` for `block` (`nextConfig` gate, `Block.java:827-832`).
     pub(super) fn block_save_config(&self, block: BlockId) -> bool {
-        self.host
-            .clone()
-            .and_then(|host| {
-                host.bind()
-                    .content_registry()
-                    .and_then(|content| content.block(block))
-                    .map(|def| def.save_config)
-            })
-            .unwrap_or(false)
+        self.with_host(|host| {
+            host.content_registry()
+                .and_then(|content| content.block(block))
+                .map(|def| def.save_config)
+        })
+        .flatten()
+        .unwrap_or(false)
     }
 
     /// Snapshot for the placement overlay pass (G03 T2).
@@ -324,8 +318,10 @@ impl DesktopBridge {
         // `build instanceof ControlBlock cont && cont.canControl() && build.team
         // == player.team() && cont.unit() != player.unit() && cont.unit().isAI()`
         // -> `cont.unit()`; the sim resolves the turret's proxy `block` unit.
-        if let (Some(mut host), Some((x, y))) = (self.host.clone(), self.cursor_tile())
-            && let Some(id) = host.bind_mut().control_block_unit_id(x, y)
+        if let Some((x, y)) = self.cursor_tile()
+            && let Some(id) = self
+                .with_host_mut(|host| host.control_block_unit_id(x, y))
+                .flatten()
         {
             return Some(id);
         }
@@ -343,8 +339,7 @@ impl DesktopBridge {
         if kind != BlockKind::CoreBlock && !payload_build {
             return None;
         }
-        let host = self.host.clone()?;
-        let team = host.bind().building_team(x, y)?;
+        let team = self.with_host(|host| host.building_team(x, y)).flatten()?;
         if team != self.player_team() {
             return None;
         }
@@ -356,7 +351,9 @@ impl DesktopBridge {
         // `unit.tileOn().build == this` (the `spawnedByCore`/payload gate is
         // approximated by the tile condition; the sim half of
         // `BuildingControlSelect` is H01's).
-        let (px, py) = host.bind().player_unit_position()?;
+        let (px, py) = self
+            .with_host(|host| host.player_unit_position())
+            .flatten()?;
         let (tx, ty) = (WorldGrid::to_tile(px), WorldGrid::to_tile(py));
         (tx == x && ty == y).then_some((x, y))
     }

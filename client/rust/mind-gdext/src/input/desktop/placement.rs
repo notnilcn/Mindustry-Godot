@@ -207,12 +207,10 @@ impl DesktopBridge {
                 ));
             }
         }
-        if let Some(mut host) = self.host.clone() {
-            for (x, y, plan_block, rotation, config) in configured {
-                let _ = host
-                    .bind_mut()
-                    .queue_player_place_config(x, y, plan_block, rotation, config);
-            }
+        for (x, y, plan_block, rotation, config) in configured {
+            let _ = self.with_host_mut(|host| {
+                host.queue_player_place_config(x, y, plan_block, rotation, config)
+            });
         }
         self.enqueue_commands(&commands);
         self.controller.state.line_plans.clear();
@@ -355,9 +353,8 @@ impl DesktopBridge {
 
     /// `Block.rotate` for a block id.
     pub(super) fn block_rotates(&self, block: BlockId) -> bool {
-        self.host
-            .clone()
-            .is_some_and(|host| host.bind().block_rotates(block))
+        self.with_host(|host| host.block_rotates(block))
+            .unwrap_or(false)
     }
 
     /// The building under the cursor is interactable and
@@ -366,26 +363,25 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return false;
         };
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let guard = host.bind();
         let team = self.player_team();
-        let interactive = guard
-            .building_team(x, y)
-            .is_some_and(|building_team| building_team == team || building_team == 0);
-        if !interactive {
-            return false;
-        }
-        let Some(content) = guard.content_registry() else {
-            return false;
-        };
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return false;
-        };
-        let Some(block) = guard.grid().block_at(TilePos::new(tx, ty)) else {
-            return false;
-        };
-        content.block(block).is_some_and(|def| def.quick_rotate) && guard.block_rotates(block)
+        self.with_host(|host| {
+            let interactive = host
+                .building_team(x, y)
+                .is_some_and(|building_team| building_team == team || building_team == 0);
+            if !interactive {
+                return false;
+            }
+            let Some(content) = host.content_registry() else {
+                return false;
+            };
+            let Some((tx, ty)) = tile_i16(x, y) else {
+                return false;
+            };
+            let Some(block) = host.grid().block_at(TilePos::new(tx, ty)) else {
+                return false;
+            };
+            content.block(block).is_some_and(|def| def.quick_rotate) && host.block_rotates(block)
+        })
+        .unwrap_or(false)
     }
 }

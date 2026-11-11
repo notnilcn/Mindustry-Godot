@@ -153,19 +153,23 @@ impl MindInput {
 
     /// Resolves a `UnitCommand` name through the host's content snapshot.
     fn command_id_by_name(&self, name: &str) -> Option<u16> {
-        let host = self.bridge.host.clone()?;
-        host.bind()
-            .content_registry()
-            .and_then(|content| content.unit_command_by_name(name))
-            .map(|def| def.id.raw())
+        self.bridge
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.unit_command_by_name(name))
+                    .map(|def| def.id.raw())
+            })
+            .flatten()
     }
 
     /// Resolves a `UnitStance` name through the host's content snapshot.
     fn stance_id_by_name(&self, name: &str) -> Option<u16> {
-        let host = self.bridge.host.clone()?;
-        host.bind()
-            .content_registry()
-            .and_then(|content| content.unit_stance_by_name(name))
-            .map(|def| def.id.raw())
+        self.bridge
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.unit_stance_by_name(name))
+                    .map(|def| def.id.raw())
+            })
+            .flatten()
     }
 }

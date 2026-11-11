@@ -65,9 +65,7 @@ impl DesktopBridge {
 
     /// Live player team (`player.team().id`) for RTS selection filters.
     pub fn player_team(&self) -> u8 {
-        self.host
-            .as_ref()
-            .map(|host| host.bind().default_team().clamp(0, 255) as u8)
+        self.with_host(|host| host.default_team().clamp(0, 255) as u8)
             .unwrap_or(0)
     }
 
@@ -85,10 +83,8 @@ impl DesktopBridge {
                 // `Reconstructor`, `UnitAssembler`, `PayloadSource`).
                 self.controller.state.selected_units.clear();
                 let tile = mind_core::config::TILESIZE as f32;
-                if let Some(host) = self.host.clone() {
-                    self.controller.state.command_buildings = host
-                        .bind()
-                        .commandable_buildings()
+                let buildings = self.with_host(|host| {
+                    host.commandable_buildings()
                         .into_iter()
                         .filter(|(x, y)| {
                             rect.is_none_or(|rect| {
@@ -96,7 +92,10 @@ impl DesktopBridge {
                             })
                         })
                         .map(|(x, y)| TilePos::new(x, y))
-                        .collect();
+                        .collect::<SmallVec<[TilePos; 32]>>()
+                });
+                if let Some(buildings) = buildings {
+                    self.controller.state.command_buildings = buildings;
                 }
             }
             SelectAllKind::Units | SelectAllKind::Transport => {
@@ -207,12 +206,14 @@ impl DesktopBridge {
         if self.controller.state.selected_units.is_empty() {
             return false;
         }
-        let Some(stance) = self.host.as_ref().and_then(|host| {
-            host.bind()
-                .content_registry()
-                .and_then(|content| content.unit_stance_by_name(name))
-                .map(|def| def.id.get())
-        }) else {
+        let Some(stance) = self
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.unit_stance_by_name(name))
+                    .map(|def| def.id.get())
+            })
+            .flatten()
+        else {
             return false;
         };
         self.set_stance(stance, enabled);
@@ -225,12 +226,14 @@ impl DesktopBridge {
         if self.controller.state.selected_units.is_empty() {
             return false;
         }
-        let Some(command) = self.host.as_ref().and_then(|host| {
-            host.bind()
-                .content_registry()
-                .and_then(|content| content.unit_command_by_name(name))
-                .map(|def| def.id.get())
-        }) else {
+        let Some(command) = self
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.unit_command_by_name(name))
+                    .map(|def| def.id.get())
+            })
+            .flatten()
+        else {
             return false;
         };
         self.command_units(command);

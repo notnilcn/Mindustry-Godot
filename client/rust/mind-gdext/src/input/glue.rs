@@ -60,16 +60,35 @@ impl MindInput {
         );
     }
 
+    /// `InputHandler.locked()` push (PAR-0100): mirrors the live lock set onto
+    /// the bridge flag and hands it to the sim host when it changed. Runs from
+    /// `input`/`process` and from the two cutscene lock setters.
+    pub(super) fn sync_input_locks(&mut self) {
+        let locked = self.locks.any();
+        if self.bridge.locked != locked {
+            self.bridge.locked = locked;
+            let _ = self
+                .bridge
+                .with_host_mut(|host| host.set_input_locked(locked));
+        }
+    }
+
     /// Adopts `MindSimHost.selected_block()` as the live placement block.
     fn sync_selected_block(&mut self) {
-        let Some(host) = self.bridge.host.clone() else {
+        let Some(name) = self
+            .bridge
+            .with_host(|host| host.selected_block().to_string())
+        else {
             return;
         };
-        let name = host.bind().selected_block().to_string();
-        let guard = host.bind();
-        if let Some(content) = guard.content_registry()
-            && let Some(id) = content.block_id(&name)
-        {
+        let id = self
+            .bridge
+            .with_host(|host| {
+                host.content_registry()
+                    .and_then(|content| content.block_id(&name))
+            })
+            .flatten();
+        if let Some(id) = id {
             // `player.block == null` at boot (`BlockId::AIR` is "no selection";
             // the command-mode gate needs it; PAR-0140).
             let selected = if id == mind_core::content::BlockId::AIR {

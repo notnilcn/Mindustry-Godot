@@ -111,13 +111,7 @@ impl MindInput {
             return;
         }
         self.locks.cutscene = locked;
-        let any = self.locks.any();
-        if self.bridge.locked != any {
-            self.bridge.locked = any;
-            if let Some(mut host) = self.bridge.host.clone() {
-                host.bind_mut().set_input_locked(any);
-            }
-        }
+        self.sync_input_locks();
     }
 
     /// `InputHandler.inputLocks`' `logicCutscene` entry (`InputHandler.java:86`):
@@ -129,13 +123,7 @@ impl MindInput {
             return;
         }
         self.locks.logic_cutscene = locked;
-        let any = self.locks.any();
-        if self.bridge.locked != any {
-            self.bridge.locked = any;
-            if let Some(mut host) = self.bridge.host.clone() {
-                host.bind_mut().set_input_locked(any);
-            }
-        }
+        self.sync_input_locks();
     }
 
     /// Replaces the lock set from a JSON list of lock names.

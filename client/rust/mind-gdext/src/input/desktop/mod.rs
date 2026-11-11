@@ -44,6 +44,7 @@ use mind_core::world::{ConfigKind, TilePos, WorldGrid};
 
 use crate::camera::MindCamera2D;
 use crate::campaign::MindCampaign;
+use crate::gdutil::coords::tile_i16;
 use crate::sim_host::MindSimHost;
 
 use content::{
@@ -58,6 +59,11 @@ use helpers::{
 /// Maximum tiles one drag action emits (defensive; previews cap at `MAX_LENGTH`).
 const DRAG_TILE_CAP: usize = 256;
 /// `Build.validPlace` hit radius for tap selection (world pixels).
+///
+/// Same value as [`PLAYER_SELECT_RANGE`], but deliberately **not** the same
+/// constant: that one is upstream's `InputHandler.playerSelectRange`
+/// (`mobile ? 17f : 11f`, `InputHandler.java:55`) for the drop-on-player
+/// gesture, so the mobile port will move it to 17 while this stays at 11.
 const UNIT_TAP_RADIUS: f32 = 11.0;
 /// Double-tap window for `selectTypedUnits` (`Time.timeSinceMillis < 300`).
 const UNIT_TAP_INTERVAL_MS: u64 = 300;
@@ -77,6 +83,10 @@ const POINTER_BINDS: [&str; 5] = ["select", "deselect", "break_block", "pick", "
 
 /// How close a cursor must be to the carrying player unit to start a drop
 /// gesture (`Vars.playerSelectRange`, `InputHandler.java:2032-2043`).
+///
+/// Desktop half of `InputHandler.playerSelectRange` (`mobile ? 17f : 11f`,
+/// `InputHandler.java:55`); see [`UNIT_TAP_RADIUS`] for why the shared value is
+/// not a shared constant.
 const PLAYER_SELECT_RANGE: f32 = 11.0;
 
 /// `rules.itemDepositCooldown` default 0.5 s (`Rules.java`), the minimum gap
@@ -199,9 +209,7 @@ impl<'a> HostWorld<'a> {
     /// Block kind at a tile (`None` out of bounds/unloaded).
     fn kind_at(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
         let content = self.content?;
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
+        let (x, y) = tile_i16(x, y)?;
         let block = self.grid.block_at(TilePos::new(x, y))?;
         content.block(block).map(|def| def.kind)
     }
@@ -213,10 +221,7 @@ impl PlacementWorld for HostWorld<'_> {
     }
 
     fn block_at(&self, x: i32, y: i32) -> BlockId {
-        let Ok(x) = i16::try_from(x) else {
-            return BlockId::AIR;
-        };
-        let Ok(y) = i16::try_from(y) else {
+        let Some((x, y)) = tile_i16(x, y) else {
             return BlockId::AIR;
         };
         self.grid
@@ -564,5 +569,29 @@ impl DesktopBridge {
     /// Removes and returns the pending effects.
     pub fn take_effects(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.effects)
+    }
+
+    /// Runs `f` with the scene sim host bound, or returns `None` when the
+    /// scene has none (the same `self.host.clone()` + `bind()` the call sites
+    /// wrote out). The `Gd` is cloned first, so `f` may still read the other
+    /// bridge fields while the guard is alive. A body that itself returns
+    /// `Option` ends with `.flatten()`.
+    ///
+    /// `f` must not call back into Godot (a `call("…")`, a signal or a UI node
+    /// access): the guard must never be held across a re-entry. A nested
+    /// immutable `bind()` (a helper that binds the same host again, such as
+    /// `player_team`) is fine; a nested `bind_mut` panics.
+    pub(super) fn with_host<R>(&self, f: impl FnOnce(&MindSimHost) -> R) -> Option<R> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        Some(f(&guard))
+    }
+
+    /// [`Self::with_host`] for a mutable sim host (`bind_mut`). No nested
+    /// `bind`/`bind_mut` of the host may run inside `f`.
+    pub(super) fn with_host_mut<R>(&self, f: impl FnOnce(&mut MindSimHost) -> R) -> Option<R> {
+        let mut host = self.host.clone()?;
+        let mut guard = host.bind_mut();
+        Some(f(&mut guard))
     }
 }
