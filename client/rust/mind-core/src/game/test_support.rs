@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! Shared fixtures for `game::*` unit tests (campaign, saves, tech tree, play
-//! flows). Copies of the per-module originals until W2 adopts them.
+//! flows). Adopted by W2-H01 in the `saves`, `planet`, `sector` and `universe`
+//! test modules.
 //! Upstream: none (port-only test support).
-#![allow(dead_code)] // adopted in W2
+//!
+//! There is no `own_sector` seed: the per-site bodies differ in save-name
+//! construction, capacity and extra fields (see the F3/H01 reports), so W2-H01
+//! left the copies in place (RULES §4).
 
 use crate::content::{ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content};
 use crate::game::planet::EmptyNeighborhood;
