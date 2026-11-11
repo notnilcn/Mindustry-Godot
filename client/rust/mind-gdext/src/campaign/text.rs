@@ -214,11 +214,9 @@ pub(super) fn resolve_preset_description(
 /// missing); every other content resolves `<type>-<name>-ui`. The port's
 /// content-type name for `SectorPreset` is `sector` (`ContentType` parity).
 pub(super) fn content_icon_name(type_name: &str, name: &str) -> String {
-    if type_name == "sector" || type_name == "sectorpreset" {
-        format!("sector-{name}")
-    } else {
-        format!("{type_name}-{name}-ui")
-    }
+    // T01: one implementation for the core research builder and the facade
+    // (`mind_core::ui::campaign::content_icon_name`).
+    mind_core::ui::campaign::content_icon_name(type_name, name)
 }
 
 #[cfg(test)]
