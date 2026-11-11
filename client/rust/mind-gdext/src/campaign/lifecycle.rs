@@ -387,12 +387,9 @@ impl MindCampaign {
         // events, so read the runtime's copy when the caller holds it (or the
         // host does), else fall back to the facade copy.
         let record = match runtime.as_deref_mut() {
-            Some(live) => play::live_sector_record(
-                &self.session,
-                &live.campaign,
-                registry,
-                snapshot.as_ref(),
-            ),
+            Some(live) => {
+                play::live_sector_record(&self.session, &live.campaign, registry, snapshot.as_ref())
+            }
             None => {
                 let live = self
                     .read_live_campaign(|campaign| {

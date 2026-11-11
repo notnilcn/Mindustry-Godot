@@ -213,129 +213,53 @@ impl MindCampaign {
         to_gstring(&views, "{}")
     }
 
-    /// Current sector/rules summary.
+    /// Current sector/rules summary: the session rules scalars, the played
+    /// sector's record rows ([`Self::sector_state_rows`]) and the campaign
+    /// flag. `set` is the `GString`-key shorthand every row uses.
     #[func]
     pub fn get_sector_state(&self) -> VarDictionary {
         let mut dict = VarDictionary::new();
-        let key = |name: &str| GString::from(name);
-        dict.set(
-            &GString::from("campaign"),
-            &self.session.is_campaign().to_variant(),
+        let set = |dict: &mut VarDictionary, key: &str, value: Variant| {
+            dict.set(&GString::from(key), &value);
+        };
+        set(
+            &mut dict,
+            "campaign",
+            self.session.is_campaign().to_variant(),
         );
         // `GameState.isEditor` (`rules.editor`): the pause dialog's desktop
         // `!state.isEditor()` gate for the `@savegame`/`@loadgame` entries
         // (`PausedDialog.java:89-93`).
-        dict.set(
-            &GString::from("editor"),
-            &self.session.rules.editor.to_variant(),
+        set(&mut dict, "editor", self.session.rules.editor.to_variant());
+        set(&mut dict, "wave", self.session.wave.to_variant());
+        set(&mut dict, "waves", self.session.rules.waves.to_variant());
+        set(
+            &mut dict,
+            "attack",
+            self.session.rules.attack_mode.to_variant(),
         );
-        dict.set(&GString::from("wave"), &self.session.wave.to_variant());
-        dict.set(
-            &GString::from("waves"),
-            &self.session.rules.waves.to_variant(),
-        );
-        dict.set(
-            &GString::from("attack"),
-            &self.session.rules.attack_mode.to_variant(),
-        );
-        dict.set(
-            &GString::from("hasCore"),
-            &(self.session.player_core_count() > 0).to_variant(),
+        set(
+            &mut dict,
+            "hasCore",
+            (self.session.player_core_count() > 0).to_variant(),
         );
         // I08 T4: the live custom map's name (the host match id for
         // non-campaign worlds); empty for campaign sectors and the menu.
-        dict.set(
-            &GString::from("mapName"),
-            &self
-                .current_map_name
+        set(
+            &mut dict,
+            "mapName",
+            self.current_map_name
                 .clone()
                 .unwrap_or_default()
                 .to_variant(),
         );
-        if let Some((planet, sector)) = self.session.sector {
-            let name = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.planet_name(planet))
-                .unwrap_or_default()
-                .to_owned();
-            dict.set(&key("planet"), &name.as_str().to_variant());
-            dict.set(&key("sector"), &(sector as i64).to_variant());
-            let record = self
-                .campaign
-                .as_ref()
-                .and_then(|campaign| campaign.sector(planet, sector));
-            dict.set(
-                &key("wasCaptured"),
-                &record
-                    .map(|sector| sector.info.info.was_captured)
-                    .unwrap_or(false)
-                    .to_variant(),
-            );
-            dict.set(
-                &key("hasSave"),
-                &record
-                    .map(|sector| sector.has_save())
-                    .unwrap_or(false)
-                    .to_variant(),
-            );
-            dict.set(
-                &key("isLast"),
-                &record
-                    .map(|sector| sector.is_last_sector())
-                    .unwrap_or(false)
-                    .to_variant(),
-            );
-            // `state.getSector().preset` name (hint predicates: `isTutorial`,
-            // `presetLaunch`), empty for a generated sector.
-            let preset_name = record
-                .and_then(|sector| sector.preset)
-                .and_then(|preset| {
-                    self.registry
-                        .as_ref()
-                        .and_then(|registry| registry.sector(preset))
-                        .map(|def| def.name.clone())
-                })
-                .unwrap_or_default();
-            dict.set(&key("preset"), &preset_name.as_str().to_variant());
-            // The landing announce gate (CoreBlock.java:414): campaign +
-            // `Vars.showSectorLandInfo` + `preset.showSectorLandInfo`.
-            let preset_def = record.and_then(|sector| sector.preset).and_then(|preset| {
-                self.registry
-                    .as_ref()
-                    .and_then(|registry| registry.sector(preset))
-            });
-            dict.set(
-                &key("showLandInfo"),
-                &mind_core::content::registries::sectors::shows_sector_land_info(
-                    self.session.is_campaign(),
-                    preset_def,
-                )
-                .to_variant(),
-            );
-            dict.set(
-                &key("captured"),
-                &record
-                    .map(|sector| sector.is_captured(None))
-                    .unwrap_or(false)
-                    .to_variant(),
-            );
-            // `PausedDialog.rebuild` `showObjective`: the preset description
-            // feeds the `@objective` full-text dialog (`UnlockableContent`
-            // resolves it from `Core.bundle`).
-            let preset_description = resolve_preset_description(
-                self.registry.as_ref(),
-                &self.bundle,
-                record.and_then(|sector| sector.preset),
-            );
-            dict.set(
-                &key("presetDescription"),
-                &preset_description.as_str().to_variant(),
-            );
+        for (key, value) in self.sector_state_rows() {
+            set(&mut dict, key, value);
         }
-        dict.set(
-            &GString::from("campaignComplete"),
-            &self.campaign_complete.to_variant(),
+        set(
+            &mut dict,
+            "campaignComplete",
+            self.campaign_complete.to_variant(),
         );
         dict
     }
@@ -507,6 +431,97 @@ impl MindCampaign {
 }
 
 impl MindCampaign {
+    /// The played sector's record rows: planet/sector identity, the
+    /// captured/save/last flags, the preset name, the landing announce gate,
+    /// the captured predicate and the localized preset description. Empty
+    /// without a played sector.
+    fn sector_state_rows(&self) -> Vec<(&'static str, Variant)> {
+        let Some((planet, sector)) = self.session.sector else {
+            return Vec::new();
+        };
+        let name = self
+            .campaign
+            .as_ref()
+            .and_then(|campaign| campaign.planet_name(planet))
+            .unwrap_or_default()
+            .to_owned();
+        let record = self
+            .campaign
+            .as_ref()
+            .and_then(|campaign| campaign.sector(planet, sector));
+        // `state.getSector().preset` name (hint predicates: `isTutorial`,
+        // `presetLaunch`), empty for a generated sector.
+        let preset_name = record
+            .and_then(|sector| sector.preset)
+            .and_then(|preset| {
+                self.registry
+                    .as_ref()
+                    .and_then(|registry| registry.sector(preset))
+                    .map(|def| def.name.clone())
+            })
+            .unwrap_or_default();
+        // The landing announce gate (CoreBlock.java:414): campaign +
+        // `Vars.showSectorLandInfo` + `preset.showSectorLandInfo`.
+        let preset_def = record.and_then(|sector| sector.preset).and_then(|preset| {
+            self.registry
+                .as_ref()
+                .and_then(|registry| registry.sector(preset))
+        });
+        // `PausedDialog.rebuild` `showObjective`: the preset description feeds
+        // the `@objective` full-text dialog (`UnlockableContent` resolves it
+        // from `Core.bundle`).
+        let preset_description = resolve_preset_description(
+            self.registry.as_ref(),
+            &self.bundle,
+            record.and_then(|sector| sector.preset),
+        );
+        vec![
+            ("planet", name.as_str().to_variant()),
+            ("sector", (sector as i64).to_variant()),
+            (
+                "wasCaptured",
+                record
+                    .map(|sector| sector.info.info.was_captured)
+                    .unwrap_or(false)
+                    .to_variant(),
+            ),
+            (
+                "hasSave",
+                record
+                    .map(|sector| sector.has_save())
+                    .unwrap_or(false)
+                    .to_variant(),
+            ),
+            (
+                "isLast",
+                record
+                    .map(|sector| sector.is_last_sector())
+                    .unwrap_or(false)
+                    .to_variant(),
+            ),
+            ("preset", preset_name.as_str().to_variant()),
+            (
+                "showLandInfo",
+                mind_core::content::registries::sectors::shows_sector_land_info(
+                    self.session.is_campaign(),
+                    preset_def,
+                )
+                .to_variant(),
+            ),
+            (
+                "captured",
+                record
+                    .map(|sector| sector.is_captured(None))
+                    .unwrap_or(false)
+                    .to_variant(),
+            ),
+            (
+                "presetDescription",
+                preset_description.as_str().to_variant(),
+            ),
+        ]
+    }
+
     /// The persisted half of an abandon without a running sector: clears the
     /// session sector's items/base/production, drops its save and removes the
     /// file.

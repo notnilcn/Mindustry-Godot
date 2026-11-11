@@ -135,36 +135,7 @@ impl MindCampaign {
                             .as_ref()
                             .and_then(|registry| registry.block_id(block))
                             .map(|id| i64::from(id.raw()));
-                        // `progress()`: a position counts when its building is
-                        // gone or belongs to another team/block.
-                        let progress = self
-                            .host()
-                            .map(|mut host| {
-                                let mut progress = 0i64;
-                                for pos in &objective.positions {
-                                    let dict = host
-                                        .call(
-                                            "building_debug",
-                                            &[pos.x.to_variant(), pos.y.to_variant()],
-                                        )
-                                        .try_to::<VarDictionary>()
-                                        .ok();
-                                    let read = |key: &str| {
-                                        dict.as_ref().and_then(|dict| {
-                                            dict.get(&GString::from(key).to_variant())
-                                                .and_then(|value| value.try_to::<i64>().ok())
-                                        })
-                                    };
-                                    let intact = read("block").is_some()
-                                        && read("block") == block_id
-                                        && read("team") == Some(i64::from(objective.team));
-                                    if !intact {
-                                        progress += 1;
-                                    }
-                                }
-                                progress
-                            })
-                            .unwrap_or(0);
+                        let progress = self.destroy_blocks_progress(objective, block_id);
                         blocks_progress.insert(index.to_string(), serde_json::json!(progress));
                     }
                     _ => {}
@@ -201,22 +172,11 @@ impl MindCampaign {
     /// (`Renderer.java:356`). `Light` markers only implement `drawLight`
     /// (`MapObjectives.java:1416-1430`; the base `draw` is empty), so they
     /// contribute no world geometry. Text-bearing classes carry their
-    /// localized text (`ObjectiveMarker.fetchText`).
+    /// localized text (`ObjectiveMarker.fetchText`). Row payloads are
+    /// [`marker_row`]'s per-class match.
     #[func]
     pub fn objective_markers_json(&self) -> GString {
         use mind_core::game::map_markers::{MarkerKind, marker_index};
-        use mind_core::io::json::objectives::{ObjectiveMarker as M, TextureHolder};
-
-        fn color_json(color: mind_core::content::Rgba) -> serde_json::Value {
-            serde_json::json!([color.r, color.g, color.b, color.a])
-        }
-        fn holder_json(holder: &TextureHolder) -> serde_json::Value {
-            serde_json::json!({
-                "string": holder.string,
-                "content": holder.content,
-                "building": holder.building,
-            })
-        }
 
         let mut rows: Vec<serde_json::Value> = Vec::new();
         for index in self.session.objectives.running_indices() {
@@ -228,98 +188,9 @@ impl MindCampaign {
                 if marker_index(marker, MarkerKind::World) == -1 {
                     continue;
                 }
-                let row = match marker {
-                    M::Point(m) => serde_json::json!({
-                        "class": "Point",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "radius": m.radius,
-                        "stroke": m.stroke,
-                        "color": color_json(m.color.0),
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::ShapeText(m) => serde_json::json!({
-                        "class": "ShapeText",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "text": self.localized_marker_text(&m.text),
-                        "radius": m.radius,
-                        "rotation": m.rotation,
-                        "sides": m.sides,
-                        "color": color_json(m.color.0),
-                        "textHeight": m.text_height,
-                        "fontSize": m.font_size,
-                        "flags": m.flags,
-                        "textAlign": m.text_align,
-                        "lineAlign": m.line_align,
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::Shape(m) => serde_json::json!({
-                        "class": "Shape",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "radius": m.radius,
-                        "rotation": m.rotation,
-                        "stroke": m.stroke,
-                        "startAngle": m.start_angle,
-                        "endAngle": m.end_angle,
-                        "fill": m.fill,
-                        "outline": m.outline,
-                        "sides": m.sides,
-                        "color": color_json(m.color.0),
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::Text(m) => serde_json::json!({
-                        "class": "Text",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "text": self.localized_marker_text(&m.text),
-                        "fontSize": m.font_size,
-                        "flags": m.flags,
-                        "textAlign": m.text_align,
-                        "lineAlign": m.line_align,
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::Line(m) => serde_json::json!({
-                        "class": "Line",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "endX": m.end_pos.x,
-                        "endY": m.end_pos.y,
-                        "stroke": m.stroke,
-                        "outline": m.outline,
-                        "color1": color_json(m.color1.0),
-                        "color2": color_json(m.color2.0),
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::Texture(m) => serde_json::json!({
-                        "class": "Texture",
-                        "x": m.pos.x,
-                        "y": m.pos.y,
-                        "rotation": m.rotation,
-                        "width": m.width,
-                        "height": m.height,
-                        "texture": holder_json(&m.texture),
-                        "color": color_json(m.color.0),
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    M::Quad(m) => serde_json::json!({
-                        "class": "Quad",
-                        "vertices": m.vertices,
-                        "texture": holder_json(&m.texture),
-                        "autoscale": m.autoscale,
-                        "drawLayer": m.draw_layer,
-                    }),
-                    // `LightMarker`: no world geometry (see the doc comment).
-                    M::Light(_) => continue,
-                };
-                rows.push(row);
+                if let Some(row) = marker_row(marker, &|raw| self.localized_marker_text(raw)) {
+                    rows.push(row);
+                }
             }
         }
         value_gstring(&serde_json::Value::Array(rows))
@@ -345,6 +216,39 @@ impl MindCampaign {
 }
 
 impl MindCampaign {
+    /// `DestroyBlocksObjective.progress()` (`MapObjectives.java:646`): a live
+    /// `world.build` scan through the host's `building_debug` — a position
+    /// counts when its building is gone or belongs to another team/block.
+    fn destroy_blocks_progress(
+        &self,
+        objective: &mind_core::io::json::objectives::DestroyBlocksObjective,
+        block_id: Option<i64>,
+    ) -> i64 {
+        let Some(mut host) = self.host() else {
+            return 0;
+        };
+        let mut progress = 0i64;
+        for pos in &objective.positions {
+            let dict = host
+                .call("building_debug", &[pos.x.to_variant(), pos.y.to_variant()])
+                .try_to::<VarDictionary>()
+                .ok();
+            let read = |key: &str| {
+                dict.as_ref().and_then(|dict| {
+                    dict.get(&GString::from(key).to_variant())
+                        .and_then(|value| value.try_to::<i64>().ok())
+                })
+            };
+            let intact = read("block").is_some()
+                && read("block") == block_id
+                && read("team") == Some(i64::from(objective.team));
+            if !intact {
+                progress += 1;
+            }
+        }
+        progress
+    }
+
     /// `ShapeTextMarker.fetchText`: a leading `@` resolves through the live
     /// bundle; Arc markup and `:icon:` tokens are stripped for the plain world
     /// label (atlas-backed icons arrive with the label pass follow-up).
@@ -361,6 +265,123 @@ impl MindCampaign {
         // them as coloured runs with content-icon glyphs (`WorldLabel`).
         resolved
     }
+}
+
+/// One marker's `[r, g, b, a]` color array.
+fn color_json(color: mind_core::content::Rgba) -> serde_json::Value {
+    serde_json::json!([color.r, color.g, color.b, color.a])
+}
+
+/// `TextureHolder`'s content references (`MapObjectives.java:1400-1420`).
+fn holder_json(holder: &mind_core::io::json::objectives::TextureHolder) -> serde_json::Value {
+    serde_json::json!({
+        "string": holder.string,
+        "content": holder.content,
+        "building": holder.building,
+    })
+}
+
+/// One world-draw row of an [`ObjectiveMarker`], per marker class
+/// (`Renderer.java:352-360`); `None` for `Light`, which has no world geometry.
+/// `text` localizes a marker's `@`-key text (`ObjectiveMarker.fetchText`).
+fn marker_row(
+    marker: &mind_core::io::json::objectives::ObjectiveMarker,
+    text: &dyn Fn(&str) -> String,
+) -> Option<serde_json::Value> {
+    use mind_core::io::json::objectives::ObjectiveMarker as M;
+
+    let row = match marker {
+        M::Point(m) => serde_json::json!({
+            "class": "Point",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "radius": m.radius,
+            "stroke": m.stroke,
+            "color": color_json(m.color.0),
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::ShapeText(m) => serde_json::json!({
+            "class": "ShapeText",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "text": text(&m.text),
+            "radius": m.radius,
+            "rotation": m.rotation,
+            "sides": m.sides,
+            "color": color_json(m.color.0),
+            "textHeight": m.text_height,
+            "fontSize": m.font_size,
+            "flags": m.flags,
+            "textAlign": m.text_align,
+            "lineAlign": m.line_align,
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::Shape(m) => serde_json::json!({
+            "class": "Shape",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "radius": m.radius,
+            "rotation": m.rotation,
+            "stroke": m.stroke,
+            "startAngle": m.start_angle,
+            "endAngle": m.end_angle,
+            "fill": m.fill,
+            "outline": m.outline,
+            "sides": m.sides,
+            "color": color_json(m.color.0),
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::Text(m) => serde_json::json!({
+            "class": "Text",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "text": text(&m.text),
+            "fontSize": m.font_size,
+            "flags": m.flags,
+            "textAlign": m.text_align,
+            "lineAlign": m.line_align,
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::Line(m) => serde_json::json!({
+            "class": "Line",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "endX": m.end_pos.x,
+            "endY": m.end_pos.y,
+            "stroke": m.stroke,
+            "outline": m.outline,
+            "color1": color_json(m.color1.0),
+            "color2": color_json(m.color2.0),
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::Texture(m) => serde_json::json!({
+            "class": "Texture",
+            "x": m.pos.x,
+            "y": m.pos.y,
+            "rotation": m.rotation,
+            "width": m.width,
+            "height": m.height,
+            "texture": holder_json(&m.texture),
+            "color": color_json(m.color.0),
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        M::Quad(m) => serde_json::json!({
+            "class": "Quad",
+            "vertices": m.vertices,
+            "texture": holder_json(&m.texture),
+            "autoscale": m.autoscale,
+            "drawLayer": m.draw_layer,
+        }),
+        // `LightMarker`: no world geometry (see `objective_markers_json`).
+        M::Light(_) => return None,
+    };
+    Some(row)
 }
 
 /// `TeamData.countType(unit)` over the `unit_debug_json` rows: the live units

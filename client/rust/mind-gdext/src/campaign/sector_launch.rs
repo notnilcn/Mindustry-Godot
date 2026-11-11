@@ -106,13 +106,9 @@ impl MindCampaign {
             .host()
             .map(|host| host.bind().player_core_blocks(default_team) == 0)
             .unwrap_or(false);
-        let Some((planet_id, launch)) = self.select_launch(
-            &campaign,
-            &registry,
-            &planet_name,
-            sector_id,
-            no_live_core,
-        ) else {
+        let Some((planet_id, launch)) =
+            self.select_launch(&campaign, &registry, &planet_name, sector_id, no_live_core)
+        else {
             self.registry = Some(registry);
             self.campaign = Some(campaign);
             return false;
@@ -629,9 +625,7 @@ impl MindCampaign {
                         // session, then `planet.applyRules` re-derives the
                         // campaign rules over it (H04 T3).
                         settings_hub::with_settings(|settings| {
-                            apply_resume_record(
-                                runtime, registry, settings, planet_id, sector_id,
-                            )
+                            apply_resume_record(runtime, registry, settings, planet_id, sector_id)
                         })
                     } else {
                         None
@@ -673,7 +667,12 @@ impl MindCampaign {
     /// cutscene unless `skipcoreanimation` or a PvP rule set (PAR-0131), then
     /// record the runtime state and reset the pump tick. `ctx` is the caller's
     /// log prefix (`start_sector`/`start_loaded_world`).
-    fn finish_launch(&mut self, installed: bool, events: &[mind_core::game::play::PlayEvent], ctx: &str) {
+    fn finish_launch(
+        &mut self,
+        installed: bool,
+        events: &[mind_core::game::play::PlayEvent],
+        ctx: &str,
+    ) {
         // `CoreBlock.playerSpawn` (upstream `Trigger.newGame` -> `player.set(core)`):
         // spawn the player mech at the best core so `player.unit()` is live after
         // the launch and WASD drives it instead of the camera.

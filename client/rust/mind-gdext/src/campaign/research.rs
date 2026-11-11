@@ -104,7 +104,9 @@ impl MindCampaign {
     ///
     /// `root` selects the tree by name; empty picks the played sector's tree,
     /// else serpulo. Cheap: no world access (`campaign_views_json` is the
-    /// heavy one).
+    /// heavy one). The pieces are `select_tree`, `tree_order`,
+    /// `tree_visibility`, `tree_bounds`, `research_items_json`,
+    /// `research_roots_json` and `research_node_json` (+ `node_progress`).
     #[func]
     pub fn research_tree_json(&self, root: GString) -> GString {
         let Some(registry) = self.registry.as_ref() else {
@@ -114,22 +116,9 @@ impl MindCampaign {
             return empty_object();
         };
         let tech = registry.tech();
-        let requested = root.to_string();
-        let tree = if requested.is_empty() {
-            self.session
-                .sector
-                .map(|(planet, _)| planet)
-                .or_else(|| registry.planet_id("serpulo"))
-                .and_then(|id| registry.planet(id))
-                .and_then(|def| def.tech_tree)
-                .and_then(|tree_id| tech.tree(tree_id))
-        } else {
-            tech.trees.iter().find(|tree| tree.name == requested)
-        };
-        let Some(tree) = tree else {
+        let Some(tree) = select_tree(registry, &root.to_string(), self.session.sector) else {
             return empty_object();
         };
-
         let ctx = CampaignObjectiveContext::new(registry, campaign);
         let unlocked_with_rules = |content: ContentRef| {
             tech_tree::content_unlocked_with_rules(registry, content, &self.session.rules)
@@ -137,46 +126,15 @@ impl MindCampaign {
 
         // Depth-first pre-order from the tree root (`TechNode.each`); indices
         // in this array are the JSON `index`/`parent`/`children` values.
-        let mut order: Vec<TechNodeRef> = Vec::new();
-        tech.each(tree.root, &mut |node_ref| order.push(node_ref));
+        let (order, indices) = tree_order(tech, tree.root);
         if order.is_empty() {
             return empty_object();
         }
-        let mut indices: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-        for (index, node_ref) in order.iter().enumerate() {
-            indices.insert(node_ref.0, index);
-        }
-
         // `checkNodes` (ResearchDialog.java:391-401): `visible` starts true for
         // every node; a locked parent hides its subtree, an unlocked parent
         // shows its direct children even when they are locked.
-        let mut visible = vec![true; order.len()];
-        let mut selectable = vec![false; order.len()];
-        for (index, node_ref) in order.iter().enumerate() {
-            let Some(node) = tech.node(*node_ref) else {
-                continue;
-            };
-            let node_locked = node
-                .content
-                .is_none_or(|content| !unlocked_with_rules(content));
-            let parent_visible = node
-                .parent
-                .and_then(|parent| indices.get(&parent.0).copied())
-                .map(|parent_index| visible[parent_index])
-                .unwrap_or(true);
-            if !node_locked && (node.parent.is_none() || parent_visible) {
-                visible[index] = true;
-            }
-            selectable[index] = node
-                .content
-                .is_some_and(|content| tech_tree::content_unlocked(registry, content))
-                || tech_tree::objectives_complete(registry, &node.objectives, &ctx);
-            for child in &node.children {
-                if let Some(child_index) = indices.get(&child.0).copied() {
-                    visible[child_index] = !node_locked && visible[index];
-                }
-            }
-        }
+        let (visible, selectable) =
+            tree_visibility(registry, tech, &order, &indices, &ctx, &unlocked_with_rules);
 
         // `treeLayout`: positions come from the Java BranchTreeLayout walk.
         let children_lists: Vec<Vec<usize>> = order
@@ -193,21 +151,8 @@ impl MindCampaign {
             })
             .collect();
         let positions = mind_core::ui::tree_layout::research_tree_layout(&children_lists, 0, 60.0);
-
-        // Bounds over visible nodes (ResearchDialog.java:360-371): node width
-        // goes into x, +`nodeSize * 1.5` into y.
-        const NODE_SIZE: f32 = 60.0;
-        let (mut minx, mut miny, mut maxx, mut maxy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        for (index, &(x, y)) in positions.iter().enumerate() {
-            if !visible.get(index).copied().unwrap_or(false) {
-                continue;
-            }
-            minx = minx.min(x - NODE_SIZE / 2.0);
-            maxx = maxx.max(x + NODE_SIZE / 2.0);
-            miny = miny.min(y - NODE_SIZE / 2.0);
-            maxy = maxy.max(y + NODE_SIZE / 2.0);
-        }
-        let bounds = [minx, miny + NODE_SIZE * 1.5, maxx - minx, maxy - miny];
+        // Bounds over visible nodes (ResearchDialog.java:360-371).
+        let bounds = tree_bounds(&positions, &visible);
 
         // The global item pool (`rebuildItems` + `ItemsDisplay`):
         // `tech_tree::research_inventory` over the root's planets.
@@ -220,54 +165,10 @@ impl MindCampaign {
             self.session.sector,
             &played_items,
         );
-        let items = &inv.pool;
-        let mut items_json: Vec<serde_json::Value> = Vec::new();
-        for index in 0..registry.items().len() {
-            let id = ItemId::new(index as u16);
-            let amount = items.get(id);
-            if amount <= 0 {
-                continue;
-            }
-            let item_name = registry
-                .item(id)
-                .map(|item| item.name.clone())
-                .unwrap_or_default();
-            items_json.push(serde_json::json!({
-                "item": item_name,
-                "amount": amount,
-                "text": mind_core::ui::text::format_amount_default(amount as i64),
-                "name": self.localized_content_name("item", &item_name),
-            }));
-        }
-
+        let items_json = self.research_items_json(registry, &inv.pool);
         // Root selector rows (`TechTree.roots` minus locked non-preferred ones).
-        let mut roots_json: Vec<serde_json::Value> = Vec::new();
-        for root_ref in &tech.roots {
-            let Some(node) = tech.node(*root_ref) else {
-                continue;
-            };
-            let selected = *root_ref == tree.root;
-            let unlocked = node
-                .content
-                .is_some_and(|content| tech_tree::content_unlocked(registry, content));
-            if node.requires_unlock && !unlocked && !selected {
-                continue;
-            }
-            let name = node.name.clone().unwrap_or_default();
-            roots_json.push(serde_json::json!({
-                "name": name,
-                "title": self.tree_title(&name),
-                "type": node
-                    .content
-                    .map(|content| content.type_.name())
-                    .unwrap_or_default(),
-                "icon": node
-                    .content
-                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
-                    .unwrap_or_default(),
-                "selected": selected,
-            }));
-        }
+        let roots_json = self.research_roots_json(registry, tech, tree.root);
+
         let root_node = tech.node(tree.root);
         let root_name = root_node
             .and_then(|node| node.name.clone())
@@ -285,118 +186,22 @@ impl MindCampaign {
             .unwrap_or_default();
 
         // Node rows (`View.rebuildAll` buttons + the hover popup table).
-        let mut nodes_json: Vec<serde_json::Value> = Vec::with_capacity(order.len());
-        for (index, node_ref) in order.iter().enumerate() {
-            let Some(node) = tech.node(*node_ref) else {
-                continue;
-            };
-            let content = node.content;
-            let type_name = content.map(|content| content.type_.name()).unwrap_or("");
-            let icon = content
-                .map(|_| content_icon_name(type_name, &node.content_name))
-                .unwrap_or_default();
-            let name = content
-                .map(|_| self.localized_content_name(type_name, &node.content_name))
-                .unwrap_or_default();
-            let description = content
-                .map(|_| self.localized_content_description(type_name, &node.content_name))
-                .unwrap_or_default();
-            let inline_description = content
-                .and_then(|content| tech_tree::unlock_fields(registry, content))
-                .is_some_and(|fields| fields.inline_description);
+        let view = ResearchTreeView {
+            registry,
+            indices: &indices,
+            positions: &positions,
+            visible: &visible,
+            selectable: &selectable,
+            ctx: &ctx,
+            items: &inv.pool,
+        };
+        let nodes_json: Vec<serde_json::Value> = order
+            .iter()
+            .enumerate()
+            .filter_map(|(index, node_ref)| self.research_node_json(&view, index, *node_ref))
+            .collect();
 
-            // Progress line (`ResearchDialog.java:685-705`).
-            let requirements = tech_tree::effective_requirements(registry, *node_ref);
-            let (mut sum, mut used) = (0.0f32, 0.0f32);
-            let mut has_progress = false;
-            for (requirement_index, requirement) in requirements.iter().enumerate() {
-                let finished = node
-                    .finished_requirements
-                    .get(requirement_index)
-                    .map(|stack| stack.amount)
-                    .unwrap_or(0);
-                if finished > 0 {
-                    has_progress = true;
-                }
-                let cost = registry
-                    .item(requirement.item)
-                    .map(|item| item.cost)
-                    .unwrap_or(0.0);
-                sum += cost * requirement.amount as f32;
-                used += cost * finished as f32;
-            }
-            let progress = if has_progress {
-                ((used / sum * 100.0) as i32).min(99)
-            } else {
-                -1
-            };
-
-            // Unfinished requirement rows (`ResearchDialog.java:707-736`).
-            let mut reqs_json: Vec<serde_json::Value> = Vec::new();
-            for (requirement_index, requirement) in requirements.iter().enumerate() {
-                let finished = node
-                    .finished_requirements
-                    .get(requirement_index)
-                    .map(|stack| stack.amount)
-                    .unwrap_or(0);
-                if requirement.amount <= finished {
-                    continue;
-                }
-                let remaining = requirement.amount - finished;
-                let pool = items.get(requirement.item);
-                let item_name = registry
-                    .item(requirement.item)
-                    .map(|item| item.name.clone())
-                    .unwrap_or_default();
-                reqs_json.push(serde_json::json!({
-                    "item": item_name,
-                    "name": self.localized_content_name("item", &item_name),
-                    "have": mind_core::ui::text::format_amount_default(pool.min(remaining) as i64),
-                    "need": mind_core::ui::text::format_amount_default(remaining as i64),
-                    "has": pool > 0,
-                }));
-            }
-
-            // Incomplete objectives (`ResearchDialog.java:737-749`).
-            let mut objectives_json: Vec<String> = Vec::new();
-            for spec in &node.objectives {
-                let (complete, text) = self.objective_display(registry, &ctx, *spec);
-                if !complete {
-                    objectives_json.push(text);
-                }
-            }
-
-            nodes_json.push(serde_json::json!({
-                "index": index,
-                "parent": node
-                    .parent
-                    .and_then(|parent| indices.get(&parent.0).copied())
-                    .map(|parent_index| parent_index as i64)
-                    .unwrap_or(-1),
-                "children": node
-                    .children
-                    .iter()
-                    .filter_map(|child| indices.get(&child.0).copied())
-                    .collect::<Vec<usize>>(),
-                "content": node.content_name,
-                "type": type_name,
-                "icon": icon,
-                "name": name,
-                "x": positions[index].0,
-                "y": positions[index].1,
-                "visible": visible[index],
-                "locked": content.is_none_or(|content| !unlocked_with_rules(content)),
-                "selectable": selectable[index],
-                "can_spend": tech_tree::can_spend(registry, *node_ref, &items, &ctx),
-                "description": description,
-                "inline_description": inline_description,
-                "progress": progress,
-                "reqs": reqs_json,
-                "objectives": objectives_json,
-            }));
-        }
-
-        let view = serde_json::json!({
+        let value = serde_json::json!({
             "root": tree.name,
             "root_title": self.tree_title(&root_name),
             "root_type": root_type,
@@ -406,7 +211,7 @@ impl MindCampaign {
             "bounds": bounds,
             "nodes": nodes_json,
         });
-        value_gstring(&view)
+        value_gstring(&value)
     }
 
     /// `UnlockableContent.unlockedHost()` by content name (G05 T4b hint gates);
@@ -545,15 +350,179 @@ impl MindCampaign {
         }
         self.with_campaign_mut(|campaign, settings| {
             for (planet, sector_id, name, updated) in updates {
-                let planet_name = campaign
-                    .planet_name(*planet)
-                    .unwrap_or_default()
-                    .to_owned();
+                let planet_name = campaign.planet_name(*planet).unwrap_or_default().to_owned();
                 campaign.edit_sector(settings, &planet_name, *sector_id, |record| {
                     record.info.info.items.insert(name.clone(), *updated);
                 });
             }
         });
+    }
+
+    /// The global item pool rows (`rebuildItems` + `ItemsDisplay`): every
+    /// nonzero pool amount in item content order.
+    fn research_items_json(
+        &self,
+        registry: &ContentRegistry,
+        items: &mind_core::world::modules::ItemModule,
+    ) -> Vec<serde_json::Value> {
+        let mut items_json: Vec<serde_json::Value> = Vec::new();
+        for index in 0..registry.items().len() {
+            let id = ItemId::new(index as u16);
+            let amount = items.get(id);
+            if amount <= 0 {
+                continue;
+            }
+            let item_name = registry
+                .item(id)
+                .map(|item| item.name.clone())
+                .unwrap_or_default();
+            items_json.push(serde_json::json!({
+                "item": item_name,
+                "amount": amount,
+                "text": mind_core::ui::text::format_amount_default(amount as i64),
+                "name": self.localized_content_name("item", &item_name),
+            }));
+        }
+        items_json
+    }
+
+    /// Root selector rows (`TechTree.roots` minus locked non-preferred ones).
+    fn research_roots_json(
+        &self,
+        registry: &ContentRegistry,
+        tech: &mind_core::content::tech::TechStore,
+        selected_root: TechNodeRef,
+    ) -> Vec<serde_json::Value> {
+        let mut roots_json: Vec<serde_json::Value> = Vec::new();
+        for root_ref in &tech.roots {
+            let Some(node) = tech.node(*root_ref) else {
+                continue;
+            };
+            let selected = *root_ref == selected_root;
+            let unlocked = node
+                .content
+                .is_some_and(|content| tech_tree::content_unlocked(registry, content));
+            if node.requires_unlock && !unlocked && !selected {
+                continue;
+            }
+            let name = node.name.clone().unwrap_or_default();
+            roots_json.push(serde_json::json!({
+                "name": name,
+                "title": self.tree_title(&name),
+                "type": node
+                    .content
+                    .map(|content| content.type_.name())
+                    .unwrap_or_default(),
+                "icon": node
+                    .content
+                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
+                    .unwrap_or_default(),
+                "selected": selected,
+            }));
+        }
+        roots_json
+    }
+
+    /// One node row of the research tree (`View.rebuildAll` button + the hover
+    /// popup rows, `ResearchDialog.java:685-749`). `None` for an index without
+    /// a node (the caller skips it, like the replaced loop).
+    fn research_node_json(
+        &self,
+        view: &ResearchTreeView,
+        index: usize,
+        node_ref: TechNodeRef,
+    ) -> Option<serde_json::Value> {
+        let tech = view.registry.tech();
+        let node = tech.node(node_ref)?;
+        let content = node.content;
+        let type_name = content.map(|content| content.type_.name()).unwrap_or("");
+        let icon = content
+            .map(|_| content_icon_name(type_name, &node.content_name))
+            .unwrap_or_default();
+        let name = content
+            .map(|_| self.localized_content_name(type_name, &node.content_name))
+            .unwrap_or_default();
+        let description = content
+            .map(|_| self.localized_content_description(type_name, &node.content_name))
+            .unwrap_or_default();
+        let inline_description = content
+            .and_then(|content| tech_tree::unlock_fields(view.registry, content))
+            .is_some_and(|fields| fields.inline_description);
+
+        // Progress line (`ResearchDialog.java:685-705`).
+        let requirements = tech_tree::effective_requirements(view.registry, node_ref);
+        let progress = node_progress(view.registry, node, requirements.as_slice());
+
+        // Unfinished requirement rows (`ResearchDialog.java:707-736`).
+        let mut reqs_json: Vec<serde_json::Value> = Vec::new();
+        for (requirement_index, requirement) in requirements.iter().enumerate() {
+            let finished = node
+                .finished_requirements
+                .get(requirement_index)
+                .map(|stack| stack.amount)
+                .unwrap_or(0);
+            if requirement.amount <= finished {
+                continue;
+            }
+            let remaining = requirement.amount - finished;
+            let pool = view.items.get(requirement.item);
+            let item_name = view
+                .registry
+                .item(requirement.item)
+                .map(|item| item.name.clone())
+                .unwrap_or_default();
+            reqs_json.push(serde_json::json!({
+                "item": item_name,
+                "name": self.localized_content_name("item", &item_name),
+                "have": mind_core::ui::text::format_amount_default(pool.min(remaining) as i64),
+                "need": mind_core::ui::text::format_amount_default(remaining as i64),
+                "has": pool > 0,
+            }));
+        }
+
+        // Incomplete objectives (`ResearchDialog.java:737-749`).
+        let mut objectives_json: Vec<String> = Vec::new();
+        for spec in &node.objectives {
+            let (complete, text) = self.objective_display(view.registry, view.ctx, *spec);
+            if !complete {
+                objectives_json.push(text);
+            }
+        }
+
+        Some(serde_json::json!({
+            "index": index,
+            "parent": node
+                .parent
+                .and_then(|parent| view.indices.get(&parent.0).copied())
+                .map(|parent_index| parent_index as i64)
+                .unwrap_or(-1),
+            "children": node
+                .children
+                .iter()
+                .filter_map(|child| view.indices.get(&child.0).copied())
+                .collect::<Vec<usize>>(),
+            "content": node.content_name,
+            "type": type_name,
+            "icon": icon,
+            "name": name,
+            "x": view.positions[index].0,
+            "y": view.positions[index].1,
+            "visible": view.visible[index],
+            "locked": content.is_none_or(|content| {
+                !tech_tree::content_unlocked_with_rules(
+                    view.registry,
+                    content,
+                    &self.session.rules,
+                )
+            }),
+            "selectable": view.selectable[index],
+            "can_spend": tech_tree::can_spend(view.registry, node_ref, view.items, view.ctx),
+            "description": description,
+            "inline_description": inline_description,
+            "progress": progress,
+            "reqs": reqs_json,
+            "objectives": objectives_json,
+        }))
     }
 
     /// `bundle("techtree." + name, name)` for a tree/root name.
@@ -614,4 +583,145 @@ impl MindCampaign {
         };
         (complete, self.bundle.format(key, &[argument.as_str()]))
     }
+}
+
+/// The selected `ResearchDialog` tree: `root` names it, empty picks the played
+/// sector's tree, else serpulo's.
+fn select_tree<'a>(
+    registry: &'a ContentRegistry,
+    requested: &str,
+    sector: Option<(PlanetId, u16)>,
+) -> Option<&'a mind_core::content::tech::TechTree> {
+    let tech = registry.tech();
+    if requested.is_empty() {
+        sector
+            .map(|(planet, _)| planet)
+            .or_else(|| registry.planet_id("serpulo"))
+            .and_then(|id| registry.planet(id))
+            .and_then(|def| def.tech_tree)
+            .and_then(|tree_id| tech.tree(tree_id))
+    } else {
+        tech.trees.iter().find(|tree| tree.name == requested)
+    }
+}
+
+/// The depth-first pre-order node list (`TechNode.each`) and the
+/// node-ref -> array-index map the JSON `index`/`parent`/`children` values use.
+fn tree_order(
+    tech: &mind_core::content::tech::TechStore,
+    root: TechNodeRef,
+) -> (Vec<TechNodeRef>, std::collections::HashMap<u32, usize>) {
+    let mut order: Vec<TechNodeRef> = Vec::new();
+    tech.each(root, &mut |node_ref| order.push(node_ref));
+    let mut indices: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for (index, node_ref) in order.iter().enumerate() {
+        indices.insert(node_ref.0, index);
+    }
+    (order, indices)
+}
+
+/// `checkNodes` (ResearchDialog.java:391-401): `visible` starts true for every
+/// node; a locked parent hides its subtree, an unlocked parent shows its direct
+/// children even when they are locked. `selectable` is the unlocked-or-objectives
+/// gate.
+fn tree_visibility(
+    registry: &ContentRegistry,
+    tech: &mind_core::content::tech::TechStore,
+    order: &[TechNodeRef],
+    indices: &std::collections::HashMap<u32, usize>,
+    ctx: &CampaignObjectiveContext,
+    unlocked_with_rules: &dyn Fn(ContentRef) -> bool,
+) -> (Vec<bool>, Vec<bool>) {
+    let mut visible = vec![true; order.len()];
+    let mut selectable = vec![false; order.len()];
+    for (index, node_ref) in order.iter().enumerate() {
+        let Some(node) = tech.node(*node_ref) else {
+            continue;
+        };
+        let node_locked = node
+            .content
+            .is_none_or(|content| !unlocked_with_rules(content));
+        let parent_visible = node
+            .parent
+            .and_then(|parent| indices.get(&parent.0).copied())
+            .map(|parent_index| visible[parent_index])
+            .unwrap_or(true);
+        if !node_locked && (node.parent.is_none() || parent_visible) {
+            visible[index] = true;
+        }
+        // The selectable half reads the host unlock form (not the rules form):
+        // `content_unlocked(registry, content)` like the replaced block.
+        selectable[index] = node
+            .content
+            .is_some_and(|content| tech_tree::content_unlocked(registry, content))
+            || tech_tree::objectives_complete(registry, &node.objectives, ctx);
+        for child in &node.children {
+            if let Some(child_index) = indices.get(&child.0).copied() {
+                visible[child_index] = !node_locked && visible[index];
+            }
+        }
+    }
+    (visible, selectable)
+}
+
+/// Bounds over the visible nodes (ResearchDialog.java:360-371): node width goes
+/// into x, `+nodeSize * 1.5` into y.
+fn tree_bounds(positions: &[(f32, f32)], visible: &[bool]) -> [f32; 4] {
+    const NODE_SIZE: f32 = 60.0;
+    let (mut minx, mut miny, mut maxx, mut maxy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for (index, &(x, y)) in positions.iter().enumerate() {
+        if !visible.get(index).copied().unwrap_or(false) {
+            continue;
+        }
+        minx = minx.min(x - NODE_SIZE / 2.0);
+        maxx = maxx.max(x + NODE_SIZE / 2.0);
+        miny = miny.min(y - NODE_SIZE / 2.0);
+        maxy = maxy.max(y + NODE_SIZE / 2.0);
+    }
+    [minx, miny + NODE_SIZE * 1.5, maxx - minx, maxy - miny]
+}
+
+/// `ResearchDialog.java:685-705`: the progress percentage once any requirement
+/// has partial progress (`min(99)`), else `-1` (no bar).
+fn node_progress(
+    registry: &ContentRegistry,
+    node: &mind_core::content::tech::TechNode,
+    requirements: &[mind_core::content::stacks::ItemStack],
+) -> i32 {
+    let (mut sum, mut used) = (0.0f32, 0.0f32);
+    let mut has_progress = false;
+    for (requirement_index, requirement) in requirements.iter().enumerate() {
+        let finished = node
+            .finished_requirements
+            .get(requirement_index)
+            .map(|stack| stack.amount)
+            .unwrap_or(0);
+        if finished > 0 {
+            has_progress = true;
+        }
+        let cost = registry
+            .item(requirement.item)
+            .map(|item| item.cost)
+            .unwrap_or(0.0);
+        sum += cost * requirement.amount as f32;
+        used += cost * finished as f32;
+    }
+    if has_progress {
+        ((used / sum * 100.0) as i32).min(99)
+    } else {
+        -1
+    }
+}
+
+/// The per-build research-tree view state (`research_tree_json`): parent
+/// indices, layout positions, visibility/selectable flags, the objective
+/// context and the item pool the node rows price against.
+struct ResearchTreeView<'a> {
+    registry: &'a ContentRegistry,
+    indices: &'a std::collections::HashMap<u32, usize>,
+    positions: &'a [(f32, f32)],
+    visible: &'a [bool],
+    selectable: &'a [bool],
+    ctx: &'a CampaignObjectiveContext,
+    items: &'a mind_core::world::modules::ItemModule,
 }

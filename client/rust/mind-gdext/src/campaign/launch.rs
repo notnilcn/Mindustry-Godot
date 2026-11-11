@@ -466,8 +466,7 @@ fn launch_sector_snapshot(
     let destination_sector = planet_record.sector(destination as u16)?;
     Some(LaunchSectorSnapshot {
         sitems: launcher_sector.items().clone(),
-        destination_allow: destination_sector
-            .allow_launch_loadout(planet_def.allow_launch_loadout),
+        destination_allow: destination_sector.allow_launch_loadout(planet_def.allow_launch_loadout),
         destination_allow_schematics: destination_sector
             .allow_launch_schematics(planet_def.allow_launch_schematics),
         destination_preset: destination_sector.preset,
@@ -515,9 +514,8 @@ fn launch_resources_on_planet(
     planet_id: PlanetId,
     campaign: &mut Campaign,
 ) -> indexmap::IndexMap<String, i32> {
-    let launch_seq = settings_hub::with_settings(|settings| {
-        campaign.universe.get_launch_resources(settings)
-    });
+    let launch_seq =
+        settings_hub::with_settings(|settings| campaign.universe.get_launch_resources(settings));
     let mut resources: indexmap::IndexMap<String, i32> = indexmap::IndexMap::new();
     for (index, item) in registry.items().iter().enumerate() {
         if registry
