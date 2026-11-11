@@ -14,6 +14,7 @@ use super::*;
 
 pub(super) mod assembler;
 pub(super) mod boost;
+pub(super) mod builder;
 pub(super) mod cargo;
 pub(super) mod ground_flying;
 pub(super) mod no_ai;

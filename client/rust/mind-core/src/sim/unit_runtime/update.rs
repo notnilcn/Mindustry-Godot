@@ -15,6 +15,7 @@ use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
 use super::ai_arms::assembler::assembler_arm;
 use super::ai_arms::boost::boost_arm;
+use super::ai_arms::builder::builder_arm;
 use super::ai_arms::cargo::cargo_arm;
 use super::ai_arms::ground_flying::ground_flying_arm;
 use super::ai_arms::no_ai::no_ai_arm;
@@ -567,51 +568,7 @@ pub fn unit_update_system(world: &mut World) {
                 let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
             }
         } else if slot.kind == AiKind::Builder && !builder_falls_back(world, team) {
-            // `BuilderAI` (T10c): pull ghost plans from the team queue and
-            // move toward the active plan; `Sim::update_builders` executes it.
-            let mut state = world
-                .get::<crate::ai::types::builder::BuilderAiState>(entity)
-                .copied()
-                .unwrap_or_else(|| {
-                    // AI-team core builders construct with
-                    // `BuilderAI(true, coreFleeRange)` (`UnitTypes.java:2495`,
-                    // 4352; the def carries the range).
-                    let core_flee_range = world
-                        .get::<UnitTypeComp>(entity)
-                        .and_then(|comp| runtime.content.unit(comp.type_id))
-                        .and_then(|def| match def.controller {
-                            crate::content::registries::units::ControllerKind::Builder {
-                                core_flee_range,
-                            } => Some(core_flee_range),
-                            _ => None,
-                        })
-                        .unwrap_or(400.0);
-                    crate::ai::types::builder::BuilderAiState::with_flee(true, core_flee_range)
-                });
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                crate::ai::types::builder::update_builder_ai(&mut ctx, entity, &mut state);
-            }
-            if let Some(mut stored) =
-                world.get_mut::<crate::ai::types::builder::BuilderAiState>(entity)
-            {
-                *stored = state;
-            } else if world.get_entity(entity).is_ok() {
-                world.entity_mut(entity).insert(state);
-            }
-            let _ = command_ai_weapon_pass(world, &runtime.content, &queries, entity, team, true);
+            builder_arm(world, &mut runtime, &queries, entity, team);
         } else if slot.kind == AiKind::Boost {
             boost_arm(world, &mut runtime, entity, team);
         } else if slot.kind == AiKind::Defender {
