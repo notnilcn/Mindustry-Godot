@@ -7,6 +7,7 @@
 use crate::MindPreview;
 use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::MindDialog;
+use mind_core::ui::campaign::{CampaignViews, SectorStatsView, SectorView};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, styles};
 use godot::builtin::{Side, VarArray, VarDictionary, VariantType};
@@ -40,6 +41,112 @@ pub(in crate::ui::dialogs) const UI_ROOT_PATH: &str = "/root/Spine/Ui/UiRoot";
 
 /// A rich label's engine handle (text/color/alignment live on `RichTextLabel`).
 pub(in crate::ui::dialogs) use crate::ui::dialogs::common::facade::rich;
+
+// ---------------------------------------------------------------------------
+// Typed campaign read models (T02)
+// ---------------------------------------------------------------------------
+
+/// The live typed campaign projection for `planet` (empty selects the played
+/// planet, else the default starting planet). `None` when the campaign is not
+/// booted, which keeps the dialogs' empty-default behaviour.
+///
+/// The `bind()` guard is a single statement so it is dropped before the caller
+/// touches the UI (a `bind()` here would panic on re-entrancy).
+pub(in crate::ui::dialogs) fn campaign_views_of(
+    dialog: &MindDialog,
+    planet: &str,
+) -> Option<CampaignViews> {
+    let campaign = dialog.campaign()?;
+    campaign.bind().campaign_views(planet)
+}
+
+/// [`campaign_views_of`] for the played planet (`campaign_views()`).
+pub(in crate::ui::dialogs) fn campaign_views_live(dialog: &MindDialog) -> Option<CampaignViews> {
+    campaign_views_of(dialog, "")
+}
+
+/// The `SectorView` for `planet`/`sector_id` in a projection (`Sector.isBeingPlayed`
+/// lookups, the stats dialog and the planet page).
+pub(in crate::ui::dialogs) fn campaign_sector_of(
+    views: &CampaignViews,
+    planet: &str,
+    sector_id: i64,
+) -> Option<SectorView> {
+    views
+        .sectors
+        .iter()
+        .find(|sector| i64::from(sector.id) == sector_id && sector.planet == planet)
+        .cloned()
+}
+
+/// The view a missing sector/section reads as: every string empty, every flag
+/// false, every number zero. `threat_band` stays `low` like the row readers'
+/// fallback (the old `row_opt_str(...).unwrap_or("low")`).
+pub(in crate::ui::dialogs) fn empty_sector_stats() -> SectorStatsView {
+    SectorStatsView {
+        attempts: 0,
+        wave: 0,
+        production: Vec::new(),
+        export: Vec::new(),
+        import: Vec::new(),
+        stored: Vec::new(),
+        resources: Vec::new(),
+        playtime_ms: 0,
+        destination: None,
+        import_sources: Vec::new(),
+        lockdown: false,
+        preset_description_key: None,
+    }
+}
+
+/// A `SectorView` with every field at its empty default (see
+/// [`empty_sector_stats`]). The planet page's synthesized start-sector row and
+/// the stats dialog's missing-sector fallback use it.
+pub(in crate::ui::dialogs) fn empty_sector_view(id: u16, planet: &str, name: &str) -> SectorView {
+    SectorView {
+        id,
+        planet: planet.to_owned(),
+        preset: None,
+        name: name.to_owned(),
+        named: false,
+        selectable: false,
+        accelerator_selectable: false,
+        require_unlock: false,
+        preset_unlocked: false,
+        lock_icon: false,
+        icon: None,
+        content_icon: None,
+        difficulty: 0.0,
+        threat: 0.0,
+        threat_band: "low",
+        unlocked: false,
+        locked: false,
+        has_base: false,
+        has_save: false,
+        captured: false,
+        attacked: false,
+        frozen: false,
+        shielded: false,
+        has_enemy_base: false,
+        is_last: false,
+        capture_wave: 0,
+        stats: empty_sector_stats(),
+        launch_from: None,
+        no_candidate: false,
+        show_action: false,
+        objectives_locked: false,
+        objectives: Vec::new(),
+        vulnerable: false,
+        threat_color: String::new(),
+        hover_lock: None,
+        hover_allowed: false,
+        being_played: false,
+        shield_arc: None,
+        attack_sources: Vec::new(),
+        export_destination: None,
+        any_exports: false,
+    }
+}
 
 /// Reads a JSON string field (`""` when missing or null).
 pub(in crate::ui::dialogs) fn row_str(row: &VarDictionary, key: &str) -> String {
@@ -184,10 +291,25 @@ pub(in crate::ui::dialogs) fn open_dialog(name: &str, context: &VarDictionary) {
     );
 }
 
+/// Live `universe.getLaunchResources()` as `(item name, amount)` rows.
+///
+/// Reads the typed `MindCampaign.launch_resource_stacks` producer (T01); empty
+/// when the campaign facade is absent.
+pub(in crate::ui::dialogs) fn campaign_launch_stacks(
+    dialog: &MindDialog,
+) -> Vec<(String, i32)> {
+    let Some(mut campaign) = dialog.campaign() else {
+        return Vec::new();
+    };
+    campaign.bind_mut().launch_resource_stacks()
+}
+
 /// Live `universe.getLaunchResources()` as `{item: amount}`.
 ///
 /// Reads `MindCampaign.get_launch_resource_stacks` (the name-keyed stacks
 /// endpoint) and parses its JSON; `{}` when the facade is absent.
+/// Superseded by [`campaign_launch_stacks`]; the last caller goes in the
+/// launch-dialog commit.
 pub(in crate::ui::dialogs) fn launch_resource_stacks(dialog: &mut MindDialog) -> VarDictionary {
     let Some(mut campaign) = dialog.campaign_node() else {
         return VarDictionary::new();
@@ -236,28 +358,19 @@ pub(in crate::ui::dialogs) fn in_game() -> bool {
 
 /// `Sector.isBeingPlayed`: the campaign's live sector is `planet_name`/`sector_id`.
 ///
-/// Reads `MindCampaign.get_sector_state` and compares the campaign flag plus the
-/// planet/sector pair (`PlanetDialog` showStats / `playSelected` paths).
+/// Reads the typed `MindCampaign.sector_state()` view (`-1` = no played sector,
+/// the old missing-`sector`-key default) and compares the campaign flag plus
+/// the planet/sector pair (`PlanetDialog` showStats / `playSelected` paths).
 pub(in crate::ui::dialogs) fn campaign_sector_is_playing(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     planet_name: &str,
     sector_id: i64,
 ) -> bool {
-    let Some(mut campaign) = dialog.campaign_node() else {
+    let Some(campaign) = dialog.campaign() else {
         return false;
     };
-    if !campaign.has_method("get_sector_state") {
-        return false;
-    }
-    let Ok(state) = campaign
-        .call("get_sector_state", &[])
-        .try_to::<VarDictionary>()
-    else {
-        return false;
-    };
-    row_bool(&state, "campaign")
-        && row_str(&state, "planet") == planet_name
-        && row_i64_or(&state, "sector", -1) == sector_id
+    let state = campaign.bind().sector_state();
+    state.campaign && state.planet == planet_name && state.sector == sector_id
 }
 
 /// `control.input.useSchematic(s)` through `MindInput` (G08 T6b).

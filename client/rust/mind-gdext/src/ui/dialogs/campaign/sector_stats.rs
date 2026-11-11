@@ -5,15 +5,15 @@
 //! Upstream: ui/dialogs/PlanetDialog.java (showStats)
 
 use super::util::*;
-use crate::gdutil::variant::{to_i64_typed, to_text_godot};
+use crate::gdutil::variant::to_i64_typed;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
-use godot::builtin::{VarArray, VarDictionary, VariantType};
 use godot::classes::control::SizeFlags;
 use godot::classes::text_server::AutowrapMode;
 use godot::classes::{Control, HBoxContainer};
 use godot::prelude::*;
+use mind_core::ui::campaign::{SectorStatRef, SectorStatsView, SectorView};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -37,7 +37,8 @@ const STATS_ACCENT: &str = "#ffd37f";
 struct SectorStatsState {
     planet: String,
     sector_id: i64,
-    row: VarDictionary,
+    /// The typed `campaign_views` sector this dialog was opened for.
+    sector: Option<SectorView>,
     root: Option<Gd<MindTable>>,
     pending_abandon: bool,
 }
@@ -97,12 +98,12 @@ impl DialogController for SectorStatsDialog {
             .context_value("sector")
             .map(|value| to_i64_typed(&value))
             .unwrap_or(-1);
-        let row = sector_stats_find_row(dialog, &planet, sector_id);
+        let sector = sector_stats_find_sector(dialog, &planet, sector_id);
         {
             let mut st = self.state.borrow_mut();
             st.planet = planet;
             st.sector_id = sector_id;
-            st.row = row;
+            st.sector = sector;
             st.pending_abandon = false;
         }
         sector_stats_build(dialog, &self.state);
@@ -134,13 +135,12 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
     dialog.clear_buttons();
     let title = sector_stats_localized_name(state);
     dialog.set_title_literal(&title);
-    let (data, planet, sector_id) = {
-        let st = state.borrow();
-        (st.row.clone(), st.planet.clone(), st.sector_id)
-    };
-    let _ = (planet, sector_id);
-    let stats = row_dict(&data, "stats");
-    let description_key = row_opt_str(&stats, "preset_description_key").unwrap_or_default();
+    let sector = state.borrow().sector.clone();
+    // A missing sector reads as the empty default view (the old empty row), so
+    // the sweep/MCP path still builds the time and threat lines.
+    let sector = sector.unwrap_or_else(|| empty_sector_view(0, "", ""));
+    let stats: &SectorStatsView = &sector.stats;
+    let description_key = stats.preset_description_key.clone().unwrap_or_default();
     if !description_key.is_empty() {
         let description = factory::label(&kit::tm(&format!("@{description_key}")).to_string());
         let mut description_rich = rich(&description);
@@ -151,31 +151,26 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         root.bind_mut().add(&description).grow_x().pad_bottom(5.0);
         root.bind_mut().row();
     }
-    let playtime = row_i64_or(&stats, "playtime_ms", 0);
-    sector_stats_value_line(&mut root, "@sectors.time", &format_millis(playtime));
-    let attempts = row_i64_or(&stats, "attempts", 0);
-    if attempts > 0 {
-        sector_stats_value_line(&mut root, "@sectors.attempts", &attempts.to_string());
+    sector_stats_value_line(&mut root, "@sectors.time", &format_millis(stats.playtime_ms));
+    if stats.attempts > 0 {
+        sector_stats_value_line(&mut root, "@sectors.attempts", &stats.attempts.to_string());
     }
-    let wave = row_i64_or(&stats, "wave", 0);
-    if wave > 0 {
-        sector_stats_value_line(&mut root, "@sectors.wave", &wave.to_string());
+    if stats.wave > 0 {
+        sector_stats_value_line(&mut root, "@sectors.wave", &stats.wave.to_string());
     }
-    if row_bool(&data, "attacked") || !row_bool(&data, "has_base") {
-        let band = row_opt_str(&data, "threat_band").unwrap_or_else(|| String::from("low"));
+    if sector.attacked || !sector.has_base {
+        let band = sector.threat_band;
         let text = kit::t(&format!("@threat.{band}")).to_string();
         sector_stats_value_line(&mut root, "@sectors.threat", &text);
     }
-    let resources = row_arr(&stats, "resources");
-    if row_bool(&data, "has_save") && !resources.is_empty() {
+    if sector.has_save && !stats.resources.is_empty() {
         let label = factory::label(&kit::t("@sectors.resources").to_string());
         root.bind_mut().add(&label).left();
         root.bind_mut().row();
         let mut resource_row = HBoxContainer::new_alloc();
         resource_row.add_theme_constant_override("separation", 3);
-        for resource in resources.iter_shared() {
-            let name = to_text_godot(&resource);
-            let Some(texture) = content_texture(&name) else {
+        for resource in &stats.resources {
+            let Some(texture) = content_texture(resource) else {
                 continue;
             };
             // code-instantiated: one 24 px icon per known resource.
@@ -184,7 +179,7 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         root.bind_mut().add(&resource_row).pad_left(10.0).left();
         root.bind_mut().row();
     }
-    if row_bool(&stats, "lockdown") {
+    if stats.lockdown {
         // `c.add(UI.formatIcons(bundle.get("sector.lockdown"))).wrap().fillX()`.
         let lockdown = factory::label(&icon_glyph_markup(&kit::tm("@sector.lockdown").to_string()));
         let mut lockdown_rich = rich(&lockdown);
@@ -194,54 +189,22 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
         root.bind_mut().row();
         apply_icon_fallback(&lockdown_rich);
     }
-    sector_stats_stat_section(
-        &mut root,
-        "@sectors.production",
-        &row_arr(&stats, "production"),
-        &VarArray::new(),
-    );
-    let mut export_trailing = VarArray::new();
-    if let Some(destination) = stats.get("destination")
-        && destination.get_type() == VariantType::DICTIONARY
-    {
-        export_trailing.push(&destination);
+    sector_stats_stat_section(&mut root, "@sectors.production", &stats.production, &[]);
+    let export_trailing: Vec<&SectorStatRef> = stats.destination.iter().collect();
+    sector_stats_stat_section(&mut root, "@sectors.export", &stats.export, &export_trailing);
+    if sector.has_base {
+        let import_sources: Vec<&SectorStatRef> = stats.import_sources.iter().collect();
+        sector_stats_stat_section(&mut root, "@sectors.import", &stats.import, &import_sources);
     }
-    sector_stats_stat_section(
-        &mut root,
-        "@sectors.export",
-        &row_arr(&stats, "export"),
-        &export_trailing,
-    );
-    if row_bool(&data, "has_base") {
-        sector_stats_stat_section(
-            &mut root,
-            "@sectors.import",
-            &row_arr(&stats, "import"),
-            &row_arr(&stats, "import_sources"),
-        );
-    }
-    let stored = row_arr(&stats, "stored");
-    if row_bool(&data, "has_base") && !stored.is_empty() {
+    if sector.has_base && !stats.stored.is_empty() {
         let label = factory::label(&kit::t("@sectors.stored").to_string());
         root.bind_mut().add(&label).left();
         root.bind_mut().row();
         // code-instantiated: the stored pool is a runtime-sized 4-column grid.
         let mut stored_grid = MindTable::new_alloc();
         let mut index = 0i64;
-        for entry in stored.iter_shared() {
-            let Ok(entry) = entry.try_to::<VarArray>() else {
-                continue;
-            };
-            if entry.len() < 2 {
-                continue;
-            }
-            let mut values = entry.iter_shared();
-            let content_name = values
-                .next()
-                .map(|value| to_text_godot(&value))
-                .unwrap_or_default();
-            let amount = values.next().map(|value| to_i64_typed(&value)).unwrap_or(0);
-            let cell = sector_stats_stored_cell(&content_name, amount);
+        for (content_name, amount) in &stats.stored {
+            let cell = sector_stats_stored_cell(content_name, i64::from(*amount));
             stored_grid.bind_mut().add(&cell);
             index += 1;
             if index % 4 == 0 {
@@ -253,7 +216,7 @@ fn sector_stats_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsSta
     }
     dialog.add_default_close_button();
     // `abandonSectorConfirm` button, shown for sectors with a base.
-    if row_bool(&data, "has_base") {
+    if sector.has_base {
         let mut abandon = factory::icon_button(
             "cancel",
             &kit::t("@sector.abandon").to_string(),
@@ -291,18 +254,9 @@ fn sector_stats_value_line(root: &mut Gd<MindTable>, label_key: &str, value: &st
 fn sector_stats_stat_section(
     root: &mut Gd<MindTable>,
     label_key: &str,
-    rows: &VarArray,
-    trailing: &VarArray,
+    cells: &[(String, i32)],
+    trailing: &[&SectorStatRef],
 ) {
-    let mut cells: Vec<VarArray> = Vec::new();
-    for entry in rows.iter_shared() {
-        let Ok(entry) = entry.try_to::<VarArray>() else {
-            continue;
-        };
-        if entry.len() >= 2 {
-            cells.push(entry);
-        }
-    }
     if cells.is_empty() && trailing.is_empty() {
         return;
     }
@@ -313,20 +267,10 @@ fn sector_stats_stat_section(
         // code-instantiated: runtime-sized 3-column rate grid.
         let mut grid = MindTable::new_alloc();
         let mut index = 0i64;
-        for cell in &cells {
+        for (content_name, amount) in cells {
             let mut cell_row = HBoxContainer::new_alloc();
             cell_row.add_theme_constant_override("separation", 3);
-            let content_name = cell
-                .iter_shared()
-                .next()
-                .map(|value| to_text_godot(&value))
-                .unwrap_or_default();
-            let amount = cell
-                .iter_shared()
-                .nth(1)
-                .map(|value| to_i64_typed(&value))
-                .unwrap_or(0);
-            if let Some(texture) = content_texture(&content_name) {
+            if let Some(texture) = content_texture(content_name) {
                 // code-instantiated: one icon per rate row.
                 cell_row.add_child(&icon_rect(&texture, 24.0));
             }
@@ -342,13 +286,10 @@ fn sector_stats_stat_section(
         root.bind_mut().add(&grid).pad_left(10.0).left();
         root.bind_mut().row();
     }
-    for source_variant in trailing.iter_shared() {
-        let Ok(source) = source_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
+    for source in trailing {
         let prefix = kit::glyph("right-open");
-        let content_icon = row_opt_str(&source, "content_icon").unwrap_or_default();
-        let icon_name = row_opt_str(&source, "icon").unwrap_or_default();
+        let content_icon = source.content_icon.clone().unwrap_or_default();
+        let icon_name = source.icon.clone().unwrap_or_default();
         let icon_text = if !content_icon.is_empty() {
             String::new()
         } else if !icon_name.is_empty() {
@@ -357,13 +298,7 @@ fn sector_stats_stat_section(
             String::new()
         };
         let spacing = if icon_text.is_empty() { "" } else { " " };
-        let line = format!(
-            "{} {}{}{}",
-            prefix,
-            icon_text,
-            spacing,
-            row_str(&source, "name")
-        );
+        let line = format!("{} {}{}{}", prefix, icon_text, spacing, source.name);
         let label = factory::label(&line);
         root.bind_mut().add(&label).pad_left(10.0).left();
         root.bind_mut().row();
@@ -388,32 +323,30 @@ fn sector_stats_stored_cell(content_name: &str, amount: i64) -> Gd<Control> {
 /// `BaseDialog(sector.name())`: custom name wins, then the localized preset.
 fn sector_stats_localized_name(state: &Rc<RefCell<SectorStatsState>>) -> String {
     let st = state.borrow();
-    if row_bool(&st.row, "named") {
-        return row_str(&st.row, "name");
+    let Some(sector) = st.sector.as_ref() else {
+        return String::new();
+    };
+    if sector.named {
+        return sector.name.clone();
     }
-    let preset = row_str(&st.row, "preset");
-    if !preset.is_empty() {
+    if let Some(preset) = sector.preset.as_deref() {
         let key = format!("sector.{preset}.name");
         let localized = kit::t(&format!("@{key}")).to_string();
         if !localized.is_empty() && localized != key {
             return localized;
         }
     }
-    row_str(&st.row, "name")
+    sector.name.clone()
 }
 
-/// The live `campaign_views` sector row this dialog was opened for.
-fn sector_stats_find_row(dialog: &mut MindDialog, planet: &str, sector_id: i64) -> VarDictionary {
-    let views = dialog.campaign_json("campaign_views_json", &[gs(planet).to_variant()]);
-    for row_variant in row_arr(&views, "sectors").iter_shared() {
-        let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_i64_or(&row, "id", -1) == sector_id && row_str(&row, "planet") == planet {
-            return row;
-        }
-    }
-    VarDictionary::new()
+/// The typed `campaign_views` sector row this dialog was opened for.
+fn sector_stats_find_sector(
+    dialog: &MindDialog,
+    planet: &str,
+    sector_id: i64,
+) -> Option<SectorView> {
+    let views = campaign_views_of(dialog, planet)?;
+    campaign_sector_of(&views, planet, sector_id)
 }
 
 /// `abandonSectorConfirm`: shared confirm prompt, then the off-play record
@@ -473,7 +406,7 @@ fn sector_stats_on_confirm(
     }
 }
 
-/// `Sector.isBeingPlayed` for this dialog's sector (`get_sector_state`).
+/// `Sector.isBeingPlayed` for this dialog's sector (`sector_state()`).
 fn sector_stats_is_played(dialog: &mut MindDialog, state: &Rc<RefCell<SectorStatsState>>) -> bool {
     let (planet, sector_id) = {
         let st = state.borrow();
