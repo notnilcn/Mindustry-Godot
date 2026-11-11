@@ -32,7 +32,7 @@ impl DialogController for FullTextDialog {
         // `FullTextDialog.java`: `super("")` + `addCloseButton()`; the text floats
         // over the defaultDialog backdrop (no boxed panel).
         dialog.enable_full_dialog(true);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {

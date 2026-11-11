@@ -10,7 +10,6 @@ use godot::prelude::*;
 
 use crate::ui::dialog::DialogController;
 use crate::ui::dialog::MindDialog;
-use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::bar::MindBar;
 use crate::ui::kit::widgets::check::MindCheck;
@@ -41,7 +40,7 @@ impl WidgetGalleryDialog {
         let Some(mut content) = dialog.content() else {
             return;
         };
-        let mut grid = MindTable::new_alloc();
+        let mut grid = factory::table();
         grid.bind_mut().grow_horizontal();
         let control: Gd<Control> = grid.clone().upcast();
         content.add_child(&control);
@@ -83,7 +82,7 @@ impl WidgetGalleryDialog {
         let button = factory::button("Button");
         grid.bind_mut().add(&button).pad(2.0);
 
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 }
 

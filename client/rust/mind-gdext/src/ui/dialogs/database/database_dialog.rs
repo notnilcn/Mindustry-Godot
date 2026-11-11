@@ -8,8 +8,8 @@ use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::text_server::AutowrapMode;
 use godot::classes::{
-    Button, ButtonGroup, ColorRect, Control, GridContainer, HBoxContainer, LineEdit,
-    MarginContainer, RichTextLabel, StyleBoxEmpty, StyleBoxFlat, VBoxContainer,
+    Button, ButtonGroup, ColorRect, Control, GridContainer, LineEdit, MarginContainer,
+    RichTextLabel, StyleBoxEmpty, StyleBoxFlat, VBoxContainer,
 };
 use godot::global::HorizontalAlignment;
 use godot::obj::{NewAlloc, NewGd};
@@ -18,9 +18,10 @@ use godot::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::gdutil::variant::dict_bool_try_or;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
-use crate::ui::kit::{self, MindScroll, MindTable, styles};
+use crate::ui::kit::{self, MindScroll, styles};
 
 use crate::ui::dialogs::settings::util::*;
 
@@ -98,7 +99,7 @@ impl DialogController for DatabaseController {
         dialog.clear_content();
         let state = self.state.clone();
         database_build(dialog, &state);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         database_connect_resize(dialog, &state);
     }
 
@@ -118,8 +119,7 @@ fn database_build(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>) {
     }
     // `cont.table(s -> { s.image(Icon.zoom).padRight(8); search = s.field(..) })`.
     // code-instantiated: the search row is part of the dialog body built in code.
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 8);
+    let mut search_row = factory::hbox(8);
     search_row.add_child(&factory::glyph_label("zoom", 30, Color::WHITE));
     let mut search = factory::field(&kit::t("@players.search").to_string());
     search.set_h_size_flags(SizeFlags::EXPAND_FILL);
@@ -150,7 +150,7 @@ fn database_build(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>) {
     let mut pane = MindScroll::new_alloc();
     pane.bind_mut().set_scrolling_disabled(true, false);
     // code-instantiated: `all` holds the live tab rail and category grid.
-    let mut all = MindTable::new_alloc();
+    let mut all = factory::table();
     all.bind_mut().set_table_top(true);
     {
         let control: Gd<Control> = all.clone().upcast();
@@ -178,8 +178,7 @@ fn database_build(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>) {
     margin.add_theme_constant_override("margin_right", 30 - DATABASE_ARC_BAR_SQUEEZE);
     margin.add_theme_constant_override("margin_top", 0);
     margin.add_theme_constant_override("margin_bottom", 20);
-    let mut grid = VBoxContainer::new_alloc();
-    grid.add_theme_constant_override("separation", 0);
+    let grid = factory::vbox(0);
     margin.add_child(&grid);
     all.bind_mut().add(&margin).grow_x();
 
@@ -251,7 +250,7 @@ fn database_load_view(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>
             && campaign.has_method("get_sector_state")
         {
             let sector_state = campaign.call("get_sector_state", &[]).to::<VarDictionary>();
-            if dict_bool(&sector_state, "campaign") {
+            if dict_bool_try_or(&sector_state, "campaign", false) {
                 current_planet = dict_text(&sector_state, "planet");
             }
         }
@@ -344,11 +343,7 @@ fn database_build_tabs(dialog: &Gd<MindDialog>, state: &Rc<RefCell<DatabaseState
     if !tabs_node.is_instance_valid() {
         return;
     }
-    for child in tabs_node.get_children().iter_shared() {
-        let mut child = child.clone();
-        tabs_node.remove_child(&child);
-        child.queue_free();
-    }
+    kit::clear_children(&mut tabs_node);
     let group = ButtonGroup::new_gd();
     let mut rows: Vec<VarDictionary> = dict_array(&view, "tabs")
         .iter_shared()
@@ -372,7 +367,7 @@ fn database_build_tabs(dialog: &Gd<MindDialog>, state: &Rc<RefCell<DatabaseState
     }
     for tab_row in rows {
         let tab_name = dict_text(&tab_row, "name");
-        let is_all = dict_bool(&tab_row, "is_all");
+        let is_all = dict_bool_try_or(&tab_row, "is_all", false);
         let label = database_tab_label(&tab_row, is_all);
         let color = if is_all {
             Color::WHITE
@@ -462,11 +457,7 @@ fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>)
     if !grid.is_instance_valid() {
         return;
     }
-    for child in grid.get_children().iter_shared() {
-        let mut child = child.clone();
-        grid.remove_child(&child);
-        child.queue_free();
-    }
+    kit::clear_children(&mut grid);
     // `cols = clamp((graphics.getWidth() - Scl.scl(30)) / Scl.scl(32 + 12), 1, 22)`.
     let columns = (((viewport_width(dialog) - 30.0) / 44.0) as i32).clamp(1, 22);
     // Port-only tables (GAPS #68 UI half): they replace the content grid.
@@ -502,14 +493,12 @@ fn database_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<DatabaseState>>)
         ));
         // `all.table(sub -> ...).growX().left().padBottom(10)`.
         // code-instantiated: one section per category with live tag rows.
-        let mut sub = VBoxContainer::new_alloc();
-        sub.add_theme_constant_override("separation", 0);
+        let mut sub = factory::vbox(0);
         for row in rows {
             let tag_name = dict_text(&row, "name");
             if tag_name != "default" {
                 // code-instantiated: tag header rows follow the live tag list.
-                let mut header = HBoxContainer::new_alloc();
-                header.add_theme_constant_override("separation", 0);
+                let mut header = factory::hbox(0);
                 let tag_label =
                     factory::label(&kit::t(&format!("@{}", dict_text(&row, "label"))).to_string());
                 {
@@ -630,12 +619,10 @@ fn database_rebuild_tables(
         5,
     ));
     // code-instantiated: one row per table entry, rebuilt on every refresh.
-    let mut list = VBoxContainer::new_alloc();
-    list.add_theme_constant_override("separation", 4);
+    let mut list = factory::vbox(4);
     for line in lines.drain(..) {
         // code-instantiated: `icon name ... value` row.
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 8);
+        let mut row = factory::hbox(8);
         if !line.icon.is_empty() {
             let mut glyph = factory::glyph_label(line.icon, 24, line.color);
             glyph.set_v_size_flags(SizeFlags::SHRINK_CENTER);
@@ -710,7 +697,7 @@ fn database_tag_rows(category: &VarDictionary, query: &str, tab: &str) -> Vec<Va
 
 /// `tab == Planets.sun || allDatabaseTabs || databaseTabs.contains(tab)`.
 fn database_entry_in_tab(entry: &VarDictionary, tab: &str) -> bool {
-    if tab == DATABASE_ALL_TAB || dict_bool(entry, "all_tabs") {
+    if tab == DATABASE_ALL_TAB || dict_bool_try_or(entry, "all_tabs", false) {
         return true;
     }
     dict_array(entry, "tabs").iter_shared().any(|value| {
@@ -734,7 +721,7 @@ fn database_entry_matches(entry: &VarDictionary, query: &str) -> bool {
 fn database_entry_button(entry_value: &Variant) -> Gd<Button> {
     let entry = entry_value.try_to::<VarDictionary>().unwrap_or_default();
     let entry_name = dict_text(&entry, "name");
-    let unlocked = dict_bool(&entry, "unlocked");
+    let unlocked = dict_bool_try_or(&entry, "unlocked", false);
     let mut button = if unlocked {
         let type_name = dict_text(&entry, "content_type");
         let regions = [
@@ -779,7 +766,7 @@ fn database_entry_button(entry_value: &Variant) -> Gd<Button> {
         locked.add_child(&lock);
         locked
     };
-    if dict_bool(&entry, "banned") {
+    if dict_bool_try_or(&entry, "banned", false) {
         // `new Image(Icon.cancel, Tmp.c1.set(Color.scarlet).a(0.6f))` over the
         // content icon when in a game with the block banned.
         let mut cross = factory::glyph_label("cancel", DATABASE_ICON_MED as i32, DATABASE_SCARLET);
