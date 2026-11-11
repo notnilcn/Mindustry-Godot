@@ -95,7 +95,7 @@ pub(in crate::ui::dialogs) fn campaign_sector_of(
 /// The view a missing sector/section reads as: every string empty, every flag
 /// false, every number zero. `threat_band` stays `low` like the row readers'
 /// fallback (the old `row_opt_str(...).unwrap_or("low")`).
-pub(in crate::ui::dialogs) fn empty_sector_stats() -> SectorStatsView {
+pub(in crate::ui) fn empty_sector_stats() -> SectorStatsView {
     SectorStatsView {
         attempts: 0,
         wave: 0,
@@ -115,7 +115,7 @@ pub(in crate::ui::dialogs) fn empty_sector_stats() -> SectorStatsView {
 /// A `SectorView` with every field at its empty default (see
 /// [`empty_sector_stats`]). The planet page's synthesized start-sector row and
 /// the stats dialog's missing-sector fallback use it.
-pub(in crate::ui::dialogs) fn empty_sector_view(id: u16, planet: &str, name: &str) -> SectorView {
+pub(in crate::ui) fn empty_sector_view(id: u16, planet: &str, name: &str) -> SectorView {
     SectorView {
         id,
         planet: planet.to_owned(),

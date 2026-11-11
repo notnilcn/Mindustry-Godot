@@ -35,10 +35,15 @@ use godot::classes::{
 };
 use godot::prelude::*;
 
+use crate::ui::dialogs::campaign::util::empty_sector_view;
 use crate::ui::kit;
+use mind_core::ui::campaign::SectorView;
 
 use self::mesh::set_uniform;
-use self::rows::{row_array, row_dict, row_f32, row_i64, row_packed_vector3, row_str, variant_i64};
+use self::rows::{
+    row_array, row_bool, row_dict, row_f32, row_i64, row_i64_array, row_opt_i64,
+    row_packed_vector3, row_str, variant_i64,
+};
 
 // The old `planet::SunMesher`/`planet::sun_mesh_data` paths stay valid for C01.
 #[allow(unused_imports)]
@@ -216,7 +221,8 @@ pub struct MindPlanetView {
     arcs: Option<Gd<MeshInstance3D>>,
     /// Arc geometry resolved from the sector rows in the last marker rebuild.
     arc_specs: Vec<ArcSpec>,
-    sectors: VarArray,
+    /// The typed `SectorView` rows driving the overlay layers.
+    sector_views: Vec<SectorView>,
     /// `PlanetRenderer.renderOrbit` loop meshes (one per system planet with a
     /// parent); the shared material's alpha tracks `uiAlpha`.
     orbits: Option<Gd<Node3D>>,
@@ -272,7 +278,7 @@ impl IControl for MindPlanetView {
             markers: None,
             arcs: None,
             arc_specs: Vec::new(),
-            sectors: VarArray::new(),
+            sector_views: Vec::new(),
             orbits: None,
             orbit_material: None,
             clouds: Vec::new(),
@@ -400,7 +406,7 @@ impl MindPlanetView {
             return false;
         }
         self.planet = planet_name;
-        self.sectors = VarArray::new();
+        self.sector_views = Vec::new();
         self.tiles = row_packed_vector3(&self.data, "tiles");
         self.corners = row_packed_vector3(&self.data, "corners");
         self.tile_corners = row_array(&self.data, "tile_corners");
@@ -430,9 +436,25 @@ impl MindPlanetView {
 
     /// `PlanetDialog.renderSectors` + `renderProjections` for every sector but
     /// the selected one.
+    ///
+    /// # ABI shim
+    ///
+    /// The untyped `#[func]` form is the MCP/test surface; the campaign dialog
+    /// pushes [`Self::set_sector_views`] instead. Each row is projected into the
+    /// typed view with the fields the overlay layers read.
     #[func]
     pub fn set_sectors(&mut self, sectors: VarArray) {
-        self.sectors = sectors;
+        let views: Vec<SectorView> = sectors
+            .iter_shared()
+            .filter_map(|row| row.try_to::<VarDictionary>().ok())
+            .map(|row| sector_view_from_row(&row))
+            .collect();
+        self.set_sector_views(&views);
+    }
+
+    /// Binds the typed `CampaignViews.sectors` markers (T01/T02 seam).
+    pub fn set_sector_views(&mut self, sectors: &[SectorView]) {
+        self.sector_views = sectors.to_vec();
         self.rebuild_markers();
     }
 
@@ -443,7 +465,7 @@ impl MindPlanetView {
     #[func]
     pub fn focus_tile(&mut self, tile: i32) {
         self.selected_tile = tile;
-        if !self.sectors.is_empty() {
+        if !self.sector_views.is_empty() {
             self.rebuild_markers();
         }
         if let Some(mut material) = self.grid_material.clone() {
@@ -510,7 +532,7 @@ impl MindPlanetView {
         self.sector_icon_preset = GString::new();
         self.clear_highlight();
         self.rebuild_sector_icon();
-        if !self.sectors.is_empty() {
+        if !self.sector_views.is_empty() {
             self.rebuild_markers();
         }
     }
@@ -615,16 +637,59 @@ impl MindPlanetView {
 
     /// Remapped view tile for a `campaign_views` sector row
     /// (`Planet.getData().presets`).
+    ///
+    /// # ABI shim
+    ///
+    /// The untyped `#[func]` form is the MCP/test surface; the dialog calls
+    /// [`Self::view_tile_index`] with the typed view's fields.
     #[func]
     pub fn view_tile(&self, sector: VarDictionary) -> i32 {
-        let presets = row_dict(&self.data, "presets");
         let preset = row_str(&sector, "preset");
+        let id = row_i64(&sector, "id", -1);
+        self.view_tile_index(id, &preset)
+    }
+
+    /// The remapped grid tile for a typed sector marker.
+    pub fn view_tile_index(&self, id: i64, preset: &str) -> i32 {
+        let presets = row_dict(&self.data, "presets");
         if !preset.is_empty()
-            && let Some(value) = presets.get(preset.as_str())
+            && let Some(value) = presets.get(preset)
             && let Some(index) = variant_i64(&value)
         {
             return index as i32;
         }
-        row_i64(&sector, "id", -1) as i32
+        id as i32
     }
+}
+
+/// Projects one untyped `campaign_views_json` sector row into [`SectorView`]
+/// (the `#[func] set_sectors` ABI path). Only the fields the overlay layers read
+/// are taken from the row; the rest keep [`empty_sector_view`]'s defaults.
+fn sector_view_from_row(row: &VarDictionary) -> SectorView {
+    let planet = row_str(row, "planet");
+    let name = row_str(row, "name");
+    let id = u16::try_from(row_i64(row, "id", -1)).unwrap_or(0);
+    let mut view = empty_sector_view(id, &planet, &name);
+    view.preset = Some(row_str(row, "preset")).filter(|preset| !preset.is_empty());
+    view.selectable = row_bool(row, "selectable");
+    view.unlocked = row_bool(row, "unlocked");
+    view.locked = row_bool(row, "locked");
+    view.require_unlock = row_bool(row, "require_unlock");
+    view.preset_unlocked = row_bool(row, "preset_unlocked");
+    view.lock_icon = row_bool(row, "lock_icon");
+    view.icon = Some(row_str(row, "icon")).filter(|icon| !icon.is_empty());
+    view.content_icon = Some(row_str(row, "content_icon")).filter(|icon| !icon.is_empty());
+    view.has_base = row_bool(row, "has_base");
+    view.has_enemy_base = row_bool(row, "has_enemy_base");
+    view.attacked = row_bool(row, "attacked");
+    view.being_played = row_bool(row, "being_played");
+    view.any_exports = row_bool(row, "any_exports");
+    view.export_destination =
+        row_opt_i64(row, "export_destination").and_then(|id| u16::try_from(id).ok());
+    view.shield_arc = row_opt_i64(row, "shield_arc").and_then(|id| u16::try_from(id).ok());
+    view.attack_sources = row_i64_array(row, "attack_sources")
+        .into_iter()
+        .filter_map(|id| u16::try_from(id).ok())
+        .collect();
+    view
 }

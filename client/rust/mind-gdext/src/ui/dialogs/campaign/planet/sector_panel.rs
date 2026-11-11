@@ -7,13 +7,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use godot::builtin::{VarArray, VarDictionary};
+use godot::builtin::VarDictionary;
 use godot::classes::control::{LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::{
     Button, ColorRect, Control, HBoxContainer, PanelContainer, TextureRect, VBoxContainer,
 };
 use godot::obj::NewAlloc;
 use godot::prelude::*;
+use mind_core::ui::campaign::SectorView;
 
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit::widgets::factory;
@@ -31,7 +32,7 @@ pub(super) fn planet_build_action_row(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<PlanetState>>,
     st: &mut PlanetState,
-    selected: &VarDictionary,
+    selected: Option<&SectorView>,
 ) {
     dialog.clear_buttons();
     let Some(mut buttons) = dialog.buttons_row() else {
@@ -63,7 +64,7 @@ pub(super) fn planet_build_action_row(
     let left_spacer = spacer(true, 0.0, 0.0);
     let left_spacer_control: Gd<Control> = left_spacer.clone().upcast();
     buttons.add_child(&left_spacer_control);
-    if !selected.is_empty() {
+    if let Some(selected) = selected {
         let panel = planet_build_sector_panel(dialog, state, st, selected);
         buttons.add_child(&panel);
     }
@@ -520,7 +521,7 @@ pub(super) fn planet_build_sector_panel(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<PlanetState>>,
     st: &mut PlanetState,
-    sector: &VarDictionary,
+    sector: &SectorView,
 ) -> Gd<PanelContainer> {
     // code-instantiated: bottom-centre readout rebuilt per selected sector.
     let mut panel = panel_with_box(pane_box(
@@ -533,11 +534,6 @@ pub(super) fn planet_build_sector_panel(
     let mut column = VBoxContainer::new_alloc();
     column.add_theme_constant_override("separation", 0);
     panel.add_child(&column);
-    if sector.is_empty() {
-        let label = factory::label(&kit::t("@sectors.select").to_string());
-        column.add_child(&label);
-        return panel;
-    }
 
     // code-instantiated: sector title row (name + rename/icon buttons).
     let mut title_row = HBoxContainer::new_alloc();
@@ -553,9 +549,9 @@ pub(super) fn planet_build_sector_panel(
         label.set_vertical_alignment(godot::global::VerticalAlignment::CENTER);
     }
     title_row.add_child(&title);
-    let preset = row_str(sector, "preset");
-    let sector_id = row_i64(sector, "id");
-    if preset.is_empty() || !row_bool_or(sector, "require_unlock", true) {
+    let preset = sector.preset.as_deref().unwrap_or("");
+    let sector_id = i64::from(sector.id);
+    if preset.is_empty() || !sector.require_unlock {
         let title_spacer = spacer(true, 0.0, 0.0);
         let title_spacer_control: Gd<Control> = title_spacer.clone().upcast();
         title_row.add_child(&title_spacer_control);
@@ -599,8 +595,8 @@ pub(super) fn planet_build_sector_panel(
     divider.set_mouse_filter(MouseFilter::IGNORE);
     column.add_child(&divider);
 
-    let has_base = row_bool(sector, "has_base");
-    if row_bool(sector, "objectives_locked") {
+    let has_base = sector.has_base;
+    if sector.objectives_locked {
         let complete_label = factory::label(&kit::tm("@complete").to_string());
         complete_label
             .clone()
@@ -609,25 +605,11 @@ pub(super) fn planet_build_sector_panel(
         let mut complete = rich(&complete_label);
         complete.set_vertical_alignment(godot::global::VerticalAlignment::CENTER);
         column.add_child(&complete_label);
-        for objective in row_arr(sector, "objectives").iter_shared() {
-            let Ok(objective) = objective.try_to::<VarArray>() else {
-                continue;
-            };
-            let values: Vec<String> = objective
-                .iter_shared()
-                .map(|value| {
-                    value
-                        .try_to::<GString>()
-                        .map(|v| v.to_string())
-                        .unwrap_or_default()
-                })
-                .collect();
-            let kind = values.first().cloned().unwrap_or_default();
-            let argument = values.get(1).cloned().unwrap_or_default();
+        for (kind, argument) in &sector.objectives {
             // code-instantiated: one row per incomplete objective.
             let mut objective_row = HBoxContainer::new_alloc();
             objective_row.add_theme_constant_override("separation", 3);
-            let localized = planet_localized_objective_arg(&kind, &argument);
+            let localized = planet_localized_objective_arg(kind, argument);
             let key = format!("@requirement.{kind}");
             let text = format!("> {}", kit::tm_format(&key, &[localized.as_str()]));
             let objective_label = factory::label(&text);
@@ -638,14 +620,8 @@ pub(super) fn planet_build_sector_panel(
             column.add_child(&objective_row);
         }
     } else if !has_base {
-        let mut threat = row_str(sector, "threat_band");
-        if threat.is_empty() {
-            threat = String::from("low");
-        }
-        let mut color = row_str(sector, "threat_color");
-        if color.is_empty() {
-            color = String::from("ffffffff");
-        }
+        let threat = sector.threat_band;
+        let color = sector.threat_color.clone();
         let color: String = color.chars().take(6).collect();
         let text = format!(
             "{} [color=#{}]{}[/color]",
@@ -671,17 +647,8 @@ pub(super) fn planet_build_sector_panel(
         column.add_child(&label);
     }
 
-    let stats = row_dict(sector, "stats");
-    let resources: Vec<String> = row_arr(&stats, "resources")
-        .iter_shared()
-        .map(|value| {
-            value
-                .try_to::<GString>()
-                .map(|v| v.to_string())
-                .unwrap_or_default()
-        })
-        .collect();
-    if row_bool(sector, "has_save") && !resources.is_empty() {
+    let resources = &sector.stats.resources;
+    if sector.has_save && !resources.is_empty() {
         // code-instantiated: the stored-resource icon row.
         let mut resource_row = HBoxContainer::new_alloc();
         resource_row.add_theme_constant_override("separation", 3);
@@ -690,7 +657,7 @@ pub(super) fn planet_build_sector_panel(
         resource_row.add_child(&lead_control);
         let resource_label = factory::label(&kit::t("@sectors.resources").to_string());
         resource_row.add_child(&resource_label);
-        for resource in &resources {
+        for resource in resources {
             let Some(texture) = content_texture(resource) else {
                 continue;
             };
@@ -724,17 +691,17 @@ pub(super) fn planet_build_sector_panel(
     }
 
     let action = planet_sector_action(dialog, sector, &st.launch_mode);
-    let mut show_action = row_bool_or(sector, "show_action", true);
+    let mut show_action = sector.show_action;
     if st.launch_mode == "planetLaunch" {
-        show_action = row_bool(sector, "accelerator_selectable");
+        show_action = sector.accelerator_selectable;
     }
     if show_action {
         // `if(Vars.showSectorSubmissions && (link = SectorSubmissions
         // .getSectorThread(sector)) != null)` (`PlanetDialog.java:1328-1335`):
         // the hidden-sector map-submission thread, 54 px tall under Stats.
         if setting_flag("showSectorSubmissions")
-            && row_bool(sector, "has_enemy_base")
-            && row_str(sector, "planet") == "serpulo"
+            && sector.has_enemy_base
+            && sector.planet == "serpulo"
             && let Some(link) = sector_submission_link(sector_id)
         {
             // code-instantiated: the link row is data-driven (bundle text).
@@ -763,11 +730,11 @@ pub(super) fn planet_build_sector_panel(
                 &pane_box(Color::BLACK, styles::ACCENT, 4, 2),
             );
         }
-        let icon = glyph_control(&row_str(&action, "icon"), 20.0);
+        let icon = glyph_control(action.icon, 20.0);
         let icon_gd: Gd<Control> = icon.upcast();
-        let label = kit::t(&row_str(&action, "label")).to_string();
+        let label = kit::t(action.label).to_string();
         dialog.build_button_content(&mut launch, Some(icon_gd), &label);
-        launch.set_disabled(row_bool(&action, "disabled"));
+        launch.set_disabled(action.disabled);
         let mut tooltip = String::new();
         for state_key in &state_labels {
             if !tooltip.is_empty() {
@@ -776,7 +743,7 @@ pub(super) fn planet_build_sector_panel(
             tooltip.push_str(&kit::t(state_key).to_string());
         }
         launch.set_tooltip_text(&GString::from(tooltip.as_str()));
-        let mode = row_str(&action, "mode");
+        let mode = action.mode;
         let target = dialog.to_gd();
         let state_for_action = state.clone();
         let callable = Callable::from_fn("planet_sector_action", move |_args: &[&Variant]| {
@@ -791,7 +758,7 @@ pub(super) fn planet_build_sector_panel(
                 &mut st,
                 &planet,
                 sector_id,
-                &mode,
+                mode,
             );
         });
         launch.connect("pressed", &callable);
@@ -801,10 +768,10 @@ pub(super) fn planet_build_sector_panel(
 }
 
 /// `_sector_icon_content`: `content_icon` texture, chosen glyph, or `Icon.none`.
-pub(super) fn planet_sector_icon_content(sector: &VarDictionary) -> Gd<Control> {
-    let content_icon = row_str(sector, "content_icon");
+pub(super) fn planet_sector_icon_content(sector: &SectorView) -> Gd<Control> {
+    let content_icon = sector.content_icon.as_deref().unwrap_or("");
     if !content_icon.is_empty()
-        && let Some(texture) = content_texture(&content_icon)
+        && let Some(texture) = content_texture(content_icon)
     {
         let mut image = TextureRect::new_alloc();
         image.set_texture(&texture);
@@ -814,7 +781,7 @@ pub(super) fn planet_sector_icon_content(sector: &VarDictionary) -> Gd<Control> 
         image.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
         return image.upcast();
     }
-    let mut icon_name = row_str(sector, "icon");
+    let mut icon_name = sector.icon.clone().unwrap_or_default();
     if icon_name.is_empty() {
         icon_name = String::from("none");
     }
@@ -832,10 +799,9 @@ pub(super) fn planet_rename_sector(
     sector_id: i64,
 ) {
     let planet = st.selected_planet.clone();
-    let sector = planet_find_sector(dialog, st, &planet, sector_id);
-    if sector.is_empty() {
+    let Some(sector) = planet_find_sector(dialog, st, &planet, sector_id) else {
         return;
-    }
+    };
     st.rename_target = sector_id;
     let _ = ui_call(
         "show_text_input",
@@ -926,10 +892,21 @@ pub(super) fn planet_open_sector_icon_dialog(
     let sector = planet_find_sector(dialog, st, &planet, sector_id);
     let mut context = VarDictionary::new();
     context.set("mode", &GString::from("sector"));
-    context.set("icon", &GString::from(row_str(&sector, "icon").as_str()));
+    context.set(
+        "icon",
+        &gs(sector
+            .as_ref()
+            .and_then(|row| row.icon.clone())
+            .as_deref()
+            .unwrap_or("")),
+    );
     context.set(
         "content_icon",
-        &GString::from(row_str(&sector, "content_icon").as_str()),
+        &gs(sector
+            .as_ref()
+            .and_then(|row| row.content_icon.clone())
+            .as_deref()
+            .unwrap_or("")),
     );
     dialog.open_dialog("icon_select", &json_stringify(&context));
 }
@@ -973,33 +950,42 @@ pub(super) fn planet_on_sector_icon_selected(
 }
 
 /// `_sector_action`: label/icon/mode/disabled for the selected sector.
+pub(super) struct SectorAction {
+    pub(super) label: &'static str,
+    pub(super) icon: &'static str,
+    pub(super) mode: &'static str,
+    pub(super) disabled: bool,
+}
+
 pub(super) fn planet_sector_action(
     dialog: &mut MindDialog,
-    sector: &VarDictionary,
+    sector: &SectorView,
     launch_mode: &str,
-) -> VarDictionary {
-    let locked = row_bool(sector, "objectives_locked");
-    let mut out = VarDictionary::new();
+) -> SectorAction {
+    let locked = sector.objectives_locked;
     if launch_mode == "planetLaunch" {
         // `PlanetDialog.java:438`: a locked destination keeps the lock entry
         // (its `disabled` flag and label), everything else launches.
         if locked {
-            out.set("label", &GString::from("@locked"));
-            out.set("icon", &GString::from("lock"));
-            out.set("disabled", true);
-        } else {
-            out.set("label", &GString::from("@sectors.launch"));
-            out.set("icon", &GString::from("play"));
-            out.set("disabled", false);
+            return SectorAction {
+                label: "@locked",
+                icon: "lock",
+                mode: "planetLaunch",
+                disabled: true,
+            };
         }
-        out.set("mode", &GString::from("planetLaunch"));
-        return out;
+        return SectorAction {
+            label: "@sectors.launch",
+            icon: "play",
+            mode: "planetLaunch",
+            disabled: false,
+        };
     }
-    let no_candidate = row_bool(sector, "no_candidate");
+    let no_candidate = sector.no_candidate;
     let disabled = locked || no_candidate;
     let (label, icon, mode) = if planet_is_being_played(dialog, sector) {
         ("@sectors.resume", "play", "resume")
-    } else if row_bool(sector, "has_base") || row_bool(sector, "captured") {
+    } else if sector.has_base || sector.captured {
         ("@sectors.go", "play", "go")
     } else if locked {
         ("@locked", "lock", "launch")
@@ -1008,20 +994,17 @@ pub(super) fn planet_sector_action(
     } else {
         ("@sectors.launch", "play", "launch")
     };
-    out.set("label", &GString::from(label));
-    out.set("icon", &GString::from(icon));
-    out.set("mode", &GString::from(mode));
-    out.set("disabled", disabled);
-    out
+    SectorAction {
+        label,
+        icon,
+        mode,
+        disabled,
+    }
 }
 
-/// `Sector.isBeingPlayed` for a row (`MindCampaign.get_sector_state`).
-pub(super) fn planet_is_being_played(dialog: &mut MindDialog, sector: &VarDictionary) -> bool {
-    planet_sector_is_being_played(
-        dialog,
-        &row_str(sector, "planet"),
-        row_i64_or(sector, "id", -2),
-    )
+/// `Sector.isBeingPlayed` for a view (`MindCampaign.sector_state()`).
+pub(super) fn planet_is_being_played(dialog: &mut MindDialog, sector: &SectorView) -> bool {
+    campaign_sector_is_playing(dialog, &sector.planet, i64::from(sector.id))
 }
 
 /// `Sector.isBeingPlayed` for the page's selected sector, addressed by
@@ -1104,10 +1087,10 @@ pub(super) fn planet_sector_launch_from(
     sector_id: i64,
 ) -> i64 {
     for sector in planet_sectors(dialog, st, planet_name) {
-        if row_i64(&sector, "id") != sector_id {
+        if i64::from(sector.id) != sector_id {
             continue;
         }
-        return row_i64_or(&sector, "launch_from", -1);
+        return sector.launch_from.map(i64::from).unwrap_or(-1);
     }
     -1
 }

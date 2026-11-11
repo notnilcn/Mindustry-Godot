@@ -6,18 +6,18 @@
 
 use super::util::*;
 use super::*;
+use mind_core::ui::campaign::{CampaignViews, PlanetView, SectorView};
 
 // ---- campaign reads -------------------------------------------------------
 
-/// `refresh_campaign_views(planet)`: the live `MindCampaign` projection.
+/// `refresh_campaign_views(planet)`: the live typed `MindCampaign` projection.
 pub(super) fn planet_refresh_views(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     planet: &str,
-) -> VarDictionary {
-    let views = dialog.campaign_json("campaign_views_json", &[GString::from(planet).to_variant()]);
-    if !views.is_empty() {
-        st.views = views.clone();
+) -> Option<CampaignViews> {
+    if let Some(views) = campaign_views_of(dialog, planet) {
+        st.views = Some(views);
         st.views_planet = planet.to_string();
     }
     st.views.clone()
@@ -25,126 +25,107 @@ pub(super) fn planet_refresh_views(
 
 /// Ensures the cached projection was read for `planet`.
 pub(super) fn planet_ensure_views(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     planet: &str,
-) -> VarDictionary {
-    if st.views_planet == planet && !st.views.is_empty() {
+) -> Option<CampaignViews> {
+    if st.views_planet == planet && st.views.is_some() {
         return st.views.clone();
     }
     planet_refresh_views(dialog, st, planet)
 }
 
 /// The live projection for a planet without touching the dialog's cache.
-pub(super) fn planet_live_views(dialog: &mut MindDialog, planet: &str) -> VarDictionary {
-    dialog.campaign_json("campaign_views_json", &[GString::from(planet).to_variant()])
+pub(super) fn planet_live_views(dialog: &MindDialog, planet: &str) -> Option<CampaignViews> {
+    campaign_views_of(dialog, planet)
 }
 
 pub(super) fn planet_find_planet(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     name: &str,
-) -> VarDictionary {
-    let views = planet_refresh_views(dialog, st, "");
-    if views.is_empty() {
-        return VarDictionary::new();
-    }
-    for planet in row_rows(&views, "planets") {
-        if row_str(&planet, "name") == name {
-            return planet;
-        }
-    }
-    VarDictionary::new()
+) -> Option<PlanetView> {
+    let views = planet_refresh_views(dialog, st, "")?;
+    views
+        .planets
+        .iter()
+        .find(|planet| planet.name == name)
+        .cloned()
 }
 
 /// `PlanetDialog` sectors for a planet: the active projection's grid, else the
-/// synthesized start sector from the planet row (`Planet.getStartSector`).
+/// synthesized start sector from the planet card (`Planet.getStartSector`).
 pub(super) fn planet_sectors(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     planet: &str,
-) -> Vec<VarDictionary> {
-    let views = planet_ensure_views(dialog, st, planet);
-    if row_str(&views, "planet") == planet {
-        return row_rows(&views, "sectors");
-    }
-    let planet_row = {
-        let mut out = VarDictionary::new();
-        for row in row_rows(&views, "planets") {
-            if row_str(&row, "name") == planet {
-                out = row;
-                break;
-            }
-        }
-        out
-    };
-    if planet_row.is_empty() {
+) -> Vec<SectorView> {
+    let Some(views) = planet_ensure_views(dialog, st, planet) else {
         return Vec::new();
+    };
+    if views.planet == planet {
+        return views.sectors;
     }
-    let mut row = VarDictionary::new();
-    row.set("id", row_i64(&planet_row, "start_sector"));
-    let localized = row_str(&planet_row, "localized");
-    row.set(
-        "name",
-        &GString::from(if localized.is_empty() {
-            planet
-        } else {
-            &localized
-        }),
-    );
-    row.set("planet", &GString::from(planet));
-    row.set("threat_band", &GString::from("low"));
-    row.set("locked", false);
-    row.set("has_base", false);
-    vec![row]
+    let Some(planet_row) = views.planets.iter().find(|row| row.name == planet) else {
+        return Vec::new();
+    };
+    // The old synthesized row carried id/name/planet, `threat_band: low` and
+    // the two false flags; every other read fell back to its empty default.
+    let name = if planet_row.localized.is_empty() {
+        planet
+    } else {
+        planet_row.localized.as_str()
+    };
+    vec![empty_sector_view(planet_row.start_sector, planet, name)]
 }
 
 pub(super) fn planet_find_sector(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     planet: &str,
     sector_id: i64,
-) -> VarDictionary {
-    for sector in planet_sectors(dialog, st, planet) {
-        if row_i64(&sector, "id") == sector_id {
-            return sector;
-        }
-    }
-    VarDictionary::new()
+) -> Option<SectorView> {
+    planet_sectors(dialog, st, planet)
+        .into_iter()
+        .find(|sector| i64::from(sector.id) == sector_id)
 }
 
 pub(super) fn planet_find_planet_row(
-    dialog: &mut MindDialog,
+    dialog: &MindDialog,
     st: &mut PlanetState,
     name: &str,
-) -> VarDictionary {
+) -> Option<PlanetView> {
     planet_find_planet(dialog, st, name)
 }
 
-/// Localized planet label (`planet.<name>.name`), falling back to the row.
-pub(super) fn planet_localized_planet(planet: &VarDictionary) -> String {
-    let name = row_str(planet, "name");
+/// Localized planet label (`planet.<name>.name`), falling back to the card.
+pub(super) fn planet_localized_planet(planet: &PlanetView) -> String {
+    let name = planet.name.clone();
     let localized = bundle_or(&format!("planet.{name}.name"), "");
     if localized.is_empty() {
-        let fallback = row_str(planet, "localized");
-        return if fallback.is_empty() { name } else { fallback };
+        return if planet.localized.is_empty() {
+            name
+        } else {
+            planet.localized.clone()
+        };
     }
     localized
 }
 
 /// Localized sector label (`sector.<preset>.name`).
-pub(super) fn planet_localized_sector(sector: &VarDictionary) -> String {
-    if row_bool(sector, "named") {
-        return row_str(sector, "name");
+pub(super) fn planet_localized_sector(sector: &SectorView) -> String {
+    if sector.named {
+        return sector.name.clone();
     }
-    let preset = row_str(sector, "preset");
-    if !preset.is_empty() {
+    if let Some(preset) = sector.preset.as_deref()
+        && !preset.is_empty()
+    {
         let localized = bundle_or(&format!("sector.{preset}.name"), "");
         if !localized.is_empty() {
             return localized;
         }
     }
-    row_str(sector, "name")
+    sector.name.clone()
 }
 
 /// `requirement.<kind>` argument localization.
@@ -185,13 +166,13 @@ pub(super) fn planet_localized_objective_arg(kind: &str, argument: &str) -> Stri
 }
 
 /// Visible state lines in `PlanetDialog.updateSelected` order.
-pub(super) fn planet_sector_state_labels(sector: &VarDictionary) -> Vec<String> {
+pub(super) fn planet_sector_state_labels(sector: &SectorView) -> Vec<String> {
     let mut out = Vec::new();
-    if row_bool(sector, "attacked") {
+    if sector.attacked {
         out.push(String::from("@sectors.underattack"));
-    } else if row_bool(sector, "vulnerable") {
+    } else if sector.vulnerable {
         out.push(String::from("@sectors.vulnerable"));
-    } else if !row_bool(sector, "has_base") && row_bool(sector, "has_enemy_base") {
+    } else if !sector.has_base && sector.has_enemy_base {
         out.push(String::from("@sectors.enemybase"));
     }
     out

@@ -26,13 +26,13 @@ mod view_binding;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use godot::builtin::VarDictionary;
 use godot::classes::control::MouseFilter;
 use godot::classes::{Button, Control, PanelContainer, VBoxContainer};
 use godot::prelude::*;
 
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::{self, MindTable};
+use mind_core::ui::campaign::CampaignViews;
 
 use self::chooser::{
     planet_add_space_backdrop, planet_apply_full_dialog_margins, planet_maybe_show_remap_notice,
@@ -47,7 +47,7 @@ use self::reveal::{planet_process, planet_start_preset_reveal};
 use self::sector_panel::planet_on_text_input;
 use self::stage::{planet_restore_stage, planet_set_planet_view_active};
 use self::util::{Deferred, connect_once, install_frame_tick, setting_flag};
-use self::view_binding::{planet_view, planet_view_call};
+use self::view_binding::planet_view;
 
 #[cfg(test)]
 use self::launch::planet_launch_clears_loadout;
@@ -109,8 +109,8 @@ struct PlanetState {
     /// Escape cleared the sector selection; the frame tick rebuilds the page
     /// (`selectSector(null)`) once the dialog can be bound again.
     selection_cleared_pending: bool,
-    /// `(planet, campaign_views_json)` cache of the dialog's campaign reads.
-    views: VarDictionary,
+    /// `(planet, typed campaign_views)` cache of the dialog's campaign reads.
+    views: Option<CampaignViews>,
     views_planet: String,
     /// Pending `call_deferred` work drained on the next frame.
     deferred: Deferred,
@@ -273,11 +273,10 @@ fn planet_shown(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     }
     if st.launch_mode == "planetLaunch"
         && let Some(mut view) = planet_view()
-        && view.has_method("set")
     {
-        view.set("zoom", &1.0f32.to_variant());
-        view.set("zoom_target", &1.0f32.to_variant());
-        view.set("ui_alpha", &0.0f32.to_variant());
+        view.bind_mut().zoom = 1.0;
+        view.bind_mut().zoom_target = 1.0;
+        view.bind_mut().ui_alpha = 0.0;
     }
     if !chooser_shown {
         st.deferred.push({
@@ -299,7 +298,7 @@ fn planet_hidden(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     planet_set_planet_view_active(dialog, &mut st, false);
     planet_restore_stage(&mut st);
     if let Some(mut view) = planet_view() {
-        planet_view_call(&mut view, "set_hover", &[(-1i64).to_variant()]);
+        view.bind_mut().set_hover(-1);
     }
 }
 

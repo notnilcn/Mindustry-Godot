@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use godot::builtin::{Side, VarArray, VarDictionary};
+use godot::builtin::{Side, VarDictionary};
 use godot::classes::control::{GrowDirection, LayoutPreset, MouseFilter, SizeFlags};
 use godot::classes::{
     Button, Control, HBoxContainer, LineEdit, PanelContainer, ScrollContainer, StyleBoxFlat,
@@ -15,6 +15,7 @@ use godot::classes::{
 };
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
+use mind_core::ui::campaign::{PlanetView, SectorView};
 
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit::widgets::factory;
@@ -32,20 +33,14 @@ use super::*;
 
 /// `PlanetDialog.show`: adopt the running sector's planet.
 pub(super) fn planet_adopt_current_sector(dialog: &mut MindDialog, st: &mut PlanetState) {
-    let Some(mut campaign) = dialog.campaign_node() else {
+    let Some(campaign) = dialog.campaign() else {
         return;
     };
-    if !campaign.has_method("get_sector_state") {
+    let state = campaign.bind().sector_state();
+    if !state.campaign {
         return;
     }
-    let state = campaign.call("get_sector_state", &[]);
-    let Ok(state) = state.try_to::<VarDictionary>() else {
-        return;
-    };
-    if !row_bool(&state, "campaign") {
-        return;
-    }
-    let planet = row_str(&state, "planet");
+    let planet = state.planet;
     if planet.is_empty() {
         return;
     }
@@ -58,17 +53,20 @@ pub(super) fn planet_planets_with_base(
     dialog: &mut MindDialog,
     st: &mut PlanetState,
 ) -> Vec<String> {
-    let views = planet_refresh_views(dialog, st, "");
+    let Some(views) = planet_refresh_views(dialog, st, "") else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
-    for planet in row_rows(&views, "planets") {
-        let name = row_str(&planet, "name");
-        if name.is_empty() || !row_bool_or(&planet, "has_grid", true) {
+    for planet in &views.planets {
+        if planet.name.is_empty() || !planet.has_grid {
             continue;
         }
-        let live = planet_live_views(dialog, &name);
-        for sector in row_rows(&live, "sectors") {
-            if row_bool(&sector, "has_base") {
-                out.push(name.clone());
+        let Some(live) = planet_live_views(dialog, &planet.name) else {
+            continue;
+        };
+        for sector in &live.sectors {
+            if sector.has_base {
+                out.push(planet.name.clone());
                 break;
             }
         }
@@ -83,10 +81,8 @@ pub(super) fn planet_boot_planet(
     based: &[String],
 ) -> String {
     let last = setting_text("lastplanet", "serpulo");
-    let planet = planet_find_planet(dialog, st, &last);
-    if !planet.is_empty()
-        && (based.iter().any(|name| name == &last) || row_bool(&planet, "accessible"))
-    {
+    let accessible = planet_find_planet(dialog, st, &last).is_some_and(|planet| planet.accessible);
+    if accessible || based.iter().any(|name| name == &last) {
         return last;
     }
     if let Some(first) = based.first() {
@@ -118,16 +114,9 @@ pub(super) fn planet_show_planet(
     planet_refresh_views(dialog, st, planet_name);
 
     if let Some(mut view) = planet_view() {
-        planet_view_call(
-            &mut view,
-            "set_planet",
-            &[GString::from(planet_name).to_variant()],
-        );
-        let mut packed = VarArray::new();
-        for sector in planet_sectors(dialog, st, planet_name) {
-            packed.push(&sector.to_variant());
-        }
-        planet_view_call(&mut view, "set_sectors", &[packed.to_variant()]);
+        view.bind_mut().set_planet(gs(planet_name));
+        let sectors = planet_sectors(dialog, st, planet_name);
+        view.bind_mut().set_sector_views(&sectors);
     }
 
     // code-instantiated: the planet rail is the data-driven Planets list.
@@ -144,25 +133,26 @@ pub(super) fn planet_show_planet(
     planet_build_sector_list(dialog, state, st, planet_name);
 
     let mut selected = planet_find_sector(dialog, st, planet_name, st.selected_sector);
-    if selected.is_empty() && select_default {
+    if selected.is_none() && select_default {
         selected = planet_default_sector(dialog, st, planet_name);
-        st.selected_sector = row_i64(&selected, "id");
+        st.selected_sector = selected
+            .as_ref()
+            .map(|sector| i64::from(sector.id))
+            .unwrap_or(-1);
     }
     if let Some(mut view) = planet_view() {
-        if selected.is_empty() {
-            planet_view_call(&mut view, "clear_selection", &[]);
-        } else {
-            let tile = planet_view_tile(&mut view, &selected);
-            planet_view_call(&mut view, "focus_tile", &[tile.to_variant()]);
-            planet_view_call(
-                &mut view,
-                "set_sector_icon",
-                &[GString::from(row_str(&selected, "preset").as_str()).to_variant()],
-            );
+        match selected.as_ref() {
+            None => view.bind_mut().clear_selection(),
+            Some(selected) => {
+                let tile = planet_view_tile(&view, selected);
+                view.bind_mut().focus_tile(tile as i32);
+                view.bind_mut()
+                    .set_sector_icon(gs(selected.preset.as_deref().unwrap_or("")));
+            }
         }
     }
 
-    planet_build_action_row(dialog, state, st, &selected);
+    planet_build_action_row(dialog, state, st, selected.as_ref());
     let mut rail_sort = rail.clone();
     st.deferred.push(move || {
         rail_sort.bind_mut().sort_now();
@@ -181,36 +171,33 @@ pub(super) fn planet_default_sector(
     dialog: &mut MindDialog,
     st: &mut PlanetState,
     planet_name: &str,
-) -> VarDictionary {
+) -> Option<SectorView> {
     let sectors = planet_sectors(dialog, st, planet_name);
     if sectors.is_empty() {
-        return VarDictionary::new();
+        return None;
     }
     let mut start = -1i64;
-    if let Some(mut view) = planet_view() {
-        let data = planet_view_data(&mut view);
+    if let Some(view) = planet_view() {
+        let data = planet_view_data(&view);
         if !data.is_empty() {
             start = row_i64_or(&data, "start_sector", -1);
         }
         for sector in &sectors {
-            if planet_view_tile(&mut view, sector) == start {
-                return sector.clone();
+            if planet_view_tile(&view, sector) == start {
+                return Some(sector.clone());
             }
         }
     }
     if let Some(sector) = sectors
         .iter()
-        .find(|sector| row_str(sector, "preset") == "groundZero")
+        .find(|sector| sector.preset.as_deref() == Some("groundZero"))
     {
-        return sector.clone();
+        return Some(sector.clone());
     }
-    if let Some(sector) = sectors
-        .iter()
-        .find(|sector| !row_bool_or(sector, "locked", true))
-    {
-        return sector.clone();
+    if let Some(sector) = sectors.iter().find(|sector| !sector.locked) {
+        return Some(sector.clone());
     }
-    sectors[0].clone()
+    sectors.first().cloned()
 }
 
 /// `_maybe_show_campaign_complete`: the completion screen after the last capture.
@@ -220,17 +207,19 @@ pub(super) fn planet_maybe_show_campaign_complete(
 ) {
     let mut st = state.borrow_mut();
     let planet_name = st.selected_planet.clone();
-    let views = planet_ensure_views(dialog, &mut st, &planet_name);
-    let last_captured = row_rows(&views, "sectors")
+    let Some(views) = planet_ensure_views(dialog, &mut st, &planet_name) else {
+        return;
+    };
+    let last_captured = views
+        .sectors
         .iter()
-        .any(|sector| row_bool(sector, "is_last") && row_bool(sector, "captured"));
+        .any(|sector| sector.is_last && sector.captured);
     if !last_captured {
         return;
     }
-    let complete = row_dict(&views, "complete");
-    let mut planet = row_str(&complete, "planet");
+    let mut planet = views.complete.planet.clone();
     if planet.is_empty() {
-        planet = row_str(&views, "planet");
+        planet = views.planet.clone();
     }
     if planet.is_empty() || planet == st.complete_announced {
         return;
@@ -246,7 +235,13 @@ pub(super) fn planet_maybe_show_campaign_complete(
         return;
     }
     st.complete_announced = planet;
-    dialog.open_dialog("campaign_complete", &json_stringify(&complete));
+    // The completion page reads the context keys `localized`/`planet`/`color`/
+    // `playtime_ms`; `CampaignCompleteView` serializes to exactly that shape.
+    let context = match serde_json::to_string(&views.complete) {
+        Ok(context) => context,
+        Err(_) => return,
+    };
+    open_dialog_json("campaign_complete", &context);
 }
 
 /// `_build_sector_list`: the collapsible top-right based-sector list.
@@ -258,13 +253,13 @@ pub(super) fn planet_build_sector_list(
 ) {
     planet_remove_sector_list(st);
     let sectors = planet_sectors(dialog, st, planet_name);
-    let mut based: Vec<VarDictionary> = Vec::new();
+    let mut based: Vec<SectorView> = Vec::new();
     let mut attacked = 0i64;
     for sector in &sectors {
-        if row_bool(sector, "attacked") {
+        if sector.attacked {
             attacked += 1;
         }
-        if row_bool(sector, "has_base") {
+        if sector.has_base {
             based.push(sector.clone());
         }
     }
@@ -272,18 +267,14 @@ pub(super) fn planet_build_sector_list(
         return;
     }
     based.sort_by(|a, b| {
-        let attacked_a = row_bool(a, "attacked");
-        let attacked_b = row_bool(b, "attacked");
-        if attacked_a != attacked_b {
-            return if attacked_a {
+        if a.attacked != b.attacked {
+            return if a.attacked {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Greater
             };
         }
-        let playtime_a = row_i64(&row_dict(a, "stats"), "playtime_ms");
-        let playtime_b = row_i64(&row_dict(b, "stats"), "playtime_ms");
-        playtime_b.cmp(&playtime_a)
+        b.stats.playtime_ms.cmp(&a.stats.playtime_ms)
     });
 
     // code-instantiated: rebuilt with the planet view; content is the live
@@ -438,7 +429,7 @@ pub(super) fn planet_fill_sector_entries(
     state: &Rc<RefCell<PlanetState>>,
     st: &mut PlanetState,
     entries: &Gd<VBoxContainer>,
-    based: &[VarDictionary],
+    based: &[SectorView],
 ) {
     let mut entries = entries.clone();
     for child in entries.get_children().iter_shared() {
@@ -453,11 +444,11 @@ pub(super) fn planet_fill_sector_entries(
         }
         let mut entry = Button::new_alloc();
         entry.set_toggle_mode(true);
-        set_toggle(&entry, row_i64(sector, "id") == st.selected_sector);
+        set_toggle(&entry, i64::from(sector.id) == st.selected_sector);
         entry.set_custom_minimum_size(Vector2::new(0.0, 40.0));
         dialog.apply_pane_button(&mut entry, OUTLINE_GRAY, 3.0);
-        let preset = row_str(sector, "preset");
-        let icon: Option<Gd<Control>> = if row_bool(sector, "attacked") {
+        let preset = sector.preset.as_deref().unwrap_or("");
+        let icon: Option<Gd<Control>> = if sector.attacked {
             Some(factory::glyph_label("warn", 18, styles::ACCENT).upcast())
         } else if !preset.is_empty() {
             let mut image = factory::image(&format!("sector-{preset}"));
@@ -468,7 +459,7 @@ pub(super) fn planet_fill_sector_entries(
             None
         };
         dialog.build_button_content(&mut entry, icon, &title);
-        let sector_id = row_i64(sector, "id");
+        let sector_id = i64::from(sector.id);
         let target = dialog.to_gd();
         let state_for_pick = state.clone();
         let callable = Callable::from_fn("planet_sector_entry", move |_args: &[&Variant]| {
@@ -506,13 +497,13 @@ pub(super) fn planet_build_rail(
     planet_name: &str,
 ) {
     let views = planet_refresh_views(dialog, st, planet_name);
-    let planets = row_rows(&views, "planets");
+    let planets: Vec<PlanetView> = views.map(|views| views.planets).unwrap_or_default();
     let mut first_planet = true;
     for rail_name in ["erekir", "serpulo"] {
-        let Some(planet) = planets.iter().find(|row| row_str(row, "name") == rail_name) else {
+        let Some(planet) = planets.iter().find(|row| row.name == rail_name) else {
             continue;
         };
-        if !row_bool_or(planet, "visible", true) {
+        if !planet.visible {
             continue;
         }
         let button = planet_make_planet_button(dialog, state, planet, rail_name == planet_name);
@@ -545,13 +536,9 @@ pub(super) fn planet_build_rail(
         bound.open_dialog("campaign_rules", &json_stringify(&context));
     });
     difficulty.connect("pressed", &callable);
-    let selected_planet = planets
-        .iter()
-        .find(|row| row_str(row, "name") == planet_name)
-        .cloned()
-        .unwrap_or_default();
+    let selected_planet = planets.iter().find(|row| row.name == planet_name);
     difficulty.set_visible(
-        row_bool_or(&selected_planet, "allow_campaign_rules", true)
+        selected_planet.is_none_or(|planet| planet.allow_campaign_rules)
             && st.launch_mode != "planetLaunch",
     );
     rail.bind_mut()
@@ -568,7 +555,7 @@ pub(super) fn planet_build_rail(
 pub(super) fn planet_make_planet_button(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<PlanetState>>,
-    planet: &VarDictionary,
+    planet: &PlanetView,
     selected: bool,
 ) -> Gd<Button> {
     // code-instantiated: rail rows carry the vendored planet art plus the
@@ -579,7 +566,7 @@ pub(super) fn planet_make_planet_button(
     set_toggle(&button, selected);
     button.set_custom_minimum_size(Vector2::new(208.0, 44.0));
     dialog.apply_pane_button(&mut button, OUTLINE_GRAY, 0.0);
-    let planet_color = Color::from_string(&row_str(planet, "color")).unwrap_or(Color::WHITE);
+    let planet_color = Color::from_string(&planet.color).unwrap_or(Color::WHITE);
     let checked = Color::from_rgba(
         styles::ACCENT.r * planet_color.r,
         styles::ACCENT.g * planet_color.g,
@@ -600,7 +587,7 @@ pub(super) fn planet_make_planet_button(
     });
     let label = planet_localized_planet(planet);
     dialog.build_button_content(&mut button, icon, &label);
-    let planet_name = row_str(planet, "name");
+    let planet_name = planet.name.clone();
     let target = dialog.to_gd();
     let state_for_switch = state.clone();
     let callable = Callable::from_fn("planet_rail_switch", move |_args: &[&Variant]| {
