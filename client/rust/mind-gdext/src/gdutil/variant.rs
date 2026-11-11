@@ -12,7 +12,6 @@
 //! Upstream: none (port-only; GDScript's implicit `str`/`int`/`float`/`bool`
 //! coercions that the native UI reproduces).
 
-
 use godot::builtin::{GString, StringName, VarArray, VarDictionary, Variant, VariantType};
 use godot::classes::Json;
 

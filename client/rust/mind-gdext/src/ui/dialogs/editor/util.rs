@@ -1023,7 +1023,11 @@ pub(in crate::ui::dialogs) fn connect_prompt_once(
     callable: &Callable,
 ) {
     crate::ui::dialogs::common::prompt::connect_prompt_once(
-        dialog, "_batch_f_", key, signal, callable,
+        dialog,
+        "_batch_f_",
+        key,
+        signal,
+        callable,
     );
 }
 

@@ -569,7 +569,7 @@ impl MindUi {
         if self.block_catalog_cache.is_none() {
             let catalog = crate::settings_hub::with_settings(|settings| {
                 let store = SettingsUnlockStore::new(settings);
-                mind_core::ui::campaign::block_catalog_unlocked(&store)
+                mind_core::ui::block_catalog::block_catalog_unlocked(&store)
             });
             let json = serde_json::to_string(&catalog).unwrap_or_else(|_| String::from("{}"));
             self.block_catalog_cache = Some(json);

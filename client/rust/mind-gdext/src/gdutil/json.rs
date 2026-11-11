@@ -5,7 +5,6 @@
 //!
 //! Upstream: none (port-only; the JSON response shapes the GDScript port returned).
 
-
 use godot::prelude::*;
 
 /// `"{}"` as a GString: the empty-object fallback used by every `*_json` #[func].

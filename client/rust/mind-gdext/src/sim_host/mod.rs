@@ -72,10 +72,6 @@ use mind_core::world::blocks::power::PowerGrids;
 use mind_core::world::modules::{ItemModule, LiquidModule, PowerModule};
 use mind_core::world::pos::unpack;
 
-pub use bar_rows::building_bar_rows;
-pub use bar_rows::{
-    BarExtras, GeneratorBars, PayloadLoaderBars, PowerBars, TurretBars, UnitCapBars,
-};
 pub use types::{
     BeamLaserLink, BeltItemSlot, BlockStateDraw, BridgeLink, BuilderView, BulletDraw, CrawlDraw,
     FireDraw, LaserLink, LegsDraw, MechDraw, OverlayView, PadDraw, PayloadDraw, PlaceRangeKind,

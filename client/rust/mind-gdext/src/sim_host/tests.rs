@@ -3,7 +3,9 @@
 //! `MindSimHost` unit tests (moved out of `sim_host.rs`).
 //! Upstream: none (port-only; test module)
 
-use super::bar_rows::BarRow;
+use super::bar_rows::{
+    BarExtras, BarRow, GeneratorBars, PowerBars, TurretBars, UnitCapBars, building_bar_rows,
+};
 use super::campaign_link::core_items_json;
 use super::command_panel::command_panel;
 use super::config::block_items_json;

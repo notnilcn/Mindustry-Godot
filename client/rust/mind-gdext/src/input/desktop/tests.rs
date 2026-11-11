@@ -800,7 +800,7 @@ fn content_options_carry_the_java_icon_size_and_filters() {
     let always = |_: &str| true;
     // A non-sandbox custom game (default `Rules`, `infiniteResources`
     // false) for `Block.isHidden` (`Block.java:1553-1555`).
-    let survival = mind_core::ui::campaign::BlockVisibilityContext::from_rules(
+    let survival = mind_core::ui::block_catalog::BlockVisibilityContext::from_rules(
         &mind_core::io::json::rules::Rules::default(),
         false,
     );
@@ -871,19 +871,20 @@ fn content_options_carry_the_java_icon_size_and_filters() {
     // `fissileMatter`/`dormantCyst` are `hidden = true`
     // (`Items.java:130,135`) and `Item.isOnPlanet` is false for them too
     // (`Item.java:61-64`); the Java sandbox source grid shows 16 items.
-    let option = |content_type: ContentType,
-                  name: &str,
-                  visibility: &mind_core::ui::campaign::BlockVisibilityContext| {
-        content_option_json(
-            &content,
-            content_type,
-            name,
-            format!("{}.{name}.name", content_type.name()),
-            serpulo,
-            &always,
-            visibility,
-        )
-    };
+    let option =
+        |content_type: ContentType,
+         name: &str,
+         visibility: &mind_core::ui::block_catalog::BlockVisibilityContext| {
+            content_option_json(
+                &content,
+                content_type,
+                name,
+                format!("{}.{name}.name", content_type.name()),
+                serpulo,
+                &always,
+                visibility,
+            )
+        };
     for name in ["fissile-matter", "dormant-cyst"] {
         let hidden = option(ContentType::Item, name, &survival);
         assert_eq!(hidden["hidden"], true, "{name}");
@@ -931,7 +932,7 @@ fn content_options_carry_the_java_icon_size_and_filters() {
         option(ContentType::Block, "item-source", &survival)["hidden"],
         true
     );
-    let sandbox = mind_core::ui::campaign::BlockVisibilityContext::sandbox();
+    let sandbox = mind_core::ui::block_catalog::BlockVisibilityContext::sandbox();
     assert_eq!(
         option(ContentType::Block, "item-source", &sandbox)["hidden"],
         false

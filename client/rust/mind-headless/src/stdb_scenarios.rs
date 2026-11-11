@@ -21,8 +21,8 @@ use spacetimedb_sdk::{Identity, Timestamp};
 
 use crate::cli::Cli;
 use crate::paths;
-use crate::stats::percentile;
 use crate::report::{StdbBinderReport, StdbOrderReport, StdbReport};
+use crate::stats::percentile;
 
 /// Exit code: success.
 const EXIT_PASS: i32 = 0;
