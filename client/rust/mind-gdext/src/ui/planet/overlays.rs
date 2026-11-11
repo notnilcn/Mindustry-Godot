@@ -18,10 +18,9 @@ use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
 use super::mesh::{arc_ribbon, gamma_shadow_alpha, new_arrays, overlay_material};
-use super::rows::{
-    faded_alpha, row_bool, row_f32, row_i64, row_i64_array, row_opt_i64, row_str, with_alpha,
-};
+use super::rows::{faded_alpha, row_f32, with_alpha};
 use crate::ui::kit::styles;
+use mind_core::ui::campaign::SectorView;
 
 use super::*;
 
@@ -53,17 +52,17 @@ impl MindPlanetView {
         self.built_ui_alpha = self.ui_alpha;
         self.built_pulse = self.preset_pulse();
         let arad = row_f32(&self.data, "outline", 1.17) + 0.001;
-        let sectors = self.sector_rows();
+        let sectors = self.sector_views();
         let ui_alpha = self.ui_alpha;
         let mut verts: Vec<Vector3> = Vec::new();
         let mut colors: Vec<Color> = Vec::new();
         for sector in &sectors {
-            let tile = self.view_tile(sector.clone());
+            let tile = self.sector_tile(sector);
             if tile < 0 || tile as usize >= self.tile_corners.len() || tile == self.selected_tile {
                 continue;
             }
             let color = self.status_color(sector);
-            if row_bool(sector, "selectable") || row_bool(sector, "unlocked") {
+            if sector.selectable || sector.unlocked {
                 if let Some(color) = color {
                     let ring =
                         Color::from_rgba(color.r * 0.8, color.g * 0.8, color.b * 0.8, ui_alpha);
@@ -85,10 +84,10 @@ impl MindPlanetView {
         let current_fill =
             Color::from_rgba(ACCENT.r, ACCENT.g, ACCENT.b, faded_alpha(0.5, ui_alpha));
         for sector in &sectors {
-            if !row_bool(sector, "being_played") {
+            if !sector.being_played {
                 continue;
             }
-            let tile = self.view_tile(sector.clone());
+            let tile = self.sector_tile(sector);
             if tile < 0 || tile as usize >= self.tile_corners.len() {
                 continue;
             }
@@ -124,35 +123,35 @@ impl MindPlanetView {
     /// `PlanetDialog.renderOverProjections` (`PlanetDialog.java:519-543`): the
     /// shield arc, the `sectorInvasion` attack arcs and the selected sector's
     /// import/export arcs, all in the mesh frame the port renders in.
-    pub(super) fn build_arc_specs(&self, sectors: &[VarDictionary], ui_alpha: f32) -> Vec<ArcSpec> {
+    pub(super) fn build_arc_specs(&self, sectors: &[SectorView], ui_alpha: f32) -> Vec<ArcSpec> {
         let mut specs = Vec::new();
         if ui_alpha <= 0.001 {
             return specs;
         }
         let tile_of = |id: i64| -> Option<i32> {
-            let row = sectors.iter().find(|row| row_i64(row, "id", -1) == id)?;
-            let tile = self.view_tile(row.clone());
+            let row = sectors.iter().find(|row| i64::from(row.id) == id)?;
+            let tile = self.sector_tile(row);
             (tile >= 0).then_some(tile)
         };
         let selected_id = sectors
             .iter()
-            .find(|row| self.view_tile((*row).clone()) == self.selected_tile)
-            .map(|row| row_i64(row, "id", -1))
+            .find(|row| self.sector_tile(row) == self.selected_tile)
+            .map(|row| i64::from(row.id))
             .filter(|id| *id >= 0);
         let selected_row =
-            selected_id.and_then(|id| sectors.iter().find(|row| row_i64(row, "id", -1) == id));
-        let selected_has_base = selected_row.is_some_and(|row| row_bool(row, "has_base"));
+            selected_id.and_then(|id| sectors.iter().find(|row| i64::from(row.id) == id));
+        let selected_has_base = selected_row.is_some_and(|row| row.has_base);
         let selected_destination =
-            selected_row.and_then(|row| row_opt_i64(row, "export_destination"));
-        let selected_exports = selected_row.is_some_and(|row| row_bool(row, "any_exports"));
+            selected_row.and_then(|row| row.export_destination.map(i64::from));
+        let selected_exports = selected_row.is_some_and(|row| row.any_exports);
         for row in sectors {
-            let id = row_i64(row, "id", -1);
+            let id = i64::from(row.id);
             let Some(tile) = tile_of(id) else {
                 continue;
             };
             // `PlanetDialog.java:519-521`: `Team.crux.color` fading to half
             // alpha, height 0.3, 110-tick cycle, stroke 0.006.
-            if let Some(target) = row_opt_i64(row, "shield_arc")
+            if let Some(target) = row.shield_arc.map(i64::from)
                 && let Some(target_tile) = tile_of(target)
             {
                 specs.push(ArcSpec {
@@ -165,12 +164,12 @@ impl MindPlanetView {
                     stroke: 0.006,
                 });
             }
-            if !row_bool(row, "has_base") {
+            if !row.has_base {
                 continue;
             }
             // `PlanetDialog.java:525-531`: crux to clear, height 0.24, stroke
             // 0.005.
-            for source in row_i64_array(row, "attack_sources") {
+            for source in row.attack_sources.iter().map(|id| i64::from(*id)) {
                 let Some(source_tile) = tile_of(source) else {
                     continue;
                 };
@@ -193,8 +192,8 @@ impl MindPlanetView {
             if !selected_has_base {
                 continue;
             }
-            if row_bool(row, "any_exports")
-                && row_opt_i64(row, "export_destination") == Some(selected)
+            if row.any_exports
+                && row.export_destination.map(i64::from) == Some(selected)
                 && let Some(selected_tile) = tile_of(selected)
             {
                 specs.push(ArcSpec {
@@ -318,25 +317,21 @@ impl MindPlanetView {
     }
 
     /// `renderSectors` ring color (None = no ring).
-    pub(super) fn status_color(&self, sector: &VarDictionary) -> Option<Color> {
-        if row_bool(sector, "has_base") {
-            let mix = if row_bool(sector, "has_enemy_base") {
-                0.5
-            } else {
-                0.0
-            };
+    pub(super) fn status_color(&self, sector: &SectorView) -> Option<Color> {
+        if sector.has_base {
+            let mix = if sector.has_enemy_base { 0.5 } else { 0.0 };
             return Some(SHARDED.lerp(CRUX, mix));
         }
-        let preset = row_str(sector, "preset");
-        if !preset.is_empty() && row_bool(sector, "require_unlock") {
+        let preset = sector.preset.as_deref().unwrap_or("");
+        if !preset.is_empty() && sector.require_unlock {
             // `derelict.lerp(white, absin(time, 10, 1))` (`PlanetDialog.java:463`).
-            return Some(if row_bool(sector, "preset_unlocked") {
+            return Some(if sector.preset_unlocked {
                 DERELICT.lerp(Color::WHITE, f64::from(self.preset_pulse()))
             } else {
                 styles::ARC_GRAY
             });
         }
-        if row_bool(sector, "has_enemy_base") {
+        if sector.has_enemy_base {
             return Some(CRUX);
         }
         None
@@ -404,38 +399,35 @@ impl MindPlanetView {
     /// Java has no facing cull here: each icon lies flat on the sector's plane
     /// (`planets.drawPlane` -> `Planet.setPlane`), so icons near the limb are
     /// seen edge-on and those behind the globe fail the depth test.
-    pub(super) fn add_icon(&mut self, sector: &VarDictionary, tile: i32) {
-        let preset = row_str(sector, "preset");
-        let has_base = row_bool(sector, "has_base");
+    pub(super) fn add_icon(&mut self, sector: &SectorView, tile: i32) {
+        let preset = sector.preset.as_deref().unwrap_or("");
+        let has_base = sector.has_base;
         let mut glyph = String::new();
         let mut region = String::new();
         let mut color = Color::WHITE;
-        if row_bool(sector, "attacked") {
+        if sector.attacked {
             glyph = String::from("warn");
             color = SHARDED;
         } else if !has_base
             && !preset.is_empty()
-            && row_bool(sector, "require_unlock")
-            && row_bool(sector, "preset_unlocked")
-            && row_str(sector, "icon").is_empty()
-            && row_str(sector, "content_icon").is_empty()
+            && sector.require_unlock
+            && sector.preset_unlocked
+            && sector.icon.as_deref().unwrap_or("").is_empty()
+            && sector.content_icon.as_deref().unwrap_or("").is_empty()
         {
             region = format!("sector-{preset}");
-        } else if row_bool(sector, "lock_icon") {
+        } else if sector.lock_icon {
             glyph = String::from("lock");
         } else {
             // `Sector.icon()`: contentIcon, info.icon, else an unlocked preset's
             // icon.
-            let content_icon = row_str(sector, "content_icon");
-            let icon = row_str(sector, "icon");
+            let content_icon = sector.content_icon.as_deref().unwrap_or("");
+            let icon = sector.icon.as_deref().unwrap_or("");
             if !content_icon.is_empty() {
-                region = content_icon;
+                region = content_icon.to_owned();
             } else if !icon.is_empty() {
-                glyph = icon;
-            } else if !preset.is_empty()
-                && row_bool(sector, "require_unlock")
-                && row_bool(sector, "preset_unlocked")
-            {
+                glyph = icon.to_owned();
+            } else if !preset.is_empty() && sector.require_unlock && sector.preset_unlocked {
                 region = format!("sector-{preset}");
             }
         }
@@ -810,14 +802,14 @@ impl MindPlanetView {
         Some(point)
     }
 
-    pub(super) fn sector_rows(&self) -> Vec<VarDictionary> {
-        let mut out = Vec::new();
-        for row in self.sectors.iter_shared() {
-            if let Ok(dict) = row.try_to::<VarDictionary>() {
-                out.push(dict);
-            }
-        }
-        out
+    /// The typed sector rows the overlays render.
+    pub(super) fn sector_views(&self) -> Vec<SectorView> {
+        self.sector_views.clone()
+    }
+
+    /// The remapped grid tile of one typed sector marker.
+    pub(super) fn sector_tile(&self, sector: &SectorView) -> i32 {
+        self.view_tile_index(i64::from(sector.id), sector.preset.as_deref().unwrap_or(""))
     }
 
     pub(super) fn tile_vec(&self, tile: i32) -> Vector3 {

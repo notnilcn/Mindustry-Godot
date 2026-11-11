@@ -22,7 +22,7 @@ pub(super) fn planet_set_planet_view_active(
     active: bool,
 ) {
     if let Some(mut view) = planet_view() {
-        planet_view_call(&mut view, "set_active", &[active.to_variant()]);
+        view.bind_mut().set_active(active);
     }
     if let Some(backdrop) = dialog.base().get_node_or_null("SpaceBackdrop")
         && let Ok(mut backdrop) = backdrop.try_cast::<CanvasItem>()

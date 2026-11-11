@@ -6,7 +6,6 @@
 
 use super::files::*;
 use super::schematics_dialog::*;
-use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit::widgets::factory;
@@ -591,7 +590,7 @@ pub(super) fn schematics_show_edit(
     if schematic_is_mod(&row) {
         // Mod schematics live under the mod's data dir (`s.mod != null`); the
         // Java edit writes only when `s.file != null`, a mod file is read-only.
-        let text = kit::tm_format("@mod.item.remove", &[row_str(&row, "mod_name").as_str()]);
+        let text = kit::tm_format("@mod.item.remove", &[row.mod_name.as_deref().unwrap_or("")]);
         dialog.show_toast(&text.to_string());
         return;
     }
@@ -605,7 +604,7 @@ pub(super) fn schematics_show_edit(
         if returning {
             (st.edit_name.clone(), st.edit_description.clone())
         } else {
-            (row_str(&row, "name"), row_str(&row, "description"))
+            (row.name.clone(), row.description.clone())
         }
     };
     {
@@ -773,12 +772,7 @@ fn schematics_edit_rebuild_tags(
     let (mut labels, tags) = {
         let st = state.borrow();
         let labels = schematic_row(dialog, index)
-            .map(|schematic| {
-                row_arr(&schematic, "labels")
-                    .iter_shared()
-                    .map(|value| to_text_godot(&value))
-                    .collect::<Vec<String>>()
-            })
+            .map(|schematic| schematic.labels.clone())
             .unwrap_or_default();
         (labels, st.tags.clone())
     };
@@ -924,12 +918,7 @@ fn schematics_show_add_tag(
     schematics_edit_stash(state);
     state.borrow_mut().edit_pending_return = true;
     let labels = schematic_row(dialog, index)
-        .map(|schematic| {
-            row_arr(&schematic, "labels")
-                .iter_shared()
-                .map(|value| to_text_godot(&value))
-                .collect::<Vec<String>>()
-        })
+        .map(|schematic| schematic.labels.clone())
         .unwrap_or_default();
     let tags = state.borrow().tags.clone();
     let available = schematics_available_tags(&tags, &labels);

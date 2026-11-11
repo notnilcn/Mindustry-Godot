@@ -32,16 +32,13 @@ pub(super) fn planet_start_preset_reveal(dialog: &mut MindDialog, st: &mut Plane
     let Some(mut view) = planet_view() else {
         return;
     };
-    if view.has_method("set") {
-        view.set("zoom", &1.0f32.to_variant());
-        view.set("zoom_target", &1.0f32.to_variant());
-    }
-    let data = planet_view_data(&mut view);
+    view.bind_mut().zoom = 1.0;
+    view.bind_mut().zoom_target = 1.0;
+    let data = planet_view_data(&view);
     st.last_sector_id = row_i64_or(&data, "last_sector", -1);
-    let last_sector = planet_find_sector(dialog, st, &planet, st.last_sector_id);
-    if !last_sector.is_empty() {
-        let tile = planet_view_tile(&mut view, &last_sector);
-        planet_view_call(&mut view, "look_at_tile", &[tile.to_variant()]);
+    if let Some(last_sector) = planet_find_sector(dialog, st, &planet, st.last_sector_id) {
+        let tile = planet_view_tile(&view, &last_sector);
+        view.bind_mut().look_at_tile(tile as i32, 1.0);
     }
     let Some(mut campaign) = dialog.campaign_node() else {
         return;
@@ -98,23 +95,20 @@ pub(super) fn planet_process(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetS
     let to_id = st.new_presets.last().copied().unwrap_or(-1);
     let planet = st.selected_planet.clone();
     let sector = planet_find_sector(dialog, &mut st, &planet, to_id);
-    if !sector.is_empty() {
-        let tile = planet_view_tile(&mut view, &sector);
-        planet_view_call(
-            &mut view,
-            "look_at_tile",
-            &[tile.to_variant(), 0.11f32.to_variant()],
-        );
+    if let Some(sector) = sector.as_ref() {
+        let tile = planet_view_tile(&view, sector);
+        view.bind_mut().look_at_tile(tile as i32, 0.11);
     }
-    if view.has_method("set") {
-        view.set("zoom_target", &0.75f32.to_variant());
-    }
+    view.bind_mut().zoom_target = 0.75;
     if st.preset_show >= 20.0 && !st.reveal_showed && st.new_presets.len() > 1 {
         st.reveal_showed = true;
         let text = format!(
             "{} [accent]{}",
             kit::glyph("lock-open"),
-            planet_localized_sector(&sector)
+            sector
+                .as_ref()
+                .map(planet_localized_sector)
+                .unwrap_or_default()
         );
         let _ = ui_call(
             "announce",

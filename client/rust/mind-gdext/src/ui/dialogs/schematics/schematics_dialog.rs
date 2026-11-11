@@ -23,6 +23,7 @@ use godot::classes::{
 };
 use godot::prelude::*;
 use mind_core::io::{FileSystem, NativeFs};
+use mind_core::ui::campaign::SchematicView;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -391,16 +392,12 @@ fn schematics_load_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSta
 /// `checkTags()` (`SchematicsDialog.java:367-379`): every label of every
 /// schematic joins the global tag list in first-seen order.
 fn schematics_check_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>) {
-    let schematics = dialog.campaign_section("schematics");
+    let schematics = schematic_library(dialog);
     let mut st = state.borrow_mut();
-    for row_variant in schematics.iter_shared() {
-        let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        for label in row_arr(&row, "labels").iter_shared() {
-            let tag = to_text_godot(&label);
-            if !tag.is_empty() && !st.tags.contains(&tag) {
-                st.tags.push(tag);
+    for row in &schematics {
+        for label in &row.labels {
+            if !label.is_empty() && !st.tags.contains(label) {
+                st.tags.push(label.clone());
             }
         }
     }
@@ -583,7 +580,7 @@ pub(super) fn schematics_rebuild_list(
         .map(|field| field.get_text().to_string())
         .unwrap_or_default();
     let needle = schematics_strip_symbols(&search.to_lowercase());
-    let schematics = dialog.campaign_section("schematics");
+    let schematics = schematic_library(dialog);
     // `cols = max((int)(screenW / 230), 1)`.
     let cols = ((dialog.base().get_viewport_rect().size.x / SCHEMATIC_COLUMN_WIDTH) as i64).max(1);
     let mut shown_count = 0i64;
@@ -592,34 +589,24 @@ pub(super) fn schematics_rebuild_list(
         let st = state.borrow();
         st.selected_tags.clone()
     };
-    for row_variant in schematics.iter_shared() {
-        let Ok(schematic) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
+    for schematic in &schematics {
         // `selectedTags.any() && !s.labels.containsAll(selectedTags)`.
-        let labels = row_arr(&schematic, "labels");
-        let mut tagged = true;
-        for tag in &selected_tags {
-            if !labels
-                .iter_shared()
-                .any(|value| to_text_godot(&value) == *tag)
-            {
-                tagged = false;
-                break;
-            }
-        }
+        let tagged = selected_tags
+            .iter()
+            .all(|tag| schematic.labels.iter().any(|label| label == tag));
         if !tagged {
             continue;
         }
         // `!search.isEmpty() && !ignoreSymbols(name).contains(searchString)`.
-        let name = row_str(&schematic, "name");
-        if !needle.is_empty() && !schematics_strip_symbols(&name.to_lowercase()).contains(&needle) {
+        if !needle.is_empty()
+            && !schematics_strip_symbols(&schematic.name.to_lowercase()).contains(&needle)
+        {
             continue;
         }
         if first_index < 0 {
-            first_index = row_i64_or(&schematic, "index", -1);
+            first_index = i64::try_from(schematic.index).unwrap_or(-1);
         }
-        let card = schematics_build_card(dialog, state, &schematic);
+        let card = schematics_build_card(dialog, state, schematic);
         list.bind_mut().add(&card).pad(4.0);
         shown_count += 1;
         if shown_count % cols == 0 {
@@ -648,9 +635,9 @@ pub(super) fn schematics_rebuild_list(
 fn schematics_build_card(
     dialog: &mut MindDialog,
     state: &Rc<RefCell<SchematicState>>,
-    schematic: &VarDictionary,
+    schematic: &SchematicView,
 ) -> Gd<Button> {
-    let index = row_i64_or(schematic, "index", -1);
+    let index = i64::try_from(schematic.index).unwrap_or(-1);
     // code-instantiated: one card per filtered schematic row.
     let mut button = Button::new_alloc();
     button.set_theme_type_variation("flati");
@@ -704,7 +691,7 @@ fn schematics_build_card(
         let mut image_control: Gd<Control> = image.clone().upcast();
         image_control.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
     }
-    image.bind_mut().setup(schematic.clone());
+    image.bind_mut().setup(schematic_image_row(schematic));
     stack.add_child(&image);
     let mut badge = PanelContainer::new_alloc();
     let mut box_ = StyleBoxFlat::new_gd();
@@ -716,7 +703,7 @@ fn schematics_build_card(
     badge.set_mouse_filter(MouseFilter::IGNORE);
     // `label.setEllipsis(true)`, `maxWidth(200f - 8f)`, centred, top.
     let mut name_label = Label::new_alloc();
-    name_label.set_text(&gs(row_str(schematic, "name")));
+    name_label.set_text(&gs(schematic.name.as_str()));
     name_label.set_custom_minimum_size(Vector2::new(192.0, 0.0));
     name_label.set_horizontal_alignment(godot::global::HorizontalAlignment::CENTER);
     name_label.set_text_overrun_behavior(OverrunBehavior::TRIM_ELLIPSIS);
@@ -844,7 +831,7 @@ fn schematics_delete(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>
         return;
     };
     if schematic_is_mod(&row) {
-        let text = kit::tm_format("@mod.item.remove", &[row_str(&row, "mod_name").as_str()]);
+        let text = kit::tm_format("@mod.item.remove", &[row.mod_name.as_deref().unwrap_or("")]);
         dialog.show_toast(&text.to_string());
         return;
     }
@@ -898,16 +885,12 @@ fn schematics_delete_tag(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSt
         if schematic_is_mod(&row) {
             continue;
         }
-        let carries = row_arr(&row, "labels")
-            .iter_shared()
-            .any(|label| to_text_godot(&label) == tag);
-        if !carries {
+        if !row.labels.iter().any(|label| label == tag) {
             continue;
         }
-        let file = row_str(&row, "file");
-        if file.is_empty() {
+        let Some(file) = row.file.clone().filter(|file| !file.is_empty()) else {
             continue;
-        }
+        };
         let path = PathBuf::from(file);
         let _ = schematic_save_file(&path, |schematic| {
             schematic_labels_remove(&mut schematic.labels, tag);
@@ -984,16 +967,12 @@ fn schematics_rename_tag_result(
         if schematic_is_mod(&row) {
             continue;
         }
-        let carries = row_arr(&row, "labels")
-            .iter_shared()
-            .any(|label| to_text_godot(&label) == old);
-        if !carries {
+        if !row.labels.iter().any(|label| label == old) {
             continue;
         }
-        let file = row_str(&row, "file");
-        if file.is_empty() {
+        let Some(file) = row.file.clone().filter(|file| !file.is_empty()) else {
             continue;
-        }
+        };
         let path = PathBuf::from(file);
         let _ = schematic_save_file(&path, |schematic| {
             schematic_labels_replace(&mut schematic.labels, old, new);

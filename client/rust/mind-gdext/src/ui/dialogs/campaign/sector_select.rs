@@ -4,12 +4,14 @@
 //! The sector select dialog controller. Filled by S03 (docs/PLANS).
 //! Upstream: ui/dialogs/SectorSelectDialog.java
 
+use super::util::campaign_views_of;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindRowTreeLayout};
-use godot::builtin::{VarArray, VarDictionary};
+use godot::builtin::VarArray;
 use godot::classes::{HBoxContainer, LineEdit};
 use godot::prelude::*;
+use mind_core::ui::campaign::SectorView;
 
 /// The dialog controllers in this batch.
 pub(super) fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
@@ -94,36 +96,40 @@ impl SectorSelectDialog {
             .map(|search| search.get_text().to_string().to_lowercase())
             .unwrap_or_default();
         let mut entries = VarArray::new();
-        for sector in dialog
-            .campaign_section_for(&self.planet, "sectors")
-            .iter_shared()
-        {
-            let Ok(sector) = sector.try_to::<VarDictionary>() else {
-                continue;
-            };
-            let planet = sector
-                .get("planet")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
-            if planet.to_string() != self.planet {
-                continue;
+        if let Some(views) = campaign_views_of(dialog, &self.planet) {
+            for sector in &views.sectors {
+                if sector.planet != self.planet {
+                    continue;
+                }
+                let Some(preset) = sector.preset.as_deref() else {
+                    continue;
+                };
+                if preset.is_empty() {
+                    continue;
+                }
+                if !needle.is_empty() && !sector.name.to_lowercase().contains(&needle) {
+                    continue;
+                }
+                entries.push(&sector_entry_row(sector).to_variant());
             }
-            let preset = sector
-                .get("preset")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
-            if preset.is_empty() {
-                continue;
-            }
-            let name = sector
-                .get("name")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
-            if !needle.is_empty() && !name.to_string().to_lowercase().contains(&needle) {
-                continue;
-            }
-            entries.push(&sector.to_variant());
         }
         layout.bind_mut().set_entries(entries);
     }
+}
+
+/// The four fields `MindRowTreeLayout::set_entries` reads (`name`, `locked`,
+/// `threat_band`, `id`).
+///
+/// The layout is outside T02's owned paths and its `#[func]` surface takes
+/// untyped rows, so the dialog hands it a minimal dictionary built from the
+/// typed view instead of the whole `campaign_views_json` row. Follow-up for
+/// C01: a typed `set_sector_views(&[SectorView])` on the layout would drop this
+/// adapter.
+fn sector_entry_row(sector: &SectorView) -> VarDictionary {
+    let mut row = VarDictionary::new();
+    row.set("id", &i64::from(sector.id).to_variant());
+    row.set("name", &GString::from(sector.name.as_str()));
+    row.set("locked", &sector.locked.to_variant());
+    row.set("threat_band", &GString::from(sector.threat_band));
+    row
 }

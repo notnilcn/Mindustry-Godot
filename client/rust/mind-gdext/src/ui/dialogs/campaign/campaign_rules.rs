@@ -18,13 +18,15 @@ use godot::classes::{
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
 
-use crate::gdutil::variant::{dict_bool_or, dict_text_or, to_bool_lenient, to_text_lenient};
+use super::util::{campaign_views_live, campaign_views_of};
+use crate::gdutil::variant::{to_bool_lenient, to_text_lenient};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::game::util::campaign_call;
-use crate::ui::dialogs::net::util::{clear_table_nodes, dict_string_or, emit_dialog_signal};
+use crate::ui::dialogs::net::util::{clear_table_nodes, emit_dialog_signal};
 use crate::ui::kit::widgets::check::MindCheck;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, Align, MindTable, styles};
+use mind_core::ui::campaign::{CampaignRulesView, CampaignViews, PlanetView};
 
 /// The dialog controllers in this module.
 pub(super) fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
@@ -74,15 +76,15 @@ const DIFFICULTY_MODIFIERS: [(&str, [f64; 3]); 5] = [
     ("eradication", [1.5, 2.0, 0.6]),
 ];
 
-/// The campaign-rules dialog state: the cached read models plus the edited
-/// rule values.
+/// The campaign-rules dialog state: the cached typed projection plus the
+/// edited rule values.
 struct CampaignRulesState {
     table: Option<Gd<MindTable>>,
     planet: String,
     difficulty: String,
     toggles: HashMap<String, bool>,
-    /// The `campaign_views_json(planet)` projection this open reads from.
-    views: VarDictionary,
+    /// The `campaign_views(planet)` projection this open reads from.
+    views: Option<CampaignViews>,
 }
 
 impl Default for CampaignRulesState {
@@ -92,7 +94,7 @@ impl Default for CampaignRulesState {
             planet: String::new(),
             difficulty: String::from("normal"),
             toggles: HashMap::new(),
-            views: VarDictionary::new(),
+            views: None,
         }
     }
 }
@@ -147,55 +149,40 @@ fn campaign_rules_shown(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRule
         Some(value) => to_text_lenient(&value),
         None => {
             let cached = state.borrow().views.clone();
-            let views = if cached.is_empty() {
-                dialog.campaign_views()
-            } else {
-                cached
-            };
-            dict_text_or(&views, "planet")
+            match cached {
+                Some(views) => views.planet,
+                None => campaign_views_live(dialog)
+                    .map(|views| views.planet)
+                    .unwrap_or_default(),
+            }
         }
     };
     // `refresh_campaign_views(_planet)`: the per-planet projection; keep the
     // existing cache when the facade is absent.
-    let live_views = dialog.campaign_json(
-        "campaign_views_json",
-        &[GString::from(planet.as_str()).to_variant()],
-    );
-    if !live_views.is_empty() {
-        state.borrow_mut().views = live_views;
-    } else if state.borrow().views.is_empty() {
-        let fallback = dialog.campaign_views();
-        if !fallback.is_empty() {
-            state.borrow_mut().views = fallback;
-        }
+    if let Some(live_views) = campaign_views_of(dialog, &planet) {
+        state.borrow_mut().views = Some(live_views);
+    } else if state.borrow().views.is_none()
+        && let Some(fallback) = campaign_views_live(dialog)
+    {
+        state.borrow_mut().views = Some(fallback);
     }
     let views = state.borrow().views.clone();
-    let mut rules = views
-        .get("rules")
-        .and_then(|value| value.try_to::<VarDictionary>().ok())
-        .unwrap_or_default();
-    // Live per-planet rules win over the read model's fixture values.
-    let live_rules = dialog.campaign_json(
-        "get_campaign_rules",
-        &[GString::from(planet.as_str()).to_variant()],
-    );
-    if !live_rules.is_empty() {
-        rules = live_rules;
-    }
-    let difficulty = dict_string_or(&rules, "difficulty", "normal");
+    // Live per-planet rules win over the read model's fixture values. The old
+    // `MindCampaign.get_campaign_rules` dynamic call never resolved (no such
+    // `#[func]`), so the typed projection is the only source now.
+    let rules = views
+        .as_ref()
+        .map(|views| views.rules.clone())
+        .unwrap_or(CampaignRulesView {
+            planet: planet.clone(),
+            difficulty: "normal",
+            difficulties: Vec::new(),
+            toggles: Vec::new(),
+        });
+    let difficulty = rules.difficulty.to_string();
     let mut toggles = HashMap::new();
-    if let Some(list) = rules.get("toggles")
-        && let Ok(list) = list.try_to::<VarArray>()
-    {
-        for entry in list.iter_shared() {
-            let Ok(row) = entry.try_to::<VarDictionary>() else {
-                continue;
-            };
-            toggles.insert(
-                dict_text_or(&row, "key"),
-                dict_bool_or(&row, "value", false),
-            );
-        }
+    for toggle in &rules.toggles {
+        toggles.insert(toggle.key.clone(), toggle.value);
     }
     if toggles.is_empty() {
         for key in RULE_KEYS {
@@ -211,34 +198,31 @@ fn campaign_rules_shown(dialog: &mut MindDialog, state: &Rc<RefCell<CampaignRule
     campaign_rules_rebuild(dialog, state);
 }
 
-/// `_planet_view_row`: the `campaign_views().planets` row for `planet_name`.
-fn campaign_rules_planet_row(views: &VarDictionary, planet_name: &str) -> VarDictionary {
-    let Some(rows) = views.get("planets") else {
-        return VarDictionary::new();
-    };
-    let Ok(rows) = rows.try_to::<VarArray>() else {
-        return VarDictionary::new();
-    };
-    for entry in rows.iter_shared() {
-        let Ok(row) = entry.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if dict_text_or(&row, "name") == planet_name {
-            return row;
-        }
-    }
-    VarDictionary::new()
+/// `_planet_view_row`: the `campaign_views().planets` card for `planet_name`.
+fn campaign_rules_planet_row(
+    views: &Option<CampaignViews>,
+    planet_name: &str,
+) -> Option<PlanetView> {
+    let views = views.as_ref()?;
+    views
+        .planets
+        .iter()
+        .find(|planet| planet.name == planet_name)
+        .cloned()
 }
 
 /// `CampaignRulesDialog.rebuild` visibility gates: `sectorInvasion` only when
 /// `allowSectorInvasion`, `rtsAI` only when `showRtsAIRule`,
 /// `clearSectorOnLose` only when the flag is OFF (Erekir shows 4 rows, Serpulo
 /// 7).
-fn campaign_rules_rule_visible(key: &str, planet_row: &VarDictionary) -> bool {
+fn campaign_rules_rule_visible(key: &str, planet_row: &Option<PlanetView>) -> bool {
+    let Some(planet_row) = planet_row.as_ref() else {
+        return true;
+    };
     match key {
-        "sector_invasion" => dict_bool_or(planet_row, "allow_sector_invasion", false),
-        "rts_ai" => dict_bool_or(planet_row, "show_rts_ai_rule", false),
-        "clear_sector_on_lose" => !dict_bool_or(planet_row, "clear_sector_on_lose", false),
+        "sector_invasion" => planet_row.allow_sector_invasion,
+        "rts_ai" => planet_row.show_rts_ai_rule,
+        "clear_sector_on_lose" => !planet_row.clear_sector_on_lose,
         _ => true,
     }
 }

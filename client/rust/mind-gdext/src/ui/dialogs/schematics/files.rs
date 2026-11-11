@@ -6,14 +6,13 @@
 
 use super::schematics_dialog::*;
 use crate::MindSimHost;
-use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit;
-use godot::builtin::VarDictionary;
 use mind_core::game::schematic::Schematic;
 use mind_core::game::schematics;
 use mind_core::io::{FileSystem, NativeFs, Paths};
+use mind_core::ui::campaign::SchematicView;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -124,31 +123,20 @@ pub(super) fn schematic_import_bytes(bytes: &[u8]) -> Option<PathBuf> {
 }
 
 /// The view row for `index` (fresh read model; `None` when it disappeared).
-pub(super) fn schematic_row(dialog: &MindDialog, index: i64) -> Option<VarDictionary> {
-    for row in dialog.campaign_section("schematics").iter_shared() {
-        let Ok(row) = row.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_i64_or(&row, "index", -1) == index {
-            return Some(row);
-        }
-    }
-    None
+pub(super) fn schematic_row(dialog: &MindDialog, index: i64) -> Option<SchematicView> {
+    schematic_library(dialog)
+        .into_iter()
+        .find(|row| i64::try_from(row.index).unwrap_or(-1) == index)
 }
 
-/// The row list (`campaign_views_json.schematics`).
-pub(super) fn schematic_rows(dialog: &MindDialog) -> Vec<VarDictionary> {
-    dialog
-        .campaign_section("schematics")
-        .iter_shared()
-        .filter_map(|value| value.try_to::<VarDictionary>().ok())
-        .collect()
+/// The typed library rows (`campaign_views.schematics`).
+pub(super) fn schematic_rows(dialog: &MindDialog) -> Vec<SchematicView> {
+    schematic_library(dialog)
 }
 
 /// The absolute `.msch` path backing a schematic (`Schematic.file`).
 pub(super) fn schematic_file_of(dialog: &MindDialog, index: i64) -> Option<PathBuf> {
-    let row = schematic_row(dialog, index)?;
-    let file = row_str(&row, "file");
+    let file = schematic_row(dialog, index)?.file.unwrap_or_default();
     if file.is_empty() {
         None
     } else {
@@ -157,16 +145,16 @@ pub(super) fn schematic_file_of(dialog: &MindDialog, index: i64) -> Option<PathB
 }
 
 /// `s.mod != null`: mod schematics live in the mod's read-only data dir.
-pub(super) fn schematic_is_mod(row: &VarDictionary) -> bool {
-    !row_str(row, "mod_name").is_empty()
+pub(super) fn schematic_is_mod(row: &SchematicView) -> bool {
+    row.mod_name.as_deref().is_some_and(|name| !name.is_empty())
 }
 
 /// The index of the schematic stored at `path` (used after an import).
 pub(super) fn schematic_index_by_file(dialog: &MindDialog, path: &Path) -> i64 {
-    let wanted = path.to_string_lossy().to_string();
+    let wanted = path.to_string_lossy();
     for row in schematic_rows(dialog) {
-        if row_str(&row, "file") == wanted {
-            return row_i64_or(&row, "index", -1);
+        if row.file.as_deref() == Some(wanted.as_ref()) {
+            return i64::try_from(row.index).unwrap_or(-1);
         }
     }
     -1
@@ -230,12 +218,7 @@ pub(super) fn schematics_tag_count(labels: &[Vec<String>], tag: &str) -> i64 {
 pub(super) fn schematic_label_lists(dialog: &MindDialog) -> Vec<Vec<String>> {
     schematic_rows(dialog)
         .iter()
-        .map(|row| {
-            row_arr(row, "labels")
-                .iter_shared()
-                .map(|value| to_text_godot(&value))
-                .collect()
-        })
+        .map(|row| row.labels.clone())
         .collect()
 }
 

@@ -9,15 +9,16 @@
 //! control. Node rows come from `MindCampaign.research_tree_json` (T1a) and are
 //! pushed in through [`MindResearchView::set_tree`].
 
-use godot::builtin::{VarArray, VarDictionary, VariantType};
+use godot::builtin::{VarArray, VarDictionary};
 use godot::classes::control::{LayoutPreset, MouseFilter};
 use godot::classes::{
-    Button, Control, IControl, InputEvent, InputEventMouseButton, InputEventMouseMotion, StyleBox,
-    StyleBoxTexture,
+    Button, Control, IControl, InputEvent, InputEventMouseButton, InputEventMouseMotion, Json,
+    StyleBox, StyleBoxTexture,
 };
 use godot::global::{MouseButton, MouseButtonMask};
 use godot::obj::{EngineBitfield, NewAlloc, NewGd, WithBaseField};
 use godot::prelude::*;
+use mind_core::ui::campaign::{ResearchNodeRow, ResearchTreeView};
 use std::collections::HashMap;
 
 use crate::ui::kit;
@@ -53,11 +54,11 @@ pub struct MindResearchView {
     /// `View.moved`: true between drag-start and the deferred release reset.
     #[var]
     pub moved: bool,
-    /// Parsed `research_tree_json.nodes` rows (the JSON dictionaries).
-    nodes: Vec<VarDictionary>,
+    /// The typed `ResearchTreeView.nodes` rows (depth-first order).
+    nodes: Vec<ResearchNodeRow>,
     buttons: Vec<Gd<Button>>,
-    /// `research_tree_json.bounds` (`[x, y, w, h]`, Java space).
-    bounds: Vec<f64>,
+    /// `ResearchTreeView.bounds` (`[x, y, w, h]`, Java space).
+    bounds: [f32; 4],
     dirty: bool,
     last_size: Vector2,
     /// Region name -> cached ninepatch style (shared across views in Java).
@@ -76,7 +77,7 @@ impl IControl for MindResearchView {
             moved: false,
             nodes: Vec::new(),
             buttons: Vec::new(),
-            bounds: Vec::new(),
+            bounds: [0.0; 4],
             dirty: true,
             last_size: Vector2::ZERO,
             styles: HashMap::new(),
@@ -125,43 +126,54 @@ impl MindResearchView {
     fn node_exited(index: i64);
 
     /// Replaces the canvas contents with a `research_tree_json` view.
+    ///
+    /// # ABI shim
+    ///
+    /// The untyped `#[func]` form is the MCP/test surface; it deserializes into
+    /// the typed [`ResearchTreeView`] and renders that.
     #[func]
     pub fn set_tree(&mut self, tree: VarDictionary) {
+        let text = Json::stringify(&tree.to_variant());
+        match serde_json::from_str::<ResearchTreeView>(&text.to_string()) {
+            Ok(view) => self.set_tree_view(&view),
+            Err(error) => {
+                log::warn!("[ui] research_tree row shape: {error}");
+                self.set_tree_view(&ResearchTreeView {
+                    root: String::new(),
+                    root_title: String::new(),
+                    root_type: String::new(),
+                    root_icon: String::new(),
+                    roots: Vec::new(),
+                    items: Vec::new(),
+                    bounds: [0.0; 4],
+                    nodes: Vec::new(),
+                });
+            }
+        }
+    }
+
+    /// Replaces the canvas contents with the typed tree payload (T01).
+    pub fn set_tree_view(&mut self, tree: &ResearchTreeView) {
         for mut button in self.buttons.drain(..) {
             if button.is_instance_valid() {
                 button.queue_free();
             }
         }
-        self.nodes.clear();
-        if let Some(value) = tree.get("nodes")
-            && let Ok(rows) = value.try_to::<VarArray>()
-        {
-            for row in rows.iter_shared() {
-                self.nodes
-                    .push(row.try_to::<VarDictionary>().unwrap_or_default());
-            }
-        }
-        self.bounds.clear();
-        if let Some(value) = tree.get("bounds")
-            && let Ok(values) = value.try_to::<VarArray>()
-        {
-            for value in values.iter_shared() {
-                self.bounds.push(variant_f64(&value));
-            }
-        }
-        let nodes = self.nodes.clone();
-        for (index, node) in nodes.iter().enumerate() {
+        self.nodes = tree.nodes.clone();
+        self.bounds = tree.bounds;
+        for index in 0..self.nodes.len() {
+            let node = self.nodes[index].clone();
             // code-instantiated: one button per tech node (`View.rebuildAll`).
             let mut button = Button::new_alloc();
             button.set_meta("node_index", &(index as i64).to_variant());
             button.set_custom_minimum_size(Vector2::new(NODE_SIZE, NODE_SIZE));
             button.set_size(Vector2::new(NODE_SIZE, NODE_SIZE));
-            let style = self.style_for(node);
+            let style = self.style_for(&node);
             for style_name in ["normal", "hover", "pressed", "disabled"] {
                 button.add_theme_stylebox_override(style_name, &style);
             }
             self.base_mut().add_child(&button);
-            self.build_button_content(&mut button, node);
+            self.build_button_content(&mut button, &node);
             let mut bound = VarArray::new();
             bound.push(&(index as i64).to_variant());
             button.connect(
@@ -214,13 +226,29 @@ impl MindResearchView {
         self.buttons[index as usize].get_global_rect()
     }
 
-    /// The parsed node row at `index`.
+    /// The `research_tree_json` node row at `index`.
+    ///
+    /// # ABI shim
+    ///
+    /// The typed rows are serialized back to the MCP/test dictionary shape;
+    /// Rust callers read [`Self::node_row`] instead.
     #[func]
     pub fn node_at(&self, index: i64) -> VarDictionary {
-        if index < 0 || index as usize >= self.nodes.len() {
+        let Some(node) = self.node_row(index) else {
             return VarDictionary::new();
+        };
+        let text = crate::gdutil::json::to_gstring(&node, "{}");
+        Json::parse_string(&text)
+            .try_to::<VarDictionary>()
+            .unwrap_or_default()
+    }
+
+    /// The typed node row at `index`, if any.
+    pub fn node_row(&self, index: i64) -> Option<ResearchNodeRow> {
+        if index < 0 {
+            return None;
         }
-        self.nodes[index as usize].clone()
+        self.nodes.get(index as usize).cloned()
     }
 
     /// `View` button click, filtered by the drag latch.
@@ -253,10 +281,10 @@ impl MindResearchView {
         self.handle_input(event);
     }
 
-    fn build_button_content(&mut self, button: &mut Gd<Button>, node: &VarDictionary) {
-        if dict_bool(node, "selectable", false) {
-            let icon_region = dict_string(node, "icon", "");
-            let type_name = dict_string(node, "type", "");
+    fn build_button_content(&mut self, button: &mut Gd<Button>, node: &ResearchNodeRow) {
+        if node.selectable {
+            let icon_region = node.icon.clone();
+            let type_name = node.kind.clone();
             let icon = factory::content_icon(&icon_region, &type_name, IMAGE_SIZE);
             if let Some(mut icon) = icon {
                 icon.set_modulate(self.image_color(node));
@@ -281,21 +309,21 @@ impl MindResearchView {
     }
 
     /// `button.getImage().setColor(...)` (ResearchDialog.java:512).
-    fn image_color(&self, node: &VarDictionary) -> Color {
-        if !dict_bool(node, "locked", true) {
+    fn image_color(&self, node: &ResearchNodeRow) -> Color {
+        if !node.locked {
             return Color::WHITE;
         }
-        if dict_bool(node, "selectable", false) {
+        if node.selectable {
             return IMAGE_GRAY;
         }
         PAL_GRAY
     }
 
     /// `button.getStyle().up` rule (ResearchDialog.java:509).
-    fn style_for(&mut self, node: &VarDictionary) -> Gd<StyleBox> {
-        let locked = dict_bool(node, "locked", true);
-        let selectable = dict_bool(node, "selectable", false);
-        let can_spend = dict_bool(node, "can_spend", false);
+    fn style_for(&mut self, node: &ResearchNodeRow) -> Gd<StyleBox> {
+        let locked = node.locked;
+        let selectable = node.selectable;
+        let can_spend = node.can_spend;
         let key = if !locked {
             "button-over"
         } else if !selectable || !can_spend {
@@ -366,18 +394,15 @@ impl MindResearchView {
 
     /// `View.clamp` (ResearchDialog.java:539-549), in Java (y-up) space.
     fn clamp_view(&mut self) {
-        if self.bounds.len() < 4 {
-            return;
-        }
         let pad = NODE_SIZE;
         let size = self.base().get_size();
         let ox = size.x / 2.0;
         let oy = size.y / 2.0;
         let screen = self.base().get_viewport_rect().size;
-        let bounds_x = self.bounds[0] as f32;
-        let bounds_y = self.bounds[1] as f32;
-        let bounds_w = self.bounds[2] as f32;
-        let bounds_h = self.bounds[3] as f32;
+        let bounds_x = self.bounds[0];
+        let bounds_y = self.bounds[1];
+        let bounds_w = self.bounds[2];
+        let bounds_h = self.bounds[3];
         let rx = clampf(bounds_x + self.pan.x + ox, -bounds_w + pad, screen.x - pad);
         let ry = clampf(self.pan.y + oy + bounds_y, -bounds_h + pad, screen.y - pad);
         self.pan.x = rx - bounds_x - ox;
@@ -392,18 +417,11 @@ impl MindResearchView {
         let pan = self.pan;
         let scale = self.scale_factor;
         for (node, button) in self.nodes.iter().zip(self.buttons.iter_mut()) {
-            let visible = dict_bool(node, "visible", true);
-            button.set_visible(visible);
-            if !visible {
+            button.set_visible(node.visible);
+            if !node.visible {
                 continue;
             }
-            let center = java_point_at(
-                pan,
-                scale,
-                size,
-                dict_f32(node, "x", 0.0),
-                dict_f32(node, "y", 0.0) + odd_offset,
-            );
+            let center = java_point_at(pan, scale, size, node.x, node.y + odd_offset);
             button.set_scale(Vector2::ONE * scale);
             button.set_position(center - Vector2::new(NODE_SIZE, NODE_SIZE) * 0.5 * scale);
         }
@@ -429,30 +447,26 @@ impl MindResearchView {
         for pass_index in 0..2 {
             let want_lock = pass_index == 0;
             for node in &self.nodes {
-                if !dict_bool(node, "visible", true) {
+                if !node.visible {
                     continue;
                 }
-                let node_x = dict_f32(node, "x", 0.0);
-                let node_y = dict_f32(node, "y", 0.0);
-                let node_locked = dict_bool(node, "locked", true);
-                for child_variant in dict_array(node, "children").iter_shared() {
-                    let child_index = variant_i64(&child_variant);
-                    if child_index < 0 || child_index as usize >= self.nodes.len() {
-                        continue;
-                    }
-                    let Some(child) = self.nodes.get(child_index as usize) else {
+                let node_x = node.x;
+                let node_y = node.y;
+                let node_locked = node.locked;
+                for child_index in &node.children {
+                    let Some(child) = self.nodes.get(*child_index) else {
                         continue;
                     };
-                    if !dict_bool(child, "visible", true) {
+                    if !child.visible {
                         continue;
                     }
-                    let lock = node_locked || dict_bool(child, "locked", true);
+                    let lock = node_locked || child.locked;
                     if lock != want_lock {
                         continue;
                     }
                     let color = if lock { PAL_GRAY } else { styles::ACCENT };
-                    let child_x = dict_f32(child, "x", 0.0);
-                    let child_y = dict_f32(child, "y", 0.0);
+                    let child_x = child.x;
+                    let child_y = child.y;
                     let node_point = self.java_point(node_x, node_y);
                     let child_point = self.java_point(child_x, child_y);
                     let manhattan = (node_x - child_x).abs() + (node_y - child_y).abs();
@@ -496,64 +510,4 @@ fn clampf(value: f32, min: f32, max: f32) -> f32 {
         return value;
     }
     value.clamp(min, max)
-}
-
-/// `row.get(key, default)` as a bool.
-fn dict_bool(dict: &VarDictionary, key: &str, fallback: bool) -> bool {
-    match dict.get(key) {
-        Some(value) => match value.get_type() {
-            VariantType::BOOL => value.try_to::<bool>().unwrap_or(fallback),
-            _ => fallback,
-        },
-        None => fallback,
-    }
-}
-
-/// `float(row.get(key, default))`.
-fn dict_f32(dict: &VarDictionary, key: &str, fallback: f32) -> f32 {
-    dict.get(key)
-        .map(|value| variant_f64(&value) as f32)
-        .unwrap_or(fallback)
-}
-
-/// `str(row.get(key, default))`.
-fn dict_string(dict: &VarDictionary, key: &str, fallback: &str) -> String {
-    match dict.get(key) {
-        Some(value) if value.get_type() == VariantType::STRING => value
-            .try_to::<GString>()
-            .map(|text| text.to_string())
-            .unwrap_or_else(|_| fallback.to_string()),
-        _ => fallback.to_string(),
-    }
-}
-
-/// `row.get(key, [])` as an untyped array.
-fn dict_array(dict: &VarDictionary, key: &str) -> VarArray {
-    dict.get(key)
-        .and_then(|value| value.try_to::<VarArray>().ok())
-        .unwrap_or_default()
-}
-
-/// GDScript `float(value)` for JSON numbers.
-fn variant_f64(value: &Variant) -> f64 {
-    match value.get_type() {
-        VariantType::FLOAT => value.try_to::<f64>().unwrap_or_default(),
-        VariantType::INT => value
-            .try_to::<i64>()
-            .map(|number| number as f64)
-            .unwrap_or_default(),
-        _ => 0.0,
-    }
-}
-
-/// GDScript `int(value)` for JSON numbers.
-fn variant_i64(value: &Variant) -> i64 {
-    match value.get_type() {
-        VariantType::INT => value.try_to::<i64>().unwrap_or_default(),
-        VariantType::FLOAT => value
-            .try_to::<f64>()
-            .map(|number| number as i64)
-            .unwrap_or_default(),
-        _ => 0,
-    }
 }

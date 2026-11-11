@@ -19,6 +19,7 @@ use godot::prelude::*;
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, styles};
+use mind_core::ui::campaign::PlanetView;
 
 use super::reads::*;
 use super::util::*;
@@ -108,12 +109,13 @@ pub(super) fn planet_set_body_centered(
 pub(super) fn planet_campaign_planets(
     dialog: &mut MindDialog,
     st: &mut PlanetState,
-) -> Vec<VarDictionary> {
-    let views = planet_refresh_views(dialog, st, "");
-    let planets = row_rows(&views, "planets");
+) -> Vec<PlanetView> {
+    let Some(views) = planet_refresh_views(dialog, st, "") else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for name in ["serpulo", "erekir"] {
-        if let Some(row) = planets.iter().find(|row| row_str(row, "name") == name) {
+        if let Some(row) = views.planets.iter().find(|row| row.name == name) {
             out.push(row.clone());
         }
     }
@@ -173,7 +175,7 @@ pub(super) fn planet_show_select(
     let mut group = ButtonGroup::new_gd();
     group.set_allow_unpress(true);
     for planet in &choices {
-        let planet_name = row_str(planet, "name");
+        let planet_name = planet.name.clone();
         let mut card = planet_make_card(planet);
         card.set_button_group(&group);
         set_toggle(&card, planet_name == st.selected_planet);
@@ -359,7 +361,7 @@ pub(super) fn planet_footer_entry(
 }
 
 /// One `PlanetDialog` chooser card (`Styles.togglet` + planet art).
-pub(super) fn planet_make_card(planet: &VarDictionary) -> Gd<Button> {
+pub(super) fn planet_make_card(planet: &PlanetView) -> Gd<Button> {
     // code-instantiated: planet card layout is data-driven (no static scene).
     let mut card = factory::button("");
     card.set_toggle_mode(true);
@@ -444,9 +446,9 @@ pub(super) fn planet_card_box(border: Color) -> Gd<StyleBoxFlat> {
 }
 
 /// Vendored `sprites/planets/<name>.png` (`PlanetDialog.planetTextures`).
-pub(super) fn planet_texture(planet: &VarDictionary) -> Option<Gd<Texture2D>> {
+pub(super) fn planet_texture(planet: &PlanetView) -> Option<Gd<Texture2D>> {
     let mut assets = kit::assets()?;
-    let planet_name = row_str(planet, "name");
+    let planet_name = planet.name.clone();
     let texture = assets
         .bind_mut()
         .find_loose(GString::from(format!("planets/{planet_name}").as_str()))?;
@@ -454,9 +456,9 @@ pub(super) fn planet_texture(planet: &VarDictionary) -> Option<Gd<Texture2D>> {
 }
 
 /// `_disc_style`: the planet's [`color`] disc with an accent ring.
-pub(super) fn planet_disc_style(planet: &VarDictionary) -> Gd<StyleBoxFlat> {
+pub(super) fn planet_disc_style(planet: &PlanetView) -> Gd<StyleBoxFlat> {
     let mut box_ = StyleBoxFlat::new_gd();
-    let color = row_str(planet, "color");
+    let color = planet.color.clone();
     box_.set_bg_color(Color::from_string(&color).unwrap_or(Color::WHITE));
     let radius = (DISC_SIZE * 0.5) as i32;
     for corner in [
@@ -482,9 +484,8 @@ pub(super) fn planet_on_select_ok(dialog: &mut MindDialog, state: &Rc<RefCell<Pl
     }
     setting_put_flag("campaignselect", true);
     let selected_planet = st.selected_planet.clone();
-    let planet = planet_find_planet_row(dialog, &mut st, &selected_planet);
-    if !planet.is_empty() {
-        st.selected_sector = row_i64(&planet, "start_sector");
+    if let Some(planet) = planet_find_planet_row(dialog, &mut st, &selected_planet) {
+        st.selected_sector = i64::from(planet.start_sector);
     }
     let selected = st.selected_planet.clone();
     planet_show_planet(dialog, state, &mut st, &selected, true);
@@ -495,9 +496,9 @@ pub(super) fn planet_on_select_ok(dialog: &mut MindDialog, state: &Rc<RefCell<Pl
     // instead of the reference framing (PAR-0018). `planet_show_planet` has
     // already stored the start tile in `selected_tile`.
     if let Some(mut view) = planet_view() {
-        let tile = view.get("selected_tile").try_to::<i64>().unwrap_or(-1);
+        let tile = i64::from(view.bind().selected_tile);
         if tile >= 0 {
-            planet_view_call(&mut view, "look_at_tile", &[tile.to_variant()]);
+            view.bind_mut().look_at_tile(tile as i32, 1.0);
         }
     }
 }

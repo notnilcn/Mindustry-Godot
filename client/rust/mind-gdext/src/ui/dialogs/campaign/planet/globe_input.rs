@@ -7,12 +7,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use godot::builtin::VarDictionary;
-use godot::classes::{CanvasItem, Node};
 use godot::prelude::*;
+use mind_core::ui::campaign::SectorView;
 
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
+use crate::ui::planet::MindPlanetView;
 
 use super::reads::*;
 use super::util::*;
@@ -42,12 +42,7 @@ pub(super) fn planet_input(
         let Some(mut view) = planet_view() else {
             return;
         };
-        if !view
-            .clone()
-            .try_cast::<CanvasItem>()
-            .map(|v| v.is_visible())
-            .unwrap_or(false)
-        {
+        if !view.is_visible() {
             return;
         }
         let mask = motion.get_button_mask();
@@ -62,13 +57,13 @@ pub(super) fn planet_input(
             }
             st.new_presets.clear();
             st.dragged = true;
-            planet_view_call(&mut view, "drag", &[motion.get_relative().to_variant()]);
+            view.bind_mut().drag(motion.get_relative());
             if let Some(mut viewport) = dialog.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
-        planet_update_hover(dialog, &mut st, &mut view, motion.get_position());
+        planet_update_hover(dialog, &mut st, &view, motion.get_position());
         return;
     }
     let Ok(click) = event.try_cast::<godot::classes::InputEventMouseButton>() else {
@@ -81,12 +76,7 @@ pub(super) fn planet_input(
         let Some(mut view) = planet_view() else {
             return;
         };
-        if !view
-            .clone()
-            .try_cast::<CanvasItem>()
-            .map(|v| v.is_visible())
-            .unwrap_or(false)
-        {
+        if !view.is_visible() {
             return;
         }
         if planet_over_ui(dialog, &st, click.get_position()) {
@@ -103,7 +93,7 @@ pub(super) fn planet_input(
         } else {
             1.0f32
         };
-        planet_view_call(&mut view, "scroll", &[amount.to_variant()]);
+        view.bind_mut().scroll(amount);
         if let Some(mut viewport) = dialog.base().get_viewport() {
             viewport.set_input_as_handled();
         }
@@ -112,15 +102,10 @@ pub(super) fn planet_input(
     if button != godot::global::MouseButton::LEFT {
         return;
     }
-    let Some(mut view) = planet_view() else {
+    let Some(view) = planet_view() else {
         return;
     };
-    if !view
-        .clone()
-        .try_cast::<CanvasItem>()
-        .map(|v| v.is_visible())
-        .unwrap_or(false)
-    {
+    if !view.is_visible() {
         return;
     }
     if click.is_pressed() {
@@ -144,12 +129,12 @@ pub(super) fn planet_input(
     if planet_over_ui(dialog, &st, click.get_position()) {
         return;
     }
-    let tile = planet_view_pick(&mut view, click.get_position());
+    let tile = planet_view_pick(&view, click.get_position());
     if tile < 0 {
         return;
     }
     planet_select_view_tile(dialog, state, &mut st, tile);
-    planet_update_hover(dialog, &mut st, &mut view, click.get_position());
+    planet_update_hover(dialog, &mut st, &view, click.get_position());
     if let Some(mut viewport) = dialog.base().get_viewport() {
         viewport.set_input_as_handled();
     }
@@ -209,22 +194,23 @@ pub(super) fn planet_select_view_tile(
 ) {
     let planet = st.selected_planet.clone();
     let sectors = planet_sectors(dialog, st, &planet);
-    let selection_key = if st.launch_mode == "planetLaunch" {
-        "accelerator_selectable"
-    } else {
-        "selectable"
-    };
+    let launch_mode = st.launch_mode.clone();
     for sector in sectors {
-        let Some(mut view) = planet_view() else {
+        let Some(view) = planet_view() else {
             return;
         };
-        if planet_view_tile(&mut view, &sector) != tile {
+        if planet_view_tile(&view, &sector) != tile {
             continue;
         }
-        if !row_bool(&sector, selection_key) {
+        let selectable = if launch_mode == "planetLaunch" {
+            sector.accelerator_selectable
+        } else {
+            sector.selectable
+        };
+        if !selectable {
             return;
         }
-        st.selected_sector = row_i64(&sector, "id");
+        st.selected_sector = i64::from(sector.id);
         planet_show_planet(dialog, state, st, &planet, true);
         return;
     }
@@ -234,7 +220,7 @@ pub(super) fn planet_select_view_tile(
 pub(super) fn planet_update_hover(
     dialog: &mut MindDialog,
     st: &mut PlanetState,
-    view: &mut Gd<Node>,
+    view: &Gd<MindPlanetView>,
     point: Vector2,
 ) {
     let mut tile = -1i64;
@@ -258,16 +244,16 @@ pub(super) fn planet_update_hover(
             // reason from the generator (`SerpuloPlanetGenerator
             // .getLockedText`); `planetLaunch` shows the cancel glyph.
             let selectable = if st.launch_mode == "planetLaunch" {
-                row_bool(&sector, "accelerator_selectable")
+                sector.accelerator_selectable
             } else {
-                row_bool(&sector, "selectable")
+                sector.selectable
             };
             if selectable {
                 name_text = format!(
                     "[color=#ffd37fff][lb] [color=white]{}[color=#ffd37fff] ]",
                     planet_localized_sector(&sector)
                 );
-            } else if !row_bool_or(&sector, "hover_allowed", true) {
+            } else if !sector.hover_allowed {
                 name_text = String::new();
             } else if st.launch_mode == "planetLaunch" {
                 name_text = format!("[color=#7f7f7fff]{}[/color]", kit::icons::glyph("cancel"));
@@ -277,19 +263,17 @@ pub(super) fn planet_update_hover(
             break;
         }
     }
-    planet_view_call(
-        view,
-        "set_sector_label_markup",
-        &[GString::from(name_text.as_str()).to_variant()],
-    );
-    planet_view_call(view, "set_hover", &[tile.to_variant()]);
+    let mut view = view.clone();
+    view.bind_mut()
+        .set_sector_label_markup(gs(name_text.as_str()));
+    view.bind_mut().set_hover(tile as i32);
 }
 
 /// `PlanetGenerator.getLockedText` (`SerpuloPlanetGenerator.java:114-123`):
 /// the reason a non-selectable cell shows under the cursor. The reason kind
 /// comes from the sector row (`hover_lock`, computed host-side).
-pub(super) fn planet_hover_lock_text(sector: &VarDictionary) -> String {
-    match row_str(sector, "hover_lock").as_str() {
+pub(super) fn planet_hover_lock_text(sector: &SectorView) -> String {
+    match sector.hover_lock.unwrap_or("") {
         "shielded" => format!(
             "[color=#ff0000ff]{}[/color]{}",
             kit::icons::glyph("defense"),

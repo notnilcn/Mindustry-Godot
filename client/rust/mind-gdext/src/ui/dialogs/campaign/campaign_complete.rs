@@ -8,6 +8,7 @@
 
 use godot::prelude::*;
 
+use super::util::campaign_views_live;
 use crate::gdutil::variant::to_i64_int_or_float;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::common::facade::rich;
@@ -59,34 +60,43 @@ impl DialogController for CampaignCompleteDialog {
         table.bind_mut().clear();
         let has_context = dialog.context_value("planet").is_some()
             || dialog.context_value("playtime_ms").is_some();
-        let view = if has_context {
-            let mut copy = VarDictionary::new();
-            for key in ["localized", "planet", "color", "playtime_ms"] {
-                if let Some(value) = dialog.context_value(key) {
-                    copy.set(key, &value);
-                }
-            }
-            copy
+        let (planet, color, playtime) = if has_context {
+            // MCP/test opens the page with a JSON context; keep that path.
+            let localized = dialog
+                .context_value("localized")
+                .map(|value| value.to::<GString>().to_string());
+            let context_planet = dialog
+                .context_value("planet")
+                .map(|value| value.to::<GString>().to_string());
+            let color = dialog
+                .context_value("color")
+                .map(|value| value.to::<GString>().to_string())
+                .unwrap_or_else(|| String::from("ffd37f"));
+            let playtime = dialog
+                .context_value("playtime_ms")
+                .map(|value| to_i64_int_or_float(&value))
+                .unwrap_or(0);
+            (
+                localized.or(context_planet).unwrap_or_default(),
+                color,
+                playtime,
+            )
         } else {
-            dialog
-                .campaign_views()
-                .get("complete")
-                .map(|value| value.to::<VarDictionary>())
-                .unwrap_or_default()
+            // The completion banner's typed read model (`CampaignViews.complete`).
+            match campaign_views_live(dialog) {
+                Some(views) => {
+                    let complete = views.complete;
+                    let planet = if complete.localized.is_empty() {
+                        complete.planet
+                    } else {
+                        complete.localized
+                    };
+                    (planet, complete.color, complete.playtime_ms)
+                }
+                None => (String::new(), String::from("ffd37f"), 0),
+            }
         };
-        let planet = view
-            .get("localized")
-            .or_else(|| view.get("planet"))
-            .map(|value| value.to::<GString>())
-            .unwrap_or_default();
-        // `Planet.localizedName` (`planet.<name>.name`): the campaign read
-        // model falls back to the raw content name when the registry's bundle
-        // is the empty memory bundle, so resolve the live bundle here.
-        let planet = planet_localized(&planet.to_string());
-        let color = view
-            .get("color")
-            .map(|value| value.to::<GString>())
-            .unwrap_or_else(|| GString::from("ffd37f"));
+        let planet = planet_localized(&planet);
         let planet_markup = if planet.is_empty() {
             String::new()
         } else {
@@ -98,13 +108,8 @@ impl DialogController for CampaignCompleteDialog {
         rich(&message).set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
         table.bind_mut().add(&message).grow_x().pad(8.0);
         table.bind_mut().row();
-        // The campaign read models carry JSON numbers, which are FLOAT
-        // variants: `to::<i64>()` panics on the type mismatch and aborted the
-        // build before the playtime row (`CampaignCompleteDialog.java:37-40`).
-        let playtime = view
-            .get("playtime_ms")
-            .map(|value| to_i64_int_or_float(&value))
-            .unwrap_or(0);
+        // The typed view's `playtime_ms` is a plain integer (`to_i64_int_or_float`
+        // was only needed for the JSON FLOAT variant).
         if playtime > 0 {
             let time = MindDialog::format_time_ms(playtime);
             let label = factory::label(&kit::tm_format("@campaign.playtime", &[&time]).to_string());

@@ -54,9 +54,10 @@ pub(super) const WORLD_PATH: &str = "/root/Spine/World";
 // ---------------------------------------------------------------------------
 
 pub(super) use super::super::util::{
-    bundle_or, campaign_sector_is_playing, content_texture, dialog_node, icon_rect, json_stringify,
-    launch_resource_stacks, panel_with_box, row_arr, row_bool, row_bool_or, row_dict, row_rows,
-    set_toggle, setting_put_flag, setting_put_text, setting_text, spacer, ui_bool, ui_root,
+    bundle_or, campaign_launch_stacks, campaign_sector_is_playing, campaign_views_of,
+    content_texture, dialog_node, empty_sector_view, gs, icon_rect, json_stringify,
+    open_dialog_json, panel_with_box, set_toggle, setting_put_flag, setting_put_text, setting_text,
+    spacer, ui_bool, ui_root,
 };
 
 /// `Core.settings.getInt(key, default)` through the `MindUi` store.
@@ -72,32 +73,6 @@ pub(super) use crate::ui::dialogs::common::facade::ui_call;
 // Planet-specific helpers
 // ---------------------------------------------------------------------------
 
-/// Reads a JSON string field (`""` when missing or null).
-///
-/// Unlike the campaign copy this accepts only string variants (`GString`); the
-/// planet read model never carries stringified numbers.
-pub(super) fn row_str(row: &VarDictionary, key: &str) -> String {
-    row.get(key)
-        .filter(|value| value.get_type() != VariantType::NIL)
-        .and_then(|value| value.try_to::<GString>().ok())
-        .map(|value| value.to_string())
-        .unwrap_or_default()
-}
-
-/// Reads a JSON string field (`None` when missing or null).
-#[allow(dead_code)]
-pub(super) fn row_opt_str(row: &VarDictionary, key: &str) -> Option<String> {
-    row.get(key)
-        .filter(|value| value.get_type() != VariantType::NIL)
-        .and_then(|value| value.try_to::<GString>().ok())
-        .map(|value| value.to_string())
-}
-
-/// Reads a JSON integer field (`0` when missing; floats truncate).
-pub(super) fn row_i64(row: &VarDictionary, key: &str) -> i64 {
-    row_i64_or(row, key, 0)
-}
-
 /// Reads a JSON integer field with a default (`i64`, then `f64` truncated).
 ///
 /// Unlike the campaign copy this never parses string/bool variants (the planet
@@ -110,24 +85,6 @@ pub(super) fn row_i64_or(row: &VarDictionary, key: &str, default: i64) -> i64 {
         return default;
     };
     to_i64_int_or_float(&value)
-}
-
-/// Reads a JSON float field (`0.0` when missing).
-#[allow(dead_code)]
-pub(super) fn row_f64(row: &VarDictionary, key: &str) -> f64 {
-    let Some(value) = row
-        .get(key)
-        .filter(|value| value.get_type() != VariantType::NIL)
-    else {
-        return 0.0;
-    };
-    if let Ok(number) = value.try_to::<f64>() {
-        return number;
-    }
-    value
-        .try_to::<i64>()
-        .map(|value| value as f64)
-        .unwrap_or(0.0)
 }
 
 /// `Core.settings.getBool(key)` through the `MindUi` store.

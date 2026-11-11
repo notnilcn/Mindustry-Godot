@@ -11,9 +11,9 @@ use godot::builtin::{VarArray, VarDictionary};
 use godot::classes::Json;
 use godot::prelude::*;
 
-use crate::gdutil::variant::to_i64_int_or_float;
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
+use mind_core::ui::campaign::LaunchPlanView;
 
 use super::sector_panel::*;
 use super::util::*;
@@ -101,22 +101,20 @@ pub(super) fn planet_stacks_json(stacks: &[VarDictionary]) -> String {
     Json::stringify(&planet_stacks_array(stacks).to_variant()).to_string()
 }
 
-/// `MindCampaign.launch_dialog_json` for the launcher launch.
+/// The typed `MindCampaign.launch_plan` payload for the launcher launch.
 pub(super) fn planet_launch_plan(
     dialog: &mut MindDialog,
     planet_name: &str,
     launcher: i64,
     sector_id: i64,
     loadout: i64,
-) -> VarDictionary {
-    dialog.campaign_json(
-        "launch_dialog_json",
-        &[
-            GString::from(planet_name).to_variant(),
-            launcher.to_variant(),
-            sector_id.to_variant(),
-            loadout.to_variant(),
-        ],
+) -> Option<LaunchPlanView> {
+    let mut campaign = dialog.campaign()?;
+    campaign.bind_mut().launch_plan(
+        planet_name,
+        i32::try_from(launcher).unwrap_or(-1),
+        i32::try_from(sector_id).unwrap_or(-1),
+        i32::try_from(loadout).unwrap_or(-1),
     )
 }
 
@@ -162,28 +160,45 @@ pub(super) fn planet_launch(
     }
 
     let mut launcher_id = -1i64;
-    let mut launch_resources = VarDictionary::new();
+    // The launch charge/stacks as ordered `(item, amount)` pairs; they only
+    // become `{item, amount}` dictionaries at the facade/ABI boundaries below.
+    let mut launch_resources: Vec<(String, i64)> = Vec::new();
     let mut launch_core = String::new();
     let mut launch_cost: Vec<VarDictionary> = Vec::new();
     if loadout >= 0 && !resume {
         launcher_id = planet_sector_launch_from(dialog, st, planet_name, sector_id);
         // `PlanetDialog.java:1409-1410` charges
         // `loadout.requirements() + universe.getLaunchResources()` for the
-        // loadout the picker actually selected. `launch_dialog_json` reports
-        // that `total` as `launch_cost` from the selected schematic row — the
-        // old path looked the index up in the planet-default core's loadout
-        // list, which is empty for a larger-core schematic, so its block cost
-        // was never charged (PAR-0489).
-        let plan = planet_launch_plan(dialog, planet_name, launcher_id, sector_id, loadout);
-        launch_resources = row_dict(&plan, "resources");
-        if launch_resources.is_empty() {
-            launch_resources = launch_resource_stacks(dialog);
+        // loadout the picker actually selected. The typed `launch_plan`
+        // reports that `total` as `launch_cost` from the selected schematic
+        // row — the old path looked the index up in the planet-default core's
+        // loadout list, which is empty for a larger-core schematic, so its
+        // block cost was never charged (PAR-0489).
+        if let Some(plan) = planet_launch_plan(dialog, planet_name, launcher_id, sector_id, loadout)
+        {
+            launch_resources = plan
+                .resources
+                .iter()
+                .map(|(item, amount)| (item.clone(), i64::from(*amount)))
+                .collect();
+            launch_core = plan.core;
+            launch_cost = planet_stacks_of(
+                &plan
+                    .launch_cost
+                    .iter()
+                    .map(|row| (row.item.clone(), i64::from(row.amount)))
+                    .collect::<Vec<(String, i64)>>(),
+            );
         }
-        launch_core = row_str(&plan, "core");
-        launch_cost = row_rows(&plan, "launch_cost");
+        if launch_resources.is_empty() {
+            launch_resources = campaign_launch_stacks(dialog)
+                .into_iter()
+                .map(|(item, amount)| (item, i64::from(amount)))
+                .collect();
+        }
         if launch_cost.is_empty() {
             // No plan (the facade is absent): charge the staged resources.
-            launch_cost = planet_stacks_of(&planet_dict_totals(&launch_resources));
+            launch_cost = planet_stacks_of(&launch_resources);
         }
     }
 
@@ -202,8 +217,7 @@ pub(super) fn planet_launch(
     if let Some(mut host) = kit::sim_host() {
         if host.has_method("set_pending_launch") {
             if loadout >= 0 && !resume {
-                let stacks =
-                    planet_stacks_json(&planet_stacks_of(&planet_dict_totals(&launch_resources)));
+                let stacks = planet_stacks_json(&planet_stacks_of(&launch_resources));
                 let _ = host.call(
                     "set_pending_launch",
                     &[
@@ -245,7 +259,7 @@ pub(super) fn planet_launch(
                     ],
                 );
             }
-            let core_stacks = planet_stacks_of(&planet_dict_totals(&launch_resources));
+            let core_stacks = planet_stacks_of(&launch_resources);
             let mut payload = VarDictionary::new();
             payload.set("core", &GString::from(launch_core.as_str()));
             payload.set("schematic", loadout);
@@ -298,23 +312,6 @@ pub(super) fn planet_launch(
     if started {
         planet_enter_game(st);
     }
-}
-
-/// The item->amount totals of a `{item: amount}` dictionary.
-pub(super) fn planet_dict_totals(dict: &VarDictionary) -> Vec<(String, i64)> {
-    let mut out = Vec::new();
-    for key in dict.keys_array().iter_shared() {
-        let item = key
-            .try_to::<GString>()
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let amount = dict
-            .get(item.as_str())
-            .map(|value| to_i64_int_or_float(&value))
-            .unwrap_or(0);
-        out.push((item, amount));
-    }
-    out
 }
 
 /// Hides the menu and shows the in-game HUD group (`MindUiRoot`).

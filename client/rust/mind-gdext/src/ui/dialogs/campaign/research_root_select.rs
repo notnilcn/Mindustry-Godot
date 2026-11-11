@@ -6,9 +6,9 @@
 
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
-use godot::builtin::{VarArray, VarDictionary};
-use godot::classes::{Button, Control, HBoxContainer, Label};
+use godot::classes::{Button, Control, HBoxContainer, Json, Label};
 use godot::prelude::*;
+use mind_core::ui::campaign::ResearchRootRow;
 
 /// The dialog controllers in this batch.
 pub(super) fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
@@ -46,29 +46,23 @@ impl DialogController for ResearchRootSelectDialog {
             control.set_h_size_flags(godot::classes::control::SizeFlags::SHRINK_CENTER);
         }
         let selected = dialog.context_string("selected").to_string();
-        let roots = dialog
+        // The picker's typed rows. `ResearchRootRow` serializes to the same
+        // `{name,title,type,icon,selected}` shape the research dialog's context
+        // carries, so an MCP context opening still feeds this path.
+        let roots: Vec<ResearchRootRow> = dialog
             .context_value("roots")
-            .map(|value| value.to::<VarArray>())
+            .and_then(|value| {
+                let text = Json::stringify(&value);
+                serde_json::from_str::<Vec<ResearchRootRow>>(&text.to_string()).ok()
+            })
             .unwrap_or_default();
-        for root in roots.iter_shared() {
-            let Ok(entry) = root.try_to::<VarDictionary>() else {
-                continue;
-            };
-            // code-instantiated: root rows come from the tree JSON roots list.
-            let name = entry
-                .get("name")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
+        for root in &roots {
+            // code-instantiated: root rows come from the typed tree roots list.
+            let name = root.name.clone();
             let mut row_button = Button::new_alloc();
             row_button.set_theme_type_variation("flatTogglet");
             row_button.set_toggle_mode(true);
-            row_button.set_pressed(
-                entry
-                    .get("selected")
-                    .map(|value| value.to::<bool>())
-                    .unwrap_or(false)
-                    || name.to_string() == selected,
-            );
+            row_button.set_pressed(root.selected || name == selected);
             row_button.set_custom_minimum_size(Vector2::new(300.0, 60.0));
             // code-instantiated: row content (icon + name) is data-driven.
             let mut content = HBoxContainer::new_alloc();
@@ -83,31 +77,18 @@ impl DialogController for ResearchRootSelectDialog {
             margin.set_custom_minimum_size(Vector2::new(12.0, 0.0));
             margin.set_mouse_filter(godot::classes::control::MouseFilter::IGNORE);
             content.add_child(&margin);
-            let icon_name = entry
-                .get("icon")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
-            let type_name = entry
-                .get("type")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
             let mut icon =
-                factory::content_icon(&icon_name.to_string(), &type_name.to_string(), ICON_SIZE)
-                    .unwrap_or_else(|| {
-                        let mut spacer = Control::new_alloc();
-                        spacer.set_custom_minimum_size(Vector2::new(ICON_SIZE, ICON_SIZE));
-                        spacer
-                    });
+                factory::content_icon(&root.icon, &root.kind, ICON_SIZE).unwrap_or_else(|| {
+                    let mut spacer = Control::new_alloc();
+                    spacer.set_custom_minimum_size(Vector2::new(ICON_SIZE, ICON_SIZE));
+                    spacer
+                });
             icon.set_custom_minimum_size(Vector2::new(ICON_SIZE, ICON_SIZE));
             icon.set_v_size_flags(godot::classes::control::SizeFlags::SHRINK_CENTER);
             icon.set_mouse_filter(godot::classes::control::MouseFilter::IGNORE);
             content.add_child(&icon);
-            let title = entry
-                .get("title")
-                .map(|value| value.to::<GString>())
-                .unwrap_or_default();
             let mut label = Label::new_alloc();
-            label.set_text(&title);
+            label.set_text(&root.title);
             label.set_vertical_alignment(godot::global::VerticalAlignment::CENTER);
             label.set_mouse_filter(godot::classes::control::MouseFilter::IGNORE);
             content.add_child(&label);

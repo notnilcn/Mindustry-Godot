@@ -17,6 +17,7 @@ use godot::classes::{
     VBoxContainer,
 };
 use godot::prelude::*;
+use mind_core::ui::campaign::MapEntryView;
 use mind_core::util::strip_colors;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -555,17 +556,35 @@ pub(crate) fn maplist_maps(dialog: &mut MindDialog) -> Vec<VarDictionary> {
             }
         }
     }
-    if rows.is_empty() {
-        for row_variant in dialog.campaign_section("maps").iter_shared() {
-            let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-                continue;
-            };
+    if rows.is_empty()
+        && let Some(views) = campaign_views_of(dialog, "")
+    {
+        for entry in &views.maps {
+            let row = map_entry_row(entry);
             if !row_str(&row, "name").is_empty() {
                 rows.push(row);
             }
         }
     }
     rows
+}
+
+/// A `MapEntryView` as the map browser's row dictionary.
+///
+/// The browser's live rows come from `MindPreview.maps_list()` (untyped, and
+/// outside T02's owned paths), so the empty-registry fallback projects the typed
+/// campaign rows into the same key shape. Follow-up for C01: a typed
+/// `maps_list` on `MindPreview` would drop this adapter.
+fn map_entry_row(entry: &MapEntryView) -> VarDictionary {
+    let mut row = VarDictionary::new();
+    row.set("name", &gs(entry.name.as_str()));
+    if let Some(author) = entry.author.as_deref() {
+        row.set("author", &gs(author));
+    }
+    row.set("width", &i64::from(entry.width).to_variant());
+    row.set("height", &i64::from(entry.height).to_variant());
+    row.set("custom", &entry.custom.to_variant());
+    row
 }
 
 /// One sortable map row (`MapListDialog._sorted_maps` keyed entry).

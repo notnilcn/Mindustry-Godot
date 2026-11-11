@@ -396,44 +396,19 @@ impl MindLandingCore {
         );
     }
 
-    /// `SectorInfo.resources` item names from the live campaign sector row.
+    /// `SectorInfo.resources` item names from the typed campaign sector view.
     fn sector_resources(&self, id: i64) -> Vec<String> {
         let Some(campaign) = self.campaign.clone() else {
             return Vec::new();
         };
-        let payload = campaign.bind().campaign_views_json(GString::new());
-        let Some(views) = Self::json_dict(&payload.to_variant()) else {
+        let Some(views) = campaign.bind().campaign_views("") else {
             return Vec::new();
         };
-        let Some(sectors) = views
-            .get("sectors")
-            .and_then(|value| value.try_to::<VarArray>().ok())
-        else {
-            return Vec::new();
-        };
-        for sector in sectors.iter_shared() {
-            let Ok(sector) = sector.try_to::<VarDictionary>() else {
-                continue;
-            };
-            let sector_id = sector
-                .get("id")
-                .and_then(|value| value.try_to_relaxed::<i64>().ok())
-                .unwrap_or(-2);
-            if sector_id != id {
+        for sector in &views.sectors {
+            if i64::from(sector.id) != id {
                 continue;
             }
-            let stats = sector
-                .get("stats")
-                .and_then(|value| value.try_to::<VarDictionary>().ok())
-                .unwrap_or_default();
-            let resources = stats
-                .get("resources")
-                .and_then(|value| value.try_to::<VarArray>().ok())
-                .unwrap_or_default();
-            return resources
-                .iter_shared()
-                .map(|item| item.stringify().to_string())
-                .collect();
+            return sector.stats.resources.clone();
         }
         Vec::new()
     }

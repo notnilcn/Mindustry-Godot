@@ -5,7 +5,7 @@
 //! Upstream: ui/dialogs/LaunchLoadoutDialog.java
 
 use super::util::*;
-use crate::gdutil::variant::{to_i64_typed, to_text_godot};
+use crate::gdutil::variant::to_i64_typed;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::schematics::schematics_dialog::SCHEMATIC_COLUMN_WIDTH;
 use crate::ui::kit::widgets::factory;
@@ -16,6 +16,7 @@ use godot::classes::control::LayoutPreset;
 use godot::classes::text_server::AutowrapMode;
 use godot::classes::{Button, Control, HBoxContainer};
 use godot::prelude::*;
+use mind_core::ui::campaign::{CampaignViews, LaunchPlanView, SchematicView};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -36,7 +37,8 @@ pub(super) fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
 struct LaunchLoadoutState {
     list: Option<Gd<MindTable>>,
     selected: i64,
-    plan: VarDictionary,
+    /// The typed `launch_plan(...)` payload for the current selection.
+    plan: Option<LaunchPlanView>,
 }
 
 impl LaunchLoadoutState {
@@ -46,6 +48,14 @@ impl LaunchLoadoutState {
             ..Self::default()
         }
     }
+}
+
+/// One grid row: the picker's own loadouts (`LaunchPlanView.loadouts`) or the
+/// planet's projected loadouts when no plan is available.
+struct LaunchRow {
+    index: i64,
+    core: String,
+    file: String,
 }
 
 /// Launch-loadout picker (`LaunchLoadoutDialog`).
@@ -86,7 +96,7 @@ impl DialogController for LaunchLoadoutDialog {
         });
         connect_once(
             dialog,
-            "loadout_changed",
+            "launch_loadout_changed",
             &loadout,
             "loadout_changed",
             &callable,
@@ -94,8 +104,11 @@ impl DialogController for LaunchLoadoutDialog {
     }
 }
 
-/// The `launch_dialog_json` plan for the current context/selection.
-fn launch_plan(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState>>) -> VarDictionary {
+/// The typed `launch_plan` payload for the current context/selection.
+fn launch_plan(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<LaunchLoadoutState>>,
+) -> Option<LaunchPlanView> {
     let planet = dialog.context_string("planet").to_string();
     let launcher = dialog
         .context_value("launcher")
@@ -109,81 +122,78 @@ fn launch_plan(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState>>)
         let st = state.borrow();
         st.selected
     };
-    dialog.campaign_json(
-        "launch_dialog_json",
-        &[
-            gs(planet).to_variant(),
-            launcher.to_variant(),
-            sector.to_variant(),
-            selected.to_variant(),
-        ],
+    let mut campaign = dialog.campaign()?;
+    campaign.bind_mut().launch_plan(
+        &planet,
+        i32::try_from(launcher).unwrap_or(-1),
+        i32::try_from(sector).unwrap_or(-1),
+        i32::try_from(selected).unwrap_or(-1),
     )
 }
 
 /// `schematics.getLoadouts()` filtered by the launcher core.
-fn launch_rows(
-    dialog: &mut MindDialog,
-    state: &Rc<RefCell<LaunchLoadoutState>>,
-) -> Vec<VarDictionary> {
-    let plan = {
-        let st = state.borrow();
-        st.plan.clone()
-    };
+fn launch_rows(plan: Option<&LaunchPlanView>, views: Option<&CampaignViews>) -> Vec<LaunchRow> {
     // A live plan's row list is authoritative: with `allowLaunchSchematics`
     // false Java renders no grid at all (`LaunchLoadoutDialog.java:167-196`),
     // so an empty list must stay empty instead of falling back to the planet
     // default core's loadouts (PAR-0509).
-    if !plan.is_empty() {
-        return row_rows(&plan, "loadouts");
+    if let Some(plan) = plan {
+        return plan
+            .loadouts
+            .iter()
+            .map(|row| LaunchRow {
+                index: row.index as i64,
+                core: row.core.clone(),
+                file: row.file.clone().unwrap_or_default(),
+            })
+            .collect();
     }
-    dialog
-        .campaign_section("loadouts")
-        .iter_shared()
-        .filter_map(|value| value.try_to::<VarDictionary>().ok())
-        .collect()
+    views
+        .map(|views| {
+            views
+                .loadouts
+                .iter()
+                .map(|loadout| LaunchRow {
+                    index: loadout.index as i64,
+                    core: loadout.core.clone(),
+                    file: loadout.file.clone().unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The picker's core (`PlanetDialog.java:1405`), read from the live plan.
-fn launch_selected_core(
-    dialog: &mut MindDialog,
-    state: &Rc<RefCell<LaunchLoadoutState>>,
-) -> String {
-    let plan = {
-        let st = state.borrow();
-        st.plan.clone()
-    };
-    let core = row_str(&plan, "core");
+fn launch_selected_core(plan: Option<&LaunchPlanView>, rows: &[LaunchRow]) -> String {
+    let core = plan.map(|plan| plan.core.clone()).unwrap_or_default();
     if !core.is_empty() {
         return core;
     }
-    for loadout in launch_rows(dialog, state) {
-        let core = row_str(&loadout, "core");
-        if !core.is_empty() {
-            return core;
+    for loadout in rows {
+        if !loadout.core.is_empty() {
+            return loadout.core.clone();
         }
     }
     String::new()
 }
 
-/// The `SchematicView` row for a schematic index.
-fn launch_schematic_row(dialog: &mut MindDialog, index: i64) -> VarDictionary {
-    for row_variant in dialog.campaign_section("schematics").iter_shared() {
-        let Ok(row) = row_variant.try_to::<VarDictionary>() else {
-            continue;
-        };
-        if row_i64_or(&row, "index", -1) == index {
-            return row;
-        }
-    }
-    VarDictionary::new()
+/// The `SchematicView` for a schematic index.
+fn launch_schematic_row(views: Option<&CampaignViews>, index: i64) -> Option<SchematicView> {
+    let views = views?;
+    views
+        .schematics
+        .iter()
+        .find(|row| i64::try_from(row.index).unwrap_or(-1) == index)
+        .cloned()
 }
 
 /// The launcher's localized name (`Sector.name()` + the `sector.<preset>.name`
 /// rule).
-fn launch_localized_from(plan: &VarDictionary) -> String {
-    let from_name = row_str(plan, "from");
-    let preset = row_str(plan, "from_preset");
-    if !preset.is_empty() {
+fn launch_localized_from(plan: &LaunchPlanView) -> String {
+    let from_name = plan.from.clone();
+    if let Some(preset) = plan.from_preset.as_deref()
+        && !preset.is_empty()
+    {
         let key = format!("sector.{preset}.name");
         let localized = kit::t(&format!("@{key}")).to_string();
         if !localized.is_empty() && localized != key {
@@ -200,23 +210,31 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
     list.bind_mut().clear();
     let plan = launch_plan(dialog, state);
     state.borrow_mut().plan = plan;
+    // The planet's projected loadouts (the no-plan fallback rows) and the
+    // schematic previews come from one per-show projection.
+    let views = campaign_views_of(dialog, "");
     // Select a row the launcher's plan offers (default row preferred); the plan
     // carries the requirements/capacity for the *selected* schematic, so a
     // selection change rebuilds it.
-    let offered: Vec<i64> = launch_rows(dialog, state)
-        .iter()
-        .map(|loadout| row_i64_or(loadout, "index", -1))
-        .collect();
+    let offered: Vec<i64> = {
+        let st = state.borrow();
+        launch_rows(st.plan.as_ref(), views.as_ref())
+            .iter()
+            .map(|loadout| loadout.index)
+            .collect()
+    };
     let mut selected = {
         let st = state.borrow();
         st.selected
     };
     if !offered.contains(&selected) {
-        let plan = {
+        selected = {
             let st = state.borrow();
-            st.plan.clone()
+            st.plan
+                .as_ref()
+                .map(|plan| plan.selected as i64)
+                .unwrap_or(-1)
         };
-        selected = row_i64_or(&plan, "selected", -1);
         if !offered.contains(&selected) && !offered.is_empty() {
             selected = offered[0];
         }
@@ -228,10 +246,10 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
         let st = state.borrow();
         st.plan.clone()
     };
-    let loadouts = launch_rows(dialog, state);
+    let loadouts = launch_rows(plan.as_ref(), views.as_ref());
     // `launch.from`: the launcher sector's name (`LaunchLoadoutDialog.java:165`).
-    if !plan.is_empty() {
-        let text = kit::tm_format("@launch.from", &[launch_localized_from(&plan).as_str()]);
+    if let Some(plan) = plan.as_ref() {
+        let text = kit::tm_format("@launch.from", &[launch_localized_from(plan).as_str()]);
         let label = factory::label(&text.to_string());
         list.bind_mut().add(&label).grow_x().pad(4.0);
         list.bind_mut().row();
@@ -240,7 +258,10 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
         // `LaunchLoadoutDialog.java:167-196,204-210`: with schematics forbidden
         // the dialog has no grid at all; Java then shows the destination
         // preset's description pane (nothing when the preset has none).
-        let description = row_str(&plan, "preset_description");
+        let description = plan
+            .as_ref()
+            .map(|plan| plan.preset_description.clone())
+            .unwrap_or_default();
         if !description.is_empty() {
             let label = factory::label(&kit::markup_text(&description).to_string());
             let mut description_rich = rich(&label);
@@ -257,7 +278,7 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
         let cols =
             ((dialog.base().get_viewport_rect().size.x / SCHEMATIC_COLUMN_WIDTH) as i64).max(1);
         for (position, loadout) in loadouts.iter().enumerate() {
-            let schematic_index = row_i64_or(loadout, "index", -1);
+            let schematic_index = loadout.index;
             // code-instantiated: one SchematicImage toggle per allowed loadout.
             let mut button = Button::new_alloc();
             button.set_theme_type_variation("togglet");
@@ -278,8 +299,9 @@ fn launch_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
                 let mut image_control: Gd<Control> = image.clone().upcast();
                 image_control.set_anchors_and_offsets_preset(LayoutPreset::FULL_RECT);
             }
-            let schematic = launch_schematic_row(dialog, schematic_index);
-            image.bind_mut().setup(schematic);
+            if let Some(schematic) = launch_schematic_row(views.as_ref(), schematic_index) {
+                image.bind_mut().setup(schematic_image_row(&schematic));
+            }
             button.add_child(&image);
             {
                 let image_for_enter = image.clone();
@@ -314,16 +336,11 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
         let st = state.borrow();
         st.plan.clone()
     };
-    if plan.is_empty() {
-        let resource_totals = launch_resource_stacks(dialog);
+    let Some(plan) = plan else {
+        let resource_totals = campaign_launch_stacks(dialog);
         if !resource_totals.is_empty() {
             let mut parts: Vec<String> = Vec::new();
-            for item in resource_totals.keys_array().iter_shared() {
-                let name = to_text_godot(&item);
-                let amount = resource_totals
-                    .get(&gs(name.as_str()))
-                    .map(|value| to_i64_typed(&value))
-                    .unwrap_or(0);
+            for (name, amount) in &resource_totals {
                 parts.push(format!("{name} x{amount}"));
             }
             let label = factory::label(&format!("{} {}", kit::t("@resources"), parts.join(", ")));
@@ -331,54 +348,36 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
             list.bind_mut().row();
         }
         return;
-    }
-    let capacity = row_i64_or(&plan, "capacity", 0);
+    };
+    let capacity = plan.capacity;
     if capacity > 0 {
         let text = kit::tm_format("@launch.capacity", &[capacity.to_string().as_str()]).to_string();
         let label = factory::label(&text);
         list.bind_mut().add(&label).grow_x().pad(4.0);
         list.bind_mut().row();
     }
-    let allow = row_bool(&plan, "allow_launch_loadout");
-    let total = row_dict(&plan, "total");
-    let requirements = row_dict(&plan, "requirements");
-    let resources = row_dict(&plan, "resources");
-    let stored = row_dict(&plan, "stored");
+    let allow = plan.allow_launch_loadout;
     let mut count = 0i64;
     // code-instantiated: item rows are the item-id-ordered `total` map.
     let mut row = HBoxContainer::new_alloc();
     row.add_theme_constant_override("separation", 4);
-    for item in total.keys_array().iter_shared() {
-        let name = to_text_godot(&item);
-        let amount = total
-            .get(&gs(name.as_str()))
-            .map(|value| to_i64_typed(&value))
-            .unwrap_or(0);
-        if amount == 0 {
+    for (name, amount) in &plan.total {
+        if *amount == 0 {
             continue;
         }
         let icon = factory::image(&format!("item-{name}-ui"));
         row.add_child(&icon);
-        let as_amount = requirements
-            .get(&gs(name.as_str()))
-            .map(|value| to_i64_typed(&value))
-            .unwrap_or(0);
-        let al_amount = resources
-            .get(&gs(name.as_str()))
-            .map(|value| to_i64_typed(&value))
-            .unwrap_or(0);
+        let as_amount = plan.requirements.get(name.as_str()).copied().unwrap_or(0);
+        let al_amount = plan.resources.get(name.as_str()).copied().unwrap_or(0);
         let mut amount_text = amount.to_string();
         if allow {
             amount_text = format!("{amount_text}[gray] ({al_amount} + {as_amount})");
         }
-        let stored_amount = stored
-            .get(&gs(name.as_str()))
-            .map(|value| to_i64_typed(&value))
-            .unwrap_or(0);
-        if stored_amount < amount {
+        let stored_amount = plan.stored.get(name.as_str()).copied().unwrap_or(0);
+        if stored_amount < *amount {
             amount_text = format!(
                 "[scarlet]{}[lightgray]/{}",
-                stored_amount.min(amount),
+                stored_amount.min(*amount),
                 amount_text
             );
         }
@@ -397,7 +396,7 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
         list.bind_mut().add(&row).grow_x().pad(2.0);
         list.bind_mut().row();
     }
-    if !row_bool(&plan, "valid") {
+    if !plan.valid {
         let label = factory::label(&kit::tm("@sector.missingresources").to_string());
         list.bind_mut().add(&label).grow_x().pad(4.0);
         list.bind_mut().row();
@@ -416,8 +415,12 @@ fn launch_rebuild_buttons(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoad
     let back = dialog.base().callable("hide_dialog");
     let back_text = kit::t("@back").to_string();
     dialog.add_button(&back_text, Some(back), "left", 160.0);
-    let allow = row_bool_or(&plan, "allow_launch_loadout", true);
-    let max_on = row_bool_or(&plan, "max", true);
+    // An absent plan reads as the old empty dictionary: both flags default true.
+    let allow = plan
+        .as_ref()
+        .map(|plan| plan.allow_launch_loadout)
+        .unwrap_or(true);
+    let max_on = plan.as_ref().map(|plan| plan.max).unwrap_or(true);
     if allow {
         let target = dialog.to_gd();
         let state_for_max = state.clone();
@@ -450,35 +453,30 @@ fn launch_rebuild_buttons(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoad
     });
     let launch_text = kit::t("@launch.text").to_string();
     let mut launch = dialog.add_button(&launch_text, Some(callable), "ok", 160.0);
-    launch.set_disabled(!plan.is_empty() && !row_bool(&plan, "valid"));
+    launch.set_disabled(plan.as_ref().is_some_and(|plan| !plan.valid));
 }
 
 /// `setMax`: writes the `maxresources` flag through the live settings store.
 fn launch_toggle_max(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState>>) {
     let max_on = {
         let st = state.borrow();
-        row_bool_or(&st.plan, "max", true)
+        st.plan.as_ref().map(|plan| plan.max).unwrap_or(true)
     };
     setting_put_flag("maxresources", !max_on);
-    state.borrow_mut().plan = VarDictionary::new();
+    state.borrow_mut().plan = None;
     launch_rebuild(dialog, state);
 }
 
-/// The selected loadout row, or `{}`.
+/// The selected loadout row.
 fn launch_find_selected_row(
-    dialog: &mut MindDialog,
     state: &Rc<RefCell<LaunchLoadoutState>>,
-) -> VarDictionary {
-    let selected = {
-        let st = state.borrow();
-        st.selected
-    };
-    for loadout in launch_rows(dialog, state) {
-        if row_i64_or(&loadout, "index", -1) == selected {
-            return loadout;
-        }
-    }
-    VarDictionary::new()
+    views: Option<&CampaignViews>,
+    selected: i64,
+) -> Option<LaunchRow> {
+    let st = state.borrow();
+    launch_rows(st.plan.as_ref(), views)
+        .into_iter()
+        .find(|loadout| loadout.index == selected)
 }
 
 /// `LaunchLoadoutDialog.@launch.text`: `universe.updateLoadout(core, selected);
@@ -503,14 +501,25 @@ fn launch_confirm(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState
         let st = state.borrow();
         st.plan.clone()
     };
-    let row = launch_find_selected_row(dialog, state);
-    let mut core_name = row_str(&row, "core");
+    let views = if plan.is_none() {
+        campaign_views_of(dialog, "")
+    } else {
+        None
+    };
+    let row = launch_find_selected_row(state, views.as_ref(), selected);
+    let mut core_name = row.as_ref().map(|row| row.core.clone()).unwrap_or_default();
     if core_name.is_empty() {
-        core_name = row_str(&plan, "core");
+        core_name = plan
+            .as_ref()
+            .map(|plan| plan.core.clone())
+            .unwrap_or_default();
     }
-    let mut file_name = row_str(&row, "file");
+    let mut file_name = row.as_ref().map(|row| row.file.clone()).unwrap_or_default();
     if file_name.is_empty() {
-        file_name = row_str(&plan, "selected_file");
+        file_name = plan
+            .as_ref()
+            .and_then(|plan| plan.selected_file.clone())
+            .unwrap_or_default();
     }
     let file_name = mind_core::game::universe::file_stem(&file_name).to_owned();
     if let Some(mut campaign) = dialog.campaign_node()
@@ -534,19 +543,29 @@ fn launch_open_loadout(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadout
         .context_value("sector")
         .map(|value| to_i64_typed(&value))
         .unwrap_or(-1);
-    let capacity = {
+    let plan = {
         let st = state.borrow();
-        row_i64_or(&st.plan, "capacity", 0)
+        st.plan.clone()
     };
+    let capacity = plan.as_ref().map(|plan| plan.capacity).unwrap_or(0);
     let selected = {
         let st = state.borrow();
         st.selected
     };
-    let core = launch_selected_core(dialog, state);
+    let views = if plan.is_none() {
+        campaign_views_of(dialog, "")
+    } else {
+        None
+    };
+    let rows = {
+        let st = state.borrow();
+        launch_rows(st.plan.as_ref(), views.as_ref())
+    };
+    let core = launch_selected_core(plan.as_ref(), &rows);
     let mut context = VarDictionary::new();
     context.set("planet", &gs(planet));
     context.set("sector", &sector.to_variant());
-    context.set("capacity", &capacity.to_variant());
+    context.set("capacity", &i64::from(capacity).to_variant());
     context.set("index", &selected.to_variant());
     context.set("core", &gs(core));
     open_dialog("loadout", &context);
