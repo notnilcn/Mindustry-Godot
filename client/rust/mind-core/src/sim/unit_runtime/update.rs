@@ -9,14 +9,14 @@
 //! core/src/mindustry/entities/comp/CrawlComp.java
 
 use super::ai::defender::update_defender_ai;
-use super::ai::flying::update_flying_ai;
 use super::ai::follow::update_flying_follow_ai;
-use super::ai::ground::{GroundAiRules, update_ground_ai};
+use super::ai::ground::GroundAiRules;
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
 use super::ai_arms::assembler::assembler_arm;
 use super::ai_arms::boost::boost_arm;
 use super::ai_arms::cargo::cargo_arm;
+use super::ai_arms::ground_flying::ground_flying_arm;
 use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_arms::player::player_arm;
 use super::ai_weapons::{
@@ -736,38 +736,16 @@ pub fn unit_update_system(world: &mut World) {
         } else if slot.kind == AiKind::NoAi {
             no_ai_arm();
         } else {
-            let flying = slot.kind == AiKind::Flying
-                || world
-                    .get::<PhysicsComp>(entity)
-                    .is_some_and(|physics| physics.flying);
-            if flying {
-                // `FlyingAI` (FlyingAI.java:16-72): main target via
-                // `findMainTarget` (core in range, else `targetFlags`, else the
-                // core), circle/close on it, shuttle to the spawner when idle
-                // on the default team.
-                update_flying_ai(
-                    world,
-                    &mut runtime,
-                    &queries,
-                    entity,
-                    team,
-                    slot,
-                    ground_rules,
-                );
-            } else {
-                // `GroundAI.updateMovement` (GroundAI.java:21-85): field walk to
-                // the enemy-core set with the Java targeting cadence.
-                update_ground_ai(
-                    world,
-                    &mut runtime,
-                    &queries,
-                    entity,
-                    team,
-                    slot,
-                    ground_rules,
-                    &mut core_target_cache,
-                );
-            }
+            ground_flying_arm(
+                world,
+                &mut runtime,
+                &queries,
+                entity,
+                team,
+                slot,
+                ground_rules,
+                &mut core_target_cache,
+            );
         }
 
         // Kind kinematics (`Unit.update` tail: legs/mech/tank/crawl/water).
