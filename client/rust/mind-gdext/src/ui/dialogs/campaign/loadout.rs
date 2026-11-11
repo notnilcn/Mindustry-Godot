@@ -9,10 +9,11 @@ use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
-use godot::builtin::{VarArray, VarDictionary};
+use godot::builtin::VarDictionary;
 use godot::classes::control::MouseFilter;
 use godot::classes::{Control, HBoxContainer};
 use godot::prelude::*;
+use mind_core::ui::campaign::CampaignViews;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -92,11 +93,14 @@ impl DialogController for LoadoutDialog {
 
     fn shown(&mut self, dialog: &mut MindDialog) {
         let planet = dialog.context_string("planet").to_string();
-        let views = dialog.campaign_json("campaign_views_json", &[gs(planet).to_variant()]);
-        let capacity = match dialog.context_value("capacity") {
-            Some(value) => to_i64_typed(&value),
-            None => row_i64_or(&views, "launch_capacity", 0),
-        };
+        // The typed per-planet projection seeds the editor's item rows. The old
+        // `launch_capacity` dictionary read was always 0: `CampaignViews` has no
+        // such field, so the capacity comes from the context only.
+        let views = campaign_views_of(dialog, &planet);
+        let capacity = dialog
+            .context_value("capacity")
+            .map(|value| to_i64_typed(&value))
+            .unwrap_or(0);
         let index = dialog
             .context_value("index")
             .map(|value| to_i64_typed(&value))
@@ -106,7 +110,7 @@ impl DialogController for LoadoutDialog {
             st.capacity = capacity;
             st.index = index;
         }
-        loadout_seed(dialog, &self.state);
+        loadout_seed(dialog, &self.state, views.as_ref());
         loadout_rebuild(dialog, &self.state);
     }
 }
@@ -117,37 +121,22 @@ impl DialogController for LoadoutDialog {
 /// `LoadoutDialog.reseed` (`LoadoutDialog.java:125-129`) copies the live
 /// launch-resource stacks and appends every remaining planet item at 0 — never
 /// the schematic requirement amounts (PAR-0488).
-fn loadout_seed(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
+fn loadout_seed(
+    dialog: &mut MindDialog,
+    state: &Rc<RefCell<LoadoutState>>,
+    views: Option<&CampaignViews>,
+) {
     let mut seed_amounts = VarDictionary::new();
-    // `Universe.getLaunchResources()`: read the name-keyed stacks endpoint.
-    // `get_launch_resources` returns the dense `PackedInt32Array`, which
-    // `campaign_json`'s GString cast cannot parse (PAR-0488).
-    let live = dialog.campaign_json("get_launch_resource_stacks", &[]);
-    for item in live.keys_array().iter_shared() {
-        let name = to_text_godot(&item);
-        let amount = live
-            .get(&gs(name.as_str()))
-            .map(|value| to_i64_typed(&value))
-            .unwrap_or(0);
-        seed_amounts.set(&gs(name.as_str()), &amount.to_variant());
+    // `Universe.getLaunchResources()`: the typed `{item: amount}` stacks.
+    for (name, amount) in campaign_launch_stacks(dialog) {
+        seed_amounts.set(&gs(name.as_str()), &i64::from(amount).to_variant());
     }
-    for loadout in dialog.campaign_section("loadouts").iter_shared() {
-        let Ok(loadout) = loadout.try_to::<VarDictionary>() else {
-            continue;
-        };
-        for requirement in row_arr(&loadout, "requirements").iter_shared() {
-            let Ok(requirement) = requirement.try_to::<VarArray>() else {
-                continue;
-            };
-            let Some(item) = requirement
-                .iter_shared()
-                .next()
-                .map(|value| to_text_godot(&value))
-            else {
-                continue;
-            };
-            if !seed_amounts.contains_key(&gs(item.as_str())) {
-                seed_amounts.set(&gs(item), &0i64.to_variant());
+    if let Some(views) = views {
+        for loadout in &views.loadouts {
+            for (item, _) in &loadout.requirements {
+                if !seed_amounts.contains_key(&gs(item.as_str())) {
+                    seed_amounts.set(&gs(item.as_str()), &0i64.to_variant());
+                }
             }
         }
     }

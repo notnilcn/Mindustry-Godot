@@ -54,8 +54,8 @@ pub(super) const WORLD_PATH: &str = "/root/Spine/World";
 // ---------------------------------------------------------------------------
 
 pub(super) use super::super::util::{
-    bundle_or, campaign_sector_is_playing, content_texture, dialog_node, icon_rect, json_stringify,
-    launch_resource_stacks, panel_with_box, row_arr, row_bool, row_bool_or, row_dict, row_rows,
+    bundle_or, campaign_launch_stacks, campaign_sector_is_playing, content_texture, dialog_node,
+    icon_rect, json_stringify, panel_with_box, row_arr, row_bool, row_bool_or, row_dict, row_rows,
     set_toggle, setting_put_flag, setting_put_text, setting_text, spacer, ui_bool, ui_root,
 };
 

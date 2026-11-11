@@ -16,7 +16,9 @@ use godot::classes::{
     StyleBoxEmpty, StyleBoxFlat, Texture2D, TextureRect,
 };
 use godot::prelude::*;
-use mind_core::ui::campaign::{CampaignViews, ResearchTreeView, SectorStatsView, SectorView};
+use mind_core::ui::campaign::{
+    CampaignViews, ResearchTreeView, SchematicView, SectorStatsView, SectorView,
+};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -157,6 +159,39 @@ pub(in crate::ui::dialogs) fn empty_sector_view(id: u16, planet: &str, name: &st
         export_destination: None,
         any_exports: false,
     }
+}
+
+/// The `SchematicImage` widget's row shape (`width`/`height`/`tiles`) built from
+/// the typed schematic view.
+///
+/// The widget is outside T02's owned paths and keeps its untyped
+/// `#[func] setup(VarDictionary)` surface, so the dialog translates at that
+/// boundary. Follow-up for C01: a typed `setup_view(&SchematicView)` on
+/// `kit/widgets/schematic_image.rs` would drop this adapter.
+pub(in crate::ui::dialogs) fn schematic_image_row(view: &SchematicView) -> VarDictionary {
+    let mut row = VarDictionary::new();
+    row.set("width", &i64::from(view.width).to_variant());
+    row.set("height", &i64::from(view.height).to_variant());
+    let mut tiles = VarArray::new();
+    for tile in &view.tiles {
+        let mut tile_row = VarDictionary::new();
+        tile_row.set("block", &gs(tile.block.as_str()).to_variant());
+        tile_row.set("x", &i64::from(tile.x).to_variant());
+        tile_row.set("y", &i64::from(tile.y).to_variant());
+        tile_row.set("size", &i64::from(tile.size).to_variant());
+        tile_row.set("rotation", &i64::from(tile.rotation).to_variant());
+        tile_row.set("rotate", &tile.rotate.to_variant());
+        if !tile.lasers.is_empty() {
+            let mut lasers = VarArray::new();
+            for index in &tile.lasers {
+                lasers.push(&(*index as i64).to_variant());
+            }
+            tile_row.set("lasers", &lasers.to_variant());
+        }
+        tiles.push(&tile_row.to_variant());
+    }
+    row.set("tiles", &tiles.to_variant());
+    row
 }
 
 /// Reads a JSON string field (`""` when missing or null).
@@ -319,25 +354,6 @@ pub(in crate::ui::dialogs) fn campaign_launch_stacks(dialog: &MindDialog) -> Vec
         return Vec::new();
     };
     campaign.bind_mut().launch_resource_stacks()
-}
-
-/// Live `universe.getLaunchResources()` as `{item: amount}`.
-///
-/// Reads `MindCampaign.get_launch_resource_stacks` (the name-keyed stacks
-/// endpoint) and parses its JSON; `{}` when the facade is absent.
-/// Superseded by [`campaign_launch_stacks`]; the last caller goes in the
-/// launch-dialog commit.
-pub(in crate::ui::dialogs) fn launch_resource_stacks(dialog: &mut MindDialog) -> VarDictionary {
-    let Some(mut campaign) = dialog.campaign_node() else {
-        return VarDictionary::new();
-    };
-    if !campaign.has_method("get_launch_resource_stacks") {
-        return VarDictionary::new();
-    }
-    let text = campaign
-        .call("get_launch_resource_stacks", &[])
-        .to::<GString>();
-    crate::gdutil::variant::parse_object(&text.to_string())
 }
 
 /// The live map registry node (`None` outside the game scene).
