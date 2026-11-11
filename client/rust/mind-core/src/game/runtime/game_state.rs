@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::game::State;
-use crate::game::play::{apply_sector_loss, check_game_state, sector_capture};
+use crate::game::play::{apply_sector_loss, check_game_state};
 
 /// `TickSet::GameStateCheck`: `Logic.checkGameState` + campaign loss
 /// bookkeeping.
@@ -102,30 +102,4 @@ pub fn current_sector_captured(world: &World) -> bool {
                 && !runtime.session.rules.waves
                 && !runtime.session.rules.attack_mode
         })
-}
-
-/// Forced `Logic.sectorCapture` on the played sector: the runtime half of the
-/// facade's `capture_sector` (`Control`'s forced capture path).
-///
-/// Snapshots the `SectorCaptureEvent` listener inputs **before** the capture
-/// (Java fires the event inside `Logic.sectorCapture` while `rules.attackMode`
-/// is still set, `Logic.java:394-425`), runs [`sector_capture`], then applies
-/// the capture arm's bookkeeping ([`on_captured_sector`]: the service hook and
-/// the derelict-wave-team queue) and queues the ordered events.
-///
-/// Returns whether a capture happened. 02-FINDINGS #2 names this the shared
-/// path; X01 keeps the facade's own body until that fix lands, so the facade
-/// does not adopt it yet.
-pub fn capture_played_sector(runtime: &mut CampaignRuntime) -> bool {
-    let was_attack_mode = runtime.session.rules.attack_mode;
-    let buildings_destroyed = runtime.session.stats.buildings_destroyed;
-    let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
-    let captured = !events.is_empty();
-    for event in events {
-        if let PlayEvent::SectorCapture { planet, .. } = &event {
-            on_captured_sector(runtime, *planet, was_attack_mode, buildings_destroyed);
-        }
-        runtime.events.push(event);
-    }
-    captured
 }

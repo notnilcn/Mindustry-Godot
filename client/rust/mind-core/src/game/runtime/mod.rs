@@ -302,9 +302,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub use game_state::{
-    capture_played_sector, current_sector_captured, game_state_tick_system, on_captured_sector,
-};
+pub use game_state::{current_sector_captured, game_state_tick_system, on_captured_sector};
 pub use hooks::{
     CampaignCoreHooks, CampaignCoreQueues, CampaignHookQueues, UnlockRef,
     install_campaign_core_hooks, reset_campaign_core_hooks,

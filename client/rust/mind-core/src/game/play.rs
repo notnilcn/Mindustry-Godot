@@ -862,20 +862,6 @@ pub fn begin_sector_launch(
     }
 }
 
-/// `Sector.isBeingPlayed` (`Sector.java:148-151`): a launch clears every
-/// previous flag before the new sector starts (`start_sector`, 1628-1634 at
-/// `291e30a8`).
-///
-/// H01 adds `Campaign::clear_being_played`; X01 must prefer it and C01 removes
-/// this copy.
-pub fn clear_being_played_for_launch(campaign: &mut Campaign) {
-    for planet in campaign.planets.values_mut() {
-        for sector in &mut planet.sectors {
-            sector.being_played = false;
-        }
-    }
-}
-
 /// The live sector record for `SectorInfo.prepare` + `SectorInfo.saveInfo`
 /// (`persist_sector_record_in` 4984-5056 at `291e30a8`): prepare from the live
 /// core snapshot, then copy the wave/rules fields.
@@ -1948,25 +1934,10 @@ mod tests {
     }
 
     #[test]
-    fn begin_sector_launch_unlocks_the_preset_and_clears_the_played_flags() {
+    fn begin_sector_launch_unlocks_the_preset_and_records_it() {
         let mut registry = content();
         let mut campaign = campaign(&registry);
         let planet = campaign.planet_id_by_name("serpulo").expect("serpulo");
-        let sector_id = registry.sector_by_name("groundZero").expect("g0").sector;
-        // A previous sector still flagged as played.
-        campaign
-            .sector_mut(planet, sector_id)
-            .expect("sector")
-            .being_played = true;
-        clear_being_played_for_launch(&mut campaign);
-        assert!(
-            campaign
-                .planet(planet)
-                .expect("serpulo record")
-                .sectors
-                .iter()
-                .all(|sector| !sector.being_played)
-        );
         // A locked preset is quiet-unlocked (no unlock event) and recorded.
         let locked = campaign
             .planet(planet)

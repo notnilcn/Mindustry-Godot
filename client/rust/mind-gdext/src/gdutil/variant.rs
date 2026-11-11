@@ -12,7 +12,6 @@
 //! Upstream: none (port-only; GDScript's implicit `str`/`int`/`float`/`bool`
 //! coercions that the native UI reproduces).
 
-#![allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
 
 use godot::builtin::{GString, StringName, VarArray, VarDictionary, Variant, VariantType};
 use godot::classes::Json;
@@ -120,30 +119,6 @@ pub fn to_i64_no_text(value: Option<Variant>) -> i64 {
     0
 }
 
-/// `int(value)` or `None`: `i64`, then the `f32` chain in [`to_f32_option`].
-///
-/// Body from `ui/planet.rs:2526`.
-pub fn to_i64_option(value: &Variant) -> Option<i64> {
-    if let Ok(number) = value.try_to::<i64>() {
-        return Some(number);
-    }
-    to_f32_option(value).map(|number| number as i64)
-}
-
-/// `float(value)`: `f32`, then `f64` narrowed, then `i64` as `f32` (`None`
-/// when none convert).
-///
-/// Body from `ui/planet.rs:2516`.
-pub fn to_f32_option(value: &Variant) -> Option<f32> {
-    if let Ok(number) = value.try_to::<f32>() {
-        return Some(number);
-    }
-    if let Ok(number) = value.try_to::<f64>() {
-        return Some(number as f32);
-    }
-    value.try_to::<i64>().ok().map(|number| number as f32)
-}
-
 /// `float(value)`: `f64`, then `i64` as `f64`, then a trimmed `GString` parse,
 /// then 0.0.
 ///
@@ -159,20 +134,6 @@ pub fn to_f64_lenient(value: &Variant) -> f64 {
         return text.to_string().trim().parse().unwrap_or(0.0);
     }
     0.0
-}
-
-/// `float(value)` by `VariantType`: FLOAT, INT as `f64`, otherwise 0.0.
-///
-/// Body from `ui/editor_views.rs:87` (also `research_view.rs:538`).
-pub fn to_f64_numeric(value: &Variant) -> f64 {
-    match value.get_type() {
-        VariantType::FLOAT => value.try_to::<f64>().unwrap_or_default(),
-        VariantType::INT => value
-            .try_to::<i64>()
-            .map(|number| number as f64)
-            .unwrap_or_default(),
-        _ => 0.0,
-    }
 }
 
 /// `float(value)` by `VariantType`: FLOAT, INT, BOOL 0.0/1.0, STRING or
@@ -391,19 +352,6 @@ pub fn to_text_godot(value: &Variant) -> String {
     }
 }
 
-/// GDScript `str(value)` or `None`: `GString`, then `StringName`.
-///
-/// Body from `ui/planet.rs:2506`.
-pub fn to_text_option(value: &Variant) -> Option<String> {
-    if let Ok(text) = value.try_to::<GString>() {
-        return Some(text.to_string());
-    }
-    if let Ok(name) = value.try_to::<StringName>() {
-        return Some(name.to_string());
-    }
-    None
-}
-
 /// GDScript `str(float)`: whole numbers keep the `.0` suffix.
 ///
 /// Body from `ui/dialogs/batch_campaign2.rs:222` (`format_godot_float`).
@@ -429,16 +377,6 @@ pub fn dict_i64_or(dict: &VarDictionary, key: &str, default: i64) -> i64 {
         .unwrap_or(default)
 }
 
-/// A dictionary value coerced with [`to_i64_int_or_float`], or `default`.
-///
-/// Body from `ui/kit/widgets/schematic_image.rs:448` (also
-/// `research_items_display.rs:282`).
-pub fn dict_i64_int_or_float_or(dict: &VarDictionary, key: &str, default: i64) -> i64 {
-    dict.get(key)
-        .map(|value| to_i64_int_or_float(&value))
-        .unwrap_or(default)
-}
-
 /// A dictionary value coerced with `try_to_relaxed::<i64>`, or `default`.
 ///
 /// Body from `ui/fragments/block_config.rs:1061` (also `fragments/hud.rs:1938`
@@ -446,25 +384,6 @@ pub fn dict_i64_int_or_float_or(dict: &VarDictionary, key: &str, default: i64) -
 pub fn dict_i64_relaxed_or(dict: &VarDictionary, key: &str, default: i64) -> i64 {
     dict.get(key)
         .and_then(|value| value.try_to_relaxed::<i64>().ok())
-        .unwrap_or(default)
-}
-
-/// A dictionary value coerced with `try_to::<i64>`, or `default`.
-///
-/// Body from `platform/crash.rs:40` (also `ui/hud.rs:792` with a `0` default
-/// and a `GString`-wrapped key lookup).
-pub fn dict_i64_try_or(dict: &VarDictionary, key: &str, default: i64) -> i64 {
-    dict.get(key)
-        .and_then(|value| value.try_to::<i64>().ok())
-        .unwrap_or(default)
-}
-
-/// A dictionary value coerced with [`to_f64_lenient`], or `default`.
-///
-/// Body from `ui/dialogs/batch_f.rs:245`.
-pub fn dict_f64_or(dict: &VarDictionary, key: &str, default: f64) -> f64 {
-    dict.get(key)
-        .map(|value| to_f64_lenient(&value))
         .unwrap_or(default)
 }
 
@@ -506,31 +425,6 @@ pub fn dict_bool_try_or(dict: &VarDictionary, key: &str, default: bool) -> bool 
         .unwrap_or(default)
 }
 
-/// A dictionary value coerced with `try_to_relaxed::<bool>`, or `default`.
-///
-/// Body from `ui/fragments/block_config.rs:1054` (also
-/// `block_inventory.rs:470`, `hints.rs:877`; `fragments/hud.rs:1931` uses the
-/// same chain with a `false` default).
-pub fn dict_bool_relaxed_or(dict: &VarDictionary, key: &str, default: bool) -> bool {
-    dict.get(key)
-        .and_then(|value| value.try_to_relaxed::<bool>().ok())
-        .unwrap_or(default)
-}
-
-/// A dictionary `BOOL` value, or `default` (other types never coerce).
-///
-/// Body from `ui/kit/widgets/research_view.rs:502` (same semantics with a
-/// match guard at `schematic_image.rs:455`).
-pub fn dict_bool_typed_or(dict: &VarDictionary, key: &str, default: bool) -> bool {
-    match dict.get(key) {
-        Some(value) => match value.get_type() {
-            VariantType::BOOL => value.try_to::<bool>().unwrap_or(default),
-            _ => default,
-        },
-        None => default,
-    }
-}
-
 /// A dictionary value coerced with [`to_text_lenient`], or `""`.
 ///
 /// Body from `ui/dialogs/batch_b.rs:233` (also `batch_f.rs:231`,
@@ -551,41 +445,6 @@ pub fn dict_text_try_or(dict: &VarDictionary, key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A dictionary value coerced with `try_to_relaxed::<GString>`, or `default`.
-///
-/// Body from `ui/fragments/block_config.rs:1068` (identical at
-/// `fragments/hints.rs:898`; `fragments/hud.rs:1952` uses the same chain with
-/// an empty default).
-pub fn dict_text_relaxed_or(dict: &VarDictionary, key: &str, default: &str) -> GString {
-    dict.get(key)
-        .and_then(|value| value.try_to_relaxed::<GString>().ok())
-        .unwrap_or_else(|| GString::from(default))
-}
-
-/// A dictionary `STRING` value, or `default` (other types never coerce).
-///
-/// Body from `ui/kit/widgets/schematic_image.rs:465` (same semantics at
-/// `research_view.rs:520`).
-pub fn dict_text_strict_or(dict: &VarDictionary, key: &str, fallback: &str) -> String {
-    match dict.get(key) {
-        Some(value) if value.get_type() == VariantType::STRING => value
-            .try_to::<GString>()
-            .map(|text| text.to_string())
-            .unwrap_or_else(|_| fallback.to_string()),
-        _ => fallback.to_string(),
-    }
-}
-
-/// A dictionary value coerced with [`to_text_display`], or `fallback`.
-///
-/// Body from `ui/kit/widgets/research_items_display.rs:274` (`dict_string`).
-pub fn dict_text_display_or(dict: &VarDictionary, key: &str, fallback: &str) -> String {
-    match dict.get(key) {
-        Some(value) => to_text_display(&value),
-        None => fallback.to_string(),
-    }
-}
-
 /// `JSON.parse_string(text)` as a dictionary (`{}` on any other shape); an
 /// empty string short-circuits before touching the engine.
 ///
@@ -598,31 +457,6 @@ pub fn parse_object(text: &str) -> VarDictionary {
     Json::parse_string(&GString::from(text))
         .try_to::<VarDictionary>()
         .unwrap_or_default()
-}
-
-/// `JSON.parse_string(text)` as a dictionary; only an all-whitespace string
-/// short-circuits.
-///
-/// Body from `ui/dialogs/batch_d.rs:196`.
-pub fn parse_object_trimmed(text: &str) -> VarDictionary {
-    if text.trim().is_empty() {
-        return VarDictionary::new();
-    }
-    Json::parse_string(&GString::from(text))
-        .try_to::<VarDictionary>()
-        .unwrap_or_default()
-}
-
-/// `JSON.parse_string(text)` as a dictionary from a `GString`; an empty string
-/// short-circuits.
-///
-/// Body from `ui/dialog.rs:1051`.
-pub fn parse_object_from_gstring(json_text: &GString) -> VarDictionary {
-    if json_text.is_empty() {
-        return VarDictionary::new();
-    }
-    let parsed = Json::parse_string(json_text);
-    parsed.try_to::<VarDictionary>().unwrap_or_default()
 }
 
 /// `JSON.parse_string(text)` as an object (`{}` on any other shape).
