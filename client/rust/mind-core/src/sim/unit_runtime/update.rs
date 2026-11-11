@@ -14,6 +14,7 @@ use super::ai::follow::update_flying_follow_ai;
 use super::ai::ground::{GroundAiRules, update_ground_ai};
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
+use super::ai_arms::boost::boost_arm;
 use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_arms::player::player_arm;
 use super::ai_weapons::{
@@ -610,29 +611,7 @@ pub fn unit_update_system(world: &mut World) {
             }
             let _ = command_ai_weapon_pass(world, &runtime.content, &queries, entity, team, true);
         } else if slot.kind == AiKind::Boost {
-            // `BoostAI.defaultBehavior` (`ai/types/boost.rs`): enable boost
-            // without issuing movement; the lift-off runs in `update_kinematics`
-            // (`UnitComp.updateBoosting`).
-            let mut state = crate::ai::types::boost::BoostAi {
-                unit: Some(entity),
-                boosting: true,
-            };
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                crate::ai::types::boost::update_boost(&mut ctx, entity, &mut state);
-            }
+            boost_arm(world, &mut runtime, entity, team);
         } else if slot.kind == AiKind::Defender {
             // `DefenderAI` (`DefenderAI.java:12-45`): escort the healthiest
             // player-controllable ally; no weapons pass of its own.
