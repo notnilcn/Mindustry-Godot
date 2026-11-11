@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T03:56:42Z",
+  "updated": "2026-11-11T04:19:31Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1587,6 +1587,63 @@
       "repro": "tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens",
       "expected": "115 PASS/0 FAIL; run-all --tier T0 4/4; --goldens --check no drift; spine checksums 2d61ec134e26eb10 / 3e48c583a94fbea4 / 08d1c5049d3375f4",
       "risk": "Determinism: the whole per-unit AI dispatch was re-homed. Any drift in arm order, the four guard continues, the kinematics/weapons tail or the two outside-arm RNG sites means a body was not moved verbatim",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261111-041931",
+      "created_at": "2026-11-11T04:19:31Z",
+      "agent": "refactor-T02",
+      "branch": "main",
+      "head": "81ea3b5a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-gdext/src/ui/dialogs,client/rust/mind-gdext/src/ui/planet,client/rust/mind-gdext/src/ui/kit/widgets",
+      "summary": "Read T01's typed campaign view-models directly in the campaign/maps/schematics dialogs, the planet view and the research widgets (W4-T02)",
+      "files": [
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/util.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/sector_stats.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/sector_select.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/campaign_complete.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/campaign_rules.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/research.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/research_root_select.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/launch_loadout.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/loadout.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/mod.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/page.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/reads.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/sector_panel.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/chooser.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/globe_input.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/launch.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/reveal.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/stage.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/util.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/campaign/planet/view_binding.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/maps/map_list.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/schematics/files.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/schematics/import_export.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/schematics/schematic_info.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/schematics/schematics_dialog.rs",
+        "client/rust/mind-gdext/src/ui/dialogs/schematics/subdialogs.rs",
+        "client/rust/mind-gdext/src/ui/kit/widgets/research_view.rs",
+        "client/rust/mind-gdext/src/ui/kit/widgets/research_items_display.rs",
+        "client/rust/mind-gdext/src/ui/planet/mod.rs",
+        "client/rust/mind-gdext/src/ui/planet/overlays.rs",
+        "client/rust/mind-gdext/src/ui/dialog.rs",
+        "client/rust/mind-gdext/src/ui/landing.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "dialog-sweep",
+        "ui-widgets-check"
+      ],
+      "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt -, then godot4 --headless --path client res://scenes/tools/dialog_sweep_check.tscn and res://scenes/tools/ui_widgets_check.tscn",
+      "expected": "437/437 mind-gdext lib tests pass (inventory 438 -> 437: one dead-helper test deleted with its helper); scoped clippy -D warnings clean; workspace --all-targets check ok; api-surface diff empty (104 MindCampaign funcs, 2 signals); dialog_sweep_check failed=0; ui_widgets_check passes. Every campaign dialog renders the same layout/text/tooltips/ids.",
+      "risk": "The dialogs are code-built UI (no unit test covers the widget tree), so the in-engine sweep is the real gate: research tree/zoom/hover popup, planet page rail + sector list + launch flow, campaign rules toggles, sector stats, schematics cards/tags/info, custom game. Watch for bind() panics if a dialog is ever shown synchronously from inside a MindCampaign method (all current paths are deferred); the typed view producers are called with the guard dropped before any UI call. The MindPlanetView/MindResearchView ABI #[func]s still accept their untyped dictionaries (rows are projected/deserialized at that boundary).",
       "status": "pending"
     }
   ]
