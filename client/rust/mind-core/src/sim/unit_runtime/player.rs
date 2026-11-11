@@ -21,10 +21,9 @@ impl Sim {
         rotation: f32,
     ) -> Option<Entity> {
         let ecs = &mut self.ecs.0;
-        let mut runtime = ecs.remove_non_send::<UnitRuntime>()?;
-        let entity = runtime.spawn(ecs, name, team, x, y, rotation);
-        ecs.insert_non_send(runtime);
-        entity
+        with_unit_runtime_removed(ecs, |ecs, runtime| {
+            runtime.spawn(ecs, name, team, x, y, rotation)
+        })?
     }
 
     /// `PayloadBlockBuild.getPayload()` accessor: the payload held by a
@@ -189,7 +188,7 @@ impl Sim {
             if entity_ref.get::<CoreBuild>().is_none() {
                 continue;
             }
-            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            if team_of(&self.ecs.0, entity_ref.id()) != Some(team) {
                 continue;
             }
             let Some(build) = entity_ref.get::<Building>() else {
@@ -259,10 +258,7 @@ impl Sim {
         // `for(mount : unit.mounts) mount.reload = mount.weapon.reload;`
         let reloads: Vec<f32> = {
             let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            unit_def(&self.ecs.0, &runtime.content, entity)
                 .map(|def| def.weapons.iter().map(|weapon| weapon.reload).collect())
                 .unwrap_or_default()
         };
@@ -375,7 +371,7 @@ impl Sim {
         let Some(target) = target else {
             return false;
         };
-        if self.ecs.0.get::<TeamComp>(target).map(|t| t.team) != Some(team) {
+        if team_of(&self.ecs.0, target) != Some(team) {
             return false;
         }
         if self
@@ -390,11 +386,7 @@ impl Sim {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                 return false;
             };
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(target)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .cloned()
+            unit_def(&self.ecs.0, &runtime.content, target).cloned()
         };
         let Some(def) = def else {
             return false;
@@ -461,11 +453,7 @@ impl Sim {
                     let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                         return false;
                     };
-                    self.ecs
-                        .0
-                        .get::<UnitTypeComp>(before)
-                        .and_then(|comp| runtime.content.unit(comp.type_id))
-                        .cloned()
+                    unit_def(&self.ecs.0, &runtime.content, before).cloned()
                 };
                 let _ = before_def;
                 self.release_unit_to_ai(before, team);
@@ -484,11 +472,7 @@ impl Sim {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                 return;
             };
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .cloned()
+            unit_def(&self.ecs.0, &runtime.content, entity).cloned()
         };
         let kind = def.map_or(AiKind::Ground, |def| {
             crate::entities::comp::unit::lifecycle::select_team_controller(&self.ecs.0, &def, team)
@@ -552,11 +536,7 @@ impl Sim {
                     let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
                         return false;
                     };
-                    let flying = self
-                        .ecs
-                        .0
-                        .get::<UnitTypeComp>(current)
-                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                    let flying = unit_def(&self.ecs.0, &runtime.content, current)
                         .is_some_and(|def| def.flying);
                     let hit = self
                         .ecs
@@ -636,7 +616,7 @@ impl Sim {
     pub fn control_block_unit_id(&mut self, pos: TilePos) -> Option<i32> {
         let entity = self.grid.entity_at(pos)?;
         let team = self.player_team?;
-        if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(team) {
+        if team_of(&self.ecs.0, entity) != Some(team) {
             return None;
         }
         let def = self
@@ -697,7 +677,7 @@ impl Sim {
             .content
             .unit_by_name("block")
             .cloned()?;
-        let team = self.ecs.0.get::<TeamComp>(router).map_or(0, |t| t.team);
+        let team = team_of(&self.ecs.0, router).unwrap_or(0);
         let (x, y) = self
             .ecs
             .0

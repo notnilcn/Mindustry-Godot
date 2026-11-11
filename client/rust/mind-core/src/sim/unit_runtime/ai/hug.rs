@@ -123,7 +123,7 @@ pub(in crate::sim::unit_runtime) fn update_hug_ai(
     {
         let dx = tpos.x - pos.x;
         let dy = tpos.y - pos.y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         if dist2 <= type_range * type_range {
             let (ux, uy) = (WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
             let (tx, ty) = (WorldGrid::to_tile(tpos.x), WorldGrid::to_tile(tpos.y));

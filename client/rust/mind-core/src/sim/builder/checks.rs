@@ -140,10 +140,7 @@ pub(super) fn should_skip(
 }
 
 /// Tile centre in world pixels (`Tile.worldx()`).
-pub(super) fn tile_world(pos: TilePos) -> (f32, f32) {
-    let unit = crate::config::TILESIZE as f32;
-    (f32::from(pos.x()) * unit, f32::from(pos.y()) * unit)
-}
+pub(super) use crate::sim::query::tile_world;
 
 pub(super) fn within(ux: f32, uy: f32, pos: TilePos, range: f32) -> bool {
     let (tx, ty) = tile_world(pos);

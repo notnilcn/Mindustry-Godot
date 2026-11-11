@@ -104,128 +104,125 @@ impl Sim {
         target: Option<i32>,
     ) -> bool {
         let ecs = &mut self.ecs.0;
-        let Some(mut runtime) = ecs.remove_non_send::<UnitRuntime>() else {
+        let Some(changed) = with_unit_runtime_removed(ecs, |ecs, runtime| {
+            let mut changed = false;
+            let candidates: Vec<Entity> = if let Some(target_seq) = target {
+                runtime
+                    .units
+                    .iter()
+                    .copied()
+                    .filter(|entity| {
+                        ecs.get::<EntitySeq>(*entity)
+                            .is_some_and(|seq| seq.0 as i32 == target_seq)
+                    })
+                    .collect()
+            } else {
+                let carrier_hit = ecs
+                    .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+                    .map(|hitbox| hitbox.hit_size)
+                    .unwrap_or(0.0);
+                // `Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`: the
+                // search is centered on the carrier, not the cursor
+                // (`InputHandler.tryPickupPayload`, InputHandler.java:1043).
+                let (cx, cy) = ecs
+                    .get::<Pos>(carrier)
+                    .map(|pos| (pos.x, pos.y))
+                    .unwrap_or((x, y));
+                let mut near: Vec<(f32, Entity)> = runtime
+                    .units
+                    .iter()
+                    .copied()
+                    .filter(|entity| *entity != carrier)
+                    .filter_map(|entity| {
+                        let pos = ecs.get::<Pos>(entity)?;
+                        let (dx, dy) = (pos.x - cx, pos.y - cy);
+                        let dist2 = dist2(dx, dy);
+                        (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
+                    })
+                    .collect();
+                near.sort_by_key(|(dist2, entity)| (dist2.to_bits(), entity.index()));
+                near.into_iter().map(|(_, entity)| entity).collect()
+            };
+            for target in candidates {
+                if target == carrier {
+                    continue;
+                }
+                let carrier_team = team_of(ecs, carrier).unwrap_or(0);
+                let target_team = team_of(ecs, target).unwrap_or(0);
+                let target_ai = ecs
+                    .get::<ControllerSlot>(target)
+                    .is_some_and(|slot| slot.kind != AiKind::Player);
+                let target_grounded = ecs
+                    .get::<UnitCore>(target)
+                    .is_some_and(|core| core.elevation < 0.001);
+                let (target_id, target_hit, target_allowed) =
+                    unit_def(ecs, &runtime.content, target)
+                        .map(|def| (def.id, def.hit_size, def.allowed_in_payloads))
+                        .unwrap_or((crate::content::UnitTypeId::new(0), f32::MAX, false));
+                let carrier_hit = ecs
+                    .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+                    .map(|hitbox| hitbox.hit_size)
+                    .unwrap_or(0.0);
+                let capacity = ecs
+                    .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
+                    .map(|payload| payload.capacity)
+                    .unwrap_or(0.0);
+                let used = ecs
+                    .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                    .map(|payloads| payloads.payload_used(&runtime.content))
+                    .unwrap_or(0.0);
+                let within = match (
+                    ecs.get::<Pos>(carrier).copied(),
+                    ecs.get::<Pos>(target).copied(),
+                ) {
+                    (Some(carrier_pos), Some(target_pos)) => {
+                        let (dx, dy) = (target_pos.x - carrier_pos.x, target_pos.y - carrier_pos.y);
+                        // `u.within(unit, u.hitSize + unit.hitSize)`
+                        // (InputHandler.java:1043).
+                        (dx * dx + dy * dy).sqrt() <= carrier_hit + target_hit
+                    }
+                    _ => false,
+                };
+                // `PayloadComp.canPickup(Unit)`: `type.pickupUnits` gate.
+                let pickup_units =
+                    unit_def(ecs, &runtime.content, carrier).is_some_and(|def| def.pickup_units);
+                if !pickup_units
+                    || carrier_team != target_team
+                    || !target_ai
+                    || !target_grounded
+                    || !target_allowed
+                    || !within
+                    || used + target_hit * target_hit > capacity + 0.001
+                {
+                    continue;
+                }
+                let health = ecs.get::<Health>(target).map(|h| h.health).unwrap_or(0.0);
+                let rotation = ecs
+                    .get::<UnitCore>(target)
+                    .map(|c| c.rotation)
+                    .unwrap_or(0.0);
+                runtime.units.retain(|entity| *entity != target);
+                runtime.units_removed += 1;
+                let _ = ecs.despawn(target);
+                if let Some(mut payloads) =
+                    ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                {
+                    payloads
+                        .stack
+                        .push(crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                            type_id: target_id,
+                            team: target_team,
+                            health,
+                            rotation,
+                        });
+                    changed = true;
+                }
+                break;
+            }
+            changed
+        }) else {
             return false;
         };
-        let mut changed = false;
-        let candidates: Vec<Entity> = if let Some(target_seq) = target {
-            runtime
-                .units
-                .iter()
-                .copied()
-                .filter(|entity| {
-                    ecs.get::<EntitySeq>(*entity)
-                        .is_some_and(|seq| seq.0 as i32 == target_seq)
-                })
-                .collect()
-        } else {
-            let carrier_hit = ecs
-                .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
-                .map(|hitbox| hitbox.hit_size)
-                .unwrap_or(0.0);
-            // `Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`: the
-            // search is centered on the carrier, not the cursor
-            // (`InputHandler.tryPickupPayload`, InputHandler.java:1043).
-            let (cx, cy) = ecs
-                .get::<Pos>(carrier)
-                .map(|pos| (pos.x, pos.y))
-                .unwrap_or((x, y));
-            let mut near: Vec<(f32, Entity)> = runtime
-                .units
-                .iter()
-                .copied()
-                .filter(|entity| *entity != carrier)
-                .filter_map(|entity| {
-                    let pos = ecs.get::<Pos>(entity)?;
-                    let (dx, dy) = (pos.x - cx, pos.y - cy);
-                    let dist2 = dx * dx + dy * dy;
-                    (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
-                })
-                .collect();
-            near.sort_by_key(|(dist2, entity)| (dist2.to_bits(), entity.index()));
-            near.into_iter().map(|(_, entity)| entity).collect()
-        };
-        for target in candidates {
-            if target == carrier {
-                continue;
-            }
-            let team_of = |entity: Entity| ecs.get::<TeamComp>(entity).map(|t| t.team);
-            let carrier_team = team_of(carrier).unwrap_or(0);
-            let target_team = team_of(target).unwrap_or(0);
-            let target_ai = ecs
-                .get::<ControllerSlot>(target)
-                .is_some_and(|slot| slot.kind != AiKind::Player);
-            let target_grounded = ecs
-                .get::<UnitCore>(target)
-                .is_some_and(|core| core.elevation < 0.001);
-            let (target_id, target_hit, target_allowed) = ecs
-                .get::<UnitTypeComp>(target)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .map(|def| (def.id, def.hit_size, def.allowed_in_payloads))
-                .unwrap_or((crate::content::UnitTypeId::new(0), f32::MAX, false));
-            let carrier_hit = ecs
-                .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
-                .map(|hitbox| hitbox.hit_size)
-                .unwrap_or(0.0);
-            let capacity = ecs
-                .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
-                .map(|payload| payload.capacity)
-                .unwrap_or(0.0);
-            let used = ecs
-                .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
-                .map(|payloads| payloads.payload_used(&runtime.content))
-                .unwrap_or(0.0);
-            let within = match (
-                ecs.get::<Pos>(carrier).copied(),
-                ecs.get::<Pos>(target).copied(),
-            ) {
-                (Some(carrier_pos), Some(target_pos)) => {
-                    let (dx, dy) = (target_pos.x - carrier_pos.x, target_pos.y - carrier_pos.y);
-                    // `u.within(unit, u.hitSize + unit.hitSize)`
-                    // (InputHandler.java:1043).
-                    (dx * dx + dy * dy).sqrt() <= carrier_hit + target_hit
-                }
-                _ => false,
-            };
-            // `PayloadComp.canPickup(Unit)`: `type.pickupUnits` gate.
-            let pickup_units = ecs
-                .get::<UnitTypeComp>(carrier)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .is_some_and(|def| def.pickup_units);
-            if !pickup_units
-                || carrier_team != target_team
-                || !target_ai
-                || !target_grounded
-                || !target_allowed
-                || !within
-                || used + target_hit * target_hit > capacity + 0.001
-            {
-                continue;
-            }
-            let health = ecs.get::<Health>(target).map(|h| h.health).unwrap_or(0.0);
-            let rotation = ecs
-                .get::<UnitCore>(target)
-                .map(|c| c.rotation)
-                .unwrap_or(0.0);
-            runtime.units.retain(|entity| *entity != target);
-            runtime.units_removed += 1;
-            let _ = ecs.despawn(target);
-            if let Some(mut payloads) =
-                ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
-            {
-                payloads
-                    .stack
-                    .push(crate::entities::comp::unit::comp::CarriedPayload::Unit {
-                        type_id: target_id,
-                        team: target_team,
-                        health,
-                        rotation,
-                    });
-                changed = true;
-            }
-            break;
-        }
-        ecs.insert_non_send(runtime);
         if changed {
             return true;
         }
@@ -255,12 +252,7 @@ impl Sim {
             return false;
         };
         let (block, rotation) = (building.block, building.rotation);
-        let build_team = self
-            .ecs
-            .0
-            .get::<TeamComp>(build)
-            .map(|team| team.team)
-            .unwrap_or(0);
+        let build_team = team_of(&self.ecs.0, build).unwrap_or(0);
         let health = self
             .ecs
             .0
@@ -269,69 +261,66 @@ impl Sim {
             .unwrap_or(0.0);
 
         let ecs = &mut self.ecs.0;
-        let Some(runtime) = ecs.remove_non_send::<UnitRuntime>() else {
+        let Some(changed) = with_unit_runtime_removed(ecs, |ecs, runtime| {
+            let carrier_team = team_of(ecs, carrier).unwrap_or(0);
+            let carrier_pos = ecs.get::<Pos>(carrier).copied();
+            let carrier_hit = ecs
+                .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+                .map(|hitbox| hitbox.hit_size)
+                .unwrap_or(0.0);
+            let capacity = ecs
+                .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
+                .map(|payload| payload.capacity)
+                .unwrap_or(0.0);
+            let used = ecs
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                .map(|payloads| payloads.payload_used(&runtime.content))
+                .unwrap_or(0.0);
+            let (size, pickable) = runtime
+                .content
+                .block(block)
+                .map(|def| {
+                    (
+                        def.size as f32 * crate::config::TILESIZE as f32,
+                        crate::world::build::block_can_pickup(def),
+                    )
+                })
+                .unwrap_or((0.0, false));
+            let tile_size = crate::config::TILESIZE as f32;
+            let within = match (carrier_pos, building_center(ecs, build)) {
+                (Some(carrier_pos), Some((bx, by))) => {
+                    let (dx, dy) = (bx - carrier_pos.x, by - carrier_pos.y);
+                    (dx * dx + dy * dy).sqrt() <= size * 1.2 + tile_size * 5.0
+                }
+                _ => false,
+            };
+            let mut changed = false;
+            if build_team == carrier_team
+                && pickable
+                && within
+                && used + size * size <= capacity + 0.001
+                && let Some(rt) = self.block_runtime.as_mut()
+                && rt.pickup_building(ecs, &mut self.grid, build).is_some()
+            {
+                if let Some(mut payloads) =
+                    ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                {
+                    payloads
+                        .stack
+                        .push(crate::entities::comp::unit::comp::CarriedPayload::Build {
+                            block,
+                            team: carrier_team,
+                            rotation,
+                            health,
+                        });
+                    changed = true;
+                }
+                let _ = carrier_hit;
+            }
+            changed
+        }) else {
             return false;
         };
-        let carrier_team = ecs.get::<TeamComp>(carrier).map(|t| t.team).unwrap_or(0);
-        let carrier_pos = ecs.get::<Pos>(carrier).copied();
-        let carrier_hit = ecs
-            .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
-            .map(|hitbox| hitbox.hit_size)
-            .unwrap_or(0.0);
-        let capacity = ecs
-            .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
-            .map(|payload| payload.capacity)
-            .unwrap_or(0.0);
-        let used = ecs
-            .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
-            .map(|payloads| payloads.payload_used(&runtime.content))
-            .unwrap_or(0.0);
-        let (size, pickable) = runtime
-            .content
-            .block(block)
-            .map(|def| {
-                (
-                    def.size as f32 * crate::config::TILESIZE as f32,
-                    crate::world::build::block_can_pickup(def),
-                )
-            })
-            .unwrap_or((0.0, false));
-        let tile_size = crate::config::TILESIZE as f32;
-        let within = match (carrier_pos, building_center(ecs, build)) {
-            (Some(carrier_pos), Some((bx, by))) => {
-                let (dx, dy) = (bx - carrier_pos.x, by - carrier_pos.y);
-                (dx * dx + dy * dy).sqrt() <= size * 1.2 + tile_size * 5.0
-            }
-            _ => false,
-        };
-        let mut changed = false;
-        if build_team == carrier_team
-            && pickable
-            && within
-            && used + size * size <= capacity + 0.001
-            && let Some(rt) = self.block_runtime.as_mut()
-            && rt
-                .pickup_building(&mut self.ecs.0, &mut self.grid, build)
-                .is_some()
-        {
-            if let Some(mut payloads) = self
-                .ecs
-                .0
-                .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
-            {
-                payloads
-                    .stack
-                    .push(crate::entities::comp::unit::comp::CarriedPayload::Build {
-                        block,
-                        team: carrier_team,
-                        rotation,
-                        health,
-                    });
-                changed = true;
-            }
-            let _ = carrier_hit;
-        }
-        self.ecs.0.insert_non_send(runtime);
         if changed {
             // The grid snapshot dropped the building.
             self.refresh_unit_runtime();
@@ -365,30 +354,28 @@ impl Sim {
                 rotation,
             } => {
                 let ecs = &mut self.ecs.0;
-                let Some(mut runtime) = ecs.remove_non_send::<UnitRuntime>() else {
-                    return false;
-                };
-                let Some(def) = runtime.content.unit(type_id) else {
-                    ecs.insert_non_send(runtime);
-                    return false;
-                };
-                let seq = runtime.seq;
-                runtime.seq = seq.wrapping_add(1);
-                let entity = crate::entities::comp::unit::lifecycle::spawn_unit_def(
-                    ecs, seq, def, team, cx, cy, rotation,
-                );
-                if let Some(mut stored) = ecs.get_mut::<Health>(entity) {
-                    stored.health = health;
-                }
-                runtime.units.push(entity);
-                runtime.units_created += 1;
-                if let Some(mut payloads) =
-                    ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
-                {
-                    let _ = payloads.stack.pop();
-                }
-                ecs.insert_non_send(runtime);
-                true
+                with_unit_runtime_removed(ecs, |ecs, runtime| {
+                    let Some(def) = runtime.content.unit(type_id) else {
+                        return false;
+                    };
+                    let seq = runtime.seq;
+                    runtime.seq = seq.wrapping_add(1);
+                    let entity = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+                        ecs, seq, def, team, cx, cy, rotation,
+                    );
+                    if let Some(mut stored) = ecs.get_mut::<Health>(entity) {
+                        stored.health = health;
+                    }
+                    runtime.units.push(entity);
+                    runtime.units_created += 1;
+                    if let Some(mut payloads) =
+                        ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                    {
+                        let _ = payloads.stack.pop();
+                    }
+                    true
+                })
+                .unwrap_or(false)
             }
             crate::entities::comp::unit::comp::CarriedPayload::Build {
                 block,

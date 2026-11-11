@@ -136,7 +136,7 @@ pub(super) fn target_flag_active(
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity;
         let replace = match best {
             None => true,
@@ -191,16 +191,16 @@ pub(super) fn unit_control_cost(
     content: &ContentRegistry,
     entity: Entity,
 ) -> crate::ai::control_pathfinder::ControlCost {
-    world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-        .map_or(crate::ai::control_pathfinder::ControlCost::Ground, |def| {
+    unit_def(world, content, entity).map_or(
+        crate::ai::control_pathfinder::ControlCost::Ground,
+        |def| {
             crate::ai::control_pathfinder::ControlCost::for_unit(
                 def.naval,
                 def.allow_leg_step,
                 def.hovering,
             )
-        })
+        },
+    )
 }
 
 /// `Pathfinder.EnemyCoreField.getPositions` (Pathfinder.java:555-588): enemy
@@ -265,7 +265,7 @@ pub(crate) fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Opt
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity.id();
         let replace = match best {
             None => true,
@@ -288,7 +288,7 @@ pub(crate) fn closest_core_of_team(world: &World, team: u8, x: f32, y: f32) -> O
         if entity_ref.get::<CoreBuild>().is_none() {
             continue;
         }
-        if entity_ref.get::<TeamComp>().map(|comp| comp.team) != Some(team) {
+        if team_of(world, entity_ref.id()) != Some(team) {
             continue;
         }
         let Some(pos) = entity_ref.get::<Pos>() else {
@@ -296,7 +296,7 @@ pub(crate) fn closest_core_of_team(world: &World, team: u8, x: f32, y: f32) -> O
         };
         let dx = pos.x - x;
         let dy = pos.y - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         let id = entity_ref.id();
         let replace = match best {
             None => true,
@@ -321,7 +321,7 @@ pub(super) fn closest_spawn_tile(runtime: &UnitRuntime, x: f32, y: f32) -> Optio
         let cy = tile.y() as f32 * TILE_SIZE;
         let dx = cx - x;
         let dy = cy - y;
-        let dist2 = dx * dx + dy * dy;
+        let dist2 = dist2(dx, dy);
         if best.is_none_or(|(best_dist, _)| dist2 < best_dist) {
             best = Some((dist2, tile));
         }
@@ -354,10 +354,7 @@ pub(crate) fn invalid_target(
     if health.dead {
         return true;
     }
-    if world
-        .get::<TeamComp>(target)
-        .is_some_and(|comp| comp.team == team)
-    {
+    if team_of(world, target) == Some(team) {
         return true;
     }
     if let Some(comp) = world.get::<UnitTypeComp>(target) {
@@ -394,9 +391,7 @@ pub(super) fn building_center(world: &World, entity: Entity) -> Option<(f32, f32
 /// `Tile.worldx()`/`worldy()` (Tile.java:166-171): the tile's corner-based
 /// world coordinate, `x * tilesize`. The tile spans `[x*8 - 4, x*8 + 4)` and a
 /// building on it sits at `drawx = worldx + block.offset`.
-pub(super) fn tile_world(tile: TilePos) -> (f32, f32) {
-    (tile.x() as f32 * TILE_SIZE, tile.y() as f32 * TILE_SIZE)
-}
+pub(super) use crate::sim::query::tile_world;
 
 /// `AIController.faceTarget` (AIController.java:121-128): omni-movement
 /// units and mechs turn toward a valid in-range target when `type.faceTarget`
@@ -414,10 +409,7 @@ pub(super) fn face_target(
     let Some(target) = target else {
         return;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, content, entity) else {
         return;
     };
     let mech = world

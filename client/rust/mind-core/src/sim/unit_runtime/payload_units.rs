@@ -77,13 +77,10 @@ pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
     let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
         return false;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| runtime.content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, &runtime.content, entity) else {
         return false;
     };
-    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+    let team = team_of(world, entity).unwrap_or(0);
     // `if(!Units.canCreate(unit.team, unit.type)) return false;`
     if !crate::entities::comp::unit::queries::can_create_unit(world, team, def) {
         return false;
@@ -132,9 +129,7 @@ pub fn unit_payload_can_dump(world: &World, entity: Entity) -> bool {
             if !crate::combat::bullet::unit_is_grounded(world, other) {
                 return false;
             }
-            world
-                .get::<UnitTypeComp>(other)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            unit_def(world, &runtime.content, other)
                 .is_some_and(|other_def| other_def.allow_leg_step == leg_step)
         });
         if overlap {
@@ -160,31 +155,31 @@ pub fn dump_carried_unit(world: &mut World, entity: Entity) -> bool {
         .remove::<crate::world::blocks::payloads::PayloadCarried>();
     world.entity_mut(entity).insert(crate::entities::comp::Unit);
     // `unit.vel.add(Mathf.range(0.5f), Mathf.range(0.5f))` (`UnitPayload.java:139`).
-    let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
+    let Some(()) = with_unit_runtime_removed(world, |world, runtime| {
+        let (jx, jy) = (
+            runtime
+                .rng
+                .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+            runtime
+                .rng
+                .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
+        );
+        if let Some(mut vel) = world.get_mut::<Vel>(entity) {
+            vel.x += jx;
+            vel.y += jy;
+        }
+        // `unit.add()`: `EntityGroup.nextId()` then join `Groups.unit`.
+        runtime.seq = runtime.seq.wrapping_add(1);
+        let seq = runtime.seq;
+        if let Some(mut stored) = world.get_mut::<EntitySeq>(entity) {
+            stored.0 = seq;
+        } else {
+            world.entity_mut(entity).insert(EntitySeq(seq));
+        }
+        runtime.units.push(entity);
+        runtime.units_created += 1;
+    }) else {
         return false;
     };
-    let (jx, jy) = (
-        runtime
-            .rng
-            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
-        runtime
-            .rng
-            .range(crate::determinism::RngStream::Sim, -0.5, 0.5),
-    );
-    if let Some(mut vel) = world.get_mut::<Vel>(entity) {
-        vel.x += jx;
-        vel.y += jy;
-    }
-    // `unit.add()`: `EntityGroup.nextId()` then join `Groups.unit`.
-    runtime.seq = runtime.seq.wrapping_add(1);
-    let seq = runtime.seq;
-    if let Some(mut stored) = world.get_mut::<EntitySeq>(entity) {
-        stored.0 = seq;
-    } else {
-        world.entity_mut(entity).insert(EntitySeq(seq));
-    }
-    runtime.units.push(entity);
-    runtime.units_created += 1;
-    world.insert_non_send(runtime);
     true
 }

@@ -1009,10 +1009,7 @@ pub(super) fn apply_movement_damage(
     else {
         return;
     };
-    let team = world
-        .get::<TeamComp>(entity)
-        .map(|team| team.team)
-        .unwrap_or(0);
+    let team = team_of(world, entity).unwrap_or(0);
     let unit_damage = crate::game::runtime::rules_of(world)
         .map(|rules| rules.unit_damage(team))
         .unwrap_or(1.0);
@@ -1082,7 +1079,7 @@ pub(super) fn apply_movement_damage(
                 let Some(build) = grid.tiles.getn(tx, ty).and_then(|t| t.build) else {
                     continue;
                 };
-                if world.get::<TeamComp>(build).map(|t| t.team) != Some(team) {
+                if team_of(world, build) != Some(team) {
                     targets.push(build);
                 }
             }
@@ -1106,19 +1103,16 @@ pub(super) fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) 
     use bevy_ecs::query::With;
     let mut query = world
         .query_filtered::<(Entity, Option<&EntitySeq>), With<bullet::spawn::SpawnedByBullet>>();
-    let mut found: Vec<(u64, Entity)> = query
-        .iter(world)
-        .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity))
-        .collect();
-    found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
-    for (_, entity) in found {
+    let found = sorted_by_seq(
+        query
+            .iter(world)
+            .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity)),
+    );
+    for entity in found {
         // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`) for payload/
         // ability spawns (H09 T10); the runtime is out of the world here, so
         // the type name comes from the local one.
-        let name = world
-            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
-            .and_then(|comp| runtime.content.unit(comp.type_id))
-            .map(|def| def.name.clone());
+        let name = unit_def(world, &runtime.content, entity).map(|def| def.name.clone());
         crate::game::stats::notify_unit_created(world, entity, name.as_deref());
         world
             .entity_mut(entity)

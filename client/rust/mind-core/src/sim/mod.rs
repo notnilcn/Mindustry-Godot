@@ -24,6 +24,7 @@ pub mod schedule;
 pub mod unit_runtime;
 pub mod world_apply;
 
+mod query;
 mod spine;
 #[cfg(test)]
 mod spine_tests;

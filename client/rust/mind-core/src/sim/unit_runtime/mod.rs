@@ -61,6 +61,7 @@ use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
 
 use super::Sim;
+use super::query::{dist2, sorted_by_seq, team_of, unit_def};
 use super::runtime::{RuntimeError, load_vanilla_content};
 
 /// First entity sequence allocated to live units/bullets.
@@ -135,6 +136,23 @@ pub use waves::run_wave_system;
 
 /// World pixels per tile (`config::TILESIZE`).
 const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
+
+/// Runs `f` with the live [`UnitRuntime`] removed from the world and re-inserts
+/// it afterwards; `None` when no runtime is installed, matching the original
+/// `remove_non_send(...) else { … }` early-return sites.
+///
+/// While the resource is removed, nested code that looks it up sees no runtime
+/// (the deliberate behaviour of every converted remove/insert pair); never mix
+/// this with a `get_non_send(_mut)` site.
+fn with_unit_runtime_removed<R>(
+    world: &mut World,
+    f: impl FnOnce(&mut World, &mut UnitRuntime) -> R,
+) -> Option<R> {
+    let mut runtime = world.remove_non_send::<UnitRuntime>()?;
+    let result = f(world, &mut runtime);
+    world.insert_non_send(runtime);
+    Some(result)
+}
 
 /// Dead flying unit in its wreck fall (`UnitComp.killed`; UnitComp.java:980-991):
 /// the unit keeps existing with `Health.dead` until it crashes (grounded or
@@ -371,24 +389,28 @@ impl UnitRuntime {
         let mut c = Checksummer::new();
         c.part(&self.grid.width());
         c.part(&self.grid.height());
-        let mut units: Vec<(u64, Entity)> = self
-            .units
-            .iter()
-            .copied()
-            .filter(|entity| world.get_entity(*entity).is_ok())
-            .map(|entity| {
-                (
-                    world
-                        .get::<EntitySeq>(entity)
-                        .map(|seq| seq.0)
-                        .unwrap_or(u64::MAX),
-                    entity,
-                )
-            })
-            .collect();
-        units.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in units {
-            c.part(&seq);
+        let units = sorted_by_seq(
+            self.units
+                .iter()
+                .copied()
+                .filter(|entity| world.get_entity(*entity).is_ok())
+                .map(|entity| {
+                    (
+                        world
+                            .get::<EntitySeq>(entity)
+                            .map(|seq| seq.0)
+                            .unwrap_or(u64::MAX),
+                        entity,
+                    )
+                }),
+        );
+        for entity in units {
+            c.part(
+                &world
+                    .get::<EntitySeq>(entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX),
+            );
             if let Some(pos) = world.get::<Pos>(entity) {
                 c.part(&pos.x);
                 c.part(&pos.y);
@@ -400,28 +422,32 @@ impl UnitRuntime {
             if let Some(health) = world.get::<Health>(entity) {
                 c.part(&health.health);
             }
-            if let Some(team) = world.get::<TeamComp>(entity) {
-                c.part(&team.team);
+            if let Some(team) = team_of(world, entity) {
+                c.part(&team);
             }
         }
-        let mut bullets: Vec<(u64, Entity)> = self
-            .bullets
-            .iter()
-            .copied()
-            .filter(|entity| world.get_entity(*entity).is_ok())
-            .map(|entity| {
-                (
-                    world
-                        .get::<EntitySeq>(entity)
-                        .map(|seq| seq.0)
-                        .unwrap_or(u64::MAX),
-                    entity,
-                )
-            })
-            .collect();
-        bullets.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in bullets {
-            c.part(&seq);
+        let bullets = sorted_by_seq(
+            self.bullets
+                .iter()
+                .copied()
+                .filter(|entity| world.get_entity(*entity).is_ok())
+                .map(|entity| {
+                    (
+                        world
+                            .get::<EntitySeq>(entity)
+                            .map(|seq| seq.0)
+                            .unwrap_or(u64::MAX),
+                        entity,
+                    )
+                }),
+        );
+        for entity in bullets {
+            c.part(
+                &world
+                    .get::<EntitySeq>(entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX),
+            );
             if let Some(pos) = world.get::<Pos>(entity) {
                 c.part(&pos.x);
                 c.part(&pos.y);

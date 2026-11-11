@@ -5,6 +5,7 @@
 //! Upstream: core/src/mindustry/ai/types/CommandAI.java,
 //! core/src/mindustry/input/InputHandler.java.
 
+use crate::sim::query::unit_def;
 use crate::sim::*;
 
 impl Sim {
@@ -121,14 +122,9 @@ impl Sim {
                 continue;
             }
             // `CommandAI.command`: only unit-typed commands are accepted.
-            let allowed = self
-                .ecs
-                .0
-                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .is_some_and(|def| {
-                    crate::ai::unit_command_runtime::allows_command(def, command_id)
-                });
+            let allowed = unit_def(&self.ecs.0, &runtime.content, entity).is_some_and(|def| {
+                crate::ai::unit_command_runtime::allows_command(def, command_id)
+            });
             if !allowed {
                 continue;
             }
@@ -294,20 +290,15 @@ impl Sim {
             if team != default_team || !commandable {
                 continue;
             }
-            let allowed = self
-                .ecs
-                .0
-                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .is_some_and(|def| {
-                    let mut stances = Vec::new();
-                    crate::ai::unit_command_runtime::get_unit_stances(
-                        def,
-                        &runtime.content,
-                        &mut stances,
-                    );
-                    stances.contains(&stance_id)
-                });
+            let allowed = unit_def(&self.ecs.0, &runtime.content, entity).is_some_and(|def| {
+                let mut stances = Vec::new();
+                crate::ai::unit_command_runtime::get_unit_stances(
+                    def,
+                    &runtime.content,
+                    &mut stances,
+                );
+                stances.contains(&stance_id)
+            });
             if allowed {
                 accepted.push(entity);
             }

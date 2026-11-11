@@ -9,6 +9,8 @@
 use super::checks::team_core;
 use super::*;
 
+use crate::sim::query::unit_def;
+
 impl Sim {
     /// Whether `SimCommand::Place`/`Break` from player input should queue on
     /// the player unit (`InputHandler.flushPlans`) rather than apply
@@ -17,11 +19,7 @@ impl Sim {
         let (Some(unit), Some(runtime)) = (self.player_unit, self.block_runtime.as_ref()) else {
             return false;
         };
-        self.ecs
-            .0
-            .get::<UnitTypeComp>(unit)
-            .and_then(|comp| runtime.content().unit(comp.type_id))
-            .is_some_and(|def| def.build_speed > 0.0)
+        unit_def(&self.ecs.0, runtime.content(), unit).is_some_and(|def| def.build_speed > 0.0)
     }
 
     /// Whether `team` owns a core. Player plans with no build-capable unit

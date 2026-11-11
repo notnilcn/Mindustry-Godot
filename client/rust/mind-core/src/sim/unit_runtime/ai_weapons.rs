@@ -71,9 +71,7 @@ pub(super) fn command_ai_weapon_pass(
     should_shoot: bool,
 ) -> Option<Entity> {
     let pos = world.get::<Pos>(entity).copied()?;
-    let def = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))?;
+    let def = unit_def(world, content, entity)?;
     let mut state = world
         .get::<AiWeaponsState>(entity)
         .copied()
@@ -224,10 +222,7 @@ pub(crate) fn update_ai_weapons(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, content, entity) else {
         return;
     };
     let (single_target, auto_drop_bombs, hit_size, target_under_blocks) = (

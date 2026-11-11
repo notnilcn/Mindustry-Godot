@@ -52,10 +52,7 @@ pub(in crate::sim::unit_runtime) fn update_ground_ai(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| runtime.content.unit(comp.type_id))
-    else {
+    let Some(def) = unit_def(world, &runtime.content, entity) else {
         return;
     };
     // Copy out of the content borrow before touching the rest of the runtime.
@@ -283,7 +280,7 @@ pub(in crate::sim::unit_runtime) fn propagate_stuck(
         if other == entity {
             continue;
         }
-        if world.get::<TeamComp>(other).map(|comp| comp.team) != Some(team) {
+        if team_of(world, other) != Some(team) {
             continue;
         }
         // `other.controller() instanceof GroundAI` (`GroundAI.java:70`).
@@ -296,10 +293,7 @@ pub(in crate::sim::unit_runtime) fn propagate_stuck(
         if (other_pos.x - x).abs() > half || (other_pos.y - y).abs() > half {
             continue;
         }
-        let Some(other_def) = world
-            .get::<UnitTypeComp>(other)
-            .and_then(|comp| runtime.content.unit(comp.type_id))
-        else {
+        let Some(other_def) = unit_def(world, &runtime.content, other) else {
             continue;
         };
         // `other.within(unit, radius + other.hitSize * unitCollisionRadiusScale)`.

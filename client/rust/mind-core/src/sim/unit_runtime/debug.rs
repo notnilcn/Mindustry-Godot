@@ -86,7 +86,7 @@ impl Sim {
             if !ids.contains(&(seq.0 as i32)) {
                 return false;
             }
-            if entity_ref.get::<TeamComp>().map(|team_comp| team_comp.team) != Some(team) {
+            if team_of(&self.ecs.0, entity_ref.id()) != Some(team) {
                 return false;
             }
             entity_ref
@@ -110,9 +110,7 @@ impl Sim {
             let Some(seq) = entity_ref.get::<EntitySeq>() else {
                 continue;
             };
-            let type_name = entity_ref
-                .get::<UnitTypeComp>()
-                .and_then(|comp| runtime.content.unit(comp.type_id))
+            let type_name = unit_def(&self.ecs.0, &runtime.content, entity)
                 .map(|def| def.name.clone())
                 .unwrap_or_default();
             let mounts: Vec<serde_json::Value> = entity_ref
@@ -154,7 +152,7 @@ impl Sim {
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_name,
-                "team": entity_ref.get::<TeamComp>().map(|team| team.team).unwrap_or(0),
+                "team": team_of(&self.ecs.0, entity_ref.id()).unwrap_or(0),
                 "kind": entity_ref
                     .get::<ControllerSlot>()
                     .map(|slot| slot.kind.name())
@@ -235,7 +233,7 @@ impl Sim {
     /// HUD boss bar (G03 T9) and the `guardian` hint (G05).
     pub fn boss_json(&self) -> String {
         use crate::content::ctype::Mappable;
-        use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+        use crate::entities::comp::unit::comp::StatusComp;
         let bosses = self.bosses();
         let runtime = self.unit_runtime();
         let mut names: Vec<String> = Vec::new();
@@ -243,12 +241,7 @@ impl Sim {
         let mut max_sum = 0.0f32;
         let mut first: Option<serde_json::Value> = None;
         for (index, &entity) in bosses.iter().enumerate() {
-            let def = runtime.and_then(|runtime| {
-                self.ecs
-                    .0
-                    .get::<UnitTypeComp>(entity)
-                    .and_then(|comp| runtime.content.unit(comp.type_id))
-            });
+            let def = runtime.and_then(|runtime| unit_def(&self.ecs.0, &runtime.content, entity));
             let name = def.map(|def| def.name().to_string()).unwrap_or_default();
             if index < 6 {
                 names.push(name.clone());
@@ -305,7 +298,7 @@ impl Sim {
             if self.ecs.0.get_entity(entity).is_err() {
                 continue;
             }
-            if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(wave_team) {
+            if team_of(&self.ecs.0, entity) != Some(wave_team) {
                 continue;
             }
             if self
@@ -331,8 +324,7 @@ impl Sim {
                 .map_or(u64::MAX, |seq| seq.0);
             bosses.push((seq, entity));
         }
-        bosses.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        bosses.into_iter().map(|(_, entity)| entity).collect()
+        sorted_by_seq(bosses.into_iter())
     }
 
     /// World-pixel position of the player unit (`Player.x/y` mirror).
