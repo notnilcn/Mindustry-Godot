@@ -22,7 +22,7 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use crate::ui::dialogs::editor::util_d::*;
+use crate::ui::dialogs::editor::util::*;
 
 use super::file_chooser::{emit_dialog_signal, hide_node};
 
@@ -100,7 +100,7 @@ impl Default for IconSelectDialog {
 impl DialogController for IconSelectDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
@@ -161,7 +161,7 @@ impl IconSelectDialog {
             let mut scroll = MindScroll::new_alloc();
             scroll.set_custom_minimum_size(Vector2::new(1000.0, 420.0));
             scroll.set_v_size_flags(SizeFlags::EXPAND_FILL);
-            let mut grid = MindTable::new_alloc();
+            let mut grid = factory::table();
             grid.bind_mut().grow_horizontal();
             let grid_control: Gd<Control> = grid.clone().upcast();
             scroll.add_child(&grid_control);

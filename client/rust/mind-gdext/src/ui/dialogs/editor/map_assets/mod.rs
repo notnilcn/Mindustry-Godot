@@ -4,8 +4,9 @@
 //! The map assets dialog controller; this directory holds its submodules.
 //! Upstream: editor/data/MapAssetsDialog.java
 
+use crate::gdutil::variant::to_bool_lenient;
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindLabel, MindScroll, styles};
 use godot::builtin::Side;
@@ -179,7 +180,7 @@ fn map_assets_ready(dialog: &mut MindDialog, state: &Rc<RefCell<MapAssetsState>>
     let callable = Callable::from_fn("map_assets_confirm", move |args: &[&Variant]| {
         let confirmed = args
             .first()
-            .map(|value| variant_bool(value))
+            .map(|value| to_bool_lenient(value))
             .unwrap_or(false);
         let dialog_for = dialog_gd.clone();
         let state_for = state_for_confirm.clone();
@@ -224,8 +225,7 @@ fn map_assets_build(dialog: &mut MindDialog, state: &Rc<RefCell<MapAssetsState>>
     let kind = state.borrow().kind.clone();
 
     // `cont.add(types).growX().left().row()`.
-    let mut types = HBoxContainer::new_alloc();
-    types.add_theme_constant_override("separation", 4);
+    let mut types = factory::hbox(4);
     types.set_h_size_flags(SizeFlags::EXPAND_FILL);
     root.bind_mut().add(&types).grow_x();
     root.bind_mut().row();
@@ -309,8 +309,7 @@ fn map_assets_build(dialog: &mut MindDialog, state: &Rc<RefCell<MapAssetsState>>
     types.add_child(&guide);
 
     // `cont.table(search -> image + field).growX().row()`.
-    let mut search = HBoxContainer::new_alloc();
-    search.add_theme_constant_override("separation", 4);
+    let mut search = factory::hbox(4);
     search.set_h_size_flags(SizeFlags::EXPAND_FILL);
     root.bind_mut().add(&search).grow_x();
     root.bind_mut().row();
@@ -425,7 +424,7 @@ fn map_assets_change_type(
         }
         _ => {}
     }
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
 
     // Switching to the content view reloads content + sprites (`changeType`).
     if kind == "content" {
@@ -441,7 +440,7 @@ fn map_assets_rebuild(dialog: &Gd<MindDialog>, state: &Rc<RefCell<MapAssetsState
     let Some(mut list) = list else {
         return;
     };
-    clear_children(&mut list);
+    kit::clear_children(&mut list);
     let kind = state.borrow().kind.clone();
     match kind.as_str() {
         "patch" => map_assets_build_patches(dialog, &mut list, state),

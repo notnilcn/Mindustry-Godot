@@ -29,7 +29,7 @@ use crate::ui::kit::styles;
 use crate::ui::kit::widgets::border_image::MindBorderImage;
 use crate::ui::kit::widgets::factory;
 
-use super::util_d::*;
+use super::util::*;
 
 // ---------------------------------------------------------------------------
 // EditorMapDialog
@@ -70,7 +70,7 @@ impl DialogController for EditorMapDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@editor.mapinfo");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         connect_confirm_prompt(dialog, "editor_map", |target, confirmed| {
             editor_map_on_confirm(target, confirmed);
         });
@@ -160,8 +160,7 @@ impl EditorMapDialog {
         // space after a word, Arc's `GlyphLayout` does not.
         margin.add_theme_constant_override("margin_right", 0);
         pane.add_child(&margin);
-        let mut info_layout = VBoxContainer::new_alloc();
-        info_layout.add_theme_constant_override("separation", 0);
+        let mut info_layout = factory::vbox(0);
         info_layout.set_alignment(AlignmentMode::BEGIN);
         info_layout.set_h_size_flags(SizeFlags::EXPAND_FILL);
         margin.add_child(&info_layout);

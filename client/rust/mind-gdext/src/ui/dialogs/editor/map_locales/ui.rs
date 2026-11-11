@@ -16,7 +16,6 @@ use godot::classes::PanelContainer;
 use godot::classes::StyleBox;
 use godot::classes::StyleBoxFlat;
 use godot::classes::TextureRect;
-use godot::classes::VBoxContainer;
 use godot::classes::box_container::AlignmentMode;
 use godot::classes::control::LayoutPreset;
 use godot::classes::control::MouseFilter;
@@ -38,7 +37,8 @@ use mind_core::maps::locales::ensure_locale;
 use mind_core::maps::locales::read_locale;
 use mind_core::maps::locales::write_locale;
 
-use super::super::util_e::*;
+use super::super::util::*;
+use crate::gdutil::variant::{dict_bool_try_or, to_text_stringify};
 
 use super::model::{
     LOCALE_APPLY_ALL_META, LOCALE_CARD_WIDTH, LOCALE_COLLAPSED_META, LOCALE_CONFIRM_BOUND_META,
@@ -194,7 +194,7 @@ fn locale_icon_button(
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_MAIN);
     });
     button.connect("pressed", &callable);
     button
@@ -296,7 +296,8 @@ fn locale_content_icon_section(
 ) -> Vec<LocaleIconEntry> {
     let mut entries = Vec::new();
     for row in rows {
-        if dict_text(row, "content_type") != type_name || !dict_bool(row, "unlocked") {
+        if dict_text(row, "content_type") != type_name || !dict_bool_try_or(row, "unlocked", false)
+        {
             continue;
         }
         let name = dict_text(row, "name");
@@ -403,7 +404,7 @@ fn locale_fill_icon_grid(
 pub(super) fn locale_main_refresh(node: &Gd<MindDialog>) -> Callable {
     let target = node.clone();
     Callable::from_fn("locales_refresh_main", move |_args: &[&Variant]| {
-        request_refresh(&target, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_MAIN);
     })
 }
 
@@ -413,7 +414,7 @@ fn locale_field_key(field: &Gd<LineEdit>) -> String {
     if !field.has_meta(LOCALE_FIELD_KEY_META) {
         return String::new();
     }
-    variant_text(&field.get_meta(LOCALE_FIELD_KEY_META))
+    to_text_stringify(&field.get_meta(LOCALE_FIELD_KEY_META))
 }
 
 fn locale_set_field_key(field: &Gd<LineEdit>, key: &str) {
@@ -434,8 +435,7 @@ pub(super) fn locale_build_card(
     let mut card = PanelContainer::new_alloc();
     card.add_theme_stylebox_override("panel", &locale_card_frame(locale_status_color(status)));
     card.set_custom_minimum_size(Vector2::new(LOCALE_CARD_WIDTH, 0.0));
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 4);
+    let mut column = factory::vbox(4);
     card.add_child(&column);
     let mut row = HBoxContainer::new_alloc();
     column.add_child(&row);
@@ -561,7 +561,7 @@ pub(super) fn locale_build_card(
         locale_remove_property(&mut state, &selected, &key, apply_all);
         locale_set_state(&node_for_remove, &state);
         locale_mark_dirty(&node_for_remove);
-        request_refresh(&node_for_remove, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&node_for_remove, LOCALE_REQUEST_MAIN);
     });
     remove.connect("pressed", &callable);
 
@@ -644,7 +644,7 @@ pub(super) fn locale_bind_confirm(node: &Gd<MindDialog>) {
             return;
         }
         locale_delete_locale(&target, &pending_delete);
-        request_refresh_deferred(&target, LOCALE_REQUEST_TABLES);
+        MindDialog::request_refresh_deferred(&target, LOCALE_REQUEST_TABLES);
     });
     ui.connect("confirm_result", &callable);
     node.clone()
@@ -698,7 +698,7 @@ pub(super) fn locale_bind_resize(dialog: &mut MindDialog) {
             LOCALE_RESIZE_COLUMNS_META,
             columns as i64,
         );
-        request_refresh(&target, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_MAIN);
     });
     viewport.connect("size_changed", &callable);
     node.clone()
@@ -770,8 +770,7 @@ pub(super) fn locale_show_add_locale(node: &Gd<MindDialog>) {
     ) else {
         return;
     };
-    let mut page = VBoxContainer::new_alloc();
-    page.add_theme_constant_override("separation", 6);
+    let mut page = factory::vbox(6);
     let state = locale_state(node);
     let selected = locale_selected(node);
     let mut any = false;
@@ -803,7 +802,7 @@ pub(super) fn locale_show_add_locale(node: &Gd<MindDialog>) {
                 let mut layer = layer.clone();
                 layer.queue_free();
             }
-            request_refresh(&target, LOCALE_REQUEST_TABLES);
+            MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
         });
         button.connect("pressed", &callable);
         page.add_child(&button);
@@ -827,12 +826,10 @@ pub(super) fn locale_show_locale_edit(node: &Gd<MindDialog>, locale: &str) {
     ) else {
         return;
     };
-    let mut page = VBoxContainer::new_alloc();
-    page.add_theme_constant_override("separation", 8);
+    let mut page = factory::vbox(8);
     let mut frame = PanelContainer::new_alloc();
     frame.add_theme_stylebox_override("panel", &button_nine_patch("button"));
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 6);
+    let mut column = factory::vbox(6);
     frame.add_child(&column);
     let copy_text = kit::t("@copy.clipboard").to_string();
     let mut copy = factory::icon_button("copy", &copy_text, "flatt", AlignmentMode::BEGIN);
@@ -869,7 +866,7 @@ pub(super) fn locale_show_locale_edit(node: &Gd<MindDialog>, locale: &str) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_TABLES);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
     });
     load.connect("pressed", &callable);
     column.add_child(&load);
@@ -890,12 +887,10 @@ pub(super) fn locale_show_edit_menu(node: &Gd<MindDialog>) {
     ) else {
         return;
     };
-    let mut page = VBoxContainer::new_alloc();
-    page.add_theme_constant_override("separation", 8);
+    let mut page = factory::vbox(8);
     let mut frame = PanelContainer::new_alloc();
     frame.add_theme_stylebox_override("panel", &button_nine_patch("button"));
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 6);
+    let mut column = factory::vbox(6);
     frame.add_child(&column);
     let copy_text = kit::t("@copy.clipboard").to_string();
     let mut copy = factory::icon_button("copy", &copy_text, "flatt", AlignmentMode::BEGIN);
@@ -928,7 +923,7 @@ pub(super) fn locale_show_edit_menu(node: &Gd<MindDialog>) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_TABLES);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
     });
     load.connect("pressed", &callable);
     column.add_child(&load);
@@ -947,7 +942,7 @@ pub(super) fn locale_show_edit_menu(node: &Gd<MindDialog>) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_TABLES);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
     });
     rollback.connect("pressed", &callable);
     column.add_child(&rollback);
@@ -967,12 +962,10 @@ fn locale_show_prop_edit(node: &Gd<MindDialog>, key: &str, value: &str) {
     ) else {
         return;
     };
-    let mut page = VBoxContainer::new_alloc();
-    page.add_theme_constant_override("separation", 8);
+    let mut page = factory::vbox(8);
     let mut frame = PanelContainer::new_alloc();
     frame.add_theme_stylebox_override("panel", &button_nine_patch("button"));
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 6);
+    let mut column = factory::vbox(6);
     frame.add_child(&column);
 
     let add_other_text = kit::t("@locales.addtoother").to_string();
@@ -991,7 +984,7 @@ fn locale_show_prop_edit(node: &Gd<MindDialog>, key: &str, value: &str) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_MAIN);
     });
     add_other.connect("pressed", &callable);
     column.add_child(&add_other);
@@ -1045,7 +1038,7 @@ fn locale_show_prop_edit(node: &Gd<MindDialog>, key: &str, value: &str) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&target, LOCALE_REQUEST_TABLES);
+        MindDialog::request_refresh(&target, LOCALE_REQUEST_TABLES);
     });
     rollback.connect("pressed", &callable);
     column.add_child(&rollback);
@@ -1064,8 +1057,7 @@ fn locale_show_prop_view(node: &Gd<MindDialog>, key: &str) {
     };
     let mut grid = factory::table();
     grid.bind_mut().grow_horizontal();
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 6);
+    let mut search_row = factory::hbox(6);
     let grow_target = node.clone();
     let grow_grid = grid.clone();
     let grow_key = key.to_string();
@@ -1141,7 +1133,7 @@ fn locale_show_prop_view(node: &Gd<MindDialog>, key: &str) {
             let mut layer = layer.clone();
             layer.queue_free();
         }
-        request_refresh(&back_target, LOCALE_REQUEST_MAIN);
+        MindDialog::request_refresh(&back_target, LOCALE_REQUEST_MAIN);
     });
     back.connect("pressed", &callable);
     frame.add_child(&as_control(&back));
@@ -1212,8 +1204,7 @@ fn locale_build_prop_card(
     let mut card = PanelContainer::new_alloc();
     card.add_theme_stylebox_override("panel", &locale_card_frame(locale_status_color(status)));
     card.set_custom_minimum_size(Vector2::new(LOCALE_CARD_WIDTH, 0.0));
-    let mut column = VBoxContainer::new_alloc();
-    column.add_theme_constant_override("separation", 4);
+    let mut column = factory::vbox(4);
     card.add_child(&column);
     let mut title = factory::label(&locale_display_name(locale));
     title.add_theme_color_override("font_color", styles::ACCENT);
@@ -1277,8 +1268,7 @@ fn locale_show_add_icon(node: &Gd<MindDialog>, key: &str, value: &str) {
     ) else {
         return;
     };
-    let mut search_row = HBoxContainer::new_alloc();
-    search_row.add_theme_constant_override("separation", 6);
+    let mut search_row = factory::hbox(6);
     let mut search = factory::field(&kit::t("@search").to_string());
     search.set_max_length(64);
     search.set_custom_minimum_size(Vector2::new(250.0, 0.0));
@@ -1352,14 +1342,12 @@ pub(super) fn locale_show_filter(node: &Gd<MindDialog>, on_close: Callable) {
     ) else {
         return;
     };
-    let mut page = VBoxContainer::new_alloc();
-    page.add_theme_constant_override("separation", 10);
+    let mut page = factory::vbox(10);
     page.add_child(&as_control(&factory::label(&kit::t("@search").to_string())));
     let by_value = meta_bool(node, LOCALE_SEARCH_VALUE_META);
     let mut by_name = locale_mode_button("@locales.byname", !by_value);
     let mut by_value_button = locale_mode_button("@locales.byvalue", by_value);
-    let mut mode_row = HBoxContainer::new_alloc();
-    mode_row.add_theme_constant_override("separation", 10);
+    let mut mode_row = factory::hbox(10);
     let name_target = node.clone();
     let name_button = by_name.clone();
     let value_button = by_value_button.clone();

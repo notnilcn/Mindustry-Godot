@@ -19,7 +19,7 @@ use mind_core::maps::locales::remove_locale;
 use mind_core::maps::locales::write_json;
 use mind_core::maps::locales::write_locale;
 
-use super::super::util_e::*;
+use super::super::util::*;
 
 // ---------------------------------------------------------------------------
 // MapLocalesDialog (`map_locales`, `MapLocalesDialog.java`)

@@ -4,8 +4,11 @@
 //! The sector generate dialog controller.
 //! Upstream: editor/SectorGenerateDialog.java
 
+use crate::gdutil::variant::{
+    dict_i64_or, dict_text_or, parse_array, to_bool_lenient, to_i64_lenient,
+};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindLabel, styles};
 use godot::classes::control::{LayoutPreset, MouseFilter};
@@ -63,7 +66,7 @@ impl DialogController for SectorGenerateDialog {
         dialog.should_pause = false;
         dialog.clear_buttons();
         // `addCloseButton()` + `buttons.button("@editor.apply", Icon.ok, ...)`.
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         let dialog_gd = dialog.to_gd();
         let state = self.state.clone();
         let apply = Callable::from_fn("sector_generate_apply", move |_args: &[&Variant]| {
@@ -143,8 +146,7 @@ fn sector_generate_build(dialog: &mut MindDialog, state: &Rc<RefCell<SectorGener
 /// One dialog row (`planet`/`sector`/`seed`), data-driven.
 fn sector_generate_row(label_text: &str, control: &Gd<Control>) -> Gd<HBoxContainer> {
     // code-instantiated: one labelled form row (planet/sector/seed).
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 10);
+    let mut row = factory::hbox(10);
     let label = factory::label(label_text);
     row.add_child(&label);
     row.add_child(control);
@@ -199,7 +201,7 @@ fn sector_generate_open_picker(dialog: &mut MindDialog, state: &Rc<RefCell<Secto
     let Some(value) = editor_call("sector_planets_json", &[]) else {
         return;
     };
-    let planets = parse_json_array(&value.to::<GString>().to_string());
+    let planets = parse_array(&value.to::<GString>().to_string());
     if planets.is_empty() {
         return;
     }
@@ -232,7 +234,7 @@ fn sector_generate_open_picker(dialog: &mut MindDialog, state: &Rc<RefCell<Secto
         let Ok(row) = value.try_to::<VarDictionary>() else {
             continue;
         };
-        let planet_name = dict_string(&row, "name");
+        let planet_name = dict_text_or(&row, "name");
         let mut button = factory::button(&planet_label(&planet_name));
         button.set_theme_type_variation("flatTogglet");
         button.set_custom_minimum_size(Vector2::new(110.0, 45.0));
@@ -321,7 +323,7 @@ fn sector_generate_refresh_size(state: &Rc<RefCell<SectorGenerateState>>) {
             sector.to_variant(),
         ],
     )
-    .map(|value| variant_i64(&value))
+    .map(|value| to_i64_lenient(&value))
     .unwrap_or(0);
     label.set_text(&GString::from(format!("[ {size}x{size} ]").as_str()));
 }
@@ -359,7 +361,7 @@ fn sector_generate_apply_now(dialog: &Gd<MindDialog>, state: &Rc<RefCell<SectorG
             seed.to_variant(),
         ],
     )
-    .map(|value| variant_bool(&value))
+    .map(|value| to_bool_lenient(&value))
     .unwrap_or(false);
     if !generated {
         notify_key("@editor.sectorgenerate");
@@ -376,13 +378,13 @@ fn sector_planet_sector_count(planet: &str) -> i64 {
     let Some(value) = editor_call("sector_planets_json", &[]) else {
         return 0;
     };
-    let planets = parse_json_array(&value.to::<GString>().to_string());
+    let planets = parse_array(&value.to::<GString>().to_string());
     for row in planets.iter_shared() {
         let Ok(row) = row.try_to::<VarDictionary>() else {
             continue;
         };
-        if dict_string(&row, "name") == planet {
-            return dict_i64(&row, "sectors", 0);
+        if dict_text_or(&row, "name") == planet {
+            return dict_i64_or(&row, "sectors", 0);
         }
     }
     0

@@ -4,8 +4,9 @@
 //! The map load dialog controller.
 //! Upstream: editor/MapLoadDialog.java
 
+use crate::gdutil::variant::{dict_bool_or, dict_text_or};
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::editor::util_f::*;
+use crate::ui::dialogs::editor::util::*;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindScroll};
 use godot::builtin::Side;
@@ -164,10 +165,10 @@ fn map_rows() -> Vec<VarDictionary> {
         let Ok(row) = row.try_to::<VarDictionary>() else {
             continue;
         };
-        if dict_string(&row, "name").is_empty() {
+        if dict_text_or(&row, "name").is_empty() {
             continue;
         }
-        if dict_bool(&row, "custom", false) {
+        if dict_bool_or(&row, "custom", false) {
             custom.push(row);
         } else {
             builtin.push(row);
@@ -199,7 +200,7 @@ fn map_load_button(state: &Rc<RefCell<MapLoadState>>, map: &VarDictionary) -> Gd
         button.set_button_group(&group);
     }
     button.set_custom_minimum_size(Vector2::new(MAP_BUTTON_WIDTH, MAP_BUTTON_HEIGHT));
-    let path = dict_string(map, "path");
+    let path = dict_text_or(map, "path");
     let state_for_pick = state.clone();
     let path_for_press = path.clone();
     let callable = Callable::from_fn("map_pick", move |_args: &[&Variant]| {
@@ -234,7 +235,7 @@ fn map_load_button(state: &Rc<RefCell<MapLoadState>>, map: &VarDictionary) -> Gd
     frame.set_v_size_flags(SizeFlags::SHRINK_CENTER);
     frame.set_mouse_filter(MouseFilter::IGNORE);
     let mut image = TextureRect::new_alloc();
-    if let Some(texture) = map_preview_texture(&dict_string(map, "name")) {
+    if let Some(texture) = map_preview_texture(&dict_text_or(map, "name")) {
         image.set_texture(&texture);
     }
     // `map.safeTexture()` keeps Arc's nearest filtering: crisp pixels.
@@ -246,8 +247,8 @@ fn map_load_button(state: &Rc<RefCell<MapLoadState>>, map: &VarDictionary) -> Gd
     row.add_child(&frame);
 
     let display = {
-        let display = dict_string(map, "display_name");
-        let name = dict_string(map, "name");
+        let display = dict_text_or(map, "display_name");
+        let name = dict_text_or(map, "name");
         if display.is_empty() { name } else { display }
     };
     let mut map_label = factory::label(&display);

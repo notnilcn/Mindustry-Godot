@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (`MapContentView`)
 
 use super::*;
+use crate::gdutil::variant::{dict_bool_or, dict_text_or};
 
 pub(super) fn map_assets_build_content(
     dialog: &Gd<MindDialog>,
@@ -19,7 +20,7 @@ pub(super) fn map_assets_build_content(
             continue;
         }
         shown_count += 1;
-        let content_type = dict_string(row, "contentType");
+        let content_type = dict_text_or(row, "contentType");
         if content_type != last_type {
             last_type = content_type.clone();
             let header = map_assets_content_header(&content_type);
@@ -37,8 +38,7 @@ pub(super) fn map_assets_build_content(
 pub(super) fn map_assets_content_header(content_type: &str) -> Gd<HBoxContainer> {
     // `list.table(t -> icon + "@content.<type>" + whiteui rule).colspan(6)`.
     // code-instantiated: one content-type header row.
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 8);
+    let mut box_ = factory::hbox(8);
     box_.set_h_size_flags(SizeFlags::EXPAND_FILL);
     let glyph = factory::glyph_label(asset_content_icon(content_type), 22, LIGHT_GRAY);
     box_.add_child(&glyph);
@@ -60,11 +60,10 @@ pub(super) fn map_assets_content_row(
     row: &VarDictionary,
     content_type: &str,
 ) -> Gd<HBoxContainer> {
-    let content_name = dict_string(row, "name");
-    let json = dict_string(row, "data");
+    let content_name = dict_text_or(row, "name");
+    let json = dict_text_or(row, "data");
     // code-instantiated: one content record row.
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 4);
+    let mut box_ = factory::hbox(4);
     box_.set_alignment(AlignmentMode::CENTER);
     box_.add_child(&map_assets_empty_cell());
 
@@ -117,8 +116,8 @@ pub(super) fn map_assets_content_row(
                 )
                 .and_then(|value| value.try_to::<VarDictionary>().ok())
                 .unwrap_or_default();
-                if !dict_bool(&removed, "ok", false) {
-                    map_assets_error(&dict_string(&removed, "error"));
+                if !dict_bool_or(&removed, "ok", false) {
+                    map_assets_error(&dict_text_or(&removed, "error"));
                     return;
                 }
                 let result = editor_call(
@@ -190,8 +189,7 @@ pub(super) fn map_assets_add_content(dialog: &Gd<MindDialog>, state: &Rc<RefCell
     // code-instantiated: Java's `BaseDialog("@asset.content.add")` name/type form.
     let mut accept = AcceptDialog::new_alloc();
     accept.set_title(&kit::t("@asset.content.add"));
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 6);
+    let mut box_ = factory::vbox(6);
     box_.set_custom_minimum_size(Vector2::new(420.0, 190.0));
     let mut name_row = HBoxContainer::new_alloc();
     let name_label = factory::label(&kit::t("@name").to_string());
@@ -242,8 +240,7 @@ pub(super) fn map_assets_add_content(dialog: &Gd<MindDialog>, state: &Rc<RefCell
     if let Some(mut ok) = accept.get_ok_button() {
         ok.set_visible(false);
     }
-    let mut actions = HBoxContainer::new_alloc();
-    actions.add_theme_constant_override("separation", 6);
+    let mut actions = factory::hbox(6);
     let cancel_target = accept.clone();
     let cancel_label = kit::t("@cancel").to_string();
     let mut cancel = factory::icon_button(

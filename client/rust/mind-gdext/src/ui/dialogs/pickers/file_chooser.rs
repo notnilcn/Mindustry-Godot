@@ -9,7 +9,6 @@ use std::rc::Rc;
 
 use godot::classes::DirAccess;
 use godot::classes::LineEdit;
-use godot::obj::NewAlloc;
 use godot::prelude::*;
 
 use crate::ui::dialog::DialogController;
@@ -18,7 +17,7 @@ use crate::ui::kit;
 use crate::ui::kit::MindTable;
 use crate::ui::kit::widgets::factory;
 
-use crate::ui::dialogs::editor::util_d::*;
+use crate::ui::dialogs::editor::util::*;
 
 // ---------------------------------------------------------------------------
 // FileChooserDialog
@@ -66,7 +65,7 @@ impl DialogController for FileChooserDialog {
         dialog.should_pause = false;
         dialog.set_title_key("@open");
         self.build(dialog);
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         self.rebuild(dialog);
     }
 
@@ -110,7 +109,7 @@ impl FileChooserDialog {
         field.connect("text_submitted", &callable);
         root.bind_mut().add(&field).grow_x().pad(4.0);
         root.bind_mut().row();
-        let list = MindTable::new_alloc();
+        let list = factory::table();
         root.bind_mut().add(&list).grow_x().grow_y();
         {
             let mut state = self.state.borrow_mut();

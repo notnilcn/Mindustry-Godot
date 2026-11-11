@@ -5,7 +5,6 @@
 //! Upstream: editor/MapResizeDialog.java
 
 use godot::classes::Control;
-use godot::classes::HBoxContainer;
 use godot::classes::VBoxContainer;
 use godot::obj::NewAlloc;
 use godot::prelude::*;
@@ -15,7 +14,8 @@ use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
 use crate::ui::kit::widgets::factory;
 
-use super::util_e::*;
+use super::util::*;
+use crate::gdutil::variant::to_i64_no_text;
 
 use super::map_info::close_dialog;
 
@@ -57,17 +57,17 @@ impl DialogController for MapResizeDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let _ = take_request(dialog);
+        let _ = MindDialog::take_request(dialog);
         let mut node = dialog.to_gd();
         let status = editor_call("status", &[])
             .and_then(|value| value.try_to::<VarDictionary>().ok())
             .unwrap_or_default();
         let width = match status.get("width") {
-            Some(value) => as_int(Some(value)),
+            Some(value) => to_i64_no_text(Some(value)),
             None => RESIZE_MIN_SIZE,
         };
         let height = match status.get("height") {
-            Some(value) => as_int(Some(value)),
+            Some(value) => to_i64_no_text(Some(value)),
             None => RESIZE_MIN_SIZE,
         };
         set_meta_int(&mut node, RESIZE_WIDTH_META, width);
@@ -98,8 +98,7 @@ fn build_resize_body(dialog: &mut MindDialog) {
 /// One size row (`table.field(...).valid(canParsePositiveInt && in range)`).
 fn resize_size_row(label_key: &str, value: i64, horizontal: bool) -> Gd<Control> {
     // code-instantiated: one label+field row per resize value.
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 8);
+    let mut row = factory::hbox(8);
     let mut label = factory::label(&kit::t(&format!("@{label_key}")).to_string());
     label.set_custom_minimum_size(Vector2::new(90.0, 0.0));
     row.add_child(&as_control(&label));
@@ -138,8 +137,7 @@ fn resize_size_row(label_key: &str, value: i64, horizontal: bool) -> Gd<Control>
 /// One shift row (`Strings::canParseInt`, max length 4).
 fn resize_shift_row(label_key: &str, value: i64, horizontal: bool) -> Gd<Control> {
     // code-instantiated: one label+field row per scroll shift.
-    let mut row = HBoxContainer::new_alloc();
-    row.add_theme_constant_override("separation", 8);
+    let mut row = factory::hbox(8);
     let mut label = factory::label(&kit::t(&format!("@{label_key}")).to_string());
     label.set_custom_minimum_size(Vector2::new(90.0, 0.0));
     row.add_child(&as_control(&label));

@@ -5,16 +5,14 @@
 //! Upstream: editor/MapEditorDialog.java
 
 use godot::classes::box_container::AlignmentMode;
-use godot::obj::NewAlloc;
 use godot::prelude::*;
 
 use crate::ui::dialog::DialogController;
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
-use crate::ui::kit::MindTable;
 use crate::ui::kit::widgets::factory;
 
-use super::util_d::*;
+use super::util::*;
 
 // ---------------------------------------------------------------------------
 // EditorMenuDialog
@@ -121,7 +119,7 @@ impl DialogController for EditorMenuDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@menu");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
@@ -137,7 +135,7 @@ impl EditorMenuDialog {
         let mut root = dialog.content_table();
         let target = dialog.to_gd();
         // code-instantiated: the menu grid is data-driven from `MENU_ENTRIES`.
-        let mut grid = MindTable::new_alloc();
+        let mut grid = factory::table();
         let mut column = 0usize;
         for entry in MENU_ENTRIES {
             // code-instantiated: one button per `MapEditorDialog` menu entry.

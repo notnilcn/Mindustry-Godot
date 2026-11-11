@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (`MapImagesView`)
 
 use super::*;
+use crate::gdutil::variant::{dict_bool_or, dict_i64_or, dict_text_or, to_bool_lenient};
 
 pub(super) fn map_assets_build_images(
     dialog: &Gd<MindDialog>,
@@ -22,7 +23,7 @@ pub(super) fn map_assets_build_images(
     list.add_child(&grid);
     let mut count = 0;
     for row in &map_assets_rows_of(state, "image") {
-        if dict_bool(row, "generated", false) {
+        if dict_bool_or(row, "generated", false) {
             continue;
         }
         if !map_assets_matches(state, row, "path") {
@@ -56,20 +57,19 @@ pub(super) fn map_assets_image_cell(
     row: &VarDictionary,
 ) -> Gd<PanelContainer> {
     let info = AssetImageInfo {
-        name: dict_string(row, "name"),
-        path: dict_string(row, "path"),
-        region: dict_string(row, "region"),
-        found: dict_bool(row, "found", false),
-        width: dict_i64(row, "width", 1),
-        height: dict_i64(row, "height", 1),
-        size: dict_i64(row, "size", 0),
+        name: dict_text_or(row, "name"),
+        path: dict_text_or(row, "path"),
+        region: dict_text_or(row, "region"),
+        found: dict_bool_or(row, "found", false),
+        width: dict_i64_or(row, "width", 1),
+        height: dict_i64_or(row, "height", 1),
+        size: dict_i64_or(row, "size", 0),
     };
     // code-instantiated: one `Styles.grayPanel` card per image record.
     let mut panel = PanelContainer::new_alloc();
     panel.add_theme_stylebox_override("panel", &flat_box(styles::GRAY_PANEL));
     panel.set_custom_minimum_size(Vector2::new(ASSET_IMAGE_CELL, ASSET_IMAGE_CELL));
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 2);
+    let mut box_ = factory::vbox(2);
     panel.add_child(&box_);
 
     // `t.add(new BorderImage(region, 4f)).scaling(Scaling.fit).size(size - 10f)`.
@@ -146,8 +146,7 @@ pub(super) fn map_assets_image_cell(
     dims.add_theme_color_override("font_color", LIGHT_GRAY);
     box_.add_child(&dims);
 
-    let mut actions = HBoxContainer::new_alloc();
-    actions.add_theme_constant_override("separation", 0);
+    let mut actions = factory::hbox(0);
     let cell = (ASSET_IMAGE_CELL - 10.0) / 4.0;
     let dialog_for_pencil = dialog.clone();
     let state_for_pencil = state.clone();
@@ -217,7 +216,7 @@ pub(super) fn map_assets_image_cell(
                         GString::from(target.as_str()).to_variant(),
                     ],
                 )
-                .map(|value| variant_bool(&value))
+                .map(|value| to_bool_lenient(&value))
                 .unwrap_or(false);
                 if !exported {
                     map_assets_error(&kit::t("@asset.broken").to_string());
@@ -312,8 +311,8 @@ pub(super) fn map_assets_add_image(dialog: &Gd<MindDialog>, state: &Rc<RefCell<M
                 )
                 .and_then(|value| value.try_to::<VarDictionary>().ok())
                 .unwrap_or_default();
-                if !dict_bool(&result, "ok", false) {
-                    map_assets_error(&dict_string(&result, "error"));
+                if !dict_bool_or(&result, "ok", false) {
+                    map_assets_error(&dict_text_or(&result, "error"));
                 }
             }
             map_assets_refetch(&state_for);

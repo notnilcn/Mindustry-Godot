@@ -37,7 +37,8 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::util_e::*;
+use super::util::*;
+use crate::gdutil::variant::{dict_bool_try_or, to_bool_strict, to_f64_boolish, to_text_stringify};
 
 use super::map_info::{GEN_APPLIED_META, close_dialog};
 
@@ -93,7 +94,7 @@ impl DialogController for MapGenerateDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let request = take_request(dialog);
+        let request = MindDialog::take_request(dialog);
         self.build_buttons(dialog);
         match request.as_str() {
             GEN_REQUEST_LIST => {
@@ -309,12 +310,10 @@ fn build_generate_card(node: &Gd<MindDialog>, index: i64, rows: &VarArray) -> Gd
     );
     card.set_custom_minimum_size(Vector2::new(GEN_CARD_WIDTH, 0.0));
     card.set_h_size_flags(SizeFlags::FILL);
-    let mut body = VBoxContainer::new_alloc();
-    body.add_theme_constant_override("separation", 0);
+    let mut body = factory::vbox(0);
     card.add_child(&body);
     body.add_child(&build_generate_card_header(node, index, &row));
-    let mut options = VBoxContainer::new_alloc();
-    options.add_theme_constant_override("separation", 2);
+    let mut options = factory::vbox(2);
     for option in dict_array(&row, "options").iter_shared() {
         let Ok(option) = option.try_to::<VarDictionary>() else {
             continue;
@@ -332,7 +331,7 @@ fn build_generate_card_header(
     row: &VarDictionary,
 ) -> Gd<Control> {
     let mut header = PanelContainer::new_alloc();
-    let mut style = flat_box(GEN_HEADER_GRAY);
+    let mut style = flat_box_plain(GEN_HEADER_GRAY);
     for side in [Side::LEFT, Side::TOP, Side::RIGHT, Side::BOTTOM] {
         style.set_content_margin(
             side,
@@ -345,8 +344,7 @@ fn build_generate_card_header(
     }
     header.add_theme_stylebox_override("panel", &style);
     // code-instantiated: header buttons are per-filter action rows.
-    let mut line = HBoxContainer::new_alloc();
-    line.add_theme_constant_override("separation", 0);
+    let mut line = factory::hbox(0);
     header.add_child(&line);
     let filter_name = dict_text(row, "name");
     let mut label = factory::label(&kit::t(&format!("@filter.{filter_name}")).to_string());
@@ -467,7 +465,7 @@ fn gen_option_value(index: i64, field: &str, option: &VarDictionary, rows: &VarA
 }
 
 fn gen_option_float(index: i64, field: &str, option: &VarDictionary, rows: &VarArray) -> f64 {
-    as_float(Some(gen_option_value(index, field, option, rows)))
+    to_f64_boolish(Some(gen_option_value(index, field, option, rows)))
 }
 
 fn gen_option_string(index: i64, field: &str, option: &VarDictionary, rows: &VarArray) -> String {
@@ -475,12 +473,12 @@ fn gen_option_string(index: i64, field: &str, option: &VarDictionary, rows: &Var
     if value.get_type() == VariantType::NIL {
         String::new()
     } else {
-        variant_text(&value)
+        to_text_stringify(&value)
     }
 }
 
 fn gen_option_bool(index: i64, field: &str, option: &VarDictionary, rows: &VarArray) -> bool {
-    as_bool(Some(gen_option_value(index, field, option, rows)))
+    to_bool_strict(Some(gen_option_value(index, field, option, rows)))
 }
 
 /// `SliderOption.build`: the label/value row stacked on the slider; the change
@@ -493,7 +491,7 @@ fn gen_slider_row(
 ) -> Gd<Control> {
     let field = dict_text(option, "field");
     let value = gen_option_float(index, &field, option, rows);
-    let integer = dict_bool(option, "integer");
+    let integer = dict_bool_try_or(option, "integer", false);
     // code-instantiated: one slider cell per descriptor (runtime row).
     let mut holder = Control::new_alloc();
     holder.set_custom_minimum_size(Vector2::new(0.0, 46.0));
@@ -526,7 +524,7 @@ fn gen_slider_row(
     holder.add_child(&overlay);
     let readout_for_change = readout.clone();
     let changed = Callable::from_fn("map_gen_slider_value", move |args: &[&Variant]| {
-        let value = as_float(args.first().map(|value| (*value).clone()));
+        let value = to_f64_boolish(args.first().map(|value| (*value).clone()));
         rich(&readout_for_change).set_text(&GString::from(auto_fixed(value).as_str()));
     });
     slider.connect("value_changed", &changed);
@@ -560,8 +558,7 @@ fn gen_block_row(
     let block_name = gen_option_string(index, &field, option, rows);
     let predicate = dict_text(option, "predicate");
     // code-instantiated: the block cell is data-driven (filter option value).
-    let mut line = HBoxContainer::new_alloc();
-    line.add_theme_constant_override("separation", 6);
+    let mut line = factory::hbox(6);
     let mut button = block_button(&block_name);
     button.set_name((format!("BlockOption_{field}")).as_str());
     button.set_custom_minimum_size(Vector2::new(48.0, 48.0));
@@ -609,7 +606,7 @@ fn gen_block_row(
                         GString::from(pasted.as_str()).to_variant(),
                         false,
                     );
-                    request_refresh(&target, GEN_REQUEST_LIST);
+                    MindDialog::request_refresh(&target, GEN_REQUEST_LIST);
                 }
             }
             _ => {}
@@ -659,8 +656,7 @@ fn gen_toggle_row(
 /// The `LogicFilter` code option: `Icon.pencil` button + the option label.
 fn gen_custom_row(node: &Gd<MindDialog>, index: i64, option: &VarDictionary) -> Gd<Control> {
     // code-instantiated: custom actions are descriptor-driven (logic code).
-    let mut line = HBoxContainer::new_alloc();
-    line.add_theme_constant_override("separation", 6);
+    let mut line = factory::hbox(6);
     let action = dict_text(option, "action");
     let mut button = factory::glyph_button("pencil", &kit::t("@edit").to_string(), "clearNonei");
     button.set_name((format!("CustomOption_{action}")).as_str());
@@ -828,7 +824,7 @@ fn gen_move(node: &Gd<MindDialog>, index: i64, direction: i64) {
     gen_write(node, &filters);
     let rows = gen_read_rows();
     set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
-    request_refresh(node, GEN_REQUEST_LIST);
+    MindDialog::request_refresh(node, GEN_REQUEST_LIST);
 }
 
 /// The per-card copy (`copy.randomize(); filters.insert(idx + 1, copy)`).
@@ -845,7 +841,7 @@ fn gen_copy(node: &Gd<MindDialog>, index: i64) {
     gen_write(node, &filters);
     let rows = gen_read_rows();
     set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
-    request_refresh(node, GEN_REQUEST_LIST);
+    MindDialog::request_refresh(node, GEN_REQUEST_LIST);
 }
 
 /// The per-card remove (`filters.remove(filter)`).
@@ -858,7 +854,7 @@ fn gen_remove(node: &Gd<MindDialog>, index: i64) {
     gen_write(node, &filters);
     let rows = gen_read_rows();
     set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
-    request_refresh(node, GEN_REQUEST_LIST);
+    MindDialog::request_refresh(node, GEN_REQUEST_LIST);
 }
 
 /// `buttons.button("@editor.apply", ...)`: write the tag, then `apply_filters()`.
@@ -905,7 +901,7 @@ fn gen_show_add_menu(node: &Gd<MindDialog>) {
     grid.add_theme_constant_override("h_separation", 4);
     grid.add_theme_constant_override("v_separation", 4);
     for row in dict_rows(&gen_read_types()) {
-        if dict_bool(&row, "post") && applied {
+        if dict_bool_try_or(&row, "post", false) && applied {
             continue;
         }
         let mut button = icon_text_button(
@@ -958,7 +954,7 @@ fn gen_add_filter(node: &Gd<MindDialog>, class_tag: &str) {
     let rows = gen_read_rows();
     set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
     free_named(node, GEN_OVERLAY);
-    request_refresh(node, GEN_REQUEST_LIST);
+    MindDialog::request_refresh(node, GEN_REQUEST_LIST);
 }
 
 /// `@filter.defaultores`: `maps.addDefaultOres(filters)`.
@@ -981,7 +977,7 @@ fn gen_add_default_ores(node: &Gd<MindDialog>) {
     let rows = gen_read_rows();
     set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
     free_named(node, GEN_OVERLAY);
-    request_refresh(node, GEN_REQUEST_LIST);
+    MindDialog::request_refresh(node, GEN_REQUEST_LIST);
 }
 
 /// `buttons.button("@edit", ...)`: the clipboard/clear/reset rows.
@@ -1097,14 +1093,14 @@ fn gen_menu_action(node: &Gd<MindDialog>, action: GenMenu) {
             let rows = gen_read_rows();
             set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
             free_named(node, GEN_OVERLAY);
-            request_refresh(node, GEN_REQUEST_LIST);
+            MindDialog::request_refresh(node, GEN_REQUEST_LIST);
         }
         GenMenu::Clear => {
             let filters = VarArray::new();
             gen_write(node, &filters);
             set_meta_array(&mut node.clone(), GEN_ROWS_META, &VarArray::new());
             free_named(node, GEN_OVERLAY);
-            request_refresh(node, GEN_REQUEST_LIST);
+            MindDialog::request_refresh(node, GEN_REQUEST_LIST);
         }
         GenMenu::Reset => {
             // `filters.set(maps.readFilters(""))`.
@@ -1114,7 +1110,7 @@ fn gen_menu_action(node: &Gd<MindDialog>, action: GenMenu) {
             set_meta_array(&mut node.clone(), GEN_ROWS_META, &rows);
             set_meta_array(&mut node.clone(), GEN_FILTERS_META, &filters);
             free_named(node, GEN_OVERLAY);
-            request_refresh(node, GEN_REQUEST_LIST);
+            MindDialog::request_refresh(node, GEN_REQUEST_LIST);
         }
     }
 }
@@ -1152,7 +1148,7 @@ fn gen_show_block_picker(node: &Gd<MindDialog>, index: i64, option: &VarDictiona
             );
             free_named(&target, GEN_OVERLAY);
             // The button icon reflects the new value.
-            request_refresh(&target, GEN_REQUEST_LIST);
+            MindDialog::request_refresh(&target, GEN_REQUEST_LIST);
         });
         cell.connect("pressed", &callable);
         grid.add_child(&cell);
@@ -1248,7 +1244,7 @@ fn gen_bind_code_edited(node: &Gd<MindDialog>) {
         let field = meta_text(&meta, GEN_CODE_FIELD_META);
         set_meta_int(&mut meta, GEN_CODE_INDEX_META, -1);
         gen_commit_field(&target, index, &field, code.to_variant(), false);
-        request_refresh(&target, GEN_REQUEST_LIST);
+        MindDialog::request_refresh(&target, GEN_REQUEST_LIST);
     });
     logic.connect("code_edited", &callable);
     node.clone()

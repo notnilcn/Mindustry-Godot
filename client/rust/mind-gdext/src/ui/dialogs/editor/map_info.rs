@@ -21,7 +21,8 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::util_e::*;
+use super::util::*;
+use crate::gdutil::variant::to_text_stringify;
 
 // ---------------------------------------------------------------------------
 // MapInfoDialog (`map_info`, `MapInfoDialog.java`)
@@ -52,7 +53,7 @@ impl DialogController for MapInfoDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@editor.mapinfo");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         // `cont.pane(...)`: the pane is the body, so the shell must not scroll.
         if let Some(mut body) = dialog.body() {
             body.set_vertical_scroll_mode(ScrollMode::DISABLED);
@@ -60,7 +61,7 @@ impl DialogController for MapInfoDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let _ = take_request(dialog);
+        let _ = MindDialog::take_request(dialog);
         self.build(dialog);
     }
 }
@@ -198,7 +199,7 @@ impl MapInfoDialog {
         let tags = editor_tags();
         let current = tags
             .get(tag)
-            .map(|value| variant_text(&value))
+            .map(|value| to_text_stringify(&value))
             .unwrap_or_default();
         if multiline {
             // code-instantiated: the description is the only multi-line field.
@@ -281,7 +282,7 @@ fn open_map_info_rules(dialog: &Gd<MindDialog>) {
     let tags = editor_tags();
     let current = tags
         .get("rules")
-        .map(|value| variant_text(&value))
+        .map(|value| to_text_stringify(&value))
         .map(|text| json_object(&GString::from(text.as_str())))
         .unwrap_or_default();
     let reset = crate::ui::kit::campaign()
@@ -320,7 +321,7 @@ fn connect_rules_edited(dialog: &Gd<MindDialog>) {
         let Some(json) = args.first() else {
             return;
         };
-        editor_set_tag("rules", &variant_text(json));
+        editor_set_tag("rules", &to_text_stringify(json));
     });
     rules.connect("rules_edited", &callable);
     dialog

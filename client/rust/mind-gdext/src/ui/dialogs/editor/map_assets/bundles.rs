@@ -5,6 +5,7 @@
 //! Upstream: editor/data/MapAssetsDialog.java (`MapBundlesView`)
 
 use super::*;
+use crate::gdutil::variant::{dict_bool_or, dict_i64_or, dict_text_or};
 
 pub(super) fn map_assets_build_bundles(
     dialog: &Gd<MindDialog>,
@@ -32,13 +33,12 @@ pub(super) fn map_assets_bundle_row(
     state: &Rc<RefCell<MapAssetsState>>,
     row: &VarDictionary,
 ) -> Gd<HBoxContainer> {
-    let bundle_name = dict_string(row, "name");
-    let path = dict_string(row, "path");
-    let text = dict_string(row, "data");
-    let lines = dict_i64(row, "size", 0);
+    let bundle_name = dict_text_or(row, "name");
+    let path = dict_text_or(row, "path");
+    let text = dict_text_or(row, "data");
+    let lines = dict_i64_or(row, "size", 0);
     // code-instantiated: one bundle entry row (show/import/export/delete).
-    let mut box_ = HBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 4);
+    let mut box_ = factory::hbox(4);
     box_.set_alignment(AlignmentMode::CENTER);
     box_.add_child(&map_assets_empty_cell());
     let name_for_show = bundle_name.clone();
@@ -149,8 +149,8 @@ pub(super) fn map_assets_add_bundle(dialog: &Gd<MindDialog>, state: &Rc<RefCell<
                 )
                 .and_then(|value| value.try_to::<VarDictionary>().ok())
                 .unwrap_or_default();
-                if !dict_bool(&result, "ok", false) {
-                    map_assets_error(&dict_string(&result, "error"));
+                if !dict_bool_or(&result, "ok", false) {
+                    map_assets_error(&dict_text_or(&result, "error"));
                 }
             }
             map_assets_refetch(&state_for);

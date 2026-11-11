@@ -25,7 +25,8 @@ use crate::ui::kit;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::super::util_e::*;
+use super::super::util::*;
+use crate::gdutil::variant::{to_bool_strict, to_f64_boolish, to_i64_no_text, to_text_stringify};
 
 use super::super::map_generate::free_named;
 use super::list::{
@@ -207,7 +208,7 @@ fn objective_editor(
         "string" => {
             if flags_has(flags, "logiccode") {
                 if nested {
-                    return factory::label(&variant_text(value)).upcast();
+                    return factory::label(&to_text_stringify(value)).upcast();
                 }
                 // `@LogicCode`: Java renders only the pencil button.
                 let mut pencil = factory::icon_button(
@@ -227,7 +228,7 @@ fn objective_editor(
                 return pencil.upcast();
             }
             if flags_has(flags, "multiline") {
-                let mut area = text_area(&variant_text(value));
+                let mut area = text_area(&to_text_stringify(value));
                 area.set_custom_minimum_size(Vector2::new(0.0, 100.0));
                 let sink = value_sink.clone();
                 let callable = Callable::from_fn("objective_area", move |args: &[&Variant]| {
@@ -240,7 +241,7 @@ fn objective_editor(
                 area.connect("text_changed", &callable);
                 return area.upcast();
             }
-            let mut edit = text_field(&variant_text(value), 0);
+            let mut edit = text_field(&to_text_stringify(value), 0);
             let sink = value_sink.clone();
             let callable = Callable::from_fn("objective_string", move |args: &[&Variant]| {
                 let text = args
@@ -253,7 +254,7 @@ fn objective_editor(
             edit.upcast()
         }
         "bool" => {
-            let checked = as_bool(Some(value.clone()));
+            let checked = to_bool_strict(Some(value.clone()));
             let sink = value_sink.clone();
             let listener = Callable::from_fn("objective_bool", move |args: &[&Variant]| {
                 let pressed = args
@@ -266,7 +267,7 @@ fn objective_editor(
         }
         "indexbool" => {
             // `@IndexBool int`: checked means `!= -1`; writes `1`/`-1`.
-            let checked = as_int(Some(value.clone())) != -1;
+            let checked = to_i64_no_text(Some(value.clone())) != -1;
             let sink = value_sink.clone();
             let listener = Callable::from_fn("objective_indexbool", move |args: &[&Variant]| {
                 let pressed = args
@@ -289,9 +290,10 @@ fn objective_editor(
         }
         "team" => {
             if nested {
-                return factory::label(&team_name_by_id(as_int(Some(value.clone())))).upcast();
+                return factory::label(&team_name_by_id(to_i64_no_text(Some(value.clone()))))
+                    .upcast();
             }
-            let mut button = factory::button(&team_name_by_id(as_int(Some(value.clone()))));
+            let mut button = factory::button(&team_name_by_id(to_i64_no_text(Some(value.clone()))));
             let target = node.clone();
             let name = String::from(field_name);
             let callable = Callable::from_fn("objective_team", move |_args: &[&Variant]| {
@@ -306,7 +308,7 @@ fn objective_editor(
                 // Java's shared `ui.picker` carries no nested sink.
                 let mut picker = ColorPickerButton::new_alloc();
                 picker.set_custom_minimum_size(Vector2::new(50.0, 50.0));
-                picker.set_pick_color(color_from_hex(&variant_text(value)));
+                picker.set_pick_color(color_from_hex(&to_text_stringify(value)));
                 let sink = value_sink.clone();
                 let callable =
                     Callable::from_fn("objective_marker_color", move |args: &[&Variant]| {
@@ -323,13 +325,13 @@ fn objective_editor(
             let mut button = Button::new_alloc();
             button.set_custom_minimum_size(Vector2::new(50.0, 50.0));
             let mut swatch = ColorRect::new_alloc();
-            swatch.set_color(color_from_hex(&variant_text(value)));
+            swatch.set_color(color_from_hex(&to_text_stringify(value)));
             swatch.set_anchors_preset(LayoutPreset::FULL_RECT);
             swatch.set_mouse_filter(MouseFilter::IGNORE);
             button.add_child(&swatch);
             let target = node.clone();
             let name = String::from(field_name);
-            let current = variant_text(value);
+            let current = to_text_stringify(value);
             let callable =
                 Callable::from_fn("objective_color_pick", move |_args: &[&Variant]| {
                     objective_open_color_picker(&target, &current, &name);
@@ -347,7 +349,7 @@ fn objective_editor(
             let mut row = HBoxContainer::new_alloc();
             for axis in ["x", "y"] {
                 let axis_sink = value_sink.field(axis);
-                let raw = as_float(Some(axis_sink.get()));
+                let raw = to_f64_boolish(Some(axis_sink.get()));
                 let display = if is_float {
                     format!("{}", raw / scale)
                 } else {
@@ -376,7 +378,8 @@ fn objective_editor(
             row.upcast()
         }
         "alignment" => {
-            let mut button = factory::button(&objective_align_name(as_int(Some(value.clone()))));
+            let mut button =
+                factory::button(&objective_align_name(to_i64_no_text(Some(value.clone()))));
             let target = node.clone();
             let flags = flags.clone();
             let sink = value_sink.clone();
@@ -389,7 +392,7 @@ fn objective_editor(
         "labelflag" => {
             // `@LabelFlag byte` (`:309-325`): the two `WorldLabel` flag checks.
             let mut box_ = VBoxContainer::new_alloc();
-            let current = as_int(Some(value.clone()));
+            let current = to_i64_no_text(Some(value.clone()));
             for (bit, key) in [(1i64, "@marker.background"), (2, "@marker.outline")] {
                 let sink = value_sink.clone();
                 let listener =
@@ -398,7 +401,7 @@ fn objective_editor(
                             .first()
                             .map(|value| value.to::<bool>())
                             .unwrap_or(false);
-                        let current = as_int(Some(sink.get()));
+                        let current = to_i64_no_text(Some(sink.get()));
                         let updated = if pressed {
                             current | bit
                         } else {
@@ -417,7 +420,7 @@ fn objective_editor(
         "texture" => {
             // `TextureHolder` interpreter: the string-backed name.
             let string_sink = value_sink.field("string");
-            let mut edit = text_field(&variant_text(&string_sink.get()), 0);
+            let mut edit = text_field(&to_text_stringify(&string_sink.get()), 0);
             let callable = Callable::from_fn("objective_texture", move |args: &[&Variant]| {
                 let text = args
                     .first()
@@ -432,10 +435,10 @@ fn objective_editor(
         "verts" => objective_verts_editor(value_sink, value),
         _ if kind.starts_with("content:") => {
             if nested {
-                return factory::label(&variant_text(value)).upcast();
+                return factory::label(&to_text_stringify(value)).upcast();
             }
             let content_kind = kind.trim_start_matches("content:").to_string();
-            let mut button = factory::button(&variant_text(value));
+            let mut button = factory::button(&to_text_stringify(value));
             let target = node.clone();
             let name = String::from(field_name);
             let callable = Callable::from_fn("objective_content", move |_args: &[&Variant]| {
@@ -446,7 +449,7 @@ fn objective_editor(
         }
         // `map:` and any future descriptor kinds still render verbatim; every
         // objective/marker class field the descriptors declare has a widget.
-        _ => factory::label(&variant_text(value)).upcast(),
+        _ => factory::label(&to_text_stringify(value)).upcast(),
     }
 }
 
@@ -457,7 +460,7 @@ fn objective_number_field(
     is_float: bool,
     scale: f64,
 ) -> Gd<Control> {
-    let raw = as_float(Some(value.clone()));
+    let raw = to_f64_boolish(Some(value.clone()));
     let display = if is_float {
         format!("{}", raw / scale)
     } else {
@@ -503,8 +506,7 @@ fn objective_seq_editor(
     inner_flags: &VarArray,
 ) -> Gd<Control> {
     let mut box_ = VBoxContainer::new_alloc();
-    let mut header = HBoxContainer::new_alloc();
-    header.add_theme_constant_override("separation", 4);
+    let mut header = factory::hbox(4);
     if !field_name.is_empty() {
         let mut label = factory::label(&format!("{field_name}:"));
         label.add_theme_color_override("font_color", styles::ACCENT);
@@ -524,7 +526,7 @@ fn objective_seq_editor(
             .unwrap_or_default();
         array.push(&objective_seq_default(&inner));
         objective_set_field(&target, index, &name, array.to_variant());
-        request_refresh(&target, OBJ_REQUEST_PANEL);
+        MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
     });
     header.add_child(&objective_small_button("add", callable));
     box_.add_child(&header);
@@ -533,8 +535,7 @@ fn objective_seq_editor(
         .and_then(|value| value.try_to::<VarArray>().ok())
         .unwrap_or_default();
     for element in 0..array.len() {
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 4);
+        let mut row = factory::hbox(4);
         let target = node.clone();
         let name = String::from(field_name);
         let remover = Callable::from_fn("objective_seq_remove", move |_args: &[&Variant]| {
@@ -545,7 +546,7 @@ fn objective_seq_editor(
             if element < array.len() {
                 array.remove(element);
                 objective_set_field(&target, index, &name, array.to_variant());
-                request_refresh(&target, OBJ_REQUEST_PANEL);
+                MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
             }
         });
         row.add_child(&objective_small_button("cancel", remover));
@@ -573,8 +574,7 @@ fn objective_seq_editor(
 /// + `getProvider(ObjectiveMarker.class)`, `:236-256`): the class button plus
 ///   the selected marker class's field rows.
 fn objective_marker_editor(node: &Gd<MindDialog>, value_sink: &ObjectiveValue) -> Gd<Control> {
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 2);
+    let mut box_ = factory::vbox(2);
     let value = value_sink
         .get()
         .try_to::<VarDictionary>()
@@ -605,8 +605,7 @@ fn objective_marker_editor(node: &Gd<MindDialog>, value_sink: &ObjectiveValue) -
         let flags = dict_array(&field, "flags");
         let field_sink = value_sink.field(&field_name);
         let current = field_sink.get();
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 4);
+        let mut row = factory::hbox(4);
         row.add_child(&as_control(&factory::label(&format!("{field_name}:"))));
         let editor = objective_editor(
             node,
@@ -672,7 +671,7 @@ fn objective_open_marker_picker(node: &Gd<MindDialog>, value_sink: &ObjectiveVal
             }
             sink.set(created.to_variant());
             free_named(&target, OBJ_OVERLAY);
-            request_refresh(&target, OBJ_REQUEST_PANEL);
+            MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
             Variant::nil()
         });
         button.connect("pressed", &callable);
@@ -696,16 +695,14 @@ fn objective_open_marker_picker(node: &Gd<MindDialog>, value_sink: &ObjectiveVal
 /// column stores `Color.toFloatBits()` bits (ABGR); alpha is clamped to 254 so
 /// the JSON number never becomes NaN.
 fn objective_verts_editor(value_sink: &ObjectiveValue, value: &Variant) -> Gd<Control> {
-    let mut box_ = VBoxContainer::new_alloc();
-    box_.add_theme_constant_override("separation", 2);
+    let mut box_ = factory::vbox(2);
     let array = value.try_to::<VarArray>().unwrap_or_default();
     let vertices = array.len() / OBJECTIVE_VERTEX_STRIDE;
     for vertex in 0..vertices {
-        let mut row = HBoxContainer::new_alloc();
-        row.add_theme_constant_override("separation", 4);
+        let mut row = factory::hbox(4);
         for (component, name) in [(0usize, "x"), (1, "y")] {
             let sink = objective_vertex_value(value_sink, vertex, component);
-            let display = format!("{}", as_float(Some(sink.get())) / OBJECTIVE_TILE_SIZE);
+            let display = format!("{}", to_f64_boolish(Some(sink.get())) / OBJECTIVE_TILE_SIZE);
             let mut edit = text_field(&display, 0);
             edit.set_custom_minimum_size(Vector2::new(70.0, 0.0));
             edit.set_tooltip_text(&GString::from(name));
@@ -725,7 +722,9 @@ fn objective_verts_editor(value_sink: &ObjectiveValue, value: &Variant) -> Gd<Co
         let color_sink = objective_vertex_value(value_sink, vertex, 2);
         let mut picker = ColorPickerButton::new_alloc();
         picker.set_custom_minimum_size(Vector2::new(40.0, 40.0));
-        picker.set_pick_color(objective_verts_color(as_float(Some(color_sink.get()))));
+        picker.set_pick_color(objective_verts_color(to_f64_boolish(Some(
+            color_sink.get(),
+        ))));
         let callable = Callable::from_fn("objective_vert_color", move |args: &[&Variant]| {
             let color = args
                 .first()
@@ -738,7 +737,7 @@ fn objective_verts_editor(value_sink: &ObjectiveValue, value: &Variant) -> Gd<Co
         row.add_child(&picker);
         for (component, name) in [(3usize, "u"), (4, "v")] {
             let sink = objective_vertex_value(value_sink, vertex, component);
-            let display = format!("{}", as_float(Some(sink.get())));
+            let display = format!("{}", to_f64_boolish(Some(sink.get())));
             let mut edit = text_field(&display, 0);
             edit.set_custom_minimum_size(Vector2::new(70.0, 0.0));
             edit.set_tooltip_text(&GString::from(name));
@@ -908,7 +907,7 @@ fn objective_open_align_picker(
     };
     let mut grid = GridContainer::new_alloc();
     grid.set_columns(3);
-    let current = as_int(Some(value_sink.get()));
+    let current = to_i64_no_text(Some(value_sink.get()));
     for (name, value) in OBJ_ALIGN_NAMES {
         if flags_has(flags, "align-nover") && value != 1 && value != 8 && value != 16 {
             continue;
@@ -929,7 +928,7 @@ fn objective_open_align_picker(
         let callable = Callable::from_fn("objective_align", move |_args: &[&Variant]| {
             sink.set(value.to_variant());
             free_named(&target, OBJ_OVERLAY);
-            request_refresh(&target, OBJ_REQUEST_PANEL);
+            MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
         });
         choice.connect("pressed", &callable);
         grid.add_child(&choice);
@@ -957,7 +956,7 @@ fn objective_open_logic(node: &Gd<MindDialog>, index: i64, field_name: &str) {
     objective_bind_logic(node);
     let code = objective_at(node, index)
         .get(&GString::from(field.as_str()))
-        .map(|value| variant_text(&value))
+        .map(|value| to_text_stringify(&value))
         .unwrap_or_default();
     let mut context = VarDictionary::new();
     context.set("filter", &true.to_variant());
@@ -989,7 +988,7 @@ fn objective_bind_logic(node: &Gd<MindDialog>) {
             return;
         }
         objective_set_field(&target, index, &field, code.to_variant());
-        request_refresh(&target, OBJ_REQUEST_PANEL);
+        MindDialog::request_refresh(&target, OBJ_REQUEST_PANEL);
     });
     logic.connect("code_edited", &callable);
     node.clone()

@@ -19,7 +19,7 @@ use crate::ui::kit;
 use crate::ui::kit::MindScroll;
 use crate::ui::kit::widgets::factory;
 
-use super::util_e::*;
+use super::util::*;
 
 use self::edit::objective_field_row;
 use self::list::{
@@ -116,7 +116,7 @@ impl DialogController for MapObjectivesDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let request = take_request(dialog);
+        let request = MindDialog::take_request(dialog);
         match request.as_str() {
             OBJ_REQUEST_PANEL => self.rebuild_panel(dialog),
             OBJ_REQUEST_PICKED => {
@@ -201,8 +201,7 @@ impl MapObjectivesDialog {
             return;
         };
         let tag = dict_text(&objective, "class");
-        let mut header = HBoxContainer::new_alloc();
-        header.add_theme_constant_override("separation", 4);
+        let mut header = factory::hbox(4);
         let mut type_button = factory::button(&objective_type_name(&tag));
         type_button.set_theme_type_variation("flatt");
         type_button.set_h_size_flags(SizeFlags::EXPAND_FILL);

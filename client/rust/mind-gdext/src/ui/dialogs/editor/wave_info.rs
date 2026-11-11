@@ -29,7 +29,8 @@ use crate::ui::kit::MindTable;
 use crate::ui::kit::styles;
 use crate::ui::kit::widgets::factory;
 
-use super::util_e::*;
+use super::util::*;
+use crate::gdutil::variant::{to_bool_strict, to_f64_boolish, to_i64_no_text, to_text_stringify};
 
 use super::map_generate::find_named;
 
@@ -82,7 +83,7 @@ impl DialogController for WaveInfoDialog {
         dialog.should_pause = false;
         dialog.clear_buttons();
         // `addCloseButton()` first, then `@edit.menu` and `waves.random`.
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
         let node = dialog.to_gd();
         let edit = kit::t("@edit.menu").to_string();
         let edit_target = node.clone();
@@ -91,18 +92,18 @@ impl DialogController for WaveInfoDialog {
             let open = !meta_bool(&meta, WAVE_EDIT_OPEN_META);
             set_meta_bool(&mut meta, WAVE_EDIT_OPEN_META, open);
             set_meta_bool(&mut meta, WAVE_SORT_OPEN_META, false);
-            request_refresh(&edit_target, WAVE_REQUEST_BUILD);
+            MindDialog::request_refresh(&edit_target, WAVE_REQUEST_BUILD);
         });
         dialog.add_button(&edit, Some(callable), "edit", 250.0);
         let random = kit::t("@waves.random").to_string();
         let random_target = node.clone();
         let callable = Callable::from_fn("wave_random", move |_args: &[&Variant]| {
-            if as_bool(editor_call("randomize_waves", &[])) {
+            if to_bool_strict(editor_call("randomize_waves", &[])) {
                 let groups = wave_read_groups();
                 let mut meta = random_target.clone();
                 set_meta_array(&mut meta, WAVE_GROUPS_META, &groups);
                 set_meta_int(&mut meta, WAVE_EXPANDED_META, -1);
-                request_refresh(&random_target, WAVE_REQUEST_BUILD);
+                MindDialog::request_refresh(&random_target, WAVE_REQUEST_BUILD);
             }
         });
         dialog.add_button(&random, Some(callable), "refresh", 200.0);
@@ -110,7 +111,7 @@ impl DialogController for WaveInfoDialog {
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {
-        let request = take_request(dialog);
+        let request = MindDialog::take_request(dialog);
         match request.as_str() {
             WAVE_REQUEST_LIST => self.rebuild(dialog),
             WAVE_REQUEST_PICKED => {
@@ -168,7 +169,7 @@ impl WaveInfoDialog {
                 .unwrap_or_default();
             let search = valid_int(&text).map(|value| value - 1).unwrap_or(-1);
             set_meta_int(&mut search_target.clone(), WAVE_SEARCH_META, search);
-            request_refresh(&search_target, WAVE_REQUEST_LIST);
+            MindDialog::request_refresh(&search_target, WAVE_REQUEST_LIST);
         });
         search_field.connect("text_changed", &callable);
         search.add_child(&search_field);
@@ -237,7 +238,7 @@ impl WaveInfoDialog {
             let open = !meta_bool(&meta, WAVE_SORT_OPEN_META);
             set_meta_bool(&mut meta, WAVE_SORT_OPEN_META, open);
             set_meta_bool(&mut meta, WAVE_EDIT_OPEN_META, false);
-            request_refresh(&sort_target, WAVE_REQUEST_BUILD);
+            MindDialog::request_refresh(&sort_target, WAVE_REQUEST_BUILD);
         });
         sort_button.connect("pressed", &callable);
         actions.add_child(&sort_button);
@@ -314,7 +315,7 @@ fn wave_build_edit_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
     let target = node.clone();
     let callable = Callable::from_fn("wave_load", move |_args: &[&Variant]| {
         let text = DisplayServer::singleton().clipboard_get();
-        if !as_bool(editor_call("set_waves_json", &[text.to_variant()])) {
+        if !to_bool_strict(editor_call("set_waves_json", &[text.to_variant()])) {
             ui_show_info(&kit::t("@waves.invalid"));
             return;
         }
@@ -322,7 +323,7 @@ fn wave_build_edit_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
         let mut meta = target.clone();
         set_meta_array(&mut meta, WAVE_GROUPS_META, &groups);
         set_meta_bool(&mut meta, WAVE_EDIT_OPEN_META, false);
-        request_refresh(&target, WAVE_REQUEST_BUILD);
+        MindDialog::request_refresh(&target, WAVE_REQUEST_BUILD);
     });
     load.connect("pressed", &callable);
     panel.add_child(&load);
@@ -333,7 +334,7 @@ fn wave_build_edit_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
         set_meta_array(&mut meta, WAVE_GROUPS_META, &VarArray::new());
         wave_commit(&target);
         set_meta_bool(&mut meta, WAVE_EDIT_OPEN_META, false);
-        request_refresh(&target, WAVE_REQUEST_BUILD);
+        MindDialog::request_refresh(&target, WAVE_REQUEST_BUILD);
     });
     clear.connect("pressed", &callable);
     panel.add_child(&clear);
@@ -347,7 +348,7 @@ fn wave_build_edit_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
         set_meta_array(&mut meta, WAVE_GROUPS_META, &groups);
         wave_commit(&target);
         set_meta_bool(&mut meta, WAVE_EDIT_OPEN_META, false);
-        request_refresh(&target, WAVE_REQUEST_BUILD);
+        MindDialog::request_refresh(&target, WAVE_REQUEST_BUILD);
     });
     reset.connect("pressed", &callable);
     panel.add_child(&reset);
@@ -371,7 +372,7 @@ fn wave_build_sort_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
             let mut meta = target.clone();
             set_meta_int(&mut meta, WAVE_SORT_META, sort_value);
             set_meta_bool(&mut meta, WAVE_SORT_OPEN_META, false);
-            request_refresh(&target, WAVE_REQUEST_BUILD);
+            MindDialog::request_refresh(&target, WAVE_REQUEST_BUILD);
         });
         button.connect("pressed", &callable);
         sort_row.add_child(&button);
@@ -385,7 +386,7 @@ fn wave_build_sort_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
             .map(|value| value.to::<bool>())
             .unwrap_or(false);
         set_meta_bool(&mut target.clone(), WAVE_REVERSE_META, pressed);
-        request_refresh(&target, WAVE_REQUEST_LIST);
+        MindDialog::request_refresh(&target, WAVE_REQUEST_LIST);
     });
     panel.add_child(&mind_check(
         &kit::t("@waves.sort.reverse").to_string(),
@@ -399,7 +400,7 @@ fn wave_build_sort_panel(node: &Gd<MindDialog>) -> Gd<VBoxContainer> {
 fn wave_spawned_at(group: &VarDictionary, wave: i64) -> i64 {
     let begin = dict_int(group, "begin");
     let end = match group.get("end") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => WAVE_NEVER,
     };
     let spacing = dict_int(group, "spacing").max(1);
@@ -458,7 +459,7 @@ fn wave_sort_key(
     health: &VarDictionary,
 ) -> f64 {
     match sort {
-        1 => as_float(health.get(dict_text(group, "type").as_str())),
+        1 => to_f64_boolish(health.get(dict_text(group, "type").as_str())),
         2 => {
             let name = dict_text(group, "type");
             type_order
@@ -495,7 +496,7 @@ fn build_wave_card(
             WAVE_EXPANDED_META,
             if current == index { -1 } else { index },
         );
-        request_refresh(&target, WAVE_REQUEST_LIST);
+        MindDialog::request_refresh(&target, WAVE_REQUEST_LIST);
     });
     header.connect("pressed", &callable);
     box_.add_child(&header);
@@ -630,7 +631,7 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     let begin_target = node.clone();
     range_row.add_child(&wave_int_field(&begin.to_string(), 100.0, {
         Callable::from_fn("wave_begin", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(&begin_target, index, "begin", (value - 1).to_variant());
         })
     }));
@@ -638,7 +639,7 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
         &kit::t("@waves.to").to_string(),
     )));
     let end = match group.get("end") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => WAVE_NEVER,
     };
     let end_text = if end == WAVE_NEVER {
@@ -649,7 +650,7 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     let end_target = node.clone();
     range_row.add_child(&wave_int_field(&end_text, 100.0, {
         Callable::from_fn("wave_end", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(
                 &end_target,
                 index,
@@ -665,13 +666,13 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
         &kit::t("@waves.every").to_string(),
     )));
     let spacing = match group.get("spacing") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => 1,
     };
     let spacing_target = node.clone();
     spacing_row.add_child(&wave_int_field(&spacing.to_string(), 100.0, {
         Callable::from_fn("wave_spacing", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             if value > 0 {
                 wave_set_field(&spacing_target, index, "spacing", value.to_variant());
             }
@@ -684,18 +685,18 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     // amount + scaling (`1f / unitScaling` shown, Java's fixed(2)).
     let mut amount_row = HBoxContainer::new_alloc();
     let amount = match group.get("amount") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => 1,
     };
     let amount_target = node.clone();
     amount_row.add_child(&wave_int_field(&amount.to_string(), 80.0, {
         Callable::from_fn("wave_amount", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(&amount_target, index, "amount", value.to_variant());
         })
     }));
     let scaling = match group.get("scaling") {
-        Some(value) => as_float(Some(value)),
+        Some(value) => to_f64_boolish(Some(value)),
         None => WAVE_NEVER as f64,
     };
     let per_spawn = if scaling <= 0.0 { 0.0 } else { 1.0 / scaling };
@@ -703,7 +704,7 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     let scaling_target = node.clone();
     amount_row.add_child(&wave_float_field(&format!("{per_spawn:.2}"), 80.0, {
         Callable::from_fn("wave_scaling", move |args: &[&Variant]| {
-            let value = as_float(args.first().map(|value| (*value).clone()));
+            let value = to_f64_boolish(args.first().map(|value| (*value).clone()));
             if value > 0.0 {
                 wave_set_field(
                     &scaling_target,
@@ -721,13 +722,13 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     // `@waves.max`.
     let mut max_row = HBoxContainer::new_alloc();
     let max = match group.get("max") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => 40,
     };
     let max_target = node.clone();
     max_row.add_child(&wave_int_field(&max.to_string(), 80.0, {
         Callable::from_fn("wave_max", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(&max_target, index, "max", value.to_variant());
         })
     }));
@@ -738,25 +739,25 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
     // `@waves.shields` + shieldScaling.
     let mut shield_row = HBoxContainer::new_alloc();
     let shields = match group.get("shields") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => 0,
     };
     let shields_target = node.clone();
     shield_row.add_child(&wave_int_field(&shields.to_string(), 80.0, {
         Callable::from_fn("wave_shields", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(&shields_target, index, "shields", value.to_variant());
         })
     }));
     shield_row.add_child(&as_control(&factory::label(" + ")));
     let shield_scaling = match group.get("shieldScaling") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => 0,
     };
     let shield_scaling_target = node.clone();
     shield_row.add_child(&wave_int_field(&shield_scaling.to_string(), 80.0, {
         Callable::from_fn("wave_shield_scaling", move |args: &[&Variant]| {
-            let value = as_int(args.first().map(|value| (*value).clone()));
+            let value = to_i64_no_text(args.first().map(|value| (*value).clone()));
             wave_set_field(
                 &shield_scaling_target,
                 index,
@@ -787,7 +788,7 @@ fn wave_group_fields(node: &Gd<MindDialog>, index: i64, group: &VarDictionary) -
         } else {
             wave_erase_field(&guardian_target, index, "effect");
         }
-        request_refresh(&guardian_target, WAVE_REQUEST_LIST);
+        MindDialog::request_refresh(&guardian_target, WAVE_REQUEST_LIST);
     });
     fields.add_child(&mind_check(
         &kit::t("@waves.guardian").to_string(),
@@ -915,7 +916,7 @@ fn wave_copy_group(node: &Gd<MindDialog>, index: i64) {
     set_meta_array(&mut meta, WAVE_GROUPS_META, &groups);
     set_meta_int(&mut meta, WAVE_EXPANDED_META, index + 1);
     wave_commit(node);
-    request_refresh(node, WAVE_REQUEST_LIST);
+    MindDialog::request_refresh(node, WAVE_REQUEST_LIST);
 }
 
 fn wave_remove_group(node: &Gd<MindDialog>, index: i64) {
@@ -928,7 +929,7 @@ fn wave_remove_group(node: &Gd<MindDialog>, index: i64) {
     set_meta_array(&mut meta, WAVE_GROUPS_META, &groups);
     set_meta_int(&mut meta, WAVE_EXPANDED_META, -1);
     wave_commit(node);
-    request_refresh(node, WAVE_REQUEST_LIST);
+    MindDialog::request_refresh(node, WAVE_REQUEST_LIST);
 }
 
 /// `showEffects(group)`: the status-effect picker.
@@ -949,7 +950,7 @@ fn wave_show_spawn_picker(node: &Gd<MindDialog>, index: i64) {
         if names.len() >= WAVE_SPAWN_CAP {
             break;
         }
-        let packed = as_int(Some(value)) as i32;
+        let packed = to_i64_no_text(Some(value)) as i32;
         let (x, y) = unpack_point2(packed);
         names.push(format!("{x}, {y}"));
     }
@@ -1004,7 +1005,7 @@ fn wave_bind_picker(node: &Gd<MindDialog>) {
             .map(|value| value.to::<GString>())
             .unwrap_or_default();
         set_meta_text(&mut target.clone(), WAVE_PICKED_META, &name.to_string());
-        request_refresh_deferred(&target, WAVE_REQUEST_PICKED);
+        MindDialog::request_refresh_deferred(&target, WAVE_REQUEST_PICKED);
     });
     picker.connect("selected", &callable);
     node.clone()
@@ -1111,7 +1112,7 @@ fn wave_team_label(group: &VarDictionary) -> String {
 /// `_spawn_label(group)`.
 fn wave_spawn_label(group: &VarDictionary) -> String {
     let packed = match group.get("spawn") {
-        Some(value) => as_int(Some(value)),
+        Some(value) => to_i64_no_text(Some(value)),
         None => -1,
     };
     if packed == -1 {
@@ -1149,7 +1150,7 @@ fn wave_unit_health() -> VarDictionary {
 fn wave_effect_names() -> Vec<String> {
     editor_array("wave_effects_json")
         .iter_shared()
-        .map(|value| variant_text(&value))
+        .map(|value| to_text_stringify(&value))
         .collect()
 }
 
