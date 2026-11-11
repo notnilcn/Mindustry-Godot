@@ -27,7 +27,7 @@ use std::rc::Rc;
 use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::{GeneratorKind, PlanetDef};
 use mind_core::content::settings_store::UnlockStore;
-use mind_core::content::tech::{ObjectiveSpec, TechNodeRef};
+use mind_core::content::tech::TechNodeRef;
 use mind_core::content::{
     BlockId, ContentRef, ContentRegistry, ContentType, ItemId, LiquidId, MemoryBundle, PlanetId,
     SectorId,
@@ -38,7 +38,7 @@ use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::gamemode::Gamemode;
 use mind_core::game::launch::LaunchPayload;
 use mind_core::game::map_objectives::MapObjectivesRuntime;
-use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
+use mind_core::game::objectives::CampaignObjectiveContext;
 #[cfg(test)]
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
@@ -108,9 +108,12 @@ mod sector_launch;
 mod sectors;
 mod service;
 mod text;
+mod views;
 
 #[cfg(test)]
 mod test_util;
+#[cfg(test)]
+mod views_snapshot_tests;
 
 /// `MindCampaign` — campaign/sector/rules/tech/schematic facade for MCP + UI.
 #[derive(GodotClass)]

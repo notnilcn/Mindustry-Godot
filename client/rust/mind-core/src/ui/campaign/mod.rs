@@ -23,7 +23,7 @@ use serde::Serialize;
 
 use crate::content::registries::sectors::SectorPresetDef;
 use crate::content::tech::ObjectiveSpec;
-use crate::content::{ContentRegistry, PlanetId};
+use crate::content::{ContentRef, ContentRegistry, PlanetId, SectorId};
 use crate::game::campaign_rules::{ALL_DIFFICULTIES, CampaignRules, Difficulty};
 use crate::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
 use crate::game::planet::Planet;
@@ -34,6 +34,91 @@ use crate::game::universe::Campaign;
 use crate::io::json::rules::ExportStat;
 
 pub use crate::ui::block_catalog::*;
+
+mod launch_plan;
+mod research_tree;
+mod sector_state;
+
+pub use launch_plan::{
+    ItemAmount, LaunchLoadoutRow, LaunchPlanInputs, LaunchPlanView, LaunchSectorSnapshot,
+    launch_plan_view, launch_resources_for_planet, launch_sector_snapshot, loadout_rows,
+    select_loadout,
+};
+pub use research_tree::{
+    ResearchItemRow, ResearchNodeRow, ResearchReqRow, ResearchRootRow, ResearchTreeView,
+    research_tree_view,
+};
+pub use sector_state::{SectorStateInputs, SectorStateView, sector_state_view};
+
+/// Facade-supplied user-facing text for the campaign view builders.
+///
+/// The view models are Godot-free, so every localized string and emoji crosses
+/// this seam: `mind-gdext` implements it over the live `Core.bundle` and
+/// `MindAssets`, while tests use a deterministic stub.
+pub trait CampaignText {
+    /// `Core.bundle` lookup with the "value == key means missing" rule
+    /// (`Bundle.get` returns the key when it has no entry).
+    fn bundle(&self, key: &str) -> Option<String>;
+    /// `Core.bundle.format(key, args)`.
+    fn format(&self, key: &str, args: &[&str]) -> String;
+    /// `<kind>.<name>.name`, falling back to `name`.
+    fn content_name(&self, kind: &str, name: &str) -> String;
+    /// `<kind>.<name>.description`, empty when the bundle has no entry.
+    fn content_description(&self, kind: &str, name: &str) -> String;
+    /// `UnlockableContent.emoji()`, empty when the content has no icon.
+    fn content_emoji(&self, name: &str) -> String;
+
+    /// `bundle("techtree." + name, name)` for a tree/root name.
+    fn tree_title(&self, name: &str) -> String {
+        let key = format!("techtree.{name}");
+        self.bundle(&key).unwrap_or_else(|| name.to_owned())
+    }
+
+    /// `Content.emoji() + " " + Content.localizedName` (no leading space when
+    /// the emoji is unknown).
+    fn emoji_content_name(&self, registry: &ContentRegistry, content: ContentRef) -> String {
+        let name = tech_tree::content_name(registry, content).unwrap_or_default();
+        let emoji = self.content_emoji(&name);
+        let localized = self.content_name(content.type_.name(), &name);
+        if emoji.is_empty() {
+            localized
+        } else {
+            format!("{emoji} {localized}")
+        }
+    }
+
+    /// `SectorPreset.localizedName`.
+    fn sector_localized_name(&self, registry: &ContentRegistry, id: SectorId) -> String {
+        let name = registry
+            .sector(id)
+            .map(|record| record.name.clone())
+            .unwrap_or_default();
+        self.content_name("sector", &name)
+    }
+
+    /// `Planet.localizedName`.
+    fn planet_localized_name(&self, registry: &ContentRegistry, id: PlanetId) -> String {
+        let name = registry
+            .planet(id)
+            .map(|record| record.name.clone())
+            .unwrap_or_default();
+        self.content_name("planet", &name)
+    }
+}
+
+/// `UnlockableContent.load` (`UnlockableContent.java:117`) and the
+/// `SectorPreset` override (`SectorPreset.java:134`): sector presets resolve
+/// the `sector-<name>` atlas region (falling back to `Icon.terrain` -- the
+/// GDScript `MindWidgets.content_icon` supplies that glyph when the region is
+/// missing); every other content resolves `<type>-<name>-ui`. The port's
+/// content-type name for `SectorPreset` is `sector` (`ContentType` parity).
+pub fn content_icon_name(type_name: &str, name: &str) -> String {
+    if type_name == "sector" || type_name == "sectorpreset" {
+        format!("sector-{name}")
+    } else {
+        format!("{type_name}-{name}-ui")
+    }
+}
 
 /// One selectable campaign difficulty (`Difficulty.all`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
