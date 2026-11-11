@@ -3,7 +3,7 @@
 //! `StdbConnector` autoload + `StdbBinder` node (plan 01 §3.11).
 //!
 //! Thin Godot shell around `mind-stdb`: one `pump()` per frame, signals for the
-//! GDScript UI, plus the MCP/diagnostic helpers. **No game rules live here**
+//! native UI, plus the MCP/diagnostic helpers. **No game rules live here**
 //! (HIGH_LEVEL_PLAN §2.2): gameplay code consumes `mind-stdb` types directly;
 //! this node exists for autoload wiring, the inspector `net` page and MCP.
 

@@ -21,7 +21,7 @@ feature. Untrusted-input paths return [`IoError`]; crate-wide rules: [`mind-core
 | `map/` | `MapIo` (create/write/load/is_image/generate_preview), `MapHeader`, preview pixels + `encode_png`/`decode_png`. |
 | `settings.rs` | `SettingsStore` (`MGST` file), typed `SettingValue`, upstream key names, atomic and debounced flush. |
 | `data_archive.rs` | Data export/import zip (`SettingsMenuDialog.exportData`/`importData`): settings + saves/maps/mods/schematics/cache trees, `settings.bin` validation, zip-slip/entry caps. |
-| `sim_io.rs` | `SimIoHandler`, the live-sim `IoHandler` fulfilling `IoSet::Capture`/`Apply` save/load requests; `LiveEntitySource`. |
+| `sim_io/` | `SimIoHandler` (`mod.rs`), the live-sim `IoHandler` fulfilling `IoSet::Capture`/`Apply` save/load requests; children `handler`, `apply`, `decode`, `entities`, `unit_codec` and `map_filter_tests`/`tests`. |
 | `java_entities.rs` | One-way upstream `MSAV` entity decoder (unit, fire, puddle chunks) keyed by the Java class ids. |
 | `legacy.rs` | `open_legacy`: handles the upstream `MSAV` magic and returns the standard unknown-version error. |
 
@@ -54,7 +54,7 @@ fall back to that backup, and `load_bytes`/`get_meta_bytes` open an in-memory co
   preview pixels/PNG, which `maps::Map` calls down into.
 - [`../world/AGENTS.md`](../world/AGENTS.md) owns the live `WorldGrid`, tile mutation and
   `world::building_io::BuildingCodec`. `world::map_source::EcsMapSource` implements the `MapSource`
-  view and `io::sim_io::LiveEntitySource` the entity half; only `save::fixture` walks a grid directly.
+  view and `io::sim_io::entities` (`LiveEntitySource`) the entity half; only `save::fixture` walks a grid directly.
 - [`../game/AGENTS.md`](../game/AGENTS.md) owns save-slot policy (autosave, playtime, sector remap);
   `io::save::slot` provides only the file/meta/preview primitives those policies call.
 

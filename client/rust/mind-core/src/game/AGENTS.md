@@ -11,26 +11,30 @@ crate-wide rules are in [`mind-core/AGENTS.md`](../../AGENTS.md).
 | Path | Responsibility |
 |---|---|
 | `../game.rs` | Module root: declares the submodules and defines `State` (`Menu`/`Playing`/`Paused`) and `GameState` (`tick`, `update_id`, `advance` and the coarse-state helpers). |
-| `play.rs` | Campaign play flows and the `PlaySession` match state: `play_map`/`play_new_sector`/`play_sector`, `logic_play`, `run_wave_campaign`, `check_game_state`, `sector_capture`, `game_over`/`update_game_over`/`sector_lose`; emits ordered `PlayEvent`s. |
-| `runtime.rs` | Live campaign ECS glue: the `CampaignRuntime` resource plus the `TickSet::Campaign`/`Objectives`/`GameStateCheck` systems; all are no-ops when no campaign is loaded. |
+| `play.rs` | Campaign play flows and the `PlaySession` match state: `play_map`/`play_new_sector`/`play_sector`, `logic_play`, `run_wave_campaign`, `check_game_state`, `sector_capture`, `game_over`/`update_game_over`/`sector_lose`; emits ordered `PlayEvent`s. Campaign API: `SectorLaunch`/`LaunchReject` and `select_sector_launch`/`begin_sector_launch` (the launch decision and quiet unlock), `live_sector_record`, `capture_replacements`, `adopt_map_rules`, `reapply_planet_rules`, `PlaySession::apply_save_meta`. |
+| `runtime/` | Live campaign ECS glue: `mod.rs` keeps the `CampaignRuntime` resource, its constants and the re-exports; children `tick` (`TickSet::Campaign`), `objectives`, `game_state` (`TickSet::GameStateCheck` + `on_captured_sector`), `session` (`PlaySession`/`Campaign` sync, `run_wave_now`), `team_ai`, `hooks`, `weather`, `test_support` and `tests/`. All systems are no-ops when no campaign is loaded. |
 | `rules.rs` | Runtime behavior on the persisted `Rules`: `copy`, `retain_content_fields`, `mode`, per-team multiplier accessors, bans, env masks, `checksum_part`, and the campaign/tuning constants (`TURN_DURATION_TICKS`, `SAVE_EXTENSION`, …). |
 | `rules_event.rs` | Rules application: `RulesEpoch`, `RulesLoad`, `decode_rules` (100 kB cap), `guard_set_rules`, `apply_set_rules`, `apply_rules_load`, `SetRulesError`. |
 | `campaign_rules.rs` | Per-planet `CampaignRules`/`Difficulty` presets and `apply` folding into `Rules`; settings `read`/`write`. |
 | `gamemode.rs` | `Gamemode` presets (`Survival`/`Sandbox`/`Attack`/`Pvp`/`Editor`), `apply(Rules)` and `valid(MapView)`. |
-| `universe.rs` | `Universe` campaign clock/launch state and the `Campaign` container: planets, `run_turn` production/import/invasion passes, `update_global`, `save_all`/`load_all`. |
+| `universe.rs` | `Universe` campaign clock/launch state and the `Campaign` container: planets, `run_turn` production/import/invasion passes, `update_global`, `save_all`/`load_all`. Campaign API: `planet_name`, `sector_key`, `sector_by_name(_mut)`, `edit_sector`, `save_sector_info`, `clear_being_played`, `boot`, `clear_saves`, `set_campaign_rules`, `launch_plan_full`/`LaunchPlan` and `Universe::launch_resource_stacks`. |
 | `planet.rs` | `Planet` runtime: orbits/positions, sectors, `apply_rules`, `update_base_coverage`/threat, `SectorNeighborhood` adjacency seam. |
-| `sector.rs` | `Sector` runtime and `SectorInfoState`: base/attack/frozen/captured predicates, item storage, rolling `InfoWindows`, `prepare`/`write`, settings round-trip. |
+| `sector.rs` | `Sector` runtime and `SectorInfoState`: base/attack/frozen/captured predicates, item storage, rolling `InfoWindows`, `prepare`/`write`, settings round-trip. Campaign API: `record_json`, `clear_base`, `abandon`, and the item-stack conversions `stacks_to_pairs`/`fill_module`/`dense_from_names`. |
 | `stats.rs` | `CampaignStats` (per-planet lifetime totals) plus `GameStats` mutation helpers. |
 | `waves.rs` | `Waves`: the built-in 28-group table and the seeded `ArcRand` generator; `WaveDifficulty`, `table_units_registered`. |
 | `spawn_group.rs` | `SpawnGroup`/`ItemStack`: wave descriptor, `get_spawned`/`get_shield` scaling, JSON codec, `create_unit`. |
 | `teams.rs` | `Teams` registry and `TeamData` caches: `BuildingRecord`/`UnitRecord` snapshots, the insertion-stable `QuadTree<T>`, clustered counts, team inventory, `destroy_to_derelict`, core/enemy queries. |
 | `team.rs` | The 256-entry `Team` registry (`all`/`get`/`base_teams`), colors/palettes and AI predicates. |
-| `tech_tree.rs` | Research runtime over `content::tech`: `requirements_complete`, `can_spend`/`spend`/`unlock`, `check_auto_unlocks`, `content_unlocked`, `reset_all`. |
+| `tech_tree.rs` | Research runtime over `content::tech`: `requirements_complete`, `can_spend`/`spend`/`unlock`, `check_auto_unlocks`, `content_unlocked`, `reset_all`. Campaign API: `UnlockOutcome`/`apply_pending_unlocks`, `check_campaign_auto_unlocks`, `unlocked_content_names`, `root_planets`, `node_for_content_name`, `ResearchInventory`/`research_inventory`, `plan_research_removal`. |
 | `objectives.rs` | Tech-tree `Objective` predicates (`Research`/`Produce`/`SectorComplete`/`OnSector`/`OnPlanet`) over `ObjectiveContext`. |
 | `map_objectives.rs` | `MapObjectivesRuntime` executor: `update`/`complete`/`qualified`/`dependency_finished`, transient timer/completion state, flag application. |
 | `map_markers.rs` | `MapMarkers` containers: the three index vectors, `MarkerKind` index fix-ups, `control` and save-region `write`/`read`. |
-| `saves.rs` | Save-slot policy on `io::save`: `load`/listing, autosave cadence, playtime, `save_sector`, `cautious_load`, remap. |
-| `schematics.rs` | `.msch` codec, `Schematic`/`Stile` values and the `Schematics` registry: `read`/`write`/base64, `place`/`place_loadout`, loadouts, `rotate`/`rotated`. |
+| `saves.rs` | Save-slot policy on `io::save`: `load`/listing, autosave cadence, playtime, `save_sector`, `cautious_load`, remap, and `Saves::sector_save_file` (the per-sector slot path). |
+| `schematic.rs`, `schematics.rs` | `Schematic`/`Stile` values and preview spec vs the `.msch` codec and the `Schematics` registry: `read`/`write`/base64, `place`/`place_loadout`, loadouts, `rotate`/`rotated`. |
+| `launch.rs` | Launch loadout: `LaunchPayload`, `launch_core_name`, `launch_requirements`, `schematic_placeable_on_planet`, `item_on_planet`, `preset_launch_loadout_filter`. |
+| `quad_tree.rs` | Insertion-stable `QuadTree<T>` fallback for `TeamData` spatial queries (deterministic, no hash iteration). |
+| `service.rs`, `achievements.rs` | Local `GameService`/`ServiceTracker` listener + stat/achievement tables (90 achievements, 21 stats, Java declaration order). |
+| `test_support.rs` | Test-only fixtures shared by the `game::*` suites: `raw_registry` (base content **without** `init`; not `content::test_support::test_registry`) and `campaign`. |
 | `fog.rs`, `fog_gate.rs` | `FogControl` static/dynamic per-team fog buffers, discovery/visibility, save chunk IO; `fog_gate` applies `inFogTo`/`isDiscovered` to targeting and placement. |
 | `attack_indicators.rs` | Minimap `AttackIndicators` insertion-ordered timers. |
 | `landing_pad.rs`, `launch_payload.rs` | Campaign transport: landing-pad import cooldowns/queue and launch-pod entities with their 120-tick lifetime/export record. |
@@ -48,6 +52,8 @@ crate-wide rules are in [`mind-core/AGENTS.md`](../../AGENTS.md).
 - Objectives and research: `Objective`, `ObjectiveContext`, `SectorStatus`;
   `MapObjectivesRuntime`, `ObjectiveEnv`, `ObjectiveRunParams`, `ObjectiveLocale`, `CompletedObjectives`;
   `SpendResult`, `SpendError`; `MapMarkers`, `MarkerKind`, `ObjectiveMarker`.
+- Campaign API seams: `LaunchPlan` (`universe.rs`), `LaunchPayload` (`launch.rs`), `SectorLaunch`,
+  `LaunchReject` (`play.rs`), `UnlockOutcome`, `ResearchInventory` (`tech_tree.rs`), `SectorKey`.
 - IO-facing: `Saves`, `SavesUpdate`, `MissingModsReport`, `SaveSlot`; `Schematic`, `Stile`,
   `Schematics`, `SchematicWorld`, `EcsSchematicWorld`, `SchematicError`; `FogControl`,
   `FogData`, `FogBits`, `FogSource`; `AttackIndicators`, `Indicator`.

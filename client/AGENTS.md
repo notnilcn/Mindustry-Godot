@@ -36,7 +36,7 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 
 ## Responsibilities
 
-- `MindUiRoot` (`rust/mind-gdext/src/ui/root.rs`, scene `scenes/ui/ui_root.tscn`) owns the layer groups (`MenuGroup`, `HudGroup`, `DialogLayer`, `OverlayLayer`, `LoadingLayer`), binds every manifest dialog/fragment to the statically-instanced node of the same name, builds the theme via `MindThemeBuilder`, connects the `MindUi` prompt/toast signals, and runs the boot presentation (`set_menu_visible(true)`: show the menu, hide the HUD group, clear the loading overlay, fade the boot cover). The theme is applied on `enter_tree` so it is in place before the static children `ready`.
+- `MindUiRoot` (`rust/mind-gdext/src/ui/root/mod.rs`, scene `scenes/ui/ui_root.tscn`) owns the layer groups (`MenuGroup`, `HudGroup`, `DialogLayer`, `OverlayLayer`, `LoadingLayer`), binds every manifest dialog/fragment to the statically-instanced node of the same name, builds the theme via `MindThemeBuilder`, connects the `MindUi` prompt/toast signals, and runs the boot presentation (`set_menu_visible(true)`: show the menu, hide the HUD group, clear the loading overlay, fade the boot cover). The theme is applied on `enter_tree` so it is in place before the static children `ready`.
 - `MindMenuFragment` renders the standalone menu in `MenuGroup`: the `MINDISTRY` logo, the left sidebar button tree (icons are Mindustry icon-font glyphs via `MindAssets`) with fade-in submenus, the Discord banner and quit. `MindMenuBackground` under `Ui/MenuBackground` asks `MindRender.build_menu_texture` for the procedural `MenuRenderer` world baked to a texture and darkens it behind the menu.
 - `MindDialog` (`rust/mind-gdext/src/ui/dialog.rs`) is the base for all dialogs: one native root class per manifest dialog, dispatched to a `DialogController` by registry key. `MindUi` owns visibility and the active-dialog stack; the node renders and calls `show_dialog`/`hide_dialog`.
 - Fragments bind to the read-only `MindHud` properties and signals or to `MindUi` JSON endpoints; they never touch sim state.
@@ -64,6 +64,13 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 
 ## Conventions
 
+- **Dialog files follow the Java tree.** A controller lives in
+  `rust/mind-gdext/src/ui/dialogs/<group>/<java_snake>.rs`, one file per upstream dialog class
+  (`editor/MapResizeDialog.java` → `dialogs/editor/map_resize.rs`), with the group's `mod.rs`
+  owning `dispatch(id)`. Group-local helpers go in that group's `util.rs`; a helper two or more
+  groups share goes in `dialogs/common/` (`defer`, `facade`, `prompt`) — never a cross-group
+  `use`. A new id needs a controller, its `ui/dialogs_manifest.json` row, and the
+  `every_manifest_id_resolves_exactly_once` module list in `ui/dialogs/mod.rs`.
 - `kit::widgets::factory` is the way dialogs build themed widgets; text/icon lookup routes through `MindAssets`.
 - Style names in `styles_manifest.json` are the parity ABI; only presentation values in `MindStyles`/`MindThemeBuilder` are local.
 - `MindTable`'s fluent `add(child).grow_x_axis().pad(4)` API mirrors `Table.add(...)`; call `row()` to start a new row.

@@ -3,11 +3,11 @@
 
 //! Per-dialog controllers for the shared [`super::dialog::MindDialog`] shell.
 //!
-//! Each module ports one `client/ui/dialogs/*.gd` (or
-//! `client/scenes/editor/*.gd`) script into a [`super::dialog::DialogController`]
-//! implementation. The dialog node resolves its registry key from the manifest
-//! and dispatches here, so the 46 scenes that inherit `mind_dialog_base.tscn`
-//! keep one native root class.
+//! Each module ports one upstream Mindustry dialog (originally one
+//! `client/ui/dialogs/*.gd` script) into a
+//! [`super::dialog::DialogController`] implementation. The dialog node resolves
+//! its registry key from the manifest and dispatches here, so the 46 scenes that
+//! inherit `mind_dialog_base.tscn` keep one native root class.
 //!
 //! The controllers are grouped by upstream dialog family: [`menu`], [`settings`],
 //! [`database`], [`game`], [`net`], [`pickers`], [`campaign`], [`maps`],
@@ -30,7 +30,6 @@ pub mod pickers;
 pub mod rules;
 pub mod schematics;
 pub mod settings;
-
 
 use super::dialog::DialogController;
 

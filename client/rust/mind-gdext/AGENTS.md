@@ -14,13 +14,13 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
 | Path | Responsibility |
 |---|---|
 | `src/lib.rs` | Crate root: module declarations, public class re-exports, `MindExtension` `ExtensionLibrary`, boot hooks, `MIND_VERSION`. |
-| `src/sim_host.rs` | `MindSimHost` — owns `mind_core::Sim`, the fixed 60 Hz pump, player control and the MCP/test API. |
+| `src/sim_host/` | `MindSimHost` — owns `mind_core::Sim`, the fixed 60 Hz pump, player control and the MCP/test API. `mod.rs` keeps the class, `pump`/`state`/`player` the tick and state seams, `commands`/`command_panel`/`plans` the order surface, `world_load`/`campaign_link`/`io` the load and campaign seams, `render_blocks`/`render_units`/`render_light`/`bar_rows` the render reads, and `inspect`/`world_query` the probes. |
 | `src/camera.rs` | `MindCamera2D` — pan/zoom/edge-pan/shake; screen↔tile transforms over `mind_core::input::CameraState`. |
 | `src/tile_grid.rs` | `MindTileGrid` — debug grid lines plus one quad per non-air block. |
 | `src/render.rs` | `MindWorldRenderer` (frame pipeline, band children, `RenderStats`, `build_menu_texture` menu-world bake) and the `MindRender` probe facade. |
 | `src/fx.rs` | `MindFx` — effect/decal/trail/shake pools and the `FxBus` drain; geometry helpers in `fx/`. |
 | `src/logic.rs` | `MindLogic` — mlog statement metadata plus parse/compile/run probes over `mind_core::logic`. |
-| `src/campaign.rs` | `MindCampaign` — sector/play/rules/tech/schematic facade over `mind_core::game`. |
+| `src/campaign/` | `MindCampaign` — sector/play/rules/tech/schematic facade over `mind_core::game`. `mod.rs` keeps the class and its `#[func]` surface; `pump.rs` the runtime steps, `runtime.rs` the Godot-side seams, `views.rs` the typed read-model producers, `launch.rs`/`sector_launch.rs` the launch flow, `saves.rs`/`lifecycle.rs` the save and boot flows, `research.rs`/`schematics.rs`/`rules.rs` the remaining feature facades. |
 | `src/mods.rs` | `MindMods` — scans `user://mods`, persists enable flags, exposes listing/import/errors. |
 | `src/stdb.rs` | `StdbConnector` autoload and `StdbBinder` node over `mind-stdb`. |
 | `src/content_boot.rs` | One per-session `ContentRegistry` builder shared by `MindSimHost`, `MindCampaign` and `MindEditor`; resolves enabled mods once. |
@@ -29,13 +29,35 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
 | `src/log_bridge.rs` | `log` → Godot console + `user://last_log.txt` bridge and panic hook. |
 | `src/assets/` | `MindAssets` plus atlas, bundle, decorator, font, audio and path loaders. |
 | `src/audio/` | `MindAudio` (buses, decorator, stream cache, voice pool) over `mind_core::audio` state machines. |
-| `src/editor/` | `MindEditor` (state/command/palette/map-view facade), `MindEditorRenderer` (editor view) and `MindPreview` (map preview textures). |
+| `src/editor/` | `MindEditor` (state/command/palette/map-view facade, `#[func]`s split across `api_*.rs` by feature), `MindEditorRenderer` (editor view) and `MindPreview` (map preview textures). |
 | `src/fx/` | `draw_turret.rs`, `env.rs`, `explosion_sink.rs` — turret/environment geometry plus the reactor-explosion → FX/audio sink. |
-| `src/input/` | `MindInput` plus event translation, bindings, gesture and mobile/desktop bridges. |
+| `src/input/` | `MindInput` plus event translation (`events`, `bindings`, `gesture`), the `#[func]` surface split across `api_*.rs`, and the desktop/mobile bridges (`desktop/mod.rs` keeps the type definitions, the behaviour is chunked across its children, `glue`/`glue_mobile`/`effects`). |
 | `src/net/` | `MindNet` multiplayer node and the `relay.rs` runtime mapping. |
 | `src/platform/` | `MindPlatform` plus args, crash, desktop, dialogs, discord, service, update, uri and workshop host glue. |
 | `src/render/` | Render passes mounted under the `BandPlan` children: terrain/light `floor`, `blocks`, `block_extras`, `building_cache`, `cached_cracks`, `shadow`, `light`, `fog`, `weather`, `env`; units/bullets `units`, `unit_parts`, `unit_build`, `unit_overlays`, `unit_abilities`, `bullets`, `turret`, `shields`, `status`, `hazards`; overlays/UI `overlays`, `overlay_top`, `command_overlay`, `plans`, `links`, `logic_displays`, `objective_markers`, `pods`, `build_beam`, `debug`, `minimap`, `menu`, `g3d`, `load`, `pixelate`; shared helpers `canvas`, `atlas_bind`, `shaders`. |
-| `src/ui/` | The native UI: `MindUi` (dialog registry, pause governor, prompt/toast signals), the `MindHud` read-only surface, `MindDialog` + the 59 dialog controllers, the 14 fragments, the `kit/` widgets/theme/text/scroll/layout, the roots (`MindUiRoot`, `MindPlanetView`, `MindLandingCore`, menu background/flyers, editor views) and the four headless oracles (`checks.rs`). Guides: `src/ui/PORTING.md` (API contract) and `PORT-STATUS.md` (inventory + cutover record). |
+| `src/gdutil/` | Shared Godot-side helpers: `json` (Variant→JSON), `variant` (lenient Variant/VarDictionary coercion) and `coords` (screen/tile conversions). |
+| `src/ui/` | The native UI: `MindUi` (dialog registry, pause governor, prompt/toast signals), the `MindHud` read-only surface, `MindDialog` plus the dialog controllers in `ui/dialogs/<group>/` (campaign, database, dev, editor, game, logic, maps, menu, mods, net, pickers, rules, schematics, settings; shared helpers in `dialogs/common/`), the 14 fragments, the `kit/` widgets/theme/text/scroll/layout, the roots (`ui/root/` = `MindUiRoot`, `ui/planet/` = `MindPlanetView`, `ui/landing.rs` = `MindLandingCore`, menu background/flyers, editor views) and the four headless oracles (`checks.rs`). `MindDialog::campaign()` is the dialog-side typed campaign accessor; `campaign_views`/`research_tree`/`launch_plan`/`sector_state` return T01's typed read models. Guides: `src/ui/PORTING.md` (API contract) and `PORT-STATUS.md` (inventory + cutover record). |
+
+## Where things live
+
+- **A Godot class may split across files.** The `#[godot_api] impl` that owns every `#[signal]`,
+  `#[rpc]` and any fn named by a `#[var(get = …, set = …)]` attribute is the primary block and
+  stays in the class's `mod.rs`. Additional `#[godot_api(secondary)] impl` blocks hold the
+  `#[func]` groups in `api_*.rs`; plain `impl` blocks hold private helpers. Signals never move
+  out of the primary block, and one `#[func]` name may appear only once across all blocks.
+- **Dialogs live in `ui/dialogs/<group>/`.** One file per Java dialog class, named
+  `<java_snake>.rs` (e.g. `editor/MapResizeDialog.java` → `dialogs/editor/map_resize.rs`); the
+  group's `mod.rs` owns its `dispatch(id)` and declares the leaves. Group-local helpers live in
+  the group's `util.rs`; helpers two or more groups share live in `dialogs/common/`
+  (`defer` = deferred actions/frame ticks, `facade` = `MindUi` calls and rich labels, `prompt` =
+  prompt-signal wiring). Controllers are registered in `ui/dialogs/mod.rs::controller_for`, and
+  `every_manifest_id_resolves_exactly_once` proves one owner per manifest id.
+- **The `Mind*` facades split by topic, not by Godot concern.** `campaign/`, `sim_host/`,
+  `editor/`, `input/` and `net/` keep their class declaration and `ready`/`process`/`bootstrap`
+  in `mod.rs` and move behaviour into a named child file; `#[func]` groups go in `api_*.rs`.
+- **Deferred work goes through `dialogs/common/defer`** (`defer_action`, `Deferred`,
+  `install_frame_tick`) rather than a fresh `call_deferred` closure, so a nested `bind_mut` panic
+  cannot happen (see [`src/ui/PORT-STATUS.md`](src/ui/PORT-STATUS.md)).
 
 ## Responsibilities
 

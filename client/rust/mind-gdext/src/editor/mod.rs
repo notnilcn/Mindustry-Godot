@@ -5,7 +5,7 @@
 //!
 //! A Godot-free `mind_core::editor::MapEditor` plus an owned editor world
 //! ([`WorldGrid`] + [`ContentRegistry`] + `bevy_ecs::World`) wrapped in a thin
-//! `#[func]` surface for GDScript and the MCP oracle. All editor rules live in
+//! `#[func]` surface for the MCP oracle and the native editor views. All editor rules live in
 //! `mind-core` (OD19-B); this node owns only view handling (pan/zoom/projection)
 //! and the type conversions across the Godot boundary.
 //!
@@ -132,7 +132,7 @@ fn loadable_content_type(kind: &str) -> Option<mind_core::content::ContentType> 
     }
 }
 
-/// `MindEditor` — editor state/command facade for GDScript + MCP.
+/// `MindEditor` — editor state/command facade for the native views + MCP.
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct MindEditor {
