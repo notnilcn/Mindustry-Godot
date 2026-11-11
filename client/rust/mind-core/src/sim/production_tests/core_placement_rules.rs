@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{item, place_team1, runtime_sim, stored_item};
 
 /// H02 T1: a full campaign core keeps accepting items (Java
 /// `Rules.coreIncinerates`, `CoreBlock.java:744-751,886-913`) and incinerates
@@ -12,7 +13,7 @@ use super::*;
 #[test]
 fn full_core_incinerates_and_counts() {
     let mut sim = runtime_sim();
-    let core = place(&mut sim, "core-shard", 10, 10);
+    let core = place_team1(&mut sim, "core-shard", 10, 10);
     let copper = item(&sim, "copper");
     let cap = sim
         .ecs
@@ -49,7 +50,7 @@ fn core_rejects_when_not_incinerating() {
         }
     }
     let mut sim = runtime_sim();
-    let core = place(&mut sim, "core-shard", 10, 10);
+    let core = place_team1(&mut sim, "core-shard", 10, 10);
     let copper = item(&sim, "copper");
     let cap = sim
         .ecs

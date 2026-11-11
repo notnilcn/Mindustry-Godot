@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// T4 (PAR-0202): `VelComp.update` integrates `vel` with tile collisions
 /// (`EntityCollisions.move`), zeroes a blocked axis (`Mathf.equal`) and then
@@ -14,7 +15,7 @@ fn vel_update_applies_drag_and_stops_on_wall() {
     use crate::ai::controller::{AiKind, ControllerSlot};
 
     let mut sim = live_sim(20);
-    let _wall = place(&mut sim, 10, 5, "copper-wall", 1);
+    let _wall = place_at(&mut sim, 10, 5, "copper-wall", 1);
     // Dagger hitSize 8 -> hitbox 5.28; the wall tile (10, 5) spans x [76, 84):
     // the resolved box stops at `76 - 2.64 = 73.36`.
     let blocked = sim
@@ -85,9 +86,7 @@ fn knockback_moves_ground_unit() {
         "one tick of 2.0 px: {}",
         pos.x
     );
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let vel = *sim.ecs.0.get::<Vel>(dagger).expect("vel");
     assert!(vel.x.abs() < 0.01, "drag stops the unit: {vel:?}");
     let pos2 = *sim.ecs.0.get::<Pos>(dagger).expect("pos");
@@ -143,9 +142,7 @@ fn sandstorm_wind_pushes_idle_flare() {
         slot.kind = AiKind::NoAi;
     }
     let start = *sim.ecs.0.get::<Pos>(flare).expect("pos");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let pos = *sim.ecs.0.get::<Pos>(flare).expect("pos");
     let dist = ((pos.x - start.x).powi(2) + (pos.y - start.y).powi(2)).sqrt();
     // Java steady state: `0.1 / (81π) / 0.04 ≈ 0.0098` px/tick -> ≈ 2.9 px.
@@ -188,9 +185,7 @@ fn ice_reduces_drag() {
             vel.y = 0.0;
         }
     }
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
     let icy_dx = sim.ecs.0.get::<Pos>(icy).expect("icy pos").x - 64.0;
     let dry_dx = sim.ecs.0.get::<Pos>(default_floor).expect("pos").x - 64.0;
     assert!(
@@ -288,10 +283,10 @@ fn attack_map_pushes_from_drop_zone() {
     };
     // Wave-team core: the attack-mode half of `hasSpawns()` and, with
     // `wavesSpawnAtCores`, a spawn position stepped toward the player core.
-    let enemy_core = place(&mut sim, 40, 40, "core-shard", 2);
+    let enemy_core = place_at(&mut sim, 40, 40, "core-shard", 2);
     // A player core is required for the wave spawner's core step
     // (`WaveSpawner.eachGroundSpawn` steps toward `playerCore()`).
-    let player_core = place(&mut sim, 30, 40, "core-shard", 1);
+    let player_core = place_at(&mut sim, 30, 40, "core-shard", 1);
     let mut session = PlaySession::new(Rules {
         default_team: 1,
         wave_team: 2,
@@ -323,9 +318,7 @@ fn attack_map_pushes_from_drop_zone() {
         vel.y = 0.0;
     }
     sim.request_wave_spawn(0);
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     let vel = *sim.ecs.0.get::<Vel>(unit).expect("vel");
     let pos = *sim.ecs.0.get::<Pos>(unit).expect("pos");
     let spawn = sim

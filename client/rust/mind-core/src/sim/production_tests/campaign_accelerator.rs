@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    campaign_runtime_mut, install_campaign_session, item, place_team1, runtime_sim, tick_n,
+};
 
 /// I01 T7: `core-bastion`/`core-citadel`/`core-acropolis` set
 /// `requiresCoreZone = true` (`Blocks.java:3198,3218,3236`), so the upgrade
@@ -75,7 +78,7 @@ fn locked_upgrade_blocks_and_fires_hint() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    let recon = place(&mut sim, "additive-reconstructor", 4, 4);
+    let recon = place_team1(&mut sim, "additive-reconstructor", 4, 4);
     let (dagger, mace_name) = {
         let content = sim.block_runtime().expect("runtime").content();
         let dagger = content.unit_id("dagger").expect("dagger");
@@ -100,11 +103,7 @@ fn locked_upgrade_blocks_and_fires_hint() {
     );
 
     // Unlocking the target accepts it again.
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign")
-        .set_unlocked_content([mace_name]);
+    campaign_runtime_mut(&mut sim).set_unlocked_content([mace_name]);
     assert!(
         dispatch_accept_payload(&sim.ecs.0, recon, recon, payload),
         "an unlocked upgrade target is accepted"
@@ -126,7 +125,7 @@ fn abandon_played_sector_kills_cores_and_plays_game_over() {
     use crate::game::universe::Campaign;
 
     let mut sim = runtime_sim();
-    let core = place(&mut sim, "core-shard", 10, 10);
+    let core = place_team1(&mut sim, "core-shard", 10, 10);
     let campaign = {
         let content = sim.block_runtime().expect("runtime").content();
         Campaign::from_registry(content, &EmptyNeighborhood)
@@ -146,43 +145,25 @@ fn abandon_played_sector_kills_cores_and_plays_game_over() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    sim.ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign")
-        .abandon_played_sector();
-    for _ in 0..6 {
-        sim.tick().expect("tick");
-    }
+    campaign_runtime_mut(&mut sim).abandon_played_sector();
+    tick_n(&mut sim, 6);
     assert!(
         sim.ecs.0.get_entity(core).is_ok(),
         "the core survives the 7-tick delay"
     );
-    let early = sim
-        .ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign")
-        .take_events();
+    let early = campaign_runtime_mut(&mut sim).take_events();
     assert!(
         !early
             .iter()
             .any(|event| matches!(event, PlayEvent::SectorLose { .. })),
         "no loss before the cores die: {early:?}"
     );
-    for _ in 0..6 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 6);
     assert!(
         sim.grid.entity_at(TilePos::new(10, 10)).is_none(),
         "the abandoned sector's core was killed"
     );
-    let events = sim
-        .ecs
-        .0
-        .get_resource_mut::<CampaignRuntime>()
-        .expect("campaign")
-        .take_events();
+    let events = campaign_runtime_mut(&mut sim).take_events();
     assert!(
         events.iter().any(|event| matches!(
             event,
@@ -227,12 +208,12 @@ fn accelerator_builds_core_gates_and_launches() {
     {
         runtime.session.sector = Some((crate::content::PlanetId::new(0), 15));
     }
-    let accelerator = place(&mut sim, "interplanetary-accelerator", 10, 10);
-    let _source = place(&mut sim, "power-source", 10, 6);
+    let accelerator = place_team1(&mut sim, "interplanetary-accelerator", 10, 10);
+    let _source = place_team1(&mut sim, "power-source", 10, 6);
     // 21 large batteries (50000 each, Blocks.java:2519) in a row on the top
     // edge: > the 1_000_000 `powerBufferRequirement` (Blocks.java:6876).
     for index in 0..21 {
-        place(&mut sim, "battery-large", 8 + index * 3, 15);
+        place_team1(&mut sim, "battery-large", 8 + index * 3, 15);
     }
     let copper = item(&sim, "copper");
     let titanium = item(&sim, "titanium");
@@ -244,9 +225,7 @@ fn accelerator_builds_core_gates_and_launches() {
     );
     assert!(!behavior.accept_item(&sim.ecs.0, accelerator, accelerator, titanium));
 
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
     let progress = |sim: &Sim| {
         sim.ecs
             .0
@@ -272,18 +251,14 @@ fn accelerator_builds_core_gates_and_launches() {
             items.add(item, amount, 25000);
         }
     }
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let mid = progress(&sim);
     assert!(mid > 0.3 && mid < 0.7, "120-tick build: {mid}");
     assert!(
         !sim.accelerator_can_launch(accelerator),
         "core not built yet"
     );
-    for _ in 0..80 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 80);
     assert_eq!(progress(&sim), 1.0);
     assert_eq!(
         behavior.get_maximum_accepted(&sim.ecs.0, accelerator, titanium),
@@ -340,7 +315,7 @@ fn accelerator_requires_campaign_and_writes_progress() {
     use crate::world::behavior::campaign::AcceleratorBehavior;
 
     let mut sim = runtime_sim();
-    let accelerator = place(&mut sim, "interplanetary-accelerator", 10, 10);
+    let accelerator = place_team1(&mut sim, "interplanetary-accelerator", 10, 10);
     if let Some(mut state) = sim
         .ecs
         .0

@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// T3: `PlayerComp.team` is set before the spawn attempt, so a player without
 /// a supported core retries `bestCore()` every 60 ticks
@@ -31,15 +32,11 @@ fn player_team_set_without_core_retries_spawn() {
         .insert_resource(CampaignRuntime::new(session, campaign));
 
     sim.set_player_team(1);
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert!(sim.player_unit().is_none(), "no player unit without a core");
     // Landing a core lets the next 60-tick window spawn the unit.
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
+    tick_n(&mut sim, 60);
     let player = sim.player_unit().expect("player spawned at the new core");
     let pos = sim.ecs.0.get::<Pos>(player).expect("pos");
     assert_eq!((pos.x, pos.y), (160.0, 160.0), "spawned on the core");
@@ -63,7 +60,7 @@ fn clear_unit_dock_releases_possessed_unit() {
         // `Command` only to the player's team; the rest get the AI branch).
         rules.default_team = 1;
     }
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     // The dockable types are the `core_unit_dock` units (Java: evoke, incite,
     // emanate, UnitTypes.java:4355/4421/4500) - the shard's alpha is not one.
     let dock_name = {
@@ -167,7 +164,7 @@ fn campaign_spawn_queues_unlock() {
         sim.ecs.0.get_resource::<CampaignCoreQueues>().is_some(),
         "campaign hook queues installed"
     );
-    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _core = place_at(&mut sim, 20, 20, "core-shard", 1);
     let alpha = sim
         .unit_runtime()
         .expect("rt")

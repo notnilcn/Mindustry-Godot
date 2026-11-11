@@ -60,7 +60,7 @@ fn spawn_sets_result() {
         10,
         "spawn @dagger 20 20 0 @sharded u\nsensor x u @x\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(unit_count(&sim, "dagger", 1), 1, "unit spawned");
     let x = processor_num(&sim, 10, 10, "x").expect("x bound");
     assert!(
@@ -83,7 +83,7 @@ fn spawn_respects_unit_cap() {
         10,
         "spawn @dagger 20 20 0 @sharded u\nspawn @dagger 24 20 0 @sharded v\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(unit_count(&sim, "dagger", 1), 1, "cap 1 blocks the second");
     assert_events_drained(&sim);
 }
@@ -93,7 +93,7 @@ fn spawn_respects_unit_cap() {
 #[test]
 fn setblock_clears_tile() {
     let mut sim = campaign_sim();
-    place(&mut sim, "conveyor", 20, 20);
+    place_team1(&mut sim, "conveyor", 20, 20);
     assert!(sim.grid.entity_at(TilePos::new(20, 20)).is_some());
     place_world_processor(
         &mut sim,
@@ -101,7 +101,7 @@ fn setblock_clears_tile() {
         10,
         "setblock block @air 20 20 @derelict 0\nstop\n",
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     assert!(
         sim.grid.entity_at(TilePos::new(20, 20)).is_none(),
         "building removed"
@@ -129,7 +129,7 @@ fn status_applies_fast() {
         10,
         "spawn @dagger 20 20 0 @sharded u\nstatus false @status-fast u 100\nstop\n",
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let dagger = sim
         .unit_runtime()
         .expect("unit runtime")
@@ -188,7 +188,7 @@ fn explosion_damages() {
         10,
         "explosion @sharded 40 40 3 50 1 1 0 0\nstop\n",
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let after = health_of(&sim, dagger);
     let armor = sim
         .block_runtime()
@@ -214,7 +214,7 @@ fn effect_emits_named_fx() {
     let mut sim = campaign_sim();
     let bus = install_fx_recorder(&mut sim);
     place_world_processor(&mut sim, 10, 10, "effect warn 130 60 2 %ffaaff\nstop\n");
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let expected = effect_by_name("unitCapKill").expect("unitCapKill");
     assert!(
         bus.drain().iter().any(|event| matches!(
@@ -234,7 +234,7 @@ fn effect_emits_named_fx() {
 fn getblock_floor_live() {
     let mut sim = campaign_sim();
     place_world_processor(&mut sim, 10, 10, "getblock floor fl 5 5\nstop\n");
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let floor = sim.grid.tile(5, 5).floor;
     assert_ne!(floor, BlockId::AIR, "runtime_sim floors are stone");
     assert_eq!(
@@ -261,7 +261,7 @@ fn weatherset_creates_rain() {
         .expect("rain")
         .id;
     place_world_processor(&mut sim, 10, 10, "weatherset @rain true\nstop\n");
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     assert!(
         sim.ecs
             .0
@@ -270,10 +270,10 @@ fn weatherset_creates_rain() {
         "rain entity created"
     );
     place_world_processor(&mut sim, 12, 10, "weathersense r @rain\nstop\n");
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     assert_eq!(processor_num(&sim, 12, 10, "r"), Some(1.0), "sense reads 1");
     place_world_processor(&mut sim, 14, 10, "weatherset @rain false\nstop\n");
-    tick(&mut sim, 360);
+    tick_n(&mut sim, 360);
     let life = sim
         .ecs
         .0
@@ -294,7 +294,7 @@ fn atolls_block1_first_steps() {
     let mut sim = finish_sim(wide_sim(320), test_rules());
     set_flags(&mut sim, &["attack"]);
     for x in [210, 215, 220, 225] {
-        place(&mut sim, "conveyor", x, 306);
+        place_team1(&mut sim, "conveyor", x, 306);
     }
     // Atolls is an ocean sector: the two naval spawns stand on deep water.
     let water = sim
@@ -313,7 +313,7 @@ fn atolls_block1_first_steps() {
         "getflag go \"attack\"\njump 0 equal go false\nwait 1\nsetrule waves false 0 0 100 100\ncutscene pan 263 135 0.06 0\ncutscene zoom 0.1 135 0.06 0\nlocaleprint \"atolls.noairunit\"\nmessage announce 6 @wait\nsetrule unitCap 4 0 0 100 100\nsetblock block @air 210 306 @derelict 0\nsetblock block @air 215 306 @derelict 0\nsetblock block @air 220 306 @derelict 0\nsetblock block @air 225 306 @derelict 0\nwait 0.02\nspawn @fortress 210 306 270 @sharded l1\nspawn @fortress 215 306 270 @sharded l2\nspawn @minke 220 306 270 @sharded n1\nspawn @minke 225 306 270 @sharded n2\nspawn @mega 110 400 270 @sharded m1\nspawn @mega 115 400 270 @sharded m2\nspawn @mega 120 400 270 @sharded m3\nspawn @mega 125 400 270 @sharded m4\nstop\n",
     );
     // 60 ticks `wait 1` + 360 ticks `message announce 6 @wait` + the spawn run.
-    tick(&mut sim, 440);
+    tick_n(&mut sim, 440);
     for x in [210, 215, 220, 225] {
         assert!(
             sim.grid.entity_at(TilePos::new(x, 306)).is_none(),

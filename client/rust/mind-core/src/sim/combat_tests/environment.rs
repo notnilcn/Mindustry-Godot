@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// G01 T13: a grounded dagger on `deep-water` drowns after
 /// `hitSize/8 * drownTimeMultiplier * floor.drownTime` = 200 ticks
@@ -36,13 +37,9 @@ fn dagger_drowns_in_deep_water() {
             .get::<Health>(dagger)
             .is_some_and(|health| !health.dead)
     };
-    for _ in 0..195 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 195);
     assert!(alive(&sim), "still alive at tick 195");
-    for _ in 0..15 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 15);
     assert!(!alive(&sim), "drowned by tick 210");
 }
 
@@ -122,7 +119,7 @@ fn unit_out_of_bounds_dies() {
 #[test]
 fn dagger_on_wall_dies_nova_boosts() {
     let mut sim = live_sim(48);
-    place(&mut sim, 20, 20, "copper-wall", 1);
+    place_at(&mut sim, 20, 20, "copper-wall", 1);
     // `World.toTile` rounds, so tile-centre coordinates map to the *next*
     // tile: spawn inside (20,20) rather than on its centre.
     let dagger = sim
@@ -132,9 +129,7 @@ fn dagger_on_wall_dies_nova_boosts() {
     let nova = sim
         .spawn_live_unit("nova", 2, 20.3 * 8.0, 20.3 * 8.0, 0.0)
         .expect("nova");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let dagger_tile = sim.ecs.0.get::<Pos>(dagger).map(|pos| {
         (
             crate::world::WorldGrid::to_tile(pos.x),
@@ -200,9 +195,7 @@ fn drop_zone_pushes_player_units() {
         .spawn_live_unit("dagger", 1, sx + 50.0, sy, 0.0)
         .expect("dagger");
     let start = 50.0f32;
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let end = sim
         .ecs
         .0
@@ -218,12 +211,10 @@ fn drop_zone_pushes_player_units() {
 #[test]
 fn bullet_hit_emits_build_damage_event() {
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     sim.spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0, 180.0)
         .expect("dagger");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let events = sim.drain_build_damage_events();
     let wall_events: Vec<_> = events
         .iter()

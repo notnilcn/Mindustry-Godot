@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{configure, item, place_team1, runtime_sim, stored_item, tick_n};
 
 /// T1 (`Reconstructor.shouldConsume`, `Reconstructor.java:376-379` + the power
 /// half of `BuildingComp.updateConsumption`, `BuildingComp.java:1955-2005`): a
@@ -14,8 +15,8 @@ use super::*;
 #[test]
 fn reconstructor_idle_requests_no_power() {
     let mut sim = runtime_sim();
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let rig = place_team1(&mut sim, "additive-reconstructor", 5, 5);
     let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
     {
         let world = &mut sim.ecs.0;
@@ -24,9 +25,7 @@ fn reconstructor_idle_requests_no_power() {
             items.add(graphite, 40, 80);
         }
     }
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let (efficiency, should) = sim
         .ecs
         .0
@@ -80,9 +79,7 @@ fn reconstructor_idle_requests_no_power() {
             is_block: false,
         },
     );
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let should = sim
         .ecs
         .0
@@ -106,7 +103,7 @@ fn reconstructor_idle_requests_no_power() {
 #[test]
 fn full_crafter_stops_consuming() {
     let mut sim = runtime_sim();
-    let press = place(&mut sim, "graphite-press", 5, 5);
+    let press = place_team1(&mut sim, "graphite-press", 5, 5);
     let (graphite, coal) = (item(&sim, "graphite"), item(&sim, "coal"));
     {
         let world = &mut sim.ecs.0;
@@ -115,9 +112,7 @@ fn full_crafter_stops_consuming() {
             items.add(coal, 4, 10);
         }
     }
-    for _ in 0..200 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 200);
     assert_eq!(
         stored_item(&sim, press, coal),
         4,
@@ -139,7 +134,7 @@ fn full_drill_stops() {
     let mut sim = runtime_sim();
     set_floor(&mut sim, 5, 5, "ore-copper");
     set_floor(&mut sim, 6, 5, "ore-copper");
-    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let drill = place_team1(&mut sim, "mechanical-drill", 5, 5);
     let copper = item(&sim, "copper");
     {
         let world = &mut sim.ecs.0;
@@ -147,9 +142,7 @@ fn full_drill_stops() {
             items.add(copper, 10, 10);
         }
     }
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let (efficiency, should, total) = sim
         .ecs
         .0
@@ -169,7 +162,7 @@ fn full_drill_stops() {
 #[test]
 fn unit_factory_needs_power() {
     let mut sim = runtime_sim();
-    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let factory = place_team1(&mut sim, "ground-factory", 5, 5);
     let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
     {
         let world = &mut sim.ecs.0;
@@ -178,9 +171,7 @@ fn unit_factory_needs_power() {
             items.add(lead, 10, 60);
         }
     }
-    for _ in 0..3000 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3000);
     let dagger = sim
         .block_runtime()
         .expect("runtime")
@@ -193,7 +184,7 @@ fn unit_factory_needs_power() {
     );
     assert_eq!(stored_item(&sim, factory, silicon), 10, "items untouched");
 
-    let _source = place(&mut sim, "power-source", 3, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
     let start = sim.tick_count();
     for _ in 0..1500 {
         sim.tick().expect("tick");
@@ -225,7 +216,7 @@ fn ground_factory_plays_unit_create() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let factory = place_team1(&mut sim, "ground-factory", 5, 5);
     let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
     {
         let world = &mut sim.ecs.0;
@@ -234,7 +225,7 @@ fn ground_factory_plays_unit_create() {
             items.add(lead, 10, 60);
         }
     }
-    let _source = place(&mut sim, "power-source", 3, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
     let dagger = sim
         .block_runtime()
         .expect("runtime")
@@ -285,15 +276,13 @@ fn mender_pulse_plays_heal_wave() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    let _mender = place(&mut sim, "mender", 5, 5);
-    let _power = place(&mut sim, "power-source", 5, 6);
-    let wall = place(&mut sim, "copper-wall", 6, 5);
+    let _mender = place_team1(&mut sim, "mender", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 5, 6);
+    let wall = place_team1(&mut sim, "copper-wall", 6, 5);
     if let Some(mut health) = sim.ecs.0.get_mut::<crate::entities::comp::Health>(wall) {
         health.health = 10.0;
     }
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let events = log.events();
     let heals: Vec<&AudioEvent> = events
         .iter()
@@ -323,12 +312,10 @@ fn mender_pulse_plays_heal_wave() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    let _mender = place(&mut sim, "mender", 5, 5);
-    let _power = place(&mut sim, "power-source", 5, 6);
-    let _wall = place(&mut sim, "copper-wall", 6, 5);
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    let _mender = place_team1(&mut sim, "mender", 5, 5);
+    let _power = place_team1(&mut sim, "power-source", 5, 6);
+    let _wall = place_team1(&mut sim, "copper-wall", 6, 5);
+    tick_n(&mut sim, 300);
     let heals = log.events().iter().filter(|ticked| {
         matches!(&ticked.event, AudioEvent::At { sound, .. } if *sound == SoundId::HEAL_WAVE)
     }).count();
@@ -349,8 +336,8 @@ fn reconstructor_applies_command() {
     {
         rules.default_team = 1;
     }
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let rig = place_team1(&mut sim, "additive-reconstructor", 5, 5);
     let rebuild = sim
         .block_runtime()
         .expect("runtime")
@@ -434,8 +421,8 @@ fn reconstructor_applies_command() {
 #[test]
 fn node_autolinks_on_place() {
     let mut sim = runtime_sim();
-    let generator = place(&mut sim, "combustion-generator", 5, 5);
-    let node = place(&mut sim, "power-node", 9, 5);
+    let generator = place_team1(&mut sim, "combustion-generator", 5, 5);
+    let node = place_team1(&mut sim, "power-node", 9, 5);
     let generator_pack = sim
         .ecs
         .0
@@ -461,8 +448,8 @@ fn node_autolinks_on_place() {
 fn consumer_autolinks_to_node_in_range() {
     let mut sim = runtime_sim();
     set_floor(&mut sim, 9, 5, "ore-copper");
-    let node = place(&mut sim, "power-node", 5, 5);
-    let drill = place(&mut sim, "laser-drill", 9, 5);
+    let node = place_team1(&mut sim, "power-node", 5, 5);
+    let drill = place_team1(&mut sim, "laser-drill", 9, 5);
     let drill_pack = sim
         .ecs
         .0
@@ -499,8 +486,8 @@ fn consumer_autolinks_to_node_in_range() {
 #[test]
 fn consumer_autolinks_to_power_source_in_range() {
     let mut sim = runtime_sim();
-    let source = place(&mut sim, "power-source", 5, 5);
-    let conveyor = place(&mut sim, "phase-conveyor", 8, 5);
+    let source = place_team1(&mut sim, "power-source", 5, 5);
+    let conveyor = place_team1(&mut sim, "phase-conveyor", 8, 5);
     let conveyor_pack = sim
         .ecs
         .0
@@ -517,9 +504,7 @@ fn consumer_autolinks_to_power_source_in_range() {
         links.contains(&conveyor_pack),
         "source linked to the consumer: {links:?}"
     );
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let status = sim
         .ecs
         .0

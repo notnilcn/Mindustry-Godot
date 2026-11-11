@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    item, liquid, place_team1, runtime_sim, stored_item, stored_liquid, tick_n,
+};
 
 /// PAR-0075: a combustion generator accepts coal (not copper) and makes
 /// power from it.
@@ -12,7 +15,7 @@ use super::*;
 fn combustion_generator_accepts_coal_and_generates() {
     let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
     sim.install_block_runtime().expect("runtime");
-    let generator = place(&mut sim, "combustion-generator", 8, 8);
+    let generator = place_team1(&mut sim, "combustion-generator", 8, 8);
     let coal = item(&sim, "coal");
     let copper = item(&sim, "copper");
     let world = &mut sim.ecs.0;
@@ -23,9 +26,7 @@ fn combustion_generator_accepts_coal_and_generates() {
         world, generator, generator, copper
     ));
     transfer::dispatch_handle_item(world, generator, generator, coal);
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let production = sim
         .ecs
         .0
@@ -44,7 +45,7 @@ fn explosive_fuel_damages_generator_and_fires_trigger() {
     use crate::world::blocks::power::generator::{GeneratorConfig, ItemExplodeConfig};
 
     let mut sim = runtime_sim();
-    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    let generator = place_team1(&mut sim, "combustion-generator", 5, 5);
     // The vanilla chance is `delta * 0.06 * clamp(1.2 - 0.5)` (~4%/tick);
     // force the roll so this test is deterministic.
     sim.ecs
@@ -69,9 +70,7 @@ fn explosive_fuel_damages_generator_and_fires_trigger() {
             .unwrap_or(0.0)
     };
     let before = health(&sim);
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     assert!(
         health(&sim) < before,
         "explosive fuel damaged the generator ({before} -> {})",
@@ -89,9 +88,7 @@ fn explosive_fuel_damages_generator_and_fires_trigger() {
     });
     let frozen = health(&sim);
     let fired = sim.triggers.fire_count(crate::sim::Trigger::BlastGenerator);
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     assert_eq!(health(&sim), frozen, "no damage with the rule off");
     assert_eq!(
         sim.triggers.fire_count(crate::sim::Trigger::BlastGenerator),
@@ -148,9 +145,7 @@ fn electrolyzer_dumps_liquids_in_configured_directions() {
             .expect("module")
             .add(liquid, amount, 500.0);
     }
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     assert!(
         stored_liquid(&sim, left, ozone) > 0.0,
         "ozone dumps toward the relative-left side (dir 1 + rotation 1)"
@@ -190,7 +185,7 @@ fn power_turret_reads_bullet_range_change() {
     sim.grid.fill(stone, BlockId::AIR);
     sim.install_block_runtime_from(crate::sim::runtime::SimRuntimeConfig::default(), content)
         .expect("runtime");
-    let turret = place(&mut sim, "lancer", 5, 5);
+    let turret = place_team1(&mut sim, "lancer", 5, 5);
     let (config_range, ammo_change) = {
         let state = sim.ecs.0.get::<TurretState>(turret).expect("state");
         let TurretAmmo::Power(ammo) = &state.config.ammo else {
@@ -225,7 +220,7 @@ fn door_refuses_to_close_with_a_unit_on_it() {
 
     let mut sim = runtime_sim();
     sim.install_unit_runtime().expect("unit runtime");
-    let door = place(&mut sim, "door", 5, 5);
+    let door = place_team1(&mut sim, "door", 5, 5);
     let unit = sim
         .ecs
         .0
@@ -275,7 +270,7 @@ fn generator_explosion_applies_sim_side_effects() {
     let mut sim = runtime_sim();
     // The fireball spawn (`Bullets.fireball.createNet`) needs the unit runtime.
     sim.install_unit_runtime().expect("unit runtime");
-    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    let generator = place_team1(&mut sim, "combustion-generator", 5, 5);
     let neoplasm = liquid(&sim, "neoplasm");
     // A neoplasia-style footprint with every sim effect active.
     {
@@ -297,7 +292,7 @@ fn generator_explosion_applies_sim_side_effects() {
     let boulder = BlockId::new(sim.world_block_id("boulder").expect("boulder"));
     sim.grid.tiles.get_mut(6, 6).block = boulder;
     // A nearby building takes falloff damage.
-    let wall = place(&mut sim, "conveyor", 7, 5);
+    let wall = place_team1(&mut sim, "conveyor", 7, 5);
     let wall_health = |sim: &Sim| {
         sim.ecs
             .0
@@ -318,9 +313,7 @@ fn generator_explosion_applies_sim_side_effects() {
     assert!(fire_explosion(&mut sim.ecs.0, generator, explosion, true));
     // The sim half drains on the following ticks (fires are delayed by
     // `dst / explosionSpeed`).
-    for _ in 0..20 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 20);
 
     assert!(
         wall_health(&sim) < before,
@@ -354,7 +347,7 @@ fn item_duration_multipliers_scale_burn_time() {
 
     let burn_ticks = |name: &str| -> i64 {
         let mut sim = runtime_sim();
-        let generator = place(&mut sim, "combustion-generator", 5, 5);
+        let generator = place_team1(&mut sim, "combustion-generator", 5, 5);
         // Isolate the duration multiplier from the T2 explosive consumer.
         sim.ecs
             .0

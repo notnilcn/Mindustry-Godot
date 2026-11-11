@@ -5,16 +5,14 @@
 //! Upstream: none (port-only tests).
 
 use crate::entities::comp::TeamComp;
-use crate::sim::*;
+use crate::sim::test_support::live_sim_seeded;
 
 /// A relay-assigned team moves both `PlayerComp.team` and the possessed
 /// unit's `TeamComp` (`PlayerComp.java:266-271`), and the possessed unit is
 /// kept (only its team changes).
 #[test]
 fn relay_team_moves_the_player_unit_and_respawn_team() {
-    let mut sim = Sim::new(7, 24, 24, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = live_sim_seeded(7, 24);
     let unit = sim
         .spawn_live_unit("alpha", 1, 32.0, 32.0, 0.0)
         .expect("alpha unit spawned");

@@ -5,6 +5,11 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    campaign_runtime, campaign_runtime_mut, configure, install_campaign_session,
+    install_logic_world, item, place_team1, place_world_processor, runtime_sim, stored_item,
+    test_rules, tick_n,
+};
 
 /// H06 T3: Ground Zero GZ-4 verbatim — the pan activates, the map area is
 /// expanded and the `wait 11` + `cutscene stop` end the cutscene.
@@ -17,11 +22,7 @@ fn gz4_cutscene_runs_and_stops() {
     install_campaign_session(&mut sim, test_rules());
     install_logic_world(&mut sim);
     {
-        let mut runtime = sim
-            .ecs
-            .0
-            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-            .expect("runtime");
+        let mut runtime = campaign_runtime_mut(&mut sim);
         runtime
             .session
             .rules
@@ -39,26 +40,18 @@ fn gz4_cutscene_runs_and_stops() {
         10,
         "getflag mineOver \"mineOver\"\njump 0 equal mineOver false\nsetflag \"mineOver\" false\nsetrule mapArea 10 0 0 256 256\ngetflag end \"spawnOver\"\njump 4 equal end false\ncutscene pan 135 230 0.03 0\nwait 11\ncutscene stop 100 100 0.06 0\nstop\n",
     );
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let cutscene = sim.logic_cutscene();
     assert!(cutscene.active, "GZ-4 pan active after the wait starts");
     assert_eq!(cutscene.pan, (1080.0, 1840.0));
     {
-        let runtime = sim
-            .ecs
-            .0
-            .get_resource::<crate::game::runtime::CampaignRuntime>()
-            .expect("runtime");
+        let runtime = campaign_runtime(&sim);
         assert!(runtime.session.rules.limit_map_area, "map area set");
         assert_eq!(runtime.session.rules.limit_width, 256);
         assert_eq!(runtime.session.rules.limit_height, 256);
     }
     // `wait 11` (seconds) then `cutscene stop`.
-    for _ in 0..11 * 60 + 10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 11 * 60 + 10);
     assert!(!sim.logic_cutscene().active, "stop ends the cutscene");
 }
 
@@ -77,9 +70,7 @@ fn cutscene_headless_noop() {
         10,
         "cutscene pan 10 20 0.05 0\ncutscene active a 0 0 0\nstop\n",
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     assert_eq!(
         sim.logic_cutscene(),
         crate::logic::world::LogicCutscene::default()
@@ -110,14 +101,8 @@ fn setrule_unchanged_is_not_dirty() {
         10,
         "setrule waveTimer true 0 0 0 0\nsetrule waves true 0 0 0 0\nstop\n",
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 4);
+    let runtime = campaign_runtime(&sim);
     assert!(runtime.session.rules.wave_timer);
     assert!(runtime.session.rules.waves);
     assert!(
@@ -148,14 +133,8 @@ fn setrule_waves_resyncs_build_rules() {
         .expect("build rules")
         .waves = false;
     place_world_processor(&mut sim, 10, 10, "setrule waves true 0 0 0 0\nstop\n");
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 4);
+    let runtime = campaign_runtime(&sim);
     assert!(runtime.session.rules.waves);
     assert!(
         sim.ecs
@@ -184,14 +163,8 @@ fn per_team_rule_changes_mark_dirty() {
         10,
         "setrule buildSpeed 2 @sharded 0 0 0\nstop\n",
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 4);
+    let runtime = campaign_runtime(&sim);
     assert_eq!(
         runtime.session.rules.team_rule(1).build_speed_multiplier,
         2.0
@@ -222,7 +195,7 @@ fn map_area_reenables_outside_buildings() {
     install_campaign_session(&mut sim, rules.clone());
     // Place before the limit is applied to the grid (placement outside the
     // rect is refused once `grid.limit_area` is set).
-    let conveyor = place(&mut sim, "conveyor", 25, 25);
+    let conveyor = place_team1(&mut sim, "conveyor", 25, 25);
     sim.apply_rules_to_world(&rules);
     assert!(
         !sim.ecs
@@ -233,9 +206,7 @@ fn map_area_reenables_outside_buildings() {
         "disabled outside the 20x20 area"
     );
     place_world_processor(&mut sim, 10, 10, "setrule mapArea 10 0 0 50 50\nstop\n");
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     assert!(
         sim.ecs
             .0
@@ -286,9 +257,7 @@ fn message_wait_blocks_until_announcement_expires() {
             })
             .unwrap_or(0.0)
     };
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     {
         let messages = sim
             .ecs
@@ -312,9 +281,7 @@ fn message_wait_blocks_until_announcement_expires() {
         );
     }
     assert_eq!(state_at(&sim), 0.0, "second announce is still blocked");
-    for _ in 0..140 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 140);
     assert_eq!(state_at(&sim), 2.0, "wait released after the announcement");
 }
 
@@ -333,9 +300,7 @@ fn message_announce_drained() {
         10,
         "print \"hi\"\nmessage announce 3 ok\nstop\n",
     );
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     let messages = sim.take_logic_messages();
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert_eq!(messages[0].0, MessageType::Announce);
@@ -369,7 +334,7 @@ fn setprop_item_sets_count() {
     use crate::logic::value::LogicObject;
 
     let mut sim = runtime_sim();
-    let container = place(&mut sim, "container", 5, 5);
+    let container = place_team1(&mut sim, "container", 5, 5);
     let copper = item(&sim, "copper");
     let target = LogicObject::Building(container);
     assert!(set_prop_content(
@@ -395,7 +360,7 @@ fn setprop_item_sets_count() {
     assert_eq!(stored_item(&sim, container, copper), 10, "idempotent");
 
     // A core accepts up to its capacity (`getMaximumAccepted`), not 99999.
-    let core = place(&mut sim, "core-shard", 10, 10);
+    let core = place_team1(&mut sim, "core-shard", 10, 10);
     let capacity = sim
         .ecs
         .0
@@ -441,9 +406,7 @@ fn setprop_unit_health_zero_kills() {
         LAccess::Health,
         0.0
     ));
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     assert!(
         sim.ecs.0.get_entity(unit).is_err(),
         "the unit was destroyed by resolve_deaths"
@@ -528,9 +491,7 @@ fn setprop_unit_stack_and_status() {
     assert!(set_prop_num(&mut sim.ecs.0, &target, LAccess::Armor, 5.0));
     // A few ticks: the per-tick status update folds the dynamic multipliers in
     // instead of resetting the override (the old bug).
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     let status = sim.ecs.0.get::<StatusComp>(unit).expect("status").clone();
     assert!(
         (status.armor_override - 5.0).abs() < 1e-4,
@@ -595,9 +556,7 @@ fn extraction_outpost_block2() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let entity = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
     let state = sim
         .ecs

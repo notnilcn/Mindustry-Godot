@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0137: `canBoost` mechs lift off while boosting
 /// (`UnitComp.updateBoosting`, UnitComp.java:121-130): elevation reaches 1,
@@ -77,7 +78,7 @@ fn flare_circles_and_keeps_firing() {
     // Inside the flare's 76 px range: `findMainTarget` (`{generator, null}`)
     // only engages an in-range target when no flagged building exists (G01 T6b
     // removed the nearest-building anchor).
-    let wall = place(&mut sim, 12, 10, "copper-wall", 1);
+    let wall = place_at(&mut sim, 12, 10, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let flare = sim
         .spawn_live_unit("flare", 2, 11.0 * 8.0, 10.0 * 8.0, 0.0)
@@ -156,9 +157,7 @@ fn stacked_daggers_separate() {
     let b = sim
         .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
         .expect("dagger b");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let pa = sim.ecs.0.get::<Pos>(a).copied().expect("pos a");
     let pb = sim.ecs.0.get::<Pos>(b).copied().expect("pos b");
     let dist = ((pa.x - pb.x).powi(2) + (pa.y - pb.y).powi(2)).sqrt();
@@ -174,9 +173,7 @@ fn stacked_daggers_separate() {
     let dagger = sim
         .spawn_live_unit("dagger", 1, 200.0, 200.0, 0.0)
         .expect("dagger c");
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let pf = sim.ecs.0.get::<Pos>(flare).copied().expect("pos flare");
     let pd = sim.ecs.0.get::<Pos>(dagger).copied().expect("pos dagger");
     let layer_dist = ((pf.x - pd.x).powi(2) + (pf.y - pd.y).powi(2)).sqrt();
@@ -227,7 +224,7 @@ fn mega_pickup_falls_back_to_building_under_carrier() {
     // Tile (12,12) spans x 96..104, y 96..104: the carrier stands on it
     // ((96,96) maps to tile 12 under both `World.tileWorld` truncation and the
     // port's rounding `WorldGrid::to_tile`).
-    let _ = place(&mut sim, 12, 12, "copper-wall", 1);
+    let _ = place_at(&mut sim, 12, 12, "copper-wall", 1);
     assert!(
         sim.apply_payload_command(0, 400.0, 400.0, None),
         "no unit in reach; the wall under the carrier is picked"

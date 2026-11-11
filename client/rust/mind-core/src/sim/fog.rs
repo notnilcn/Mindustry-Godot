@@ -578,7 +578,7 @@ pub(crate) fn fog_force_update(world: &mut World, e: Entity) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::combat_tests;
+    use crate::sim::test_support::live_sim;
 
     /// T1/H03 seam: `fog_static_bytes` and `fog_sources` expose the live
     /// static bits and dynamic vision circles.
@@ -590,7 +590,7 @@ mod tests {
         use crate::game::runtime::CampaignRuntime;
         use crate::game::universe::Campaign;
 
-        let mut sim = combat_tests::live_sim(32);
+        let mut sim = live_sim(32);
         let campaign = {
             let content = &sim.unit_runtime().expect("rt").content;
             Campaign::from_registry(content, &EmptyNeighborhood)

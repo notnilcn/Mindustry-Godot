@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// G01 T16: an attack order on a *unit* follows the moving target
 /// (`CommandAI.defaultBehavior`: `targetPos.set(attackTarget)` every tick) and
@@ -177,7 +178,7 @@ fn unit_with_blast_compound_explodes() {
     use crate::entities::comp::unit::comp::ItemsComp;
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let dagger = sim
         .spawn_live_unit("dagger", 2, 20.5 * 8.0 + 8.0, 20.5 * 8.0, 180.0)
@@ -197,9 +198,7 @@ fn unit_with_blast_compound_explodes() {
     }
     sim.tick().expect("tick");
     // Staggered waves (`Time.run(i * 2f)`): the growing radius needs ticks.
-    for _ in 0..40 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 40);
     let wall_end = health(&sim, wall);
     eprintln!("wall {wall_start} -> {wall_end:?}");
     assert!(
@@ -214,7 +213,7 @@ fn core_spawned_unit_does_not_explode() {
     use crate::entities::comp::unit::comp::{ItemsComp, UnitCore};
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall = place_at(&mut sim, 20, 20, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let dagger = sim
         .spawn_live_unit("dagger", 2, 20.5 * 8.0 + 8.0, 20.5 * 8.0, 180.0)
@@ -336,7 +335,7 @@ fn fire_damage_respects_block_health_multiplier() {
     let mut sim = campaign_sim(48, |rules| {
         rules.block_health_multiplier = 2.0;
     });
-    let container = place(&mut sim, 10, 10, "container", 1);
+    let container = place_at(&mut sim, 10, 10, "container", 1);
     let mut rng = crate::determinism::SimRng::new(9);
     let fire = crate::combat::fires::create(&mut sim.ecs.0, 10, 10, &mut rng).expect("fire");
     {

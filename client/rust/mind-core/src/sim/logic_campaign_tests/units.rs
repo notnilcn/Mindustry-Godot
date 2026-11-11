@@ -6,6 +6,7 @@
 
 use super::world_effects::{processor_num, processor_obj};
 use super::*;
+use crate::sim::test_support::campaign_runtime_mut;
 
 // ---- I03 T1: ubind/ucontrol/ulocate drive live units (PAR-0221) ----
 
@@ -66,7 +67,7 @@ fn ubind_type_cycles_in_spawn_order() {
         10,
         "ubind @poly\nset a @unit\nubind @poly\nset b @unit\nubind @poly\nset c @unit\nubind @poly\nset d @unit\nstop\n",
     );
-    tick(&mut sim, 10);
+    tick_n(&mut sim, 10);
     assert_eq!(
         processor_obj(&sim, 10, 10, "a"),
         Some(LogicObject::Unit(p1))
@@ -91,14 +92,14 @@ fn ubind_type_cycles_in_spawn_order() {
 #[test]
 fn ubind_unit_object() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     place_world_processor(
         &mut sim,
         10,
         10,
         "spawn @dagger 14 14 0 @sharded u\nubind u\nset b @unit\nstop\n",
     );
-    tick(&mut sim, 10);
+    tick_n(&mut sim, 10);
     let spawned = processor_obj(&sim, 10, 10, "u").expect("spawn result");
     assert!(matches!(spawned, LogicObject::Unit(_)));
     assert_eq!(processor_obj(&sim, 10, 10, "b"), Some(spawned));
@@ -115,7 +116,7 @@ fn ubind_gate() {
     let poly = sim
         .spawn_live_unit("poly", 1, 80.0, 80.0, 0.0)
         .expect("poly");
-    place(&mut sim, "micro-processor", 12, 12);
+    place_team1(&mut sim, "micro-processor", 12, 12);
     let bytes =
         crate::logic::blocks::logic_block::compress("ubind @poly\nset a @unit\nstop\n", &[]);
     configure(
@@ -124,7 +125,7 @@ fn ubind_gate() {
         12,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    tick(&mut sim, 10);
+    tick_n(&mut sim, 10);
     assert_eq!(
         processor_bound_unit(&sim, 12, 12),
         None,
@@ -138,7 +139,7 @@ fn ubind_gate() {
 #[test]
 fn ucontrol_move_reaches_target() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let dagger = sim
         .spawn_live_unit("dagger", 1, 40.0, 40.0, 0.0)
         .expect("dagger");
@@ -148,7 +149,7 @@ fn ucontrol_move_reaches_target() {
         10,
         "ubind @dagger\nucontrol move 10 10 0 0 0\n",
     );
-    tick(&mut sim, 300);
+    tick_n(&mut sim, 300);
     let (x, y) = entity_pos(&sim, dagger);
     let (dx, dy) = (x - 80.0, y - 80.0);
     assert!(
@@ -164,7 +165,7 @@ fn ucontrol_move_reaches_target() {
 #[test]
 fn commanded_unit_not_logic_controllable() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let dagger = sim
         .spawn_live_unit("dagger", 1, 40.0, 40.0, 0.0)
         .expect("dagger");
@@ -183,7 +184,7 @@ fn commanded_unit_not_logic_controllable() {
         10,
         "ubind @dagger\nucontrol move 10 10 0 0 0\n",
     );
-    tick(&mut sim, 20);
+    tick_n(&mut sim, 20);
     assert_eq!(
         controller_kind(&sim, dagger),
         crate::ai::AiKind::Command,
@@ -204,7 +205,7 @@ fn commanded_unit_not_logic_controllable() {
 #[test]
 fn logic_ai_times_out() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let dagger = sim
         .spawn_live_unit("dagger", 1, 40.0, 40.0, 0.0)
         .expect("dagger");
@@ -214,7 +215,7 @@ fn logic_ai_times_out() {
         10,
         "ubind @dagger\nucontrol move 10 10 0 0 0\n",
     );
-    tick(&mut sim, 30);
+    tick_n(&mut sim, 30);
     assert_eq!(controller_kind(&sim, dagger), crate::ai::AiKind::Logic);
     // Replace the code with `stop`: no further ucontrol for 601 ticks.
     let bytes = crate::logic::blocks::logic_block::compress("stop\n", &[]);
@@ -224,7 +225,7 @@ fn logic_ai_times_out() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    tick(&mut sim, 601);
+    tick_n(&mut sim, 601);
     assert_eq!(
         controller_kind(&sim, dagger),
         crate::ai::AiKind::Command,
@@ -245,7 +246,7 @@ fn logic_ai_times_out() {
 #[test]
 fn ucontrol_within_and_getblock() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let dagger = sim
         .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
         .expect("dagger");
@@ -255,7 +256,7 @@ fn ucontrol_within_and_getblock() {
         10,
         "ubind @dagger\nucontrol within 12 12 2 r\nucontrol getBlock 10 10 t b f\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(processor_num(&sim, 10, 10, "r"), Some(1.0), "inside 16 px");
     let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("processor");
     let content = sim.block_runtime().expect("runtime").content();
@@ -290,8 +291,8 @@ fn ucontrol_within_and_getblock() {
 #[test]
 fn ucontrol_item_take_and_drop() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
-    let container = place(&mut sim, "container", 12, 12);
+    place_team1(&mut sim, "core-shard", 20, 20);
+    let container = place_team1(&mut sim, "container", 12, 12);
     let copper = item(&sim, "copper");
     sim.ecs
         .0
@@ -310,14 +311,14 @@ fn ucontrol_item_take_and_drop() {
         &links,
     );
     // First transfer happens at the first tick past the 90-tick delay.
-    tick(&mut sim, 100);
+    tick_n(&mut sim, 100);
     assert_eq!(mono_stack(&sim, mono), Some((copper, 10)));
     assert_eq!(container_count(&sim, container, copper), 10);
     // Still inside the delay for the second call.
-    tick(&mut sim, 70);
+    tick_n(&mut sim, 70);
     assert_eq!(mono_stack(&sim, mono), Some((copper, 10)));
     // Past it: the take runs again.
-    tick(&mut sim, 20);
+    tick_n(&mut sim, 20);
     assert_eq!(mono_stack(&sim, mono), Some((copper, 20)));
     assert_eq!(container_count(&sim, container, copper), 0);
     // Drop half of it back.
@@ -331,7 +332,7 @@ fn ucontrol_item_take_and_drop() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    tick(&mut sim, 100);
+    tick_n(&mut sim, 100);
     assert_eq!(mono_stack(&sim, mono), Some((copper, 10)));
     assert_eq!(container_count(&sim, container, copper), 10);
     assert_events_drained(&sim);
@@ -345,7 +346,7 @@ fn ucontrol_build_places_plan() {
     rules.instant_build = true;
     rules.infinite_resources = true;
     let mut sim = finish_sim(wide_sim(64), rules);
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let poly = sim
         .spawn_live_unit("poly", 1, 96.0, 112.0, 0.0)
         .expect("poly");
@@ -355,7 +356,7 @@ fn ucontrol_build_places_plan() {
         10,
         "ubind @poly\nucontrol build 12 12 @copper-wall 0 0\nstop\n",
     );
-    tick(&mut sim, 200);
+    tick_n(&mut sim, 200);
     let wall = sim
         .block_runtime()
         .expect("runtime")
@@ -376,7 +377,7 @@ fn ucontrol_build_places_plan() {
 #[test]
 fn ulocate_building_core() {
     let mut sim = campaign_sim();
-    let core = place(&mut sim, "core-shard", 20, 20);
+    let core = place_team1(&mut sim, "core-shard", 20, 20);
     let poly = sim
         .spawn_live_unit("poly", 1, 100.0, 100.0, 0.0)
         .expect("poly");
@@ -386,7 +387,7 @@ fn ulocate_building_core() {
         10,
         "ubind @poly\nulocate building core false @copper x y f b\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(processor_num(&sim, 10, 10, "f"), Some(1.0), "found");
     let (cx, cy) = entity_pos(&sim, core);
     assert_eq!(
@@ -421,11 +422,7 @@ fn objective_completion_script_runs_live() {
         all: vec![MapObjective::Flag(flag)],
     };
     {
-        let mut runtime = sim
-            .ecs
-            .0
-            .get_resource_mut::<CampaignRuntime>()
-            .expect("campaign runtime");
+        let mut runtime = campaign_runtime_mut(&mut sim);
         runtime.session.objectives =
             crate::game::map_objectives::MapObjectivesRuntime::from_data(data);
         let session = &mut runtime.session;
@@ -435,7 +432,7 @@ fn objective_completion_script_runs_live() {
         );
     }
     assert!(!has_flag(&sim, "x"), "not yet run");
-    tick(&mut sim, 1);
+    tick_n(&mut sim, 1);
     assert!(
         has_flag(&sim, "x"),
         "the completion script set the live flag"
@@ -468,7 +465,7 @@ fn logic_explosion_air_only() {
         4,
         "explosion 1 20 20 5 500 true false false false\nstop\n",
     );
-    tick(&mut sim, 10);
+    tick_n(&mut sim, 10);
     assert!(
         health(&sim, flyer) < flyer_hp,
         "the flyer takes an air-only explosion"

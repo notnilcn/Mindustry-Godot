@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{live_sim, place_at, tick_n};
 
 /// H01 T9: `DefenderAI.findTarget` (`DefenderAI.java:26-38`) — an oct follows
 /// the healthiest player-controllable ally in `max(range, 400)` (key
@@ -22,9 +23,7 @@ fn oct_follows_healthiest_ally() {
     let mace = sim
         .spawn_live_unit("mace", 2, 300.0, 100.0, 0.0)
         .expect("mace");
-    for _ in 0..1500 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1500);
     let hit = |sim: &Sim, e| {
         sim.ecs
             .0
@@ -53,9 +52,7 @@ fn quell_follows_ally_on_wave_team() {
     let dagger = sim
         .spawn_live_unit("dagger", 2, 200.0, 100.0, 0.0)
         .expect("dagger");
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let hit = |sim: &Sim, e| {
         sim.ecs
             .0
@@ -83,13 +80,11 @@ fn quell_uses_flying_ai_on_player_team() {
     let _ally = sim
         .spawn_live_unit("dagger", 1, 200.0, 100.0, 0.0)
         .expect("dagger");
-    let core = place(&mut sim, 30, 30, "core-shard", 2);
+    let core = place_at(&mut sim, 30, 30, "core-shard", 2);
     let core_pos = *sim.ecs.0.get::<Pos>(core).expect("core pos");
     let start = *sim.ecs.0.get::<Pos>(quell).expect("quell pos");
     let start_dst = ((core_pos.x - start.x).powi(2) + (core_pos.y - start.y).powi(2)).sqrt();
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 600);
     let pos = *sim.ecs.0.get::<Pos>(quell).expect("quell alive");
     let dst = ((core_pos.x - pos.x).powi(2) + (core_pos.y - pos.y).powi(2)).sqrt();
     assert!(
@@ -118,9 +113,7 @@ fn renale_hugs_target() {
     let dagger = sim
         .spawn_live_unit("dagger", 1, 150.0 + range * 0.8, 100.0, 180.0)
         .expect("dagger");
-    for _ in 0..900 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 900);
     let hit = |sim: &Sim, e| {
         sim.ecs
             .0
@@ -145,9 +138,7 @@ fn dummy_never_moves() {
         .spawn_live_unit("dummy", 2, 100.0, 100.0, 0.0)
         .expect("dummy");
     let start = *sim.ecs.0.get::<Pos>(dummy).expect("dummy pos");
-    for _ in 0..300 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 300);
     let pos = *sim.ecs.0.get::<Pos>(dummy).expect("dummy alive");
     assert_eq!((pos.x, pos.y), (start.x, start.y), "the dummy never moves");
 }
@@ -186,7 +177,7 @@ fn stuck_dagger_activates_avoidance_in_a_pocket() {
         .insert_resource(CampaignRuntime::new(session, campaign));
 
     // The enemy core and a stationary same-team unit elsewhere on the map.
-    place(&mut sim, 48, 31, "core-shard", 1);
+    place_at(&mut sim, 48, 31, "core-shard", 1);
     let blocker = sim
         .spawn_live_unit("dagger", 2, 24.0 * 8.0, 24.0 * 8.0, 0.0)
         .expect("blocker");
@@ -196,7 +187,7 @@ fn stuck_dagger_activates_avoidance_in_a_pocket() {
     // A 1-tile pocket: the follower is walled in on all four sides, so
     // `should_move` stays true while its position cannot change.
     for (x, y) in [(20, 30), (20, 32), (19, 31), (21, 31)] {
-        place(&mut sim, x, y, "copper-wall", 2);
+        place_at(&mut sim, x, y, "copper-wall", 2);
     }
     let follower = sim
         .spawn_live_unit("dagger", 2, 20.0 * 8.0, 31.0 * 8.0, 0.0)

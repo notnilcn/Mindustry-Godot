@@ -19,7 +19,7 @@ fn content_sense_table() {
         10,
         "sensor h @dagger @health\nsensor n @copper @name\nsensor c @copper @color\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     let dagger_health = sim
         .block_runtime()
         .expect("runtime")
@@ -54,14 +54,14 @@ fn content_sense_table() {
 #[test]
 fn building_name_and_id_are_null() {
     let mut sim = campaign_sim();
-    let container = place(&mut sim, "container", 12, 12);
+    let container = place_team1(&mut sim, "container", 12, 12);
     place_world_processor(
         &mut sim,
         10,
         10,
         "fetch build b @sharded 0 @container\nsensor n b @name\nsensor i b @id\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "b"),
         Some(LogicObject::Building(container))
@@ -81,7 +81,7 @@ fn unit_range_and_armor() {
         10,
         "sensor a @mace @armor\nsensor r @mace @range\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     let def = sim
         .block_runtime()
         .expect("runtime")
@@ -104,7 +104,7 @@ fn unit_range_and_armor() {
 #[test]
 fn liquid_turret_ammo_is_total_ammo() {
     let mut sim = campaign_sim();
-    let wave = place(&mut sim, "wave", 12, 12);
+    let wave = place_team1(&mut sim, "wave", 12, 12);
     let water = sim
         .block_runtime()
         .expect("runtime")
@@ -118,7 +118,7 @@ fn liquid_turret_ammo_is_total_ammo() {
         .add(water, 100.0, 100.0);
     let links = [LogicLink::new("wave1", 2, 2)];
     place_linked_world_processor(&mut sim, 10, 10, "sensor a wave1 @ammo\nstop\n", &links);
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(processor_num(&sim, 10, 10, "a"), Some(0.0));
     assert_events_drained(&sim);
 }
@@ -127,14 +127,14 @@ fn liquid_turret_ammo_is_total_ammo() {
 #[test]
 fn fetch_core_and_count() {
     let mut sim = campaign_sim();
-    let core = place(&mut sim, "core-shard", 20, 20);
+    let core = place_team1(&mut sim, "core-shard", 20, 20);
     place_world_processor(
         &mut sim,
         10,
         10,
         "fetch core c @sharded 0 @air\nfetch coreCount k @sharded 0 @air\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "c"),
         Some(LogicObject::Building(core))
@@ -147,7 +147,7 @@ fn fetch_core_and_count() {
 #[test]
 fn fetch_player() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let player = sim
         .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
         .expect("player");
@@ -157,7 +157,7 @@ fn fetch_player() {
         10,
         "fetch player p @sharded 0 @air\nfetch playerCount n @sharded 0 @air\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(
         processor_obj(&sim, 10, 10, "p"),
         Some(LogicObject::Unit(player))
@@ -181,7 +181,7 @@ fn printchar_content_emoji() {
         .expect("copper has an icon code");
     let mut sim = campaign_sim();
     place_world_processor(&mut sim, 10, 10, "printchar @copper\nstop\n");
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("processor");
     let state = sim.ecs.0.get::<LogicBlockState>(e).expect("state");
     let got = state.executor.text_buffer.chars().next().map(|c| c as u32);
@@ -200,7 +200,7 @@ fn family_sense_overrides() {
     use crate::entities::comp::{CrafterState, DoorState};
     use crate::world::blocks::distribution::ConveyorBuild;
     let mut sim = campaign_sim();
-    let press = place(&mut sim, "graphite-press", 20, 20);
+    let press = place_team1(&mut sim, "graphite-press", 20, 20);
     {
         let mut state = sim
             .ecs
@@ -209,12 +209,12 @@ fn family_sense_overrides() {
             .expect("crafter state");
         state.progress = 0.5;
     }
-    let door = place(&mut sim, "door", 22, 20);
+    let door = place_team1(&mut sim, "door", 22, 20);
     {
         let mut state = sim.ecs.0.get_mut::<DoorState>(door).expect("door state");
         state.open = true;
     }
-    let conveyor = place(&mut sim, "conveyor", 24, 20);
+    let conveyor = place_team1(&mut sim, "conveyor", 24, 20);
     let copper = item(&sim, "copper");
     {
         let mut state = sim
@@ -226,8 +226,8 @@ fn family_sense_overrides() {
         state.ys[0] = 0.75;
         state.len = 1;
     }
-    let core = place(&mut sim, "core-shard", 30, 30);
-    let illuminator = place(&mut sim, "illuminator", 26, 20);
+    let core = place_team1(&mut sim, "core-shard", 30, 30);
+    let illuminator = place_team1(&mut sim, "illuminator", 26, 20);
     {
         let mut state = sim
             .ecs
@@ -236,7 +236,7 @@ fn family_sense_overrides() {
             .expect("light state");
         state.color = 0x1122_33ff;
     }
-    let heat = place(&mut sim, "heat-source", 28, 20);
+    let heat = place_team1(&mut sim, "heat-source", 28, 20);
     if let Some(mut state) = sim
         .ecs
         .0
@@ -260,7 +260,7 @@ fn family_sense_overrides() {
             LogicLink::new("heat1", 18, 10),
         ],
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("processor");
     let num = |name: &str| {
         sim.ecs
@@ -332,10 +332,10 @@ fn building_config_sensor() {
     use crate::world::config::{ConfigValue, configure};
     let mut sim = campaign_sim();
     let copper = item(&sim, "copper");
-    let sorter = place(&mut sim, "sorter", 20, 20);
-    let unloader = place(&mut sim, "unloader", 22, 20);
-    let conveyor = place(&mut sim, "conveyor", 24, 20);
-    let factory = place(&mut sim, "ground-factory", 30, 30);
+    let sorter = place_team1(&mut sim, "sorter", 20, 20);
+    let unloader = place_team1(&mut sim, "unloader", 22, 20);
+    let conveyor = place_team1(&mut sim, "conveyor", 24, 20);
+    let factory = place_team1(&mut sim, "ground-factory", 30, 30);
     let dagger = sim
         .block_runtime()
         .expect("runtime")
@@ -409,7 +409,7 @@ fn building_config_sensor() {
             LogicLink::new("conveyor1", 14, 10),
         ],
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     assert_eq!(
         processor_obj(&sim, 10, 10, "c"),
         Some(LogicObject::Content(crate::content::ContentRef::item(
@@ -430,8 +430,8 @@ fn building_payload_sensors() {
     use crate::logic::access::{Sensed, sense};
     use crate::world::behavior::PayloadRef;
     let mut sim = campaign_sim();
-    let conveyor = place(&mut sim, "payload-conveyor", 20, 20);
-    let wall = place(&mut sim, "copper-wall", 26, 20);
+    let conveyor = place_team1(&mut sim, "payload-conveyor", 20, 20);
+    let wall = place_team1(&mut sim, "copper-wall", 26, 20);
     let content = sim.block_runtime().expect("runtime").content();
     let dagger = content.unit_id("dagger").expect("dagger");
     let wall_block = content.block_id("copper-wall").expect("wall");
@@ -501,7 +501,7 @@ fn building_payload_sensors() {
     assert_eq!(read(&sim, wall, LAccess::PayloadCount), Sensed::Num(0.0));
     assert_eq!(read(&sim, wall, LAccess::PayloadType), Sensed::Obj(None));
     // `UnitAssemblerBuild.getPayloads()` = `blocks`: the stored total.
-    let assembler = place(&mut sim, "tank-assembler", 8, 26);
+    let assembler = place_team1(&mut sim, "tank-assembler", 8, 26);
     {
         let mut state = sim
             .ecs
@@ -531,8 +531,8 @@ fn building_controlled_sensor() {
     use crate::logic::LAccess;
     use crate::logic::access::{Sensed, sense};
     let mut sim = campaign_sim();
-    let duo = place(&mut sim, "duo", 20, 20);
-    let wall = place(&mut sim, "copper-wall", 24, 20);
+    let duo = place_team1(&mut sim, "duo", 20, 20);
+    let wall = place_team1(&mut sim, "copper-wall", 24, 20);
     let read =
         |sim: &Sim, e: Entity| sense(&sim.ecs.0, &LogicObject::Building(e), LAccess::Controlled);
     assert_eq!(read(&sim, duo), Sensed::Num(0.0), "unpossessed turret");
@@ -562,9 +562,9 @@ fn building_capacity_sensors() {
     use crate::logic::LAccess;
     use crate::logic::access::{Sensed, sense};
     let mut sim = campaign_sim();
-    let node = place(&mut sim, "power-node", 20, 20);
-    let battery = place(&mut sim, "battery", 22, 20);
-    let conduit = place(&mut sim, "conduit", 24, 20);
+    let node = place_team1(&mut sim, "power-node", 20, 20);
+    let battery = place_team1(&mut sim, "battery", 22, 20);
+    let conduit = place_team1(&mut sim, "conduit", 24, 20);
     let read = |sim: &Sim, e: Entity, a: LAccess| sense(&sim.ecs.0, &LogicObject::Building(e), a);
     assert_eq!(read(&sim, node, LAccess::ItemCapacity), Sensed::Num(0.0));
     assert_eq!(read(&sim, node, LAccess::LiquidCapacity), Sensed::Num(0.0));
@@ -634,7 +634,7 @@ fn unit_item_and_controller_sensors() {
 #[test]
 fn ubind_skips_non_logic_controllable_types() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     let manifold = sim
         .spawn_live_unit("manifold", 1, 60.0, 60.0, 0.0)
         .expect("manifold");
@@ -647,7 +647,7 @@ fn ubind_skips_non_logic_controllable_types() {
         10,
         "ubind @manifold\nset m @unit\nubind @dagger\nset d @unit\nstop\n",
     );
-    tick(&mut sim, 3);
+    tick_n(&mut sim, 3);
     assert_eq!(processor_obj(&sim, 10, 10, "m"), None, "manifold not bound");
     assert_eq!(
         processor_obj(&sim, 10, 10, "d"),
@@ -663,7 +663,7 @@ fn ubind_skips_non_logic_controllable_types() {
 #[test]
 fn ucontrol_within_is_strict() {
     let mut sim = campaign_sim();
-    place(&mut sim, "core-shard", 20, 20);
+    place_team1(&mut sim, "core-shard", 20, 20);
     sim.spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
         .expect("dagger");
     // One processor batch: read the unit tile position, then test a point
@@ -674,7 +674,7 @@ fn ucontrol_within_is_strict() {
         10,
         "ubind @dagger\nsensor ux @unit @x\nsensor uy @unit @y\nop add ty uy 2.5\nucontrol within ux ty 2.5 edge\nucontrol within ux ty 2.6 inside\nstop\n",
     );
-    tick(&mut sim, 5);
+    tick_n(&mut sim, 5);
     assert_eq!(processor_num(&sim, 10, 10, "edge"), Some(0.0), "exactly r");
     assert_eq!(processor_num(&sim, 10, 10, "inside"), Some(1.0), "inside");
     assert_events_drained(&sim);
@@ -692,7 +692,7 @@ fn sensor_reads_team_properties() {
         10,
         "set t @sharded\nsensor id t @id\nsensor col t @color\nsensor nm t @name\nstop\n",
     );
-    tick(&mut sim, 20);
+    tick_n(&mut sim, 20);
     assert_eq!(
         processor_num(&sim, 10, 10, "id"),
         Some(1.0),

@@ -8,6 +8,7 @@ use super::*;
 use crate::content::{BlockId, MemoryBundle, MemoryUnlockStore, create_base_content};
 use crate::editor::context::EditorContext;
 use crate::io::save::{SaveIo, SaveReadState};
+use crate::sim::test_support::{install_live_runtimes, tick_n};
 use crate::world::building_io::DecodedBase;
 use std::path::Path;
 
@@ -48,14 +49,11 @@ fn ground_zero_wave_spawns_live_units() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
     sim.set_unit_wave_team(2);
     sim.request_wave_spawn(0);
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert!(
         sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
         "groundZero wave spawned a live unit: {:?}",
@@ -95,8 +93,7 @@ fn ground_zero_processors_resolve_constants() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     // Fixed load order: the globals exist before the map is decoded
     // (`Vars.init` before any map read, `Vars.java:369`).
     crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
@@ -158,8 +155,7 @@ fn ground_zero_wave_dagger_avoids_deep_water() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
 
     // Per-tile deep map + the `wet` status id, read before the tick loop
@@ -270,8 +266,7 @@ fn ground_zero_wave_one_is_one_dagger() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
 
     let campaign = {
@@ -299,9 +294,7 @@ fn ground_zero_wave_one_is_one_dagger() {
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
 
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     let runtime = sim
         .ecs
         .0
@@ -361,8 +354,7 @@ fn ground_zero_drill_fed_duo_kills_wave_daggers() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
     let core_block = content.block_id("core-shard").expect("core");
     let core = sim
@@ -419,9 +411,7 @@ fn ground_zero_drill_fed_duo_kills_wave_daggers() {
     }
     let duo_entity = sim.grid.tiles.get(dx + 2, dy).build.expect("duo built");
     // Let the drill stock the duo (mechanical drill ~ one copper / 9 s).
-    for _ in 0..1800 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1800);
     let ammo = sim
         .ecs
         .0
@@ -485,8 +475,7 @@ fn ground_zero_wave_destroys_undefended_core() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
     // Bullet-vs-building collision reads the runtime grid snapshot; refresh
     // it after materializing the map's buildings (bullets otherwise fly
@@ -585,9 +574,7 @@ fn ground_zero_wave_destroys_undefended_core() {
     }
     // The campaign liveness sweep + `checkGameState` run on the tick after
     // the core is removed.
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     let game_over = sim
         .ecs
         .0
@@ -687,8 +674,7 @@ fn ground_zero_wave_one_dies_to_drill_fed_duo() {
     let air = BlockId::AIR;
     let mut sim = Sim::new(1, width, height, air, air);
     sim.grid = grid;
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    install_live_runtimes(&mut sim);
     assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
     // Bullet-vs-building collision reads the runtime grid snapshot.
     sim.refresh_unit_runtime();
@@ -762,9 +748,7 @@ fn ground_zero_wave_one_dies_to_drill_fed_duo() {
         .expect("place");
     }
     let duo_entity = sim.grid.tiles.get(dx + 2, dy).build.expect("duo built");
-    for _ in 0..1800 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1800);
     let ammo = sim
         .ecs
         .0

@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    configure, item, liquid, place_team1, runtime_sim, stored_item, stored_liquid, tick_n,
+};
 
 /// T7 (`SolidPump.updateTile`, `SolidPump.java:116-135`; `Blocks.java:2941-2948`):
 /// the water extractor's yield is `pumpAmount * (validTiles + boost)` where
@@ -14,16 +17,14 @@ use super::*;
 #[test]
 fn water_extractor_scales_with_floor() {
     let mut sim = runtime_sim();
-    let _plain_source = place(&mut sim, "power-source", 4, 5);
-    let _wet_source = place(&mut sim, "power-source", 11, 5);
-    let plain = place(&mut sim, "water-extractor", 5, 5);
+    let _plain_source = place_team1(&mut sim, "power-source", 4, 5);
+    let _wet_source = place_team1(&mut sim, "power-source", 11, 5);
+    let plain = place_team1(&mut sim, "water-extractor", 5, 5);
     for (x, y) in [(12, 5), (13, 5), (12, 6), (13, 6)] {
         set_floor(&mut sim, x, y, "mud");
     }
-    let wet = place(&mut sim, "water-extractor", 12, 5);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let wet = place_team1(&mut sim, "water-extractor", 12, 5);
+    tick_n(&mut sim, 60);
     let water = liquid(&sim, "water");
     let plain_amount = stored_liquid(&sim, plain, water);
     let wet_amount = stored_liquid(&sim, wet, water);
@@ -49,11 +50,9 @@ fn water_extractor_rain_bonus() {
                 ..GeneratorEnv::default()
             });
         }
-        let _source = place(&mut sim, "power-source", 4, 5);
-        let pump = place(&mut sim, "water-extractor", 5, 5);
-        for _ in 0..60 {
-            sim.tick().expect("tick");
-        }
+        let _source = place_team1(&mut sim, "power-source", 4, 5);
+        let pump = place_team1(&mut sim, "water-extractor", 5, 5);
+        tick_n(&mut sim, 60);
         let water = liquid(&sim, "water");
         stored_liquid(&sim, pump, water)
     };
@@ -91,8 +90,8 @@ fn oil_extractor_needs_oil_floor() {
             set_floor(&mut sim, x, y, "sand-floor");
         }
     }
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let extractor = place(&mut sim, "oil-extractor", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let extractor = place_team1(&mut sim, "oil-extractor", 5, 5);
     {
         let (sand, water) = (item(&sim, "sand"), liquid(&sim, "water"));
         let world = &mut sim.ecs.0;
@@ -103,9 +102,7 @@ fn oil_extractor_needs_oil_floor() {
             liquids.add(water, 20.0, 40.0);
         }
     }
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 60);
     let oil = stored_liquid(&sim, extractor, liquid(&sim, "oil"));
     // `pumpAmount` 0.25 * (0 + 9 * 0.7 / 9) = 0.175 per tick.
     assert!((oil - 10.5).abs() < 1.5, "oil pumped {oil}");
@@ -128,12 +125,10 @@ fn plasma_bore_stops_when_ore_removed() {
         tile.block = wall;
         tile.overlay = ore;
     }
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let bore = place_team1(&mut sim, "plasma-bore", 5, 5);
     let beryllium = item(&sim, "beryllium");
-    for _ in 0..400 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 400);
     let produced = stored_item(&sim, bore, beryllium);
     assert!(produced > 0, "bore produced before removal: {produced}");
 
@@ -150,9 +145,7 @@ fn plasma_bore_stops_when_ore_removed() {
         .unwrap_or(-1.0);
     assert_eq!(facing, 0.0, "facing rescan dropped the removed ore");
     let before = stored_item(&sim, bore, beryllium);
-    for _ in 0..400 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 400);
     assert_eq!(
         stored_item(&sim, bore, beryllium),
         before,
@@ -167,7 +160,7 @@ fn plasma_bore_stops_when_ore_removed() {
 #[test]
 fn door_configs_apply_without_tap_throttle() {
     let mut sim = runtime_sim();
-    let door = place(&mut sim, "door", 5, 5);
+    let door = place_team1(&mut sim, "door", 5, 5);
     let is_open = |sim: &Sim| {
         sim.ecs
             .0
@@ -177,9 +170,7 @@ fn door_configs_apply_without_tap_throttle() {
     };
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
     assert!(is_open(&sim), "opened on the first config");
-    for _ in 0..10 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 10);
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
     assert!(
         !is_open(&sim),
@@ -198,7 +189,7 @@ fn door_toggle_plays_door() {
     sim.ecs
         .0
         .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
-    let _door = place(&mut sim, "door", 5, 5);
+    let _door = place_team1(&mut sim, "door", 5, 5);
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
     let events = log.events();
     let doors: Vec<&AudioEvent> = events
@@ -234,18 +225,16 @@ fn drill_accepts_water_boost() {
     for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
         set_floor(&mut sim, x, y, "ore-copper");
     }
-    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let drill = place_team1(&mut sim, "mechanical-drill", 5, 5);
     let water = liquid(&sim, "water");
-    let _source = place(&mut sim, "liquid-source", 4, 5);
+    let _source = place_team1(&mut sim, "liquid-source", 4, 5);
     configure(
         &mut sim,
         4,
         5,
         crate::determinism::ConfigValue::Content("water".to_owned()),
     );
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert!(
         stored_liquid(&sim, drill, water) > 0.0,
         "the drill accepted the water from the source"
@@ -274,8 +263,8 @@ fn drill_accepts_water_boost() {
 #[test]
 fn mender_accepts_silicon_and_reactor_accepts_thorium() {
     let mut sim = runtime_sim();
-    let mender = place(&mut sim, "mender", 5, 5);
-    let reactor = place(&mut sim, "thorium-reactor", 8, 8);
+    let mender = place_team1(&mut sim, "mender", 5, 5);
+    let reactor = place_team1(&mut sim, "thorium-reactor", 8, 8);
     let silicon = item(&sim, "silicon");
     let copper = item(&sim, "copper");
     let thorium = item(&sim, "thorium");
@@ -319,7 +308,7 @@ fn mender_accepts_silicon_and_reactor_accepts_thorium() {
 #[test]
 fn unloader_pulls_from_crafter() {
     let mut sim = runtime_sim();
-    let press = place(&mut sim, "graphite-press", 5, 5);
+    let press = place_team1(&mut sim, "graphite-press", 5, 5);
     let graphite = item(&sim, "graphite");
     {
         let world = &mut sim.ecs.0;
@@ -330,7 +319,7 @@ fn unloader_pulls_from_crafter() {
         5,
         "press holds graphite"
     );
-    let unloader = place(&mut sim, "unloader", 7, 5);
+    let unloader = place_team1(&mut sim, "unloader", 7, 5);
     let _ = unloader;
     configure(
         &mut sim,
@@ -338,10 +327,8 @@ fn unloader_pulls_from_crafter() {
         5,
         crate::determinism::ConfigValue::Content("graphite".to_owned()),
     );
-    let belt = place(&mut sim, "conveyor", 8, 5);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    let belt = place_team1(&mut sim, "conveyor", 8, 5);
+    tick_n(&mut sim, 60);
     assert!(
         stored_item(&sim, press, graphite) < 5,
         "unloader pulled graphite from the press (Java canUnload = block.unloadable)"
@@ -357,7 +344,7 @@ fn unloader_pulls_from_crafter() {
 #[test]
 fn heat_crafter_accepts_inputs() {
     let mut sim = runtime_sim();
-    let crucible = place(&mut sim, "carbide-crucible", 5, 5);
+    let crucible = place_team1(&mut sim, "carbide-crucible", 5, 5);
     let tungsten = item(&sim, "tungsten");
     let graphite = item(&sim, "graphite");
     let copper = item(&sim, "copper");
@@ -379,9 +366,9 @@ fn heat_crafter_accepts_inputs() {
 #[test]
 fn incinerator_burns_belt_items() {
     let mut sim = runtime_sim();
-    let _source = place(&mut sim, "power-source", 4, 5);
-    let incinerator = place(&mut sim, "incinerator", 5, 5);
-    let item_source = place(&mut sim, "item-source", 6, 5);
+    let _source = place_team1(&mut sim, "power-source", 4, 5);
+    let incinerator = place_team1(&mut sim, "incinerator", 5, 5);
+    let item_source = place_team1(&mut sim, "item-source", 6, 5);
     let copper = item(&sim, "copper");
     configure(
         &mut sim,
@@ -389,9 +376,7 @@ fn incinerator_burns_belt_items() {
         5,
         crate::determinism::ConfigValue::Content("copper".to_owned()),
     );
-    for _ in 0..12 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 12);
     let heat = sim
         .ecs
         .0
@@ -406,9 +391,7 @@ fn incinerator_burns_belt_items() {
         !transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
         "cold incinerator rejects items"
     );
-    for _ in 0..18 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 18);
     let heat = sim
         .ecs
         .0
@@ -420,9 +403,7 @@ fn incinerator_burns_belt_items() {
         transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
         "hot incinerator accepts any item"
     );
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     assert!(
         emitted(&sim, item_source) > 0,
         "the item source ran and fed the incinerator"
@@ -439,7 +420,7 @@ fn incinerator_burns_belt_items() {
 #[test]
 fn item_incinerator_needs_power() {
     let mut sim = runtime_sim();
-    let slag = place(&mut sim, "slag-incinerator", 5, 5);
+    let slag = place_team1(&mut sim, "slag-incinerator", 5, 5);
     let copper = item(&sim, "copper");
     {
         let world = &mut sim.ecs.0;
@@ -469,12 +450,10 @@ fn mechanical_drill_period_includes_hardness() {
     for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
         set_floor(&mut sim, x, y, "ore-copper");
     }
-    let _drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let _drill = place_team1(&mut sim, "mechanical-drill", 5, 5);
     let copper = item(&sim, "copper");
-    let container = place(&mut sim, "container", 7, 5);
-    for _ in 0..3000 {
-        sim.tick().expect("tick");
-    }
+    let container = place_team1(&mut sim, "container", 7, 5);
+    tick_n(&mut sim, 3000);
     let offloaded = stored_item(&sim, container, copper);
     assert!(
         (17..=19).contains(&offloaded),
@@ -498,11 +477,9 @@ fn drill_offload_records_production() {
         state.default_team = 1;
     }
     let copper = item(&sim, "copper");
-    let _drill = place(&mut sim, "mechanical-drill", 5, 5);
-    let _container = place(&mut sim, "container", 7, 5);
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    let _drill = place_team1(&mut sim, "mechanical-drill", 5, 5);
+    let _container = place_team1(&mut sim, "container", 7, 5);
+    tick_n(&mut sim, 600);
     let state = queues.lock().expect("lock");
     assert!(
         state.production_deltas.contains(&(copper, 1)),
@@ -532,10 +509,10 @@ fn impact_drill_bursts() {
             set_floor(&mut sim, x, y, "ore-copper");
         }
     }
-    let drill = place(&mut sim, "impact-drill", 5, 5);
+    let drill = place_team1(&mut sim, "impact-drill", 5, 5);
     let copper = item(&sim, "copper");
-    let _power = place(&mut sim, "power-source", 8, 5);
-    let _water = place(&mut sim, "liquid-source", 5, 8);
+    let _power = place_team1(&mut sim, "power-source", 8, 5);
+    let _water = place_team1(&mut sim, "liquid-source", 5, 8);
     configure(
         &mut sim,
         5,
@@ -550,17 +527,13 @@ fn impact_drill_bursts() {
         Some(16),
         "all 16 footprint tiles are ore"
     );
-    for _ in 0..710 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 710);
     assert_eq!(
         stored_item(&sim, drill, copper),
         0,
         "no trickle before the first burst"
     );
-    for _ in 0..15 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 15);
     assert_eq!(
         stored_item(&sim, drill, copper),
         16,

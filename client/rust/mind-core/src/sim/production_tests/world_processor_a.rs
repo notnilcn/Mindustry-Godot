@@ -5,6 +5,10 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    campaign_runtime, campaign_runtime_mut, configure, install_campaign_session,
+    install_logic_world, place_team1, place_world_processor, runtime_sim, test_rules, tick_n,
+};
 
 /// G06 T1 (PAR-0106): the live sim refreshes the logic globals every tick
 /// before entity updates, so `@tick` equals the tick the instruction runs in.
@@ -34,9 +38,7 @@ fn live_tick_global_advances() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let state = sim
         .ecs
         .0
@@ -59,14 +61,8 @@ fn setrule_writes_live_rules() {
         10,
         "setrule waveSending true 0 0 100 100\nsetrule unitCap 4 0 0 100 100\nstop\n",
     );
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 3);
+    let runtime = campaign_runtime(&sim);
     assert!(runtime.session.rules.wave_sending);
     assert_eq!(runtime.session.rules.unit_cap, 4);
 }
@@ -76,10 +72,7 @@ fn setrule_writes_live_rules() {
 fn flags_roundtrip_live() {
     let mut sim = runtime_sim();
     install_campaign_session(&mut sim, test_rules());
-    sim.ecs
-        .0
-        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime")
+    campaign_runtime_mut(&mut sim)
         .session
         .rules
         .objective_flags
@@ -90,14 +83,8 @@ fn flags_roundtrip_live() {
         10,
         "getflag waves \"allowWaves\"\njump 0 equal waves false\nsetflag \"allowWaves\" false\nsetrule waveSending true 0 0 100 100\nsetrule waveTimer true 0 0 100 100\nstop\n",
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 4);
+    let runtime = campaign_runtime(&sim);
     assert!(!runtime.session.rules.objective_flags.contains("allowWaves"));
     assert!(runtime.session.rules.wave_sending);
     assert!(runtime.session.rules.wave_timer);
@@ -114,15 +101,9 @@ fn map_area_rule_toggles_live_limit() {
     // Java `SetRuleI`: the `value` slot is unused for `mapArea`; x/y/w/h come
     // from p1..p4 (`setrule mapArea 10 0 0 256 256` -> x=0, w=256).
     place_world_processor(&mut sim, 10, 10, "setrule mapArea 10 0 0 256 256\nstop\n");
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 3);
     {
-        let runtime = sim
-            .ecs
-            .0
-            .get_resource::<crate::game::runtime::CampaignRuntime>()
-            .expect("runtime");
+        let runtime = campaign_runtime(&sim);
         assert!(runtime.session.rules.limit_map_area);
         assert_eq!(runtime.session.rules.limit_width, 256);
     }
@@ -136,14 +117,8 @@ fn map_area_rule_toggles_live_limit() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 3);
+    let runtime = campaign_runtime(&sim);
     assert!(!runtime.session.rules.limit_map_area);
     assert_eq!(sim.grid.limit_area, None);
 }
@@ -159,14 +134,8 @@ fn wave_rule_sets_wave_and_wavetime() {
         10,
         "setrule wave 0 0 0 100 100\nsetrule currentWaveTime 2.5 0 0 100 100\nstop\n",
     );
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 3);
+    let runtime = campaign_runtime(&sim);
     assert_eq!(runtime.session.wave, 1);
     assert_eq!(runtime.session.wavetime, 150.0);
 }
@@ -180,14 +149,8 @@ fn logic_events_drain_each_tick() {
         .0
         .insert_resource(crate::logic::world::LogicWorldState::new());
     place_world_processor(&mut sim, 10, 10, "setflag \"drained\" true\nstop\n");
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 3);
+    let runtime = campaign_runtime(&sim);
     assert!(runtime.session.rules.objective_flags.contains("drained"));
     let state = sim
         .ecs
@@ -202,7 +165,7 @@ fn logic_events_drain_each_tick() {
 #[test]
 fn logic_state_snapshot_lists_vars() {
     let mut sim = runtime_sim();
-    place(&mut sim, "micro-processor", 10, 10);
+    place_team1(&mut sim, "micro-processor", 10, 10);
     let bytes = crate::logic::blocks::logic_block::compress("set a 1\nop add b a 2", &[]);
     configure(
         &mut sim,
@@ -210,9 +173,7 @@ fn logic_state_snapshot_lists_vars() {
         10,
         crate::determinism::ConfigValue::Bytes(bytes),
     );
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 5);
     let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
     let snapshot =
         crate::logic::blocks::logic_block::state_snapshot(&sim.ecs.0, e).expect("snapshot");
@@ -286,10 +247,8 @@ fn processor_loaded_before_globals_resolves_constants() {
     let content = crate::world::harness::BuildHarness::load_content();
     crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
     crate::logic::blocks::logic_block::reassemble_all_processors(&mut sim.ecs.0);
-    place(&mut sim, "duo", 20, 20);
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    place_team1(&mut sim, "duo", 20, 20);
+    tick_n(&mut sim, 4);
     let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
     let state = sim
         .ecs
@@ -337,30 +296,16 @@ fn spawnwave_natural_runs_wave() {
     let index = sim.grid.tiles.index(6, 6);
     sim.grid.tiles.geti_mut(index).overlay = spawn;
     place_world_processor(&mut sim, 10, 10, "spawnwave natural 10 true\nstop\n");
-    let before = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime")
-        .session
-        .wave;
-    for _ in 0..3 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    let before = campaign_runtime(&sim).session.wave;
+    tick_n(&mut sim, 3);
+    let runtime = campaign_runtime(&sim);
     assert_eq!(runtime.session.wave, before + 1, "one wave advanced");
     assert_eq!(
         runtime.session.wavetime, wave_spacing,
         "countdown reset to waveSpacing (non-campaign multiplier 1)"
     );
     // The queued `spawnEnemies` runs in the next `run_wave_system`.
-    for _ in 0..2 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 2);
     let dagger = sim
         .block_runtime()
         .expect("runtime")
@@ -417,10 +362,7 @@ fn gz1_spawn_wave_flag() {
         .expect("spawn");
     let index = sim.grid.tiles.index(6, 6);
     sim.grid.tiles.geti_mut(index).overlay = spawn;
-    sim.ecs
-        .0
-        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime")
+    campaign_runtime_mut(&mut sim)
         .session
         .rules
         .objective_flags
@@ -431,27 +373,15 @@ fn gz1_spawn_wave_flag() {
         10,
         "getflag wave \"spawnWave\"\njump 0 equal wave false\nsetflag \"spawnWave\" false\nspawnwave natural 10 true\n",
     );
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 5);
+    let runtime = campaign_runtime(&sim);
     assert!(
         !runtime.session.rules.objective_flags.contains("spawnWave"),
         "GZ-1 consumed the flag"
     );
     assert_eq!(runtime.session.wave, 2, "wave 1 -> 2");
-    for _ in 0..100 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    tick_n(&mut sim, 100);
+    let runtime = campaign_runtime(&sim);
     assert_eq!(runtime.session.wave, 2, "no further wave without the flag");
 }
 
@@ -472,21 +402,9 @@ fn spawnwave_positional_no_wave_advance() {
     install_campaign_session(&mut sim, rules);
     install_logic_world(&mut sim);
     place_world_processor(&mut sim, 10, 10, "spawnwave 20 20 false\nstop\n");
-    let before = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime")
-        .session
-        .wave;
-    for _ in 0..5 {
-        sim.tick().expect("tick");
-    }
-    let runtime = sim
-        .ecs
-        .0
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .expect("runtime");
+    let before = campaign_runtime(&sim).session.wave;
+    tick_n(&mut sim, 5);
+    let runtime = campaign_runtime(&sim);
     assert_eq!(
         runtime.session.wave, before,
         "positional spawn keeps the wave"
@@ -531,9 +449,7 @@ fn cutscene_pan_sets_state() {
         10,
         "cutscene pan 10 20 0.05 0\ncutscene active a 0 0 0\nstop\n",
     );
-    for _ in 0..4 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 4);
     let cutscene = sim.logic_cutscene();
     assert!(cutscene.active, "pan activates the cutscene");
     assert_eq!(cutscene.pan, (80.0, 160.0), "World.unconv applied");

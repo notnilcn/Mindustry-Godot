@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{item, place_team1, runtime_sim, stored_item, tick_n};
 
 /// PAR-0076: an additive reconstructor only upgrades a payload with power and
 /// its 40 silicon + 40 graphite, after `constructTime` (600) ticks, and consumes
@@ -12,8 +13,8 @@ use super::*;
 #[test]
 fn reconstructor_needs_items_and_time() {
     let mut sim = runtime_sim();
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let rig = place_team1(&mut sim, "additive-reconstructor", 5, 5);
     let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
     let dagger = sim
         .block_runtime()
@@ -60,9 +61,7 @@ fn reconstructor_needs_items_and_time() {
     );
 
     // No items: the payload waits, nothing spawns.
-    for _ in 0..700 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 700);
     assert_eq!(
         sim.ecs
             .0
@@ -103,7 +102,7 @@ fn reconstructor_needs_items_and_time() {
 #[test]
 fn message_block_accepts_text_config() {
     let mut sim = runtime_sim();
-    let message = place(&mut sim, "message", 5, 5);
+    let message = place_team1(&mut sim, "message", 5, 5);
     sim.command(SimCommand::Configure {
         x: 5,
         y: 5,
@@ -125,8 +124,8 @@ fn message_block_accepts_text_config() {
 #[test]
 fn unit_factory_config_selects_plan() {
     let mut sim = runtime_sim();
-    let _source = place(&mut sim, "power-source", 3, 5);
-    let factory = place(&mut sim, "air-factory", 5, 5);
+    let _source = place_team1(&mut sim, "power-source", 3, 5);
+    let factory = place_team1(&mut sim, "air-factory", 5, 5);
     let silicon = item(&sim, "silicon");
     let content_flare = sim
         .block_runtime()
@@ -191,9 +190,7 @@ fn unit_factory_config_selects_plan() {
             items.add(silicon, 60, 100);
         }
     }
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 120);
     assert!(
         !spawned_unit(&sim, content_flare) && !spawned_unit(&sim, mono),
         "no plan selected -> nothing produced"

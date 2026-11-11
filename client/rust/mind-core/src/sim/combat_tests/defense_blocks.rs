@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; live-sim regression tests).
 
 use super::*;
+use crate::sim::test_support::{health, live_sim, place_at, tick_n};
 
 /// PAR-0475: a powered `shield-projector` runs the `BaseShield.unitConsumer`
 /// (`BaseShield.java:38-57`) through the live `BuildingBehavior` path (it
@@ -16,11 +17,9 @@ fn shield_projector_repels_and_kills_enemy_units() {
     use crate::world::blocks::defense::projectors::BaseShieldState;
 
     let mut sim = live_sim(48);
-    place(&mut sim, 18, 20, "power-source", 1);
-    let shield = place(&mut sim, 20, 20, "shield-projector", 1);
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    place_at(&mut sim, 18, 20, "power-source", 1);
+    let shield = place_at(&mut sim, 20, 20, "shield-projector", 1);
+    tick_n(&mut sim, 600);
     let radius = sim
         .ecs
         .0
@@ -84,12 +83,10 @@ fn force_projector_absorbs_explosion() {
 
     let mut sim = live_sim(48);
     // Power-source feeds the projector; the wall sits inside its radius.
-    place(&mut sim, 18, 20, "power-source", 1);
-    let projector = place(&mut sim, 20, 20, "force-projector", 1);
-    let wall = place(&mut sim, 22, 20, "copper-wall", 1);
-    for _ in 0..600 {
-        sim.tick().expect("tick");
-    }
+    place_at(&mut sim, 18, 20, "power-source", 1);
+    let projector = place_at(&mut sim, 20, 20, "force-projector", 1);
+    let wall = place_at(&mut sim, 22, 20, "copper-wall", 1);
+    tick_n(&mut sim, 600);
     let (broken, radius) = sim
         .ecs
         .0
@@ -132,11 +129,9 @@ fn force_projector_powered_by_adjacent_source() {
     use crate::world::blocks::defense::shields::ForceProjectorState;
 
     let mut sim = live_sim(48);
-    place(&mut sim, 18, 20, "power-source", 1);
-    let projector = place(&mut sim, 20, 20, "force-projector", 1);
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
+    place_at(&mut sim, 18, 20, "power-source", 1);
+    let projector = place_at(&mut sim, 20, 20, "force-projector", 1);
+    tick_n(&mut sim, 60);
     let efficiency = sim.ecs.0.get::<Building>(projector).map(|b| b.efficiency);
     assert!(
         efficiency.is_some_and(|e| e > 0.99),
@@ -159,11 +154,9 @@ fn force_projector_absorbs_enemy_bullet() {
     use crate::world::blocks::defense::shields::ForceProjectorState;
 
     let mut sim = live_sim(48);
-    place(&mut sim, 18, 20, "power-source", 1);
-    let projector = place(&mut sim, 20, 20, "force-projector", 1);
-    for _ in 0..120 {
-        sim.tick().expect("tick");
-    }
+    place_at(&mut sim, 18, 20, "power-source", 1);
+    let projector = place_at(&mut sim, 20, 20, "force-projector", 1);
+    tick_n(&mut sim, 120);
     // Inside the ~101.7 px dome, 60 px east of the projector centre
     // (tile centre (20,20) = world (160,160)), facing it.
     sim.spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 4.0, 180.0)
@@ -189,8 +182,8 @@ fn force_projector_phase_boost() {
     use crate::world::modules::ItemModule;
 
     let mut sim = live_sim(48);
-    place(&mut sim, 18, 20, "power-source", 1);
-    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    place_at(&mut sim, 18, 20, "power-source", 1);
+    let projector = place_at(&mut sim, 20, 20, "force-projector", 1);
     let phase = sim
         .unit_runtime()
         .expect("rt")
@@ -200,9 +193,7 @@ fn force_projector_phase_boost() {
     if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(projector) {
         items.add(phase, 2, 10);
     }
-    for _ in 0..30 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 30);
     let phase_heat = sim
         .ecs
         .0
@@ -217,9 +208,7 @@ fn force_projector_phase_boost() {
         .unwrap_or(0);
     assert!(phase_heat > 0.9, "phase heat {phase_heat}");
     assert_eq!(count, 1, "one fabric consumed after the first timer cycle");
-    for _ in 0..400 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 400);
     let count = sim
         .ecs
         .0
@@ -237,7 +226,7 @@ fn shock_mine_zaps_enemy_dagger() {
     use crate::world::blocks::defense::shields::ShockMineState;
 
     let mut sim = live_sim(48);
-    let mine = place(&mut sim, 20, 20, "shock-mine", 1);
+    let mine = place_at(&mut sim, 20, 20, "shock-mine", 1);
     let mine_start = health(&sim, mine).expect("mine health");
     assert_eq!(mine_start, 50.0, "vanilla shock-mine health");
     // Tile centre: `WorldGrid::to_tile` rounds, so only `tile * 8` lands on
@@ -317,7 +306,7 @@ fn shock_mine_zaps_enemy_dagger() {
 fn conveyor_carries_dagger() {
     let mut sim = live_sim(48);
     for x in 10..=20 {
-        place(&mut sim, x, 20, "titanium-conveyor", 1);
+        place_at(&mut sim, x, 20, "titanium-conveyor", 1);
     }
     let dagger = sim
         .spawn_live_unit("dagger", 1, 96.0, 160.0, 0.0)
@@ -346,7 +335,7 @@ fn explosion_absorbed_polygon() {
     use crate::world::blocks::defense::shields::ForceProjectorState;
 
     let mut sim = live_sim(48);
-    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    let projector = place_at(&mut sim, 20, 20, "force-projector", 1);
     if let Some(mut state) = sim.ecs.0.get_mut::<ForceProjectorState>(projector) {
         state.radscl = 1.0;
         state.radius = 100.0;
@@ -382,7 +371,7 @@ fn building_pos_uses_block_offset() {
         ("core-foundation", 40, 324.0),  // 4x4, offset 4
     ];
     for (name, tile, expected) in cases {
-        let entity = place(&mut sim, tile, tile, name, 1);
+        let entity = place_at(&mut sim, tile, tile, name, 1);
         let pos = sim.ecs.0.get::<Pos>(entity).expect("pos");
         assert_eq!(
             (pos.x, pos.y),

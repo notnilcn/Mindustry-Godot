@@ -5,6 +5,9 @@
 //! Upstream: none (port-only; live-runtime production/logistics regressions).
 
 use super::*;
+use crate::sim::test_support::{
+    install_campaign_session, item, place_team1, runtime_sim, stored_item, tick_n,
+};
 
 /// H02 T3: `kind_rotates` matches the Java `rotate = true` set
 /// (`grep -rn "rotate = true\|rotate = false" J/world/blocks`).
@@ -99,7 +102,7 @@ fn drill_warmup_scales_with_time_scale() {
             set_floor(&mut sim, x, y, "ore-copper");
         }
     }
-    let drill = place(&mut sim, "mechanical-drill", 10, 10);
+    let drill = place_team1(&mut sim, "mechanical-drill", 10, 10);
     sim.tick().expect("tick");
     let warmup = |sim: &Sim| {
         sim.ecs
@@ -138,9 +141,9 @@ fn derelict_drill_does_not_mine() {
     for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
         set_floor(&mut sim, x, y, "ore-copper");
     }
-    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let drill = place_team1(&mut sim, "mechanical-drill", 5, 5);
     let copper = item(&sim, "copper");
-    let container = place(&mut sim, "container", 7, 5);
+    let container = place_team1(&mut sim, "container", 7, 5);
     assert!(
         sim.debug_set_building_team(5, 5, 0),
         "team switch to derelict"
@@ -151,9 +154,7 @@ fn derelict_drill_does_not_mine() {
         .get::<crate::entities::comp::Building>(drill)
         .map(|building| building.enabled);
     assert_eq!(enabled, Some(false), "derelict drill is disabled");
-    for _ in 0..1625 {
-        sim.tick().expect("tick");
-    }
+    tick_n(&mut sim, 1625);
     assert_eq!(
         stored_item(&sim, container, copper),
         0,
@@ -165,11 +166,9 @@ fn derelict_drill_does_not_mine() {
     for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
         set_floor(&mut sim, x, y, "ore-copper");
     }
-    place(&mut sim, "mechanical-drill", 5, 5);
-    let container = place(&mut sim, "container", 7, 5);
-    for _ in 0..1625 {
-        sim.tick().expect("tick");
-    }
+    place_team1(&mut sim, "mechanical-drill", 5, 5);
+    let container = place_team1(&mut sim, "container", 7, 5);
+    tick_n(&mut sim, 1625);
     assert!(
         stored_item(&sim, container, copper) >= 9,
         "a team-1 drill mines ~10 copper in 1625 ticks"
@@ -186,7 +185,7 @@ fn outside_map_area_disabled_and_reset() {
     use crate::game::runtime::CampaignRuntime;
 
     let mut sim = runtime_sim();
-    let drill = place(&mut sim, "mechanical-drill", 20, 20);
+    let drill = place_team1(&mut sim, "mechanical-drill", 20, 20);
     let mut rules = Rules {
         default_team: 1,
         ..Rules::default()
@@ -238,7 +237,7 @@ fn env_unsupported_block_disabled() {
         !supports_env_bits(&def, 17),
         "{name} (requires spores) is not supported on Erekir"
     );
-    let generator = place(&mut sim, name, 5, 5);
+    let generator = place_team1(&mut sim, name, 5, 5);
     let mut rules = Rules {
         default_team: 1,
         ..Rules::default()
