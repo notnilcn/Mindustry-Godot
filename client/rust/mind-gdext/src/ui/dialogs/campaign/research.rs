@@ -5,6 +5,7 @@
 //! Upstream: ui/dialogs/ResearchDialog.java
 
 use super::util::*;
+use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::widgets::research_items_display::MindResearchItemsDisplay;
@@ -105,7 +106,7 @@ fn research_ready(dialog: &mut MindDialog, state: &Rc<RefCell<ResearchState>>) {
         panel.add_theme_stylebox_override("panel", &empty);
     }
     research_build(dialog, state);
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     // Java: hide research, show the database (`Icon.book`).
     let target = dialog.to_gd();
     let callable = Callable::from_fn("research_database", move |_args: &[&Variant]| {
@@ -445,7 +446,7 @@ fn research_on_node_pressed(
             let item_name = row_str(&req, "item");
             let before = previous_have
                 .get(&gs(item_name.as_str()))
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
                 .unwrap_or_default();
             if previous_have.contains_key(&gs(item_name.as_str()))
                 && before != row_text(&req, "have")
@@ -680,7 +681,7 @@ fn research_rebuild_popup(
             for objective in row_arr(&node, "objectives").iter_shared() {
                 let mut objective_row = HBoxContainer::new_alloc();
                 objective_row.add_theme_constant_override("separation", 3);
-                let objective_label = factory::label(&format!("> {}", text_of(&objective)));
+                let objective_label = factory::label(&format!("> {}", to_text_godot(&objective)));
                 rich(&objective_label).add_theme_color_override("default_color", TEXT_GRAY);
                 objective_row.add_child(&objective_label);
                 let glyph = glyph_control("cancel", 18.0, PAL_REMOVE);
@@ -906,7 +907,7 @@ fn research_hidden(dialog: &mut MindDialog) {
 fn row_text(row: &VarDictionary, key: &str) -> String {
     row.get(key)
         .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| text_of(&value))
+        .map(|value| to_text_godot(&value))
         .unwrap_or_default()
 }
 

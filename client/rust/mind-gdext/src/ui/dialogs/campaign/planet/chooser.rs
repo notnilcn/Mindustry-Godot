@@ -524,8 +524,3 @@ pub(super) fn planet_maybe_show_remap_notice(dialog: &mut MindDialog) {
     context.set("keep_previous", true);
     dialog.open_dialog("full_text", &json_stringify(&context));
 }
-
-/// `JSON.stringify` for the `open_dialog` context payloads.
-pub(super) fn json_stringify(value: &VarDictionary) -> String {
-    godot::classes::Json::stringify(&value.to_variant()).to_string()
-}

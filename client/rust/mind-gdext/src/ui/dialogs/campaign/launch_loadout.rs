@@ -5,6 +5,7 @@
 //! Upstream: ui/dialogs/LaunchLoadoutDialog.java
 
 use super::util::*;
+use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::schematics::schematics_dialog::SCHEMATIC_COLUMN_WIDTH;
 use crate::ui::kit::widgets::factory;
@@ -98,11 +99,11 @@ fn launch_plan(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutState>>)
     let planet = dialog.context_string("planet").to_string();
     let launcher = dialog
         .context_value("launcher")
-        .map(|value| int_of(&value))
+        .map(|value| to_i64_typed(&value))
         .unwrap_or(-1);
     let sector = dialog
         .context_value("sector")
-        .map(|value| int_of(&value))
+        .map(|value| to_i64_typed(&value))
         .unwrap_or(-1);
     let selected = {
         let st = state.borrow();
@@ -318,10 +319,10 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
         if !resource_totals.is_empty() {
             let mut parts: Vec<String> = Vec::new();
             for item in resource_totals.keys_array().iter_shared() {
-                let name = text_of(&item);
+                let name = to_text_godot(&item);
                 let amount = resource_totals
                     .get(&gs(name.as_str()))
-                    .map(|value| int_of(&value))
+                    .map(|value| to_i64_typed(&value))
                     .unwrap_or(0);
                 parts.push(format!("{name} x{amount}"));
             }
@@ -348,10 +349,10 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
     let mut row = HBoxContainer::new_alloc();
     row.add_theme_constant_override("separation", 4);
     for item in total.keys_array().iter_shared() {
-        let name = text_of(&item);
+        let name = to_text_godot(&item);
         let amount = total
             .get(&gs(name.as_str()))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         if amount == 0 {
             continue;
@@ -360,11 +361,11 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
         row.add_child(&icon);
         let as_amount = requirements
             .get(&gs(name.as_str()))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         let al_amount = resources
             .get(&gs(name.as_str()))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         let mut amount_text = amount.to_string();
         if allow {
@@ -372,7 +373,7 @@ fn launch_rebuild_items(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadou
         }
         let stored_amount = stored
             .get(&gs(name.as_str()))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         if stored_amount < amount {
             amount_text = format!(
@@ -463,20 +464,6 @@ fn launch_toggle_max(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadoutSt
     launch_rebuild(dialog, state);
 }
 
-/// Live `universe.getLaunchResources` as `{item: amount}`.
-fn launch_resource_stacks(dialog: &mut MindDialog) -> VarDictionary {
-    let Some(mut campaign) = dialog.campaign_node() else {
-        return VarDictionary::new();
-    };
-    if !campaign.has_method("get_launch_resource_stacks") {
-        return VarDictionary::new();
-    }
-    let text = campaign
-        .call("get_launch_resource_stacks", &[])
-        .to::<GString>();
-    parse_object(&text.to_string())
-}
-
 /// The selected loadout row, or `{}`.
 fn launch_find_selected_row(
     dialog: &mut MindDialog,
@@ -545,7 +532,7 @@ fn launch_open_loadout(dialog: &mut MindDialog, state: &Rc<RefCell<LaunchLoadout
     let planet = dialog.context_string("planet").to_string();
     let sector = dialog
         .context_value("sector")
-        .map(|value| int_of(&value))
+        .map(|value| to_i64_typed(&value))
         .unwrap_or(-1);
     let capacity = {
         let st = state.borrow();

@@ -4,6 +4,7 @@
 //! Shared map-list helpers for the maps dialogs. Filled by S03 (docs/PLANS).
 //! Upstream: ui/dialogs/MapListDialog.java
 
+use crate::gdutil::variant::{parse_object, to_text_godot};
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit::widgets::factory;
@@ -448,7 +449,7 @@ pub(crate) fn maplist_load_settings(dialog: &mut MindDialog, state: &Rc<RefCell<
         .settings
         .keys_array()
         .iter_shared()
-        .map(|value| text_of(&value))
+        .map(|value| to_text_godot(&value))
         .collect();
     {
         let mut st = state.borrow_mut();

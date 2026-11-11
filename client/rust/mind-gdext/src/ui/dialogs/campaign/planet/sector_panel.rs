@@ -19,7 +19,6 @@ use crate::ui::dialog::MindDialog;
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, styles};
 
-use super::chooser::*;
 use super::launch::*;
 use super::reads::*;
 use super::util::*;
@@ -1032,21 +1031,7 @@ pub(super) fn planet_sector_is_being_played(
     planet_name: &str,
     sector_id: i64,
 ) -> bool {
-    let Some(mut campaign) = dialog.campaign_node() else {
-        return false;
-    };
-    if !campaign.has_method("get_sector_state") {
-        return false;
-    }
-    let Ok(state) = campaign
-        .call("get_sector_state", &[])
-        .try_to::<VarDictionary>()
-    else {
-        return false;
-    };
-    row_bool(&state, "campaign")
-        && row_str(&state, "planet") == planet_name
-        && row_i64_or(&state, "sector", -1) == sector_id
+    campaign_sector_is_playing(dialog, planet_name, sector_id)
 }
 
 pub(super) fn planet_sector_action_pressed(

@@ -5,6 +5,7 @@
 //! Upstream: ui/dialogs/LoadoutDialog.java
 
 use super::util::*;
+use crate::gdutil::variant::{to_i64_typed, to_text_godot};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::kit::widgets::factory;
 use crate::ui::kit::{self, MindTable};
@@ -93,12 +94,12 @@ impl DialogController for LoadoutDialog {
         let planet = dialog.context_string("planet").to_string();
         let views = dialog.campaign_json("campaign_views_json", &[gs(planet).to_variant()]);
         let capacity = match dialog.context_value("capacity") {
-            Some(value) => int_of(&value),
+            Some(value) => to_i64_typed(&value),
             None => row_i64_or(&views, "launch_capacity", 0),
         };
         let index = dialog
             .context_value("index")
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(-1);
         {
             let mut st = self.state.borrow_mut();
@@ -123,10 +124,10 @@ fn loadout_seed(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
     // `campaign_json`'s GString cast cannot parse (PAR-0488).
     let live = dialog.campaign_json("get_launch_resource_stacks", &[]);
     for item in live.keys_array().iter_shared() {
-        let name = text_of(&item);
+        let name = to_text_godot(&item);
         let amount = live
             .get(&gs(name.as_str()))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         seed_amounts.set(&gs(name.as_str()), &amount.to_variant());
     }
@@ -141,7 +142,7 @@ fn loadout_seed(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
             let Some(item) = requirement
                 .iter_shared()
                 .next()
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
             else {
                 continue;
             };
@@ -173,7 +174,7 @@ fn loadout_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
     let mut keys: Vec<String> = amounts
         .keys_array()
         .iter_shared()
-        .map(|value| text_of(&value))
+        .map(|value| to_text_godot(&value))
         .collect();
     keys.sort();
     let mut pending: Option<Gd<HBoxContainer>> = None;
@@ -211,7 +212,7 @@ fn loadout_rebuild(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
     });
     let reset_text = kit::t("@settings.reset").to_string();
     dialog.add_button(&reset_text, Some(callable), "refresh", 200.0);
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
 }
 
 fn loadout_item_row(
@@ -272,7 +273,7 @@ fn loadout_item_row(
         let st = state.borrow();
         st.amounts
             .get(&gs(item))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0)
     };
     let label = factory::label(&format!("{}  {}", loadout_localized_item(item), amount));
@@ -315,7 +316,7 @@ fn loadout_step(
         let current = st
             .amounts
             .get(&gs(item))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0);
         let mut amount = (current + direction * loadout_step_size(current)).max(0);
         if capacity > 0 {
@@ -342,7 +343,7 @@ fn loadout_max_items(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>)
             .amounts
             .keys_array()
             .iter_shared()
-            .map(|value| text_of(&value))
+            .map(|value| to_text_godot(&value))
             .collect();
         for item in keys {
             st.amounts.set(&gs(item.as_str()), &capacity.to_variant());
@@ -363,7 +364,7 @@ fn loadout_reset(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>) {
             .amounts
             .keys_array()
             .iter_shared()
-            .map(|value| text_of(&value))
+            .map(|value| to_text_godot(&value))
             .collect();
         for item in keys {
             st.amounts.set(&gs(item.as_str()), &0i64.to_variant());
@@ -384,7 +385,7 @@ fn loadout_edit(dialog: &mut MindDialog, state: &Rc<RefCell<LoadoutState>>, item
         let st = state.borrow();
         st.amounts
             .get(&gs(item))
-            .map(|value| int_of(&value))
+            .map(|value| to_i64_typed(&value))
             .unwrap_or(0)
     };
     let limit = if capacity > 0 { capacity } else { 9999 };

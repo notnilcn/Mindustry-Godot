@@ -32,7 +32,7 @@ impl DialogController for ResearchRootSelectDialog {
     fn ready(&mut self, dialog: &mut MindDialog) {
         dialog.set_title_key("@techtree.select");
         dialog.should_pause = false;
-        dialog.add_close_button(210.0);
+        dialog.add_default_close_button();
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {

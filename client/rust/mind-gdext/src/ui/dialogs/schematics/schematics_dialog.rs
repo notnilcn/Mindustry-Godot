@@ -7,6 +7,7 @@
 use super::files::*;
 use super::import_export::*;
 use super::subdialogs::*;
+use crate::gdutil::variant::{parse_array, to_text_godot};
 use crate::ui::dialog::{DialogController, MindDialog};
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit::widgets::factory;
@@ -239,7 +240,7 @@ fn schematics_ready(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicState>>
     // `makeButtonOverlay()` (`SchematicsDialog.java:64`).
     dialog.apply_button_overlay(true);
     schematics_build(dialog, state);
-    dialog.add_close_button(210.0);
+    dialog.add_default_close_button();
     // `buttons.button("@schematic.import", Icon.download, this::showImport)`:
     // the import button follows Back in the bottom row.
     let mut import = factory::button("");
@@ -378,7 +379,7 @@ fn schematics_load_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSta
     let mut tags: Vec<String> = Vec::new();
     let text = setting_text("schematic-tags", "[]");
     for tag in parse_array(&text).iter_shared() {
-        let value = text_of(&tag);
+        let value = to_text_godot(&tag);
         if !value.is_empty() && !tags.contains(&value) {
             tags.push(value);
         }
@@ -397,7 +398,7 @@ fn schematics_check_tags(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSt
             continue;
         };
         for label in row_arr(&row, "labels").iter_shared() {
-            let tag = text_of(&label);
+            let tag = to_text_godot(&label);
             if !tag.is_empty() && !st.tags.contains(&tag) {
                 st.tags.push(tag);
             }
@@ -599,7 +600,10 @@ pub(super) fn schematics_rebuild_list(
         let labels = row_arr(&schematic, "labels");
         let mut tagged = true;
         for tag in &selected_tags {
-            if !labels.iter_shared().any(|value| text_of(&value) == *tag) {
+            if !labels
+                .iter_shared()
+                .any(|value| to_text_godot(&value) == *tag)
+            {
                 tagged = false;
                 break;
             }
@@ -896,7 +900,7 @@ fn schematics_delete_tag(dialog: &mut MindDialog, state: &Rc<RefCell<SchematicSt
         }
         let carries = row_arr(&row, "labels")
             .iter_shared()
-            .any(|label| text_of(&label) == tag);
+            .any(|label| to_text_godot(&label) == tag);
         if !carries {
             continue;
         }
@@ -982,7 +986,7 @@ fn schematics_rename_tag_result(
         }
         let carries = row_arr(&row, "labels")
             .iter_shared()
-            .any(|label| text_of(&label) == old);
+            .any(|label| to_text_godot(&label) == old);
         if !carries {
             continue;
         }

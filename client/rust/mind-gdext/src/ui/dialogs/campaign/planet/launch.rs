@@ -11,10 +11,10 @@ use godot::builtin::{VarArray, VarDictionary};
 use godot::classes::Json;
 use godot::prelude::*;
 
+use crate::gdutil::variant::to_i64_int_or_float;
 use crate::ui::dialog::MindDialog;
 use crate::ui::kit;
 
-use super::chooser::*;
 use super::sector_panel::*;
 use super::util::*;
 use super::*;
@@ -120,20 +120,6 @@ pub(super) fn planet_launch_plan(
     )
 }
 
-/// `universe.getLaunchResources()` as an item->amount map.
-pub(super) fn planet_launch_resource_totals(dialog: &mut MindDialog) -> VarDictionary {
-    let Some(mut campaign) = dialog.campaign_node() else {
-        return VarDictionary::new();
-    };
-    if !campaign.has_method("get_launch_resource_stacks") {
-        return VarDictionary::new();
-    }
-    let text = campaign
-        .call("get_launch_resource_stacks", &[])
-        .to::<GString>();
-    parse_object(&text.to_string())
-}
-
 /// `PlanetDialog.playSelected` (`PlanetDialog.java:1396-1403,1449`): the
 /// stored loadout + launch resources are dropped **only** by the free-launch
 /// branch (`mode == look`, no base, `findLauncher == null`). A resume/go entry
@@ -191,7 +177,7 @@ pub(super) fn planet_launch(
         let plan = planet_launch_plan(dialog, planet_name, launcher_id, sector_id, loadout);
         launch_resources = row_dict(&plan, "resources");
         if launch_resources.is_empty() {
-            launch_resources = planet_launch_resource_totals(dialog);
+            launch_resources = launch_resource_stacks(dialog);
         }
         launch_core = row_str(&plan, "core");
         launch_cost = row_rows(&plan, "launch_cost");
@@ -324,7 +310,7 @@ pub(super) fn planet_dict_totals(dict: &VarDictionary) -> Vec<(String, i64)> {
             .unwrap_or_default();
         let amount = dict
             .get(item.as_str())
-            .map(|value| variant_i64(&value))
+            .map(|value| to_i64_int_or_float(&value))
             .unwrap_or(0);
         out.push((item, amount));
     }

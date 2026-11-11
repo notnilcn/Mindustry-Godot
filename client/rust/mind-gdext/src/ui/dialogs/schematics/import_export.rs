@@ -7,6 +7,7 @@
 use super::files::*;
 use super::schematics_dialog::*;
 use super::subdialogs::*;
+use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit;
@@ -235,7 +236,7 @@ fn schematics_export_clipboard(
 ) {
     let facade = campaign_schematic_mutation(dialog, "export_schematic", &[index.to_variant()])
         .filter(|value| value.get_type() != VariantType::NIL)
-        .map(|value| text_of(&value))
+        .map(|value| to_text_godot(&value))
         .unwrap_or_default();
     let text = if !facade.is_empty() {
         facade

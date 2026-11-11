@@ -6,6 +6,7 @@
 
 use super::files::*;
 use super::schematics_dialog::*;
+use crate::gdutil::variant::to_text_godot;
 use crate::ui::dialog::MindDialog;
 use crate::ui::dialogs::campaign::util::*;
 use crate::ui::kit::widgets::factory;
@@ -775,7 +776,7 @@ fn schematics_edit_rebuild_tags(
             .map(|schematic| {
                 row_arr(&schematic, "labels")
                     .iter_shared()
-                    .map(|value| text_of(&value))
+                    .map(|value| to_text_godot(&value))
                     .collect::<Vec<String>>()
             })
             .unwrap_or_default();
@@ -926,7 +927,7 @@ fn schematics_show_add_tag(
         .map(|schematic| {
             row_arr(&schematic, "labels")
                 .iter_shared()
-                .map(|value| text_of(&value))
+                .map(|value| to_text_godot(&value))
                 .collect::<Vec<String>>()
         })
         .unwrap_or_default();
