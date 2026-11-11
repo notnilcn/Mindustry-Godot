@@ -15,6 +15,7 @@ use super::ai::ground::{GroundAiRules, update_ground_ai};
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
 use super::ai_arms::boost::boost_arm;
+use super::ai_arms::cargo::cargo_arm;
 use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_arms::player::player_arm;
 use super::ai_weapons::{
@@ -641,33 +642,7 @@ pub fn unit_update_system(world: &mut World) {
                 &mut core_target_cache,
             );
         } else if slot.kind == AiKind::Cargo {
-            // `CargoAI` (`CargoAI.java:26-97`, H01 T13): the tether unit
-            // shuttles items between its loader and a configured unload point.
-            let mut state = world
-                .get::<crate::ai::types::cargo::CargoAi>(entity)
-                .copied()
-                .unwrap_or_default();
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                let _ = crate::ai::types::cargo::update_cargo(&mut ctx, entity, &mut state);
-            }
-            if let Some(mut stored) = world.get_mut::<crate::ai::types::cargo::CargoAi>(entity) {
-                *stored = state;
-            } else if world.get_entity(entity).is_ok() {
-                world.entity_mut(entity).insert(state);
-            }
+            cargo_arm(world, &mut runtime, entity, team);
         } else if slot.kind == AiKind::Assembler {
             // `AssemblerAI` (`AssemblerAI.java:11-24`, H01 T13): hold at the
             // arranged spot and face the locked angle.

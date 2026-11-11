@@ -13,5 +13,6 @@
 use super::*;
 
 pub(super) mod boost;
+pub(super) mod cargo;
 pub(super) mod no_ai;
 pub(super) mod player;
