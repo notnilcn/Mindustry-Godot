@@ -17,6 +17,7 @@ pub(super) mod boost;
 pub(super) mod builder;
 pub(super) mod cargo;
 pub(super) mod ground_flying;
+pub(super) mod logic;
 pub(super) mod missile;
 pub(super) mod no_ai;
 pub(super) mod player;
