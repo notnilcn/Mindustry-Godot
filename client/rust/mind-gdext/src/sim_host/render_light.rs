@@ -175,25 +175,34 @@ impl MindSimHost {
     /// (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
     /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
     pub fn light_sources(&self, rect: (f32, f32, f32, f32)) -> Vec<LightSource> {
-        use mind_core::combat::bullet::Bullet;
-        use mind_core::entities::comp::Pos;
-        use mind_core::entities::comp::unit::comp::UnitTypeComp;
-        use mind_core::render::drawf::pal;
-        use mind_core::world::behavior::light::LightState;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let rules = self.render_rules_or_default();
-        let view = CameraView {
-            x: rect.0 + rect.2 / 2.0,
-            y: rect.1 + rect.3 / 2.0,
-            w: rect.2 + 2.0 * LIGHT_GROW,
-            h: rect.3 + 2.0 * LIGHT_GROW,
-            zoom: 1.0,
-            team: self.player_team(),
-        };
+        let view = self.grown_view(rect, LIGHT_GROW);
         let mut out = Vec::new();
-        for tile in visible_blocks(&self.sim.grid, content, &view) {
+        self.block_lights(content, &view, &mut out);
+        // `BlockRenderer.java:846-855`: floor/overlay environment lights for
+        // tiles whose block does not obstruct light (PAR-0467).
+        out.extend(floor_light_sources(&self.sim.grid, content, &view));
+        self.hazard_lights(rect, &mut out);
+        self.unit_lights(content, &rules, &mut out);
+        self.bullet_lights(content, &mut out);
+        out
+    }
+
+    /// Block light sources: cores (`CoreBlock.java:158,739-741`), illuminators
+    /// (`LightBlock.java:40,105,126-129`) and static `emitLight` blocks
+    /// (`Block.lightRadius` default 60), in `visible_blocks` order.
+    fn block_lights(
+        &self,
+        content: &ContentRegistry,
+        view: &CameraView,
+        out: &mut Vec<LightSource>,
+    ) {
+        use mind_core::render::drawf::pal;
+        use mind_core::world::behavior::light::LightState;
+        for tile in visible_blocks(&self.sim.grid, content, view) {
             let Some(def) = content.block(tile.block) else {
                 continue;
             };
@@ -203,9 +212,7 @@ impl MindSimHost {
             // (PAR-0467: the covered proxy tiles used to emit shifted copies).
             if let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build
                 && let Some(building) = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::Building>(entity)
                 && building.tile != TilePos::new(tile.x as i16, tile.y as i16)
             {
@@ -230,7 +237,7 @@ impl MindSimHost {
                     let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
                         continue;
                     };
-                    let state = self.sim.ecs.0.get::<LightState>(entity);
+                    let state = self.world().get::<LightState>(entity);
                     let color = state.map_or(0xffd3_7fff_u32, |s| s.color);
                     let smooth = state.map_or(1.0, |s| s.smooth_time).min(2.0);
                     out.push(LightSource {
@@ -247,11 +254,12 @@ impl MindSimHost {
                 _ => {}
             }
         }
-        // `BlockRenderer.java:846-855`: floor/overlay environment lights for
-        // tiles whose block does not obstruct light (PAR-0467).
-        out.extend(floor_light_sources(&self.sim.grid, content, &view));
-        // Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
-        // `Liquid.drawPuddle`; H03 T7).
+    }
+
+    /// Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
+    /// `Liquid.drawPuddle`; H03 T7).
+    fn hazard_lights(&self, rect: (f32, f32, f32, f32), out: &mut Vec<LightSource>) {
+        use mind_core::render::drawf::pal;
         let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
         for fire in self.fire_draws(rect) {
             out.push(LightSource {
@@ -273,14 +281,20 @@ impl MindSimHost {
                 });
             }
         }
+    }
+
+    /// Unit lights when `rules.unitLight` (`UnitType.java:954,1800-1804`).
+    fn unit_lights(&self, content: &ContentRegistry, rules: &Rules, out: &mut Vec<LightSource>) {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
         if rules.unit_light
             && let Some(runtime) = self.sim.unit_runtime()
         {
             for &entity in &runtime.units {
-                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                let Some(pos) = self.world().get::<Pos>(entity) else {
                     continue;
                 };
-                let Some(type_comp) = self.sim.ecs.0.get::<UnitTypeComp>(entity) else {
+                let Some(type_comp) = self.world().get::<UnitTypeComp>(entity) else {
                     continue;
                 };
                 let Some(def) = content.unit(type_comp.type_id) else {
@@ -306,12 +320,19 @@ impl MindSimHost {
                 });
             }
         }
+    }
+
+    /// Bullet lights (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
+    /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
+    fn bullet_lights(&self, content: &ContentRegistry, out: &mut Vec<LightSource>) {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::entities::comp::Pos;
         if let Some(runtime) = self.sim.unit_runtime() {
             for &entity in &runtime.bullets {
-                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                let Some(pos) = self.world().get::<Pos>(entity) else {
                     continue;
                 };
-                let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+                let Some(bullet) = self.world().get::<Bullet>(entity) else {
                     continue;
                 };
                 if bullet.finished() {
@@ -336,16 +357,12 @@ impl MindSimHost {
                 });
             }
         }
-        out
     }
 
     /// `rules.borderDarkness` for the darkness/minimap passes (G03 T11):
     /// live campaign rules, else the last `load_sector` rules, else `true`.
     pub fn border_darkness_enabled(&self) -> bool {
-        self.sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+        self.campaign_runtime()
             .map(|runtime| runtime.session.rules.border_darkness)
             .or_else(|| {
                 self.sector_rules
@@ -366,7 +383,7 @@ impl MindSimHost {
         wx: f32,
         wy: f32,
     ) -> Vec<(f32, f32, usize, Option<mind_core::content::Rgba>)> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         // `World.toTile`: `Math.round(coord / tilesize)`.
@@ -376,9 +393,7 @@ impl MindSimHost {
             return Vec::new();
         };
         let Some(building) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::building::Building>(entity)
         else {
             return Vec::new();
@@ -415,17 +430,10 @@ impl MindSimHost {
     /// `PowerNode.java:496-512`): each node pair once (the other node's entity
     /// index must be below ours), derelicts skipped.
     pub fn power_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<LaserLink> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
-        let view = CameraView {
-            x: rect.0 + rect.2 / 2.0,
-            y: rect.1 + rect.3 / 2.0,
-            w: rect.2 + 2.0 * POWER_GROW,
-            h: rect.3 + 2.0 * POWER_GROW,
-            zoom: 1.0,
-            team: self.player_team(),
-        };
+        let view = self.grown_view(rect, POWER_GROW);
         let mut out = Vec::new();
         for tile in visible_blocks(&self.sim.grid, content, &view) {
             let Some(def) = content.block(tile.block) else {
@@ -439,13 +447,11 @@ impl MindSimHost {
             let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
                 continue;
             };
-            let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) else {
+            let Some(module) = self.world().get::<PowerModule>(entity) else {
                 continue;
             };
             let satisfaction = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get_resource::<PowerGrids>()
                 .and_then(|grids| grids.graph(module.graph))
                 .map(|graph| graph.get_satisfaction())
@@ -466,9 +472,7 @@ impl MindSimHost {
                     continue;
                 }
                 let Some(other_def) = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<BuildingComp>(other)
                     .and_then(|comp| content.block(comp.block))
                 else {
@@ -505,17 +509,10 @@ impl MindSimHost {
     pub fn beam_node_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<BeamLaserLink> {
         use mind_core::entities::comp::Building;
         use mind_core::world::blocks::power::nodes::BeamNodeState;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
-        let view = CameraView {
-            x: rect.0 + rect.2 / 2.0,
-            y: rect.1 + rect.3 / 2.0,
-            w: rect.2 + 2.0 * POWER_GROW,
-            h: rect.3 + 2.0 * POWER_GROW,
-            zoom: 1.0,
-            team: self.player_team(),
-        };
+        let view = self.grown_view(rect, POWER_GROW);
         let mut out = Vec::new();
         for tile in visible_blocks(&self.sim.grid, content, &view) {
             let Some(def) = content.block(tile.block) else {
@@ -531,18 +528,14 @@ impl MindSimHost {
             if self.building_team(tile.x, tile.y) == Some(0) {
                 continue;
             }
-            let Some(state) = self.sim.ecs.0.get::<BeamNodeState>(entity).copied() else {
+            let Some(state) = self.world().get::<BeamNodeState>(entity).copied() else {
                 continue;
             };
             let satisfaction = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<PowerModule>(entity)
                 .and_then(|module| {
-                    self.sim
-                        .ecs
-                        .0
+                    self.world()
                         .get_resource::<PowerGrids>()
                         .and_then(|grids| grids.graph(module.graph))
                         .map(|graph| graph.get_satisfaction())
@@ -555,7 +548,7 @@ impl MindSimHost {
                 let Some(other) = *link else {
                     continue;
                 };
-                let Some(other_build) = self.sim.ecs.0.get::<Building>(other) else {
+                let Some(other_build) = self.world().get::<Building>(other) else {
                     continue;
                 };
                 let Some(other_def) = content.block(other_build.block) else {
@@ -577,9 +570,7 @@ impl MindSimHost {
                 // range draws; equal ranges break the tie by entity index.
                 if other_def.kind == BlockKind::BeamNode {
                     let other_range = self
-                        .sim
-                        .ecs
-                        .0
+                        .world()
                         .get::<BeamNodeState>(other)
                         .map(|state| state.range)
                         .unwrap_or(0);
@@ -608,17 +599,10 @@ impl MindSimHost {
     /// `ItemBridge.java:384-432`).
     pub fn bridge_links(&self, rect: (f32, f32, f32, f32)) -> Vec<BridgeLink> {
         use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
-        let view = CameraView {
-            x: rect.0 + rect.2 / 2.0,
-            y: rect.1 + rect.3 / 2.0,
-            w: rect.2 + 2.0 * BRIDGE_GROW,
-            h: rect.3 + 2.0 * BRIDGE_GROW,
-            zoom: 1.0,
-            team: self.player_team(),
-        };
+        let view = self.grown_view(rect, BRIDGE_GROW);
         let mut out = Vec::new();
         for tile in visible_blocks(&self.sim.grid, content, &view) {
             let Some(def) = content.block(tile.block) else {
@@ -633,7 +617,7 @@ impl MindSimHost {
             let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
                 continue;
             };
-            let Some(bridge) = self.sim.ecs.0.get::<ItemBridgeBuild>(entity) else {
+            let Some(bridge) = self.world().get::<ItemBridgeBuild>(entity) else {
                 continue;
             };
             if bridge.link < 0 {
@@ -647,9 +631,7 @@ impl MindSimHost {
                 continue;
             };
             let linked_same = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<BuildingComp>(other)
                 .is_some_and(|comp| comp.block == tile.block);
             if !linked_same {

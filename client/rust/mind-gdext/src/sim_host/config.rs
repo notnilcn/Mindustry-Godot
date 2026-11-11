@@ -46,9 +46,7 @@ pub(super) fn block_items_json(
     x: i32,
     y: i32,
 ) -> Option<String> {
-    let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-        return None;
-    };
+    let (tx, ty) = crate::gdutil::coords::tile_i16(x, y)?;
     let pos = mind_core::world::TilePos::new(tx, ty);
     let def = content.block(sim.grid.block_at(pos)?)?;
     if !def.has_items {
@@ -77,9 +75,7 @@ impl MindSimHost {
     /// `Block.configurations` keys) from the live block runtime. Empty when the
     /// runtime is not installed or the behavior declares none.
     pub fn block_config_kinds(&self, block: BlockId) -> &'static [mind_core::world::ConfigKind] {
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get_resource::<mind_core::world::block::BlockTable>()
             .and_then(|table| table.get(block).map(|inst| inst.config_kinds()))
             .unwrap_or(&[])
@@ -90,9 +86,7 @@ impl MindSimHost {
     /// for other kinds.
     pub fn message_limits(&self, block: BlockId) -> Option<(i32, i32)> {
         let table = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::block::BlockTable>()?;
         match &table.get(block)?.kind_data {
             mind_core::world::block_kind_data::BlockKindData::Message(message) => {
@@ -106,14 +100,10 @@ impl MindSimHost {
     /// T2): the selected plan index (`-1` = none) and the queued command
     /// override (`UnitFactory.java:227`).
     pub fn unit_factory_config(&self, x: i32, y: i32) -> Option<(i32, Option<u16>)> {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
+        let (tx, ty) = crate::gdutil::coords::tile_i16(x, y)?;
         let entity = self.sim.grid.entity_at(TilePos::new(tx, ty))?;
         let state = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::blocks::units::UnitFactoryBuild>(entity)?;
         Some((
             state.current_plan,
@@ -139,19 +129,13 @@ impl MindSimHost {
     /// `null` for no config).
     #[func]
     pub fn building_config_json(&self, x: i32, y: i32) -> GString {
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return GString::from("null");
         };
-        let config = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
+        let config = mind_core::world::config::read_config(self.world(), entity);
         let value = config_to_json(&config);
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// `StatusEffect.permanent` for a `@status-<name>` content reference
@@ -176,14 +160,9 @@ impl MindSimHost {
     #[func]
     pub fn logic_picker_json(&self, kind: GString) -> GString {
         let Some(registry) = self.content_snapshot.as_ref() else {
-            return GString::from("[]");
+            return crate::gdutil::json::empty_array();
         };
-        let campaign = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
-            .is_some();
+        let campaign = self.campaign_runtime().is_some();
         let unlocked_now = |unlock: &mind_core::content::UnlockFields| {
             unlock.unlocked || unlock.always_unlocked || !campaign
         };
@@ -244,11 +223,7 @@ impl MindSimHost {
                 .collect(),
             _ => Vec::new(),
         };
-        GString::from(
-            serde_json::to_string(&rows)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&rows, "[]")
     }
 
     /// Read-only `Building.onConfigureBuildTapped` preview for the tap handler
@@ -272,7 +247,7 @@ impl MindSimHost {
             return -1;
         };
         match mind_core::world::config_tap::config_tap(
-            &self.sim.ecs.0,
+            self.world(),
             &self.sim.grid,
             selected,
             other,
@@ -286,17 +261,11 @@ impl MindSimHost {
     /// Building config readback as a plain string (`nil` for non-string configs).
     #[func]
     pub fn building_config_string(&self, x: i32, y: i32) -> Variant {
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return Variant::nil();
         };
-        match mind_core::world::config::read_config(&self.sim.ecs.0, entity) {
+        match mind_core::world::config::read_config(self.world(), entity) {
             mind_core::world::config::ConfigValue::String(text) => Variant::from(text.as_str()),
             _ => Variant::nil(),
         }
@@ -305,20 +274,12 @@ impl MindSimHost {
     /// Packed RGBA color of a `LightBlock` at `(x, y)` (`nil` when absent).
     #[func]
     pub fn light_color(&self, x: i32, y: i32) -> Variant {
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return Variant::nil();
         };
         match self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::behavior::light::LightState>(entity)
         {
             Some(state) => Variant::from(i64::from(state.color)),
@@ -329,20 +290,12 @@ impl MindSimHost {
     /// `Building.enabled` at `(x, y)` (`nil` when the tile has no building).
     #[func]
     pub fn building_enabled(&self, x: i32, y: i32) -> Variant {
-        let entity = self
-            .sim
-            .grid
-            .tiles
-            .in_bounds(x, y)
-            .then(|| self.sim.grid.tile(x, y).build)
-            .flatten();
+        let entity = self.build_at(x, y);
         let Some(entity) = entity else {
             return Variant::nil();
         };
         match self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::Building>(entity)
         {
             Some(building) => Variant::from(building.enabled),
@@ -378,7 +331,7 @@ impl MindSimHost {
     /// T13): whether a ground unit overlaps the building at `(x, y)`.
     #[func]
     pub fn building_has_unit_overlap(&self, x: i32, y: i32) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         if !self.sim.grid.tiles.in_bounds(x, y) {
@@ -388,10 +341,10 @@ impl MindSimHost {
         let Some(block) = self.sim.grid.block_at(pos) else {
             return false;
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return false;
         };
-        mind_core::sim::builder::unit_overlap_at(&self.sim.ecs.0, content, pos, block)
+        mind_core::sim::builder::unit_overlap_at(self.world(), content, pos, block)
     }
 
     /// `Door.DoorBuild.tapped`'s 60-tick timer (`Door.java:149`):
@@ -400,13 +353,13 @@ impl MindSimHost {
     /// `building_has_unit_overlap` first (Java short-circuit order).
     #[func]
     pub fn door_tap_allowed(&mut self, x: i32, y: i32) -> bool {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         let pos = mind_core::world::TilePos::new(tx, ty);
         let Some(entity) = self.sim.grid.entity_at(pos) else {
             return false;
         };
-        mind_core::world::behavior::defense::tap_allowed(&mut self.sim.ecs.0, entity)
+        mind_core::world::behavior::defense::tap_allowed(self.world_mut(), entity)
     }
 }

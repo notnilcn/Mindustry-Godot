@@ -3,6 +3,10 @@
 //! Unit factory/reconstructor build previews.
 //! Upstream: core/src/mindustry/world/blocks/units/UnitFactory.java
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+use mind_core::content::registries::units::UnitTypeDef;
+
 use super::*;
 
 /// `UnitFactory.draw` preview numbers: `(unit, progress / plan.time)` for the
@@ -55,16 +59,16 @@ impl MindSimHost {
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         runtime
             .units
             .iter()
             .filter_map(|entity| {
-                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
-                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
-                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let pos = self.world().get::<Pos>(*entity)?;
+                let core = self.world().get::<UnitCore>(*entity)?;
+                let type_comp = self.world().get::<UnitTypeComp>(*entity)?;
                 let def = content.unit(type_comp.type_id)?;
                 Some((
                     pos.x,
@@ -83,249 +87,60 @@ impl MindSimHost {
     pub fn unit_draws_full(&self) -> Vec<UnitDraw> {
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::health::Health;
-        use mind_core::entities::comp::unit::comp::{MechComp, UnitCore, UnitTypeComp};
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         runtime
             .units
             .iter()
             .filter_map(|entity| {
-                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
-                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
-                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let pos = self.world().get::<Pos>(*entity)?;
+                let core = self.world().get::<UnitCore>(*entity)?;
+                let type_comp = self.world().get::<UnitTypeComp>(*entity)?;
                 let def = content.unit(type_comp.type_id)?;
                 let team = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::TeamComp>(*entity)
                     .map(|comp| comp.team)
                     .unwrap_or(0);
                 let healthf = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<Health>(*entity)
                     .map(Health::fraction)
                     .unwrap_or(1.0);
-                let mech = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<MechComp>(*entity)
-                    .map(|mech| MechDraw {
-                        base_rotation: mech.base_rotation,
-                        walk_time: mech.walk_time,
-                        stride: def.mech_stride.max(0.001),
-                    });
-                let treads = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::TankComp>(*entity)
-                    .map(|tank| TreadsDraw {
-                        tread_time: tank.tread_time,
-                        rects: def.tread_rects.clone(),
-                        frames: def.tread_frames.max(1),
-                    });
+                let mech = mech_draw(self.world(), *entity, def);
+                let treads = treads_draw(self.world(), *entity, def);
                 // L04 T3: `CrawlComp` draw state (`UnitType.drawCrawl`).
-                let crawl = if def.segments > 0 {
-                    self.sim
-                        .ecs
-                        .0
-                        .get::<mind_core::entities::comp::unit::comp::CrawlComp>(*entity)
-                } else {
-                    None
-                }
-                .map(|comp| CrawlDraw {
-                    crawl_time: comp.crawl_time,
-                    segment_rot: comp.segment_rot,
-                    segments: def.segments,
-                    segment_scl: def.segment_scl,
-                    segment_mag: def.segment_mag,
-                    segment_phase: def.segment_phase,
-                });
+                let crawl = crawl_draw(self.world(), *entity, def);
                 // L04 T3: `drawPayload` reads `payloads().first()` (oldest).
-                let payload = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::UnitPayloads>(*entity)
-                    .and_then(|payloads| payloads.stack.first())
-                    .and_then(|payload| match payload {
-                        mind_core::entities::comp::unit::comp::CarriedPayload::Unit {
-                            type_id,
-                            team,
-                            health,
-                            rotation,
-                        } => {
-                            let carried = content.unit(*type_id)?;
-                            Some(PayloadDraw::Unit {
-                                name: carried.name.clone(),
-                                rotation: *rotation,
-                                team: *team,
-                                healthf: if carried.health > 0.0 {
-                                    (*health / carried.health).clamp(0.0, 1.0)
-                                } else {
-                                    0.0
-                                },
-                                draw_body: carried.draw_body,
-                                draw_cell: carried.draw_cell,
-                                segments: carried.segments,
-                            })
-                        }
-                        mind_core::entities::comp::unit::comp::CarriedPayload::Build {
-                            block,
-                            ..
-                        } => {
-                            let carried = content.block(*block)?;
-                            Some(PayloadDraw::Build {
-                                block: carried.name.clone(),
-                                region: carried.region.clone(),
-                                size: carried.size,
-                            })
-                        }
-                    });
-                let legs = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::LegsComp>(*entity)
-                    .map(|comp| LegsDraw {
-                        base_rotation: comp.base_rotation,
-                        legs: comp
-                            .legs
-                            .iter()
-                            .map(|leg| mind_core::render::unit_draw::LegDrawLeg {
-                                foot: (leg.foot_x, leg.foot_y),
-                                joint: (leg.joint_x, leg.joint_y),
-                                moving: leg.moving,
-                                stage: leg.step,
-                            })
-                            .collect(),
-                        // `UnitType.drawLegs` reads `1 - unit.drownTime`; the
-                        // port has no drowning yet (`UnitCore.drown_time`).
-                        inv_drown: 1.0,
-                        leg_base_offset: def.leg_base_offset,
-                        leg_straightness: def.leg_straightness,
-                        base_leg_straightness: def.base_leg_straightness,
-                        leg_straight_length: def.leg_straight_length,
-                        leg_extension: def.leg_extension,
-                        leg_base_under: def.leg_base_under,
-                        shadow_elevation: def.shadow_elevation,
-                    });
-                let weapons = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::weapons::UnitWeapons>(*entity)
-                    .map(|weapons| {
-                        weapons
-                            .weapons
-                            .iter()
-                            .enumerate()
-                            .map(|(index, weapon)| {
-                                let mount = weapons.mounts.get(index);
-                                WeaponDraw {
-                                    name: weapon.name.clone(),
-                                    x: weapon.x,
-                                    y: weapon.y,
-                                    mount_rotation: mount
-                                        .map(|mount| mount.rotation)
-                                        .unwrap_or(weapon.base_rotation),
-                                    base_rotation: weapon.base_rotation,
-                                    rotate: weapon.rotate,
-                                    flip: weapon.flip_sprite,
-                                    top: weapon.top,
-                                    recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
-                                    def: weapon.clone(),
-                                    mount: mount
-                                        .cloned()
-                                        .unwrap_or_else(|| WeaponMount::new(weapon)),
-                                }
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let payload = payload_draw(self.world(), content, *entity);
+                let legs = legs_draw(self.world(), *entity, def);
+                let weapons = weapons_draw(self.world(), *entity);
                 let id = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::ecs::EntitySeq>(*entity)
                     .map(|seq| seq.0)
                     .unwrap_or(0);
-                let mine_tile = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::MinerComp>(*entity)
-                    .filter(|miner| miner.mining)
-                    .and_then(|miner| miner.mine_tile.map(|pos| (pos.x(), pos.y())));
-                let item = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::ItemsComp>(*entity)
-                    .and_then(|items| items.item)
-                    .and_then(|(item, amount)| {
-                        self.content_snapshot
-                            .as_ref()
-                            .and_then(|content| content.item(item))
-                            .map(|item| (item.name.clone(), amount))
-                    });
+                let mine_tile = mine_tile_of(self.world(), *entity);
+                let item = item_draw(self.world(), content, *entity);
                 let is_player = self.sim.player_unit() == Some(*entity);
                 let health = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<Health>(*entity)
                     .map(|health| health.health)
                     .unwrap_or(0.0);
                 // H03 T10: active status effects with their view parameters
                 // (`StatusEffect.effect/effectChance/color`).
-                let statuses = self
-                    .sim
-                    .ecs
-                    .0
-                    .get::<mind_core::entities::comp::unit::comp::StatusComp>(*entity)
-                    .map(|comp| {
-                        comp.statuses
-                            .iter()
-                            .filter_map(|entry| content.status(entry.effect))
-                            .filter(|def| {
-                                !matches!(
-                                    &def.effect,
-                                    mind_core::content::registries::fx_meta::EffectRef::Named(id)
-                                        if *id == mind_core::content::EffectId::NONE
-                                ) && def.effect_chance > 0.0
-                            })
-                            .map(|def| (def.effect.clone(), def.effect_chance, def.color))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let statuses = status_draws(self.world(), content, *entity);
                 // H03 T10: floor under the unit (`floorOn()`).
-                let (floor_is_liquid, floor_color) = {
-                    let tile = self
-                        .sim
-                        .grid
-                        .tiles
-                        .getn(WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
-                    let floor = tile.and_then(|tile| content.block(tile.floor));
-                    (
-                        floor.map(|def| def.is_liquid).unwrap_or(false),
-                        floor
-                            .and_then(|def| def.map_color)
-                            .unwrap_or(mind_core::content::Rgba::WHITE),
-                    )
-                };
+                let (floor_is_liquid, floor_color) =
+                    floor_draw(&self.sim.grid, content, pos.x, pos.y);
                 let fin = self
-                    .sim
-                    .ecs
-                    .0
+                    .world()
                     .get::<mind_core::entities::comp::unit::comp::TimedKillComp>(*entity)
                     .map(|timed| {
                         if timed.lifetime > 0.0 {
@@ -384,13 +199,13 @@ impl MindSimHost {
         let Some(runtime) = self.sim.unit_runtime() else {
             return Vec::new();
         };
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let wanted: std::collections::HashSet<i32> = ids.iter().copied().collect();
         let mut out = Vec::new();
         for &entity in &runtime.units {
-            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+            let Ok(entity_ref) = self.world().get_entity(entity) else {
                 continue;
             };
             let Some(seq) = entity_ref.get::<mind_core::ecs::EntitySeq>() else {
@@ -422,11 +237,11 @@ impl MindSimHost {
     /// (T13/PAR-0129).
     pub fn force_shields(&self) -> Vec<(f32, f32, f32, u8, f32, u8, f32)> {
         use mind_core::world::blocks::defense::shields::ForceProjectorState;
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(state) = entity.get::<ForceProjectorState>() else {
                 continue;
             };
@@ -467,11 +282,11 @@ impl MindSimHost {
     pub fn unit_shields(&self) -> Vec<(f32, f32, f32, f32, u8, f32)> {
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::unit::comp::{ShieldComp, UnitTypeComp};
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(shield) = entity.get::<ShieldComp>() else {
                 continue;
             };
@@ -518,11 +333,11 @@ impl MindSimHost {
         use mind_core::content::registries::units::ability::AbilityKind;
         use mind_core::entities::comp::Pos;
         use mind_core::entities::comp::unit::comp::{ShieldComp, UnitCore, UnitTypeComp};
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(comp) = entity.get::<AbilityComp>() else {
                 continue;
             };
@@ -574,7 +389,7 @@ impl MindSimHost {
                             .and_then(|name| content.unit_by_name(name))
                             .is_some_and(|spawn| {
                                 mind_core::entities::comp::unit::queries::can_create_unit(
-                                    &self.sim.ecs.0,
+                                    self.world(),
                                     team,
                                     spawn,
                                 )
@@ -607,7 +422,7 @@ impl MindSimHost {
     /// `(center tile x, center tile y, world x, world y, size, java_color)`.
     /// Rust-only seam for the status pass (T14/PAR-0097).
     pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
         let team = self.player_team();
@@ -615,7 +430,7 @@ impl MindSimHost {
         // drives the efficiency pulse (`BuildingComp.java:651`; I02 T3).
         let tick = self.sim.tick_count();
         let mut out = Vec::new();
-        for entity in self.sim.ecs.0.iter_entities() {
+        for entity in self.world().iter_entities() {
             let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
                 continue;
             };
@@ -638,7 +453,7 @@ impl MindSimHost {
             // per-family `shouldConsume()` overrides in
             // `mind_core::world::status::java_block_status`).
             let status =
-                mind_core::world::status::java_block_status(&self.sim.ecs.0, entity.id(), tick);
+                mind_core::world::status::java_block_status(self.world(), entity.id(), tick);
             let size = def.size.max(1);
             // `Building.tile` is the center tile; `Block.offset` recentres the
             // even-size sprites (same convention as `blocks.rs`).
@@ -675,15 +490,13 @@ impl MindSimHost {
         let cy = (y + (size - 1) / 2) as f32 * 8.0 + def.offset;
         let rotation = self.building_rotation(x, y);
         let efficiency = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<Building>(entity)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
         match def.kind {
             BlockKind::UnitFactory => {
-                let state = self.sim.ecs.0.get::<UnitFactoryBuild>(entity)?;
+                let state = self.world().get::<UnitFactoryBuild>(entity)?;
                 let (unit, fraction) =
                     factory_preview(&def.unit_plans, state.current_plan, state.progress);
                 Some(UnitBuildDraw {
@@ -701,7 +514,7 @@ impl MindSimHost {
                 })
             }
             BlockKind::Reconstructor => {
-                let state = self.sim.ecs.0.get::<ReconstructorBuild>(entity)?;
+                let state = self.world().get::<ReconstructorBuild>(entity)?;
                 let (unit, fraction, arrived) = reconstructor_preview(
                     &def.reconstructor_upgrades,
                     state.payload,
@@ -727,4 +540,208 @@ impl MindSimHost {
             _ => None,
         }
     }
+}
+
+/// `MechComp` walk state for the mech draw part (`drawMech`).
+fn mech_draw(world: &World, entity: Entity, def: &UnitTypeDef) -> Option<MechDraw> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::MechComp>(entity)
+        .map(|mech| MechDraw {
+            base_rotation: mech.base_rotation,
+            walk_time: mech.walk_time,
+            stride: def.mech_stride.max(0.001),
+        })
+}
+
+/// `TankComp` tread state + the `UnitType` tread knobs (`drawTank`).
+fn treads_draw(world: &World, entity: Entity, def: &UnitTypeDef) -> Option<TreadsDraw> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::TankComp>(entity)
+        .map(|tank| TreadsDraw {
+            tread_time: tank.tread_time,
+            rects: def.tread_rects.clone(),
+            frames: def.tread_frames.max(1),
+        })
+}
+
+/// `CrawlComp` draw state (`UnitType.drawCrawl`, L04 T3).
+fn crawl_draw(world: &World, entity: Entity, def: &UnitTypeDef) -> Option<CrawlDraw> {
+    if def.segments > 0 {
+        world.get::<mind_core::entities::comp::unit::comp::CrawlComp>(entity)
+    } else {
+        None
+    }
+    .map(|comp| CrawlDraw {
+        crawl_time: comp.crawl_time,
+        segment_rot: comp.segment_rot,
+        segments: def.segments,
+        segment_scl: def.segment_scl,
+        segment_mag: def.segment_mag,
+        segment_phase: def.segment_phase,
+    })
+}
+
+/// `UnitType.drawPayload`: the first carried payload (`payloads().first()`,
+/// the oldest; L04 T3).
+fn payload_draw(world: &World, content: &ContentRegistry, entity: Entity) -> Option<PayloadDraw> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::UnitPayloads>(entity)
+        .and_then(|payloads| payloads.stack.first())
+        .and_then(|payload| match payload {
+            mind_core::entities::comp::unit::comp::CarriedPayload::Unit {
+                type_id,
+                team,
+                health,
+                rotation,
+            } => {
+                let carried = content.unit(*type_id)?;
+                Some(PayloadDraw::Unit {
+                    name: carried.name.clone(),
+                    rotation: *rotation,
+                    team: *team,
+                    healthf: if carried.health > 0.0 {
+                        (*health / carried.health).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                    draw_body: carried.draw_body,
+                    draw_cell: carried.draw_cell,
+                    segments: carried.segments,
+                })
+            }
+            mind_core::entities::comp::unit::comp::CarriedPayload::Build { block, .. } => {
+                let carried = content.block(*block)?;
+                Some(PayloadDraw::Build {
+                    block: carried.name.clone(),
+                    region: carried.region.clone(),
+                    size: carried.size,
+                })
+            }
+        })
+}
+
+/// `LegsComp` state + the `UnitType` leg knobs (`UnitType.drawLegs`, J03 T4).
+fn legs_draw(world: &World, entity: Entity, def: &UnitTypeDef) -> Option<LegsDraw> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::LegsComp>(entity)
+        .map(|comp| LegsDraw {
+            base_rotation: comp.base_rotation,
+            legs: comp
+                .legs
+                .iter()
+                .map(|leg| mind_core::render::unit_draw::LegDrawLeg {
+                    foot: (leg.foot_x, leg.foot_y),
+                    joint: (leg.joint_x, leg.joint_y),
+                    moving: leg.moving,
+                    stage: leg.step,
+                })
+                .collect(),
+            // `UnitType.drawLegs` reads `1 - unit.drownTime`; the port has no
+            // drowning yet (`UnitCore.drown_time`).
+            inv_drown: 1.0,
+            leg_base_offset: def.leg_base_offset,
+            leg_straightness: def.leg_straightness,
+            base_leg_straightness: def.base_leg_straightness,
+            leg_straight_length: def.leg_straight_length,
+            leg_extension: def.leg_extension,
+            leg_base_under: def.leg_base_under,
+            shadow_elevation: def.shadow_elevation,
+        })
+}
+
+/// Live weapon mounts resolved for drawing (`UnitType.drawWeapons`).
+fn weapons_draw(world: &World, entity: Entity) -> Vec<WeaponDraw> {
+    world
+        .get::<mind_core::weapons::UnitWeapons>(entity)
+        .map(|weapons| {
+            weapons
+                .weapons
+                .iter()
+                .enumerate()
+                .map(|(index, weapon)| {
+                    let mount = weapons.mounts.get(index);
+                    WeaponDraw {
+                        name: weapon.name.clone(),
+                        x: weapon.x,
+                        y: weapon.y,
+                        mount_rotation: mount
+                            .map(|mount| mount.rotation)
+                            .unwrap_or(weapon.base_rotation),
+                        base_rotation: weapon.base_rotation,
+                        rotate: weapon.rotate,
+                        flip: weapon.flip_sprite,
+                        top: weapon.top,
+                        recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
+                        def: weapon.clone(),
+                        mount: mount.cloned().unwrap_or_else(|| WeaponMount::new(weapon)),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Ordered mine tile of a mining unit (`MinerComp.mine_tile`).
+fn mine_tile_of(world: &World, entity: Entity) -> Option<(i16, i16)> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::MinerComp>(entity)
+        .filter(|miner| miner.mining)
+        .and_then(|miner| miner.mine_tile.map(|pos| (pos.x(), pos.y())))
+}
+
+/// Carried item as `(name, amount)` (`ItemsComp.item`).
+fn item_draw(world: &World, content: &ContentRegistry, entity: Entity) -> Option<(String, i32)> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::ItemsComp>(entity)
+        .and_then(|items| items.item)
+        .and_then(|(item, amount)| content.item(item).map(|item| (item.name.clone(), amount)))
+}
+
+/// Active status effects with their view parameters
+/// (`StatusEffect.effect/effectChance/color`; H03 T10).
+fn status_draws(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+) -> Vec<(
+    mind_core::content::registries::fx_meta::EffectRef,
+    f32,
+    mind_core::content::Rgba,
+)> {
+    world
+        .get::<mind_core::entities::comp::unit::comp::StatusComp>(entity)
+        .map(|comp| {
+            comp.statuses
+                .iter()
+                .filter_map(|entry| content.status(entry.effect))
+                .filter(|def| {
+                    !matches!(
+                        &def.effect,
+                        mind_core::content::registries::fx_meta::EffectRef::Named(id)
+                            if *id == mind_core::content::EffectId::NONE
+                    ) && def.effect_chance > 0.0
+                })
+                .map(|def| (def.effect.clone(), def.effect_chance, def.color))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Floor under a unit (`floorOn()`; H03 T10): `(is_liquid, map_color)`.
+fn floor_draw(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    x: f32,
+    y: f32,
+) -> (bool, mind_core::content::Rgba) {
+    let tile = grid
+        .tiles
+        .getn(WorldGrid::to_tile(x), WorldGrid::to_tile(y));
+    let floor = tile.and_then(|tile| content.block(tile.floor));
+    (
+        floor.map(|def| def.is_liquid).unwrap_or(false),
+        floor
+            .and_then(|def| def.map_color)
+            .unwrap_or(mind_core::content::Rgba::WHITE),
+    )
 }

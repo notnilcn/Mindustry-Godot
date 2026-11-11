@@ -87,7 +87,7 @@ impl MindSimHost {
 
     /// `Block.rotate` for a block id (G08 T6b plan rotation math).
     pub fn block_rotates(&self, id: BlockId) -> bool {
-        mind_core::world::blocks::payloads::payload_block::block_rotates(&self.sim.ecs.0, id)
+        mind_core::world::blocks::payloads::payload_block::block_rotates(self.world(), id)
     }
 
     /// `Schematics.create` over the live world (F-drag / break-cut copy): the
@@ -107,7 +107,7 @@ impl MindSimHost {
         };
         let world = mind_core::game::schematics::EcsSchematicWorld {
             grid: &self.sim.grid,
-            world: &self.sim.ecs.0,
+            world: self.world(),
             content,
             team: Some(self.player_team()),
         };
@@ -150,15 +150,11 @@ impl MindSimHost {
     ) -> Option<(BlockId, Option<mind_core::world::config::ConfigValue>)> {
         let entity = self.tile_at(x, y)?.build?;
         let block = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::Building>(entity)
             .map(|building| building.block)?;
         let effective = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::ConstructState>(entity)
             .map_or(block, |state| state.current);
         let def = self.content_registry()?.block(block)?;
@@ -167,7 +163,7 @@ impl MindSimHost {
             BlockKind::ItemBridge | BlockKind::BufferedItemBridge
         );
         let config = if copy {
-            let value = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
+            let value = mind_core::world::config::read_config(self.world(), entity);
             (!matches!(value, mind_core::world::config::ConfigValue::None)).then_some(value)
         } else {
             None
@@ -209,7 +205,7 @@ impl MindSimHost {
     /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;
     /// preview only, no side effects (G03 T2).
     pub fn preview_can_place(&self, x: i32, y: i32, block: BlockId, rot: u8) -> bool {
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         self.sim.preview_can_place(x, y, block, rot)
@@ -292,7 +288,7 @@ impl MindSimHost {
     /// from [`Self::block_place_range`] because `LogicBuild.drawSelect` draws
     /// no hover range.
     pub fn logic_place_range(&self, block: BlockId) -> Option<f32> {
-        mind_core::logic::blocks::logic_place_range(&self.sim.ecs.0, block)
+        mind_core::logic::blocks::logic_place_range(self.world(), block)
     }
 
     /// `InputHandler.validBreak(x, y)`: whether the local team may deconstruct
@@ -301,20 +297,18 @@ impl MindSimHost {
     /// preview (G03 T2).
     pub fn preview_can_break(&self, x: i32, y: i32) -> bool {
         let team = self.sim.live_default_team();
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return false;
         };
         let rules = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::limits::BuildRules>()
             .cloned()
             .unwrap_or_default();
         mind_core::world::build::valid_break(
             content,
             &self.sim.grid,
-            Some(&self.sim.ecs.0),
+            Some(self.world()),
             &rules,
             team,
             x,
@@ -326,9 +320,7 @@ impl MindSimHost {
     /// (`InputHandler.java:1500`). Rust-only seam for the placement overlay
     /// (GAPS #47 residual).
     pub fn place_range_check(&self) -> bool {
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get_resource::<mind_core::world::limits::BuildRules>()
             .is_some_and(|rules| rules.place_range_check)
     }
@@ -348,7 +340,7 @@ impl MindSimHost {
         y: i32,
         block: BlockId,
     ) -> Option<(i32, i32, i32, bool)> {
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let def = self.content_snapshot.as_ref()?.block(block)?;
         let rules = world
             .get_resource::<mind_core::world::limits::BuildRules>()?
@@ -397,10 +389,10 @@ impl MindSimHost {
         &self,
         area: mind_core::input::placement::NormalizeResult,
     ) -> Vec<(i32, i32, BlockId, i32, f32)> {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return Vec::new();
         };
-        let ecs = &self.sim.ecs.0;
+        let ecs = self.world();
         let grid = &self.sim.grid;
         let origins = mind_core::input::placement::rebuild_selection_tiles(
             area,
@@ -430,20 +422,16 @@ impl MindSimHost {
         use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
         use mind_core::sim::builder::BuilderPlans;
         let entity = self.sim.player_unit()?;
-        let pos = self.sim.ecs.0.get::<Pos>(entity)?;
-        let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(entity)?;
+        let pos = self.world().get::<Pos>(entity)?;
+        let type_comp = self.world().get::<UnitTypeComp>(entity)?;
         let def = self.content_snapshot.as_ref()?.unit(type_comp.type_id)?;
         let update_building = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<BuilderPlans>(entity)
             .map(|plans| plans.update_building)
             .unwrap_or(false);
         let rotation = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<UnitCore>(entity)
             .map(|core| core.rotation)
             .unwrap_or(0.0);
@@ -475,10 +463,7 @@ impl MindSimHost {
     pub fn team_ghost_plans_json(&self) -> GString {
         let team = self.player_team();
         let plans: Vec<serde_json::Value> = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+            .campaign_runtime()
             .and_then(|campaign| {
                 campaign
                     .session
@@ -499,7 +484,7 @@ impl MindSimHost {
                     .collect()
             })
             .unwrap_or_default();
-        GString::from(serde_json::Value::Array(plans).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(plans))
     }
 
     /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head
@@ -522,7 +507,7 @@ impl MindSimHost {
                 })
             })
             .collect();
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// Clears the player unit's queued build plans (`Binding.clearBuilding`;

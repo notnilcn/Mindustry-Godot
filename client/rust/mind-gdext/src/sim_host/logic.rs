@@ -66,11 +66,8 @@ impl MindSimHost {
         let Some(exec) =
             mind_core::logic::script::run_standalone(&code.to_string(), privileged, ticks, ipt)
         else {
-            out.set(&GString::from("ok"), &false.to_variant());
-            out.set(
-                &GString::from("error"),
-                &GString::from("assemble failed").to_variant(),
-            );
+            out.set("ok", &false.to_variant());
+            out.set("error", &GString::from("assemble failed").to_variant());
             return out;
         };
         let mut vars = Dictionary::<GString, Variant>::new();
@@ -86,14 +83,14 @@ impl MindSimHost {
             } else {
                 cell.num.to_variant()
             };
-            vars.set(&GString::from(cell.name.as_str()), &value);
+            vars.set(cell.name.as_str(), &value);
         }
-        out.set(&GString::from("ok"), &true.to_variant());
+        out.set("ok", &true.to_variant());
         out.set(
-            &GString::from("text"),
+            "text",
             &GString::from(exec.text_buffer.as_str()).to_variant(),
         );
-        out.set(&GString::from("vars"), &vars.to_variant());
+        out.set("vars", &vars.to_variant());
         out
     }
 
@@ -108,7 +105,7 @@ impl MindSimHost {
     /// `LAssembler.read` → `LAssembler.write`; empty string when no processor).
     #[func]
     pub fn logic_get_code(&self, x: i64, y: i64) -> GString {
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let Some(e) =
             mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
         else {
@@ -133,7 +130,7 @@ impl MindSimHost {
     pub fn logic_set_code(&mut self, x: i64, y: i64, code: GString) -> bool {
         self.logic_last_error = String::new();
         let code = code.to_string();
-        let world = &mut self.sim.ecs.0;
+        let world = self.world_mut();
         let Some(e) =
             mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
         else {
@@ -176,7 +173,7 @@ impl MindSimHost {
     #[func]
     pub fn logic_get_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::<GString, Variant>::new();
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let Some(e) =
             mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
         else {
@@ -185,54 +182,36 @@ impl MindSimHost {
         let Some(snapshot) = mind_core::logic::blocks::logic_block::state_snapshot(world, e) else {
             return out;
         };
+        out.set("privileged", &snapshot.privileged.to_variant());
+        out.set("accessible", &snapshot.accessible.to_variant());
+        out.set("ipt", &(snapshot.ipt as i64).to_variant());
         out.set(
-            &GString::from("privileged"),
-            &snapshot.privileged.to_variant(),
-        );
-        out.set(
-            &GString::from("accessible"),
-            &snapshot.accessible.to_variant(),
-        );
-        out.set(&GString::from("ipt"), &(snapshot.ipt as i64).to_variant());
-        out.set(
-            &GString::from("tag"),
+            "tag",
             &match &snapshot.tag {
                 Some(tag) => GString::from(tag.as_str()).to_variant(),
                 None => Variant::nil(),
             },
         );
-        out.set(
-            &GString::from("code"),
-            &GString::from(snapshot.code.as_str()).to_variant(),
-        );
+        out.set("code", &GString::from(snapshot.code.as_str()).to_variant());
         let mut links = Array::<Variant>::new();
         for (name, lx, ly, valid) in &snapshot.links {
             let mut row = Dictionary::<GString, Variant>::new();
-            row.set(
-                &GString::from("name"),
-                &GString::from(name.as_str()).to_variant(),
-            );
-            row.set(&GString::from("x"), &(*lx as i64).to_variant());
-            row.set(&GString::from("y"), &(*ly as i64).to_variant());
-            row.set(&GString::from("valid"), &valid.to_variant());
+            row.set("name", &GString::from(name.as_str()).to_variant());
+            row.set("x", &(*lx as i64).to_variant());
+            row.set("y", &(*ly as i64).to_variant());
+            row.set("valid", &valid.to_variant());
             links.push(&row.to_variant());
         }
-        out.set(&GString::from("links"), &links.to_variant());
+        out.set("links", &links.to_variant());
         let mut vars = Array::<Variant>::new();
         for (name, value, type_) in &snapshot.vars {
             let mut row = Dictionary::<GString, Variant>::new();
-            row.set(
-                &GString::from("name"),
-                &GString::from(name.as_str()).to_variant(),
-            );
-            row.set(
-                &GString::from("value"),
-                &GString::from(value.as_str()).to_variant(),
-            );
-            row.set(&GString::from("type"), &GString::from(*type_).to_variant());
+            row.set("name", &GString::from(name.as_str()).to_variant());
+            row.set("value", &GString::from(value.as_str()).to_variant());
+            row.set("type", &GString::from(*type_).to_variant());
             vars.push(&row.to_variant());
         }
-        out.set(&GString::from("vars"), &vars.to_variant());
+        out.set("vars", &vars.to_variant());
         out
     }
 
@@ -246,11 +225,7 @@ impl MindSimHost {
             .iter()
             .map(String::as_str)
             .collect();
-        GString::from(
-            serde_json::to_string(&value)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&value, "[]")
     }
 
     /// Logic cutscene/HUD probe: `{"active","x","y","speed","zoom","hideHud"}`
@@ -266,7 +241,7 @@ impl MindSimHost {
             "zoom": cutscene.zoom,
             "hideHud": cutscene.hide_hud,
         });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// Drains queued world-processor messages (`announce`/`notify`/`toast`) as
@@ -276,18 +251,9 @@ impl MindSimHost {
         let mut out = Array::<Variant>::new();
         for (type_, text, duration) in self.sim.take_logic_messages() {
             let mut row = Dictionary::<GString, Variant>::new();
-            row.set(
-                &GString::from("type"),
-                &GString::from(type_.name()).to_variant(),
-            );
-            row.set(
-                &GString::from("text"),
-                &GString::from(text.as_str()).to_variant(),
-            );
-            row.set(
-                &GString::from("duration"),
-                &f64::from(duration).to_variant(),
-            );
+            row.set("type", &GString::from(type_.name()).to_variant());
+            row.set("text", &GString::from(text.as_str()).to_variant());
+            row.set("duration", &f64::from(duration).to_variant());
             out.push(&row.to_variant());
         }
         out
@@ -314,16 +280,12 @@ impl MindSimHost {
             return out;
         };
         let root = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::logic::blocks::LogicDisplayState>(e)
             .and_then(|state| state.root_display)
             .unwrap_or(e);
         let Some(state) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::logic::blocks::LogicDisplayState>(root)
         else {
             return out;
@@ -338,7 +300,7 @@ impl MindSimHost {
     #[func]
     pub fn logic_display_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::<GString, Variant>::new();
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return out;
         };
         let Some(e) = self
@@ -348,7 +310,7 @@ impl MindSimHost {
         else {
             return out;
         };
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let Some(state) = world.get::<mind_core::logic::blocks::LogicDisplayState>(e) else {
             return out;
         };
@@ -373,23 +335,14 @@ impl MindSimHost {
         } else {
             (root_state.display_size, root_state.display_size)
         };
-        out.set(&GString::from("root_x"), &i64::from(root_x).to_variant());
-        out.set(&GString::from("root_y"), &i64::from(root_y).to_variant());
-        out.set(&GString::from("width"), &i64::from(width).to_variant());
-        out.set(&GString::from("height"), &i64::from(height).to_variant());
-        out.set(
-            &GString::from("queued"),
-            &(root_state.commands.len() as i64).to_variant(),
-        );
-        out.set(
-            &GString::from("operations"),
-            &(root_state.operations as i64).to_variant(),
-        );
-        out.set(
-            &GString::from("rectangular"),
-            &root_state.rectangular.to_variant(),
-        );
-        out.set(&GString::from("tileable"), &tileable.to_variant());
+        out.set("root_x", &i64::from(root_x).to_variant());
+        out.set("root_y", &i64::from(root_y).to_variant());
+        out.set("width", &i64::from(width).to_variant());
+        out.set("height", &i64::from(height).to_variant());
+        out.set("queued", &(root_state.commands.len() as i64).to_variant());
+        out.set("operations", &(root_state.operations as i64).to_variant());
+        out.set("rectangular", &root_state.rectangular.to_variant());
+        out.set("tileable", &tileable.to_variant());
         out
     }
 
@@ -397,7 +350,7 @@ impl MindSimHost {
     /// bottom-left origin). `-1` when the display or pixel is absent.
     #[func]
     pub fn logic_display_pixel(&self, x: i64, y: i64, px: i64, py: i64) -> i64 {
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return -1;
         };
         let Some(e) = self
@@ -408,16 +361,12 @@ impl MindSimHost {
             return -1;
         };
         let root = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::logic::blocks::LogicDisplayState>(e)
             .and_then(|state| state.root_display)
             .unwrap_or(e);
         let rasters = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::logic::display_raster::LogicDisplayRasters>()
             .and_then(|rasters| rasters.rasters.get(&root));
         rasters
@@ -455,6 +404,7 @@ impl MindSimHost {
         };
         let ctx = crate::display_context::AtlasIcons::new(assets, names);
         let rows = mind_core::logic::display_raster::display_rows(
+            // Field path: `ctx` borrows `self.display_icon_names`.
             &mut self.sim.ecs.0,
             &ctx,
             min_x,
@@ -464,27 +414,18 @@ impl MindSimHost {
         );
         for row in rows {
             let mut dict = Dictionary::<GString, Variant>::new();
-            dict.set(
-                &GString::from("root_x"),
-                &i64::from(row.root_x).to_variant(),
-            );
-            dict.set(
-                &GString::from("root_y"),
-                &i64::from(row.root_y).to_variant(),
-            );
-            dict.set(&GString::from("draw_buffer"), &row.draw_buffer.to_variant());
-            dict.set(&GString::from("x"), &row.x.to_variant());
-            dict.set(&GString::from("y"), &row.y.to_variant());
-            dict.set(&GString::from("w"), &row.w.to_variant());
-            dict.set(&GString::from("h"), &row.h.to_variant());
-            dict.set(&GString::from("frame"), &row.frame.to_variant());
-            dict.set(&GString::from("frame_x"), &row.frame_x.to_variant());
-            dict.set(&GString::from("frame_y"), &row.frame_y.to_variant());
-            dict.set(&GString::from("bits"), &i64::from(row.bits).to_variant());
-            dict.set(
-                &GString::from("sprite"),
-                &i64::from(row.sprite).to_variant(),
-            );
+            dict.set("root_x", &i64::from(row.root_x).to_variant());
+            dict.set("root_y", &i64::from(row.root_y).to_variant());
+            dict.set("draw_buffer", &row.draw_buffer.to_variant());
+            dict.set("x", &row.x.to_variant());
+            dict.set("y", &row.y.to_variant());
+            dict.set("w", &row.w.to_variant());
+            dict.set("h", &row.h.to_variant());
+            dict.set("frame", &row.frame.to_variant());
+            dict.set("frame_x", &row.frame_x.to_variant());
+            dict.set("frame_y", &row.frame_y.to_variant());
+            dict.set("bits", &i64::from(row.bits).to_variant());
+            dict.set("sprite", &i64::from(row.sprite).to_variant());
             out.push(&dict.to_variant());
         }
         out
@@ -502,37 +443,24 @@ impl MindSimHost {
         max_y: f32,
     ) -> Array<Variant> {
         let mut out = Array::<Variant>::new();
-        for row in mind_core::logic::blocks::canvas::canvas_rows(
-            &self.sim.ecs.0,
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-        ) {
+        for row in
+            mind_core::logic::blocks::canvas::canvas_rows(self.world(), min_x, min_y, max_x, max_y)
+        {
             let mut dict = Dictionary::<GString, Variant>::new();
-            dict.set(&GString::from("x"), &i64::from(row.x).to_variant());
-            dict.set(&GString::from("y"), &i64::from(row.y).to_variant());
-            dict.set(&GString::from("cx"), &row.cx.to_variant());
-            dict.set(&GString::from("cy"), &row.cy.to_variant());
-            dict.set(&GString::from("size"), &row.size.to_variant());
-            dict.set(
-                &GString::from("blending"),
-                &i64::from(row.blending).to_variant(),
-            );
-            dict.set(
-                &GString::from("pixels"),
-                &i64::from(row.pixels).to_variant(),
-            );
-            dict.set(
-                &GString::from("bpp"),
-                &i64::from(row.bits_per_pixel).to_variant(),
-            );
+            dict.set("x", &i64::from(row.x).to_variant());
+            dict.set("y", &i64::from(row.y).to_variant());
+            dict.set("cx", &row.cx.to_variant());
+            dict.set("cy", &row.cy.to_variant());
+            dict.set("size", &row.size.to_variant());
+            dict.set("blending", &i64::from(row.blending).to_variant());
+            dict.set("pixels", &i64::from(row.pixels).to_variant());
+            dict.set("bpp", &i64::from(row.bits_per_pixel).to_variant());
             let mut palette = PackedInt64Array::new();
             for color in &row.palette {
                 palette.push(i64::from(*color));
             }
-            dict.set(&GString::from("palette"), &palette.to_variant());
-            dict.set(&GString::from("invalidated"), &row.invalidated.to_variant());
+            dict.set("palette", &palette.to_variant());
+            dict.set("invalidated", &row.invalidated.to_variant());
             out.push(&dict.to_variant());
         }
         out
@@ -544,7 +472,7 @@ impl MindSimHost {
     #[func]
     pub fn logic_canvas_image(&mut self, x: i64, y: i64) -> PackedByteArray {
         let mut out = PackedByteArray::new();
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return out;
         };
         let Some(e) = self
@@ -554,13 +482,11 @@ impl MindSimHost {
         else {
             return out;
         };
-        let palette = mind_core::logic::blocks::canvas_def_of(&self.sim.ecs.0, e)
+        let palette = mind_core::logic::blocks::canvas_def_of(self.world(), e)
             .map(|def| def.palette)
             .unwrap_or_default();
         let Some(mut state) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_mut::<mind_core::logic::blocks::CanvasBlockState>(e)
         else {
             return out;
@@ -587,7 +513,7 @@ impl MindSimHost {
     #[func]
     pub fn logic_canvas_pixels(&self, x: i64, y: i64) -> PackedByteArray {
         let mut out = PackedByteArray::new();
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
             return out;
         };
         let Some(e) = self
@@ -598,9 +524,7 @@ impl MindSimHost {
             return out;
         };
         let Some(state) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::logic::blocks::CanvasBlockState>(e)
         else {
             return out;
@@ -617,7 +541,7 @@ impl MindSimHost {
     #[func]
     pub fn logic_display_image(&self, root_x: i64, root_y: i64) -> PackedByteArray {
         let mut out = PackedByteArray::new();
-        let (Ok(tx), Ok(ty)) = (i16::try_from(root_x), i16::try_from(root_y)) else {
+        let Some((tx, ty)) = crate::gdutil::coords::tile_i16(root_x, root_y) else {
             return out;
         };
         let Some(e) = self
@@ -628,9 +552,7 @@ impl MindSimHost {
             return out;
         };
         let Some(raster) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::logic::display_raster::LogicDisplayRasters>()
             .and_then(|rasters| rasters.rasters.get(&e))
         else {
@@ -667,7 +589,7 @@ impl MindSimHost {
     pub fn logic_configure_code(&mut self, x: i64, y: i64, code: GString) -> GString {
         self.logic_last_error = String::new();
         let code = code.to_string();
-        let world = &self.sim.ecs.0;
+        let world = self.world();
         let Some(e) =
             mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
         else {
@@ -687,7 +609,7 @@ impl MindSimHost {
                 GString::from(format!("toolong:{len}").as_str())
             }
             Ok(bytes) => {
-                let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                let Some((tx, ty)) = crate::gdutil::coords::tile_i16(x, y) else {
                     return GString::from("noprocessor");
                 };
                 self.pending_commands.push_back(SimCommand::Configure {
@@ -718,16 +640,11 @@ impl MindSimHost {
     /// processors (`waveSending`/`waveTimer`/`mapArea`/flags/wave).
     #[func]
     pub fn logic_rules_probe(&self) -> GString {
-        let Some(runtime) = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
-        else {
-            return GString::from("{}");
+        let Some(runtime) = self.campaign_runtime() else {
+            return crate::gdutil::json::empty_object();
         };
         let rules = &runtime.session.rules;
-        let logic_rules = mind_core::logic::blocks::rules_ref(&self.sim.ecs.0);
+        let logic_rules = mind_core::logic::blocks::rules_ref(self.world());
         let value = serde_json::json!({
             // I03 T9: the add dialog hides the unit category when the rule is off
             // (`LogicDialog.showAddDialog`).
@@ -746,19 +663,14 @@ impl MindSimHost {
             "unitCap": rules.unit_cap,
             "flags": rules.objective_flags.iter().cloned().collect::<Vec<_>>(),
         });
-        GString::from(value.to_string().as_str())
+        crate::gdutil::json::value_gstring(&value)
     }
 
     /// G06 T4 verification-only seam: set/clear an objective flag (what the
     /// Ground Zero tutorial objectives raise).
     #[func]
     pub fn logic_set_flag(&mut self, name: GString, on: bool) -> bool {
-        let Some(mut runtime) = self
-            .sim
-            .ecs
-            .0
-            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
-        else {
+        let Some(mut runtime) = self.campaign_runtime_mut() else {
             return false;
         };
         let name = name.to_string();

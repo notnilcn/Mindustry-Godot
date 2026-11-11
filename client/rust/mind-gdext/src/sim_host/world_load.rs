@@ -395,7 +395,7 @@ impl MindSimHost {
             return false;
         }
         // A new world invalidates the previous campaign runtime.
-        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        self.world_mut().remove_resource::<CampaignRuntime>();
         // Resume metadata is per load; clear before this load decides.
         self.sector_resume = None;
         // The loadout placement flag is per load (H05 T4).
@@ -687,9 +687,7 @@ impl MindSimHost {
         // stable.
         self.install_live_block_runtime();
         if let Some(catalog) = base_catalog {
-            self.sim
-                .ecs
-                .0
+            self.world_mut()
                 .insert_resource(mind_core::game::runtime::BaseCatalog(std::sync::Arc::new(
                     catalog,
                 )));
@@ -741,17 +739,13 @@ impl MindSimHost {
             })
             .unwrap_or_default();
         if let Some(mut text) = self
-            .sim
-            .ecs
-            .0
+            .world_mut()
             .get_resource_mut::<mind_core::logic::world::LogicText>()
         {
             text.map_locales = map_locales;
         }
-        self.world_dirty = true;
         self.world_loads += 1;
-        self.emit_state();
-        self.emit_world_changed();
+        self.mark_world_changed();
         self.emit_world_loaded();
         true
     }
@@ -799,10 +793,8 @@ impl MindSimHost {
         self.player = Some(player);
         self.install_sim_seams();
         self.sim.reset_logic_presentation();
-        self.world_dirty = true;
         self.world_loads += 1;
-        self.emit_state();
-        self.emit_world_changed();
+        self.mark_world_changed();
         self.emit_world_loaded();
         true
     }
@@ -880,7 +872,7 @@ impl MindSimHost {
             return false;
         };
         // A new world invalidates the previous campaign runtime.
-        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        self.world_mut().remove_resource::<CampaignRuntime>();
         // Resume metadata is per load; clear before this load decides.
         self.sector_resume = None;
         // A non-sector load cannot report a corrupt sector slot.

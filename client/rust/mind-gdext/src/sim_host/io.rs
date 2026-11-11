@@ -51,7 +51,7 @@ impl MindSimHost {
         // per-block colours (`ContentLoader.loadColors`).
         let mut palette = BlockPalette::of(registry);
         palette.apply_block_colors(&crate::render::minimap::load_block_colors());
-        let source = EcsMapSource::new(&self.sim.grid, registry, &self.sim.ecs.0);
+        let source = EcsMapSource::new(&self.sim.grid, registry, self.world());
         let image = generate_preview_from_tiles(&palette, &source);
         let Ok(bytes) = encode_png(&image) else {
             log::warn!("write_save_preview: PNG encode failed");
@@ -111,11 +111,7 @@ impl MindSimHost {
                 }),
             })
             .collect();
-        GString::from(
-            serde_json::to_string(&value)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&value, "[]")
     }
 
     /// Drains queued IO responses as JSON (`[{kind,path,as_map?,error?}]`), so
@@ -145,11 +141,7 @@ impl MindSimHost {
                 row
             })
             .collect();
-        GString::from(
-            serde_json::to_string(&value)
-                .unwrap_or_else(|_| String::from("[]"))
-                .as_str(),
-        )
+        crate::gdutil::json::to_gstring(&value, "[]")
     }
 
     /// Delivers a `MindIo` result as JSON (`{kind,path,as_map?,error?}`).

@@ -84,7 +84,7 @@ impl MindSimHost {
     /// the `block-<name>-full` region the landing cutscene draws); empty before
     /// content boot or on a core-less map.
     pub fn best_core_block(&self) -> GString {
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return GString::new();
         };
         self.sim
@@ -119,9 +119,7 @@ impl MindSimHost {
         self.tile_at(x, y)
             .and_then(|tile| tile.build)
             .and_then(|entity| {
-                self.sim
-                    .ecs
-                    .0
+                self.world()
                     .get::<mind_core::ecs::BuildingComp>(entity)
                     .map(|comp| comp.rot)
             })
@@ -132,9 +130,7 @@ impl MindSimHost {
     /// Rust-only seam for the construct-site sprite (`ConstructBuild.draw`).
     pub fn construct_draw(&self, x: i32, y: i32) -> Option<(mind_core::content::BlockId, f32)> {
         let entity = self.tile_at(x, y)?.build?;
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get::<mind_core::world::construct::ConstructState>(entity)
             .map(|state| (state.current, state.progress))
     }
@@ -144,9 +140,7 @@ impl MindSimHost {
     pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {
         let entity = self.tile_at(x, y)?.build?;
         let state = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::world::ConstructState>(entity)?;
         Some((state.current, state.progress, state.active_deconstruct))
     }
@@ -156,9 +150,7 @@ impl MindSimHost {
     /// overlays (`Block.drawTeamOverlay`).
     pub fn building_team(&self, x: i32, y: i32) -> Option<u8> {
         let entity = self.tile_at(x, y)?.build?;
-        self.sim
-            .ecs
-            .0
+        self.world()
             .get::<mind_core::ecs::BuildingComp>(entity)
             .map(|comp| comp.team.0)
     }
@@ -168,7 +160,7 @@ impl MindSimHost {
     /// `queue_player_place_config` runs; the placement preview's
     /// `HostWorld.valid_place`).
     pub fn can_place_player(&self, x: i32, y: i32, block: BlockId, rotation: u8) -> bool {
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(x, y) else {
             return false;
         };
         self.sim.valid_place_player(x, y, block, rotation)
@@ -245,9 +237,7 @@ impl MindSimHost {
             return Variant::nil();
         };
         let Some(building) = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get::<mind_core::entities::comp::building::Building>(entity)
         else {
             return Variant::nil();
@@ -258,10 +248,11 @@ impl MindSimHost {
             .and_then(|content| content.block(building.block))
             .map(|def| def.offset)
             .unwrap_or(0.0);
-        Vector2::new(
-            f32::from(building.tile.0) * TILESIZE_F + offset,
-            f32::from(building.tile.1) * TILESIZE_F + offset,
-        )
-        .to_variant()
+        let (cx, cy) = tile_center(
+            i32::from(building.tile.0),
+            i32::from(building.tile.1),
+            offset,
+        );
+        Vector2::new(cx, cy).to_variant()
     }
 }

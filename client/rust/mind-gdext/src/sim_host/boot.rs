@@ -18,15 +18,15 @@ impl MindSimHost {
     /// Idempotent.
     pub(super) fn install_logic_globals(&mut self) {
         if self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::logic::globals::GlobalVars>()
             .is_some()
         {
             return;
         }
         if let Some(registry) = self.content_snapshot.as_ref() {
+            // Field path: `registry` borrows `self.content_snapshot`, so the
+            // `world_mut()` accessor (which borrows all of `self`) is rejected.
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
         }
         // `@clientLocale`/`@clientName` from the shared settings store
@@ -39,7 +39,7 @@ impl MindSimHost {
                 store.get_string(mind_core::io::settings::KEY_PLAYER_NAME, "")
             }),
         };
-        self.sim.ecs.0.insert_resource(info);
+        self.world_mut().insert_resource(info);
     }
 
     /// Wires the host seams that live on the `Sim` value: the content-initialized
@@ -56,9 +56,7 @@ impl MindSimHost {
             // the campaign session; the event log + message timers are sim
             // resources (headless=false so messages/cutscenes reach the host).
             match self
-                .sim
-                .ecs
-                .0
+                .world_mut()
                 .get_resource_mut::<mind_core::logic::world::LogicWorldState>()
             {
                 Some(mut state) => {
@@ -66,9 +64,7 @@ impl MindSimHost {
                     state.is_host = true;
                 }
                 None => {
-                    self.sim
-                        .ecs
-                        .0
+                    self.world_mut()
                         .insert_resource(mind_core::logic::world::LogicWorldState {
                             headless: false,
                             ..mind_core::logic::world::LogicWorldState::new()
@@ -76,25 +72,19 @@ impl MindSimHost {
                 }
             }
             if self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get_resource::<mind_core::logic::world::MessageState>()
                 .is_none()
             {
-                self.sim
-                    .ecs
-                    .0
+                self.world_mut()
                     .insert_resource(mind_core::logic::world::MessageState::default());
             }
             if self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get_resource::<mind_core::logic::world::LogicContentIndex>()
                 .is_none()
             {
-                self.sim.ecs.0.insert_resource(
+                self.world_mut().insert_resource(
                     mind_core::logic::world::LogicContentIndex::from_content(&registry),
                 );
             }
@@ -104,15 +94,11 @@ impl MindSimHost {
             let assets_dir = crate::assets::loader::resolve_assets_dir();
             let locale = crate::assets::loader::resolve_locale();
             let map_locales = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get_resource::<mind_core::logic::world::LogicText>()
                 .map(|text| text.map_locales.clone())
                 .unwrap_or_default();
-            self.sim
-                .ecs
-                .0
+            self.world_mut()
                 .insert_resource(mind_core::logic::world::LogicText {
                     bundle: Some(crate::assets::bundle::load_bundle(&assets_dir, &locale)),
                     iconc: Some(crate::assets::bundle::load_iconc(&assets_dir)),
@@ -129,6 +115,7 @@ impl MindSimHost {
 
         // Sim systems emit `AudioEvent`s unconditionally; `MindAudio` drains this
         // log once per frame.
+        // Field path: the `audio_log` clone below borrows `self`.
         self.sim
             .ecs
             .0
@@ -151,7 +138,7 @@ impl MindSimHost {
         let bus = fx.bind().bus_handle();
         // Reactor/generator explosions (`ExplosionSink`) share the same bus so
         // their effect/sound/shake/scorch reach the view (PAR-0399).
-        self.sim.ecs.0.insert_resource(
+        self.world_mut().insert_resource(
             mind_core::world::blocks::power::explosion::ExplosionSinkRes(Some(Box::new(
                 crate::fx::explosion_sink::HostExplosionSink { bus: bus.clone() },
             ))),

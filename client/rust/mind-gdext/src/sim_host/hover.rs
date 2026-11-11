@@ -9,7 +9,7 @@ impl MindSimHost {
     /// Tile hover rows only (`hover_info` minus the unit test).
     pub(super) fn hover_tile(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return out;
         };
         // `world.tileWorld` is null off the map: no hover info.
@@ -20,9 +20,7 @@ impl MindSimHost {
         // `hoverTile.build.displayable()`: any live building.
         if let Some(entity) = tile.build {
             let build = self
-                .sim
-                .ecs
-                .0
+                .world()
                 .get::<mind_core::ecs::BuildingComp>(entity)
                 .and_then(|comp| content.block(comp.block));
             if let Some(def) = build {
@@ -203,8 +201,8 @@ impl MindSimHost {
     /// or without a core; `PlacementFragment.java:407-416`).
     #[func]
     pub fn block_requirements_json(&self, name: GString) -> GString {
-        let empty = GString::from("[]");
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let empty = crate::gdutil::json::empty_array();
+        let Some(content) = self.content_registry() else {
             return empty;
         };
         let Some(def) = content.block_id(&name.to_string()) else {
@@ -214,18 +212,12 @@ impl MindSimHost {
             return empty;
         };
         let multiplier = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+            .campaign_runtime()
             .map(|runtime| runtime.session.rules.build_cost_multiplier)
             .filter(|value| *value > 0.0)
             .unwrap_or(1.0);
         let team = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+            .campaign_runtime()
             .map(|runtime| runtime.session.rules.default_team)
             .unwrap_or(0);
         let core_items: std::collections::HashMap<String, i32> =
@@ -233,19 +225,14 @@ impl MindSimHost {
         // `core == null || state.rules.isInfiniteResources(player.team())`
         // (`PlacementFragment.java:410`): Java's team check is
         // `infiniteResources || teams.get(team).infiniteResources`.
-        let infinite = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
-            .is_some_and(|runtime| {
-                let rules = &runtime.session.rules;
-                rules.infinite_resources
-                    || rules
-                        .teams
-                        .get(team)
-                        .is_some_and(|rule| rule.infinite_resources)
-            });
+        let infinite = self.campaign_runtime().is_some_and(|runtime| {
+            let rules = &runtime.session.rules;
+            rules.infinite_resources
+                || rules
+                    .teams
+                    .get(team)
+                    .is_some_and(|rule| rule.infinite_resources)
+        });
         let has_core = self.player_core_blocks(team) > 0;
         let rows: Vec<serde_json::Value> = def
             .requirements
@@ -268,7 +255,7 @@ impl MindSimHost {
                 }))
             })
             .collect();
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// `PlacementFragment` block-info header state: `unlocked(block)` plus the
@@ -284,14 +271,14 @@ impl MindSimHost {
     #[func]
     pub fn block_placement_info_json(&self, name: GString) -> GString {
         let fallback = GString::from(r#"{"unlocked":true,"reason":null,"limit":0}"#);
-        let Some(content) = self.content_snapshot.as_ref() else {
+        let Some(content) = self.content_registry() else {
             return fallback;
         };
         let name = name.to_string();
         let Some(def) = content.block_id(&name).and_then(|id| content.block(id)) else {
             return fallback;
         };
-        let campaign = self.sim.ecs.0.get_resource::<CampaignRuntime>();
+        let campaign = self.campaign_runtime();
         let is_campaign = campaign.is_some_and(|runtime| runtime.session.is_campaign());
         // `state.getPlanet()`: the launched sector's planet (campaign) or the
         // session `rules.planet` (custom game, default serpulo).
@@ -303,9 +290,7 @@ impl MindSimHost {
         let planet = content.planet_id(&planet_name);
         let sun = content.planet_id("sun");
         let build_rules = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::limits::BuildRules>();
         // `state.rules.env`; an absent `BuildRules` keeps the upstream default.
         let env = build_rules.map_or(mind_core::game::rules::DEFAULT_ENV, |rules| rules.env);
@@ -321,9 +306,7 @@ impl MindSimHost {
             })
             .unwrap_or(false);
         let counter = self
-            .sim
-            .ecs
-            .0
+            .world()
             .get_resource::<mind_core::world::limits::BlockCounter>();
         let reason = mind_core::world::build::unplaceable_reason(
             def,
@@ -356,14 +339,11 @@ impl MindSimHost {
     /// seam, mirroring Java's per-frame `button.update`.
     #[func]
     pub fn palette_tints_json(&self) -> GString {
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return GString::from("{}");
+        let Some(content) = self.content_registry() else {
+            return crate::gdutil::json::empty_object();
         };
         let rules = self
-            .sim
-            .ecs
-            .0
-            .get_resource::<CampaignRuntime>()
+            .campaign_runtime()
             .map(|runtime| runtime.session.rules.clone());
         let team = rules.as_ref().map_or(0, |rules| rules.default_team);
         let core_items: std::collections::HashMap<String, i32> =
@@ -397,6 +377,6 @@ impl MindSimHost {
             let tint = mind_core::world::build::palette_tint(placeable, affordable, builder);
             out.insert(def.name.clone(), serde_json::Value::from(tint));
         }
-        GString::from(serde_json::Value::Object(out).to_string().as_str())
+        crate::gdutil::json::value_gstring(&serde_json::Value::Object(out))
     }
 }

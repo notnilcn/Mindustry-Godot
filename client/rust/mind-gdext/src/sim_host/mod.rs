@@ -315,7 +315,7 @@ impl INode for MindSimHost {
         let tile = camera
             .bind()
             .screen_to_tile(position.x as f64, position.y as f64);
-        let (Ok(x), Ok(y)) = (i16::try_from(tile.x), i16::try_from(tile.y)) else {
+        let Some((x, y)) = crate::gdutil::coords::tile_i16(tile.x, tile.y) else {
             return;
         };
 
@@ -327,8 +327,7 @@ impl INode for MindSimHost {
         };
         if applied {
             log::debug!("mouse tile ({x}, {y}) applied ({button:?})");
-            self.emit_state();
-            self.emit_world_changed();
+            self.mark_world_changed();
         }
     }
 
@@ -400,9 +399,7 @@ impl MindSimHost {
         self.capture = pump::parse_capture_args();
         // The STDB connection is owned by the `StdbConnector` autoload (plan 01
         // M5, exactly one pump per process); the sim host no longer connects.
-        self.world_dirty = true;
-        self.emit_state();
-        self.emit_world_changed();
+        self.mark_world_changed();
 
         // Plan-17 sim→view hook: the FX host advances one fixed view tick per
         // sim tick (one-way; the sim never reads the view). Optional: absent in
@@ -435,6 +432,74 @@ impl MindSimHost {
     /// catalogue (`J/ui/fragments/PlacementFragment.java:78-84`).
     #[signal]
     fn world_loaded();
+}
+
+/// Accessors and small shared helpers for the `sim_host` children (H06).
+impl MindSimHost {
+    /// The sim's ECS world (`self.sim.ecs.0`; `MindWorld`'s only field).
+    pub(super) fn world(&self) -> &bevy_ecs::world::World {
+        &self.sim.ecs.0
+    }
+
+    /// Mutable form of [`Self::world`].
+    pub(super) fn world_mut(&mut self) -> &mut bevy_ecs::world::World {
+        &mut self.sim.ecs.0
+    }
+
+    /// Building entity at `(x, y)`; `None` off the map or on an empty tile.
+    pub(super) fn build_at(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
+        self.sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten()
+    }
+
+    /// Live campaign runtime (`None` outside a campaign session).
+    pub(super) fn campaign_runtime(&self) -> Option<&CampaignRuntime> {
+        self.world().get_resource::<CampaignRuntime>()
+    }
+
+    /// Mutable form of [`Self::campaign_runtime`] (bevy's change-detection
+    /// guard, which derefs to `&mut CampaignRuntime`).
+    pub(super) fn campaign_runtime_mut(
+        &mut self,
+    ) -> Option<bevy_ecs::change_detection::Mut<'_, CampaignRuntime>> {
+        self.sim.ecs.0.get_resource_mut::<CampaignRuntime>()
+    }
+
+    /// Camera view covering `rect` grown by `grow` world pixels per side.
+    pub(super) fn grown_view(&self, rect: (f32, f32, f32, f32), grow: f32) -> CameraView {
+        CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * grow,
+            h: rect.3 + 2.0 * grow,
+            zoom: 1.0,
+            team: self.player_team(),
+        }
+    }
+
+    /// Marks the world dirty, then emits `state_changed` and `world_changed`.
+    ///
+    /// `emit_world_changed` only signals while `world_dirty` is set, so the
+    /// assignment must stay first.
+    pub(super) fn mark_world_changed(&mut self) {
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+    }
+}
+
+/// `Block.offset` world-pixel centre of tile `(x, y)`: `x * TILESIZE + offset`.
+///
+/// The multiblock-aware variant is [`render_light::building_center`]; this one
+/// is the plain per-tile form (no `(size - 1) / 2` term).
+pub(super) fn tile_center(x: i32, y: i32, offset: f32) -> (f32, f32) {
+    let cx = x as f32 * TILESIZE_F + offset;
+    let cy = y as f32 * TILESIZE_F + offset;
+    (cx, cy)
 }
 
 /// `Block.offset` world-pixel centre of a tile (H01 T1 convention).
