@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T03:33:10Z",
+  "updated": "2026-11-11T03:56:42Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1548,6 +1548,45 @@
       "repro": "CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/Mindustry-Godot/.git/mindustry-wave-target tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib campaign && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib ui:: && python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt - && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens && tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- run-all --tier T0 && tools/run-cpu-intensive-task.sh --goldens --check",
       "expected": "438/438 mind-gdext lib tests pass (432 base + 6 snapshot/typed-view tests); mind-core 3299 lib tests (3291 base + 8 model tests) and all targets pass; scoped clippy clean; api-surface diff empty (104 MindCampaign funcs, 2 signals); 115/115 parity goldens, T0 4/4, no golden drift; dialog_sweep_check reports failed=0; research tree/launch/sector-state JSON unchanged (campaign/testdata snapshots).",
       "risk": "The Godot-facing payloads are the risk: research_tree_json/launch_dialog_json are now serialized from typed structs (field order/float formatting pinned by campaign/testdata), campaign_views_json still serializes the untouched CampaignViews, and get_sector_state is a VarDictionary rebuilt from SectorStateView (engine-gated key/type test; no-sector sentinel gating). The in-engine campaign smoke should compare research_tree_json/launch_dialog_json/get_sector_state/campaign_views_json against a pre-T01 build.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261111-035642",
+      "created_at": "2026-11-11T03:56:42Z",
+      "agent": "refactor-X02",
+      "branch": "main",
+      "head": "1b80e48b",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 0,
+      "area": "client/rust/mind-core/src/sim/unit_runtime",
+      "summary": "X02: per-AI-kind dispatch arms for unit_update_system",
+      "files": [
+        "client/rust/mind-core/src/sim/unit_runtime/update.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/mod.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/mod.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/no_ai.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/player.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/boost.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/cargo.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/assembler.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/ground_flying.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/builder.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/suicide.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/missile.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/logic.rs",
+        "client/rust/mind-core/src/sim/unit_runtime/ai_arms/command.rs"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "sim-goldens",
+        "spine"
+      ],
+      "repro": "tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens",
+      "expected": "115 PASS/0 FAIL; run-all --tier T0 4/4; --goldens --check no drift; spine checksums 2d61ec134e26eb10 / 3e48c583a94fbea4 / 08d1c5049d3375f4",
+      "risk": "Determinism: the whole per-unit AI dispatch was re-homed. Any drift in arm order, the four guard continues, the kinematics/weapons tail or the two outside-arm RNG sites means a body was not moved verbatim",
       "status": "pending"
     }
   ]
