@@ -15,30 +15,14 @@ impl MindCampaign {
     /// (`"{}"` with no campaign).
     #[func]
     pub fn universe_json(&self) -> GString {
-        let mut value = self.campaign.as_ref().map(|campaign| {
+        // The runtime copy while a sector is installed, else the facade copy.
+        self.read_live_campaign(|campaign| {
             serde_json::json!({
                 "turn": campaign.universe.turn,
                 "seconds": campaign.universe.seconds,
             })
-        });
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(runtime) = &taken {
-                value = Some(serde_json::json!({
-                    "turn": runtime.campaign.universe.turn,
-                    "seconds": runtime.campaign.universe.seconds,
-                }));
-            }
-            if let Some(runtime) = taken {
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-        }
-        GString::from(
-            value
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "{}".to_owned())
-                .as_str(),
-        )
+        })
+        .map_or_else(empty_object, |value| value_gstring(&value))
     }
 
     /// `Shaders.planet` lighting for the globe (`HexMesh.preRender`,
@@ -52,7 +36,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return out;
         };
-        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+        let Some(def) = planet_def(registry, &planet.to_string()) else {
             return out;
         };
         let index = def.id.index();
@@ -87,7 +71,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return out;
         };
-        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+        let Some(def) = planet_def(registry, &planet.to_string()) else {
             return out;
         };
         for row in planet_body_rows(registry.planets(), def.id.index(), seconds) {
@@ -119,21 +103,17 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return out;
         };
-        let Some(def) = registry.planet_by_name(&name) else {
+        let Some(def) = planet_def(registry, &name) else {
             return out;
         };
 
         let grid = PlanetGrid::create(def.sector_tiles as usize);
         let outline = OUTLINE_RAD * def.radius;
 
-        let mut tiles = PackedVector3Array::new();
-        for tile in &grid.tiles {
-            tiles.push(Vector3::new(tile.v[0], tile.v[1], tile.v[2]));
-        }
-        let mut corners = PackedVector3Array::new();
-        for corner in &grid.corners {
-            corners.push(Vector3::new(corner.v[0], corner.v[1], corner.v[2]));
-        }
+        let tile_points: Vec<[f32; 3]> = grid.tiles.iter().map(|tile| tile.v).collect();
+        let tiles = vec3_array(&tile_points);
+        let corner_points: Vec<[f32; 3]> = grid.corners.iter().map(|corner| corner.v).collect();
+        let corners = vec3_array(&corner_points);
         let mut tile_corners = Array::<PackedInt32Array>::new();
         for tile in &grid.tiles {
             let mut ids = PackedInt32Array::new();
@@ -144,10 +124,7 @@ impl MindCampaign {
         }
 
         let line_mesh = build_planet_grid(&grid, u32::MAX, outline);
-        let mut lines = PackedVector3Array::new();
-        for vertex in &line_mesh.vertices {
-            lines.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
-        }
+        let lines = vec3_array(&line_mesh.vertices);
 
         let mut presets = VarDictionary::new();
         let path = format!(
@@ -272,28 +249,17 @@ impl MindCampaign {
         let Some(def) = self
             .registry
             .as_ref()
-            .and_then(|registry| registry.planet_by_name(&planet.to_string()))
+            .and_then(|registry| planet_def(registry, &planet.to_string()))
         else {
             return out;
         };
         for layer in &def.cloud_layers {
             let mesh = layer.build(def.radius);
-            let mut vertices = PackedVector3Array::new();
-            for vertex in &mesh.vertices {
-                vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
-            }
-            let mut normals = PackedVector3Array::new();
-            for normal in &mesh.normals {
-                normals.push(Vector3::new(normal[0], normal[1], normal[2]));
-            }
+            let vertices = vec3_array(&mesh.vertices);
+            let normals = vec3_array(&mesh.normals);
             let mut colors = PackedColorArray::new();
             for packed in &mesh.colors {
-                colors.push(Color::from_rgba8(
-                    (packed >> 24) as u8,
-                    (packed >> 16) as u8,
-                    (packed >> 8) as u8,
-                    *packed as u8,
-                ));
+                colors.push(rgba8(*packed));
             }
             let mut indices = PackedInt32Array::new();
             for index in &mesh.indices {
@@ -329,7 +295,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return out;
         };
-        let Some(def) = registry.planet_by_name(&name) else {
+        let Some(def) = planet_def(registry, &name) else {
             return out;
         };
         let mut mesher: Box<dyn HexMesher> = match name.as_str() {
@@ -380,29 +346,15 @@ impl MindCampaign {
         let emissive = mesher.is_emissive();
         let mesh =
             mind_core::render::g3d::mesh_data::build_hex(mesher.as_mut(), 6, def.radius, 0.2);
-        let mut vertices = PackedVector3Array::new();
-        for vertex in &mesh.vertices {
-            vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
-        }
-        let mut normals = PackedVector3Array::new();
-        for normal in &mesh.normals {
-            normals.push(Vector3::new(normal[0], normal[1], normal[2]));
-        }
-        let color_of = |packed: u32| {
-            Color::from_rgba8(
-                (packed >> 24) as u8,
-                (packed >> 16) as u8,
-                (packed >> 8) as u8,
-                packed as u8,
-            )
-        };
+        let vertices = vec3_array(&mesh.vertices);
+        let normals = vec3_array(&mesh.normals);
         let mut colors = PackedColorArray::new();
         for color in &mesh.colors {
-            colors.push(color_of(*color));
+            colors.push(rgba8(*color));
         }
         let mut emissive_colors = PackedColorArray::new();
         for color in &mesh.emissive {
-            emissive_colors.push(color_of(*color));
+            emissive_colors.push(rgba8(*color));
         }
         let mut indices = PackedInt32Array::new();
         for index in &mesh.indices {
@@ -439,6 +391,26 @@ impl MindCampaign {
             .and_then(|host| host.bind().campaign_universe_secondsf())
             .unwrap_or(facade)
     }
+}
+
+/// A `PackedVector3Array` from `[x, y, z]` points (the `push(Vector3::new(..))`
+/// loops every planet-view mesh used to repeat).
+fn vec3_array(points: &[[f32; 3]]) -> PackedVector3Array {
+    let mut out = PackedVector3Array::new();
+    for point in points {
+        out.push(Vector3::new(point[0], point[1], point[2]));
+    }
+    out
+}
+
+/// `Color.from_rgba8` from a packed `0xRRGGBBAA` mesh color.
+fn rgba8(packed: u32) -> Color {
+    Color::from_rgba8(
+        (packed >> 24) as u8,
+        (packed >> 16) as u8,
+        (packed >> 8) as u8,
+        packed as u8,
+    )
 }
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.

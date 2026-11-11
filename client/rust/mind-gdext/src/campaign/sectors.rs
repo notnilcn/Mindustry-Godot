@@ -16,26 +16,19 @@ impl MindCampaign {
     #[func]
     pub fn sector_record_json(&self, planet: GString, sector: i64) -> GString {
         if !(0..=i64::from(u16::MAX)).contains(&sector) {
-            return GString::from("{}");
+            return empty_object();
         }
         let planet_name = planet.to_string();
         let sector_id = sector as u16;
-        let mut value = self
-            .campaign
-            .as_ref()
-            .and_then(|campaign| Self::sector_record_value(campaign, &planet_name, sector_id));
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(runtime) = &taken {
-                value = Self::sector_record_value(&runtime.campaign, &planet_name, sector_id);
-            }
-            if let Some(runtime) = taken {
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-        }
+        // The runtime copy while a sector is installed, else the facade copy.
+        let value = self
+            .read_live_campaign(|campaign| {
+                Self::sector_record_value(campaign, &planet_name, sector_id)
+            })
+            .flatten();
         match value {
-            Some(value) => GString::from(value.to_string().as_str()),
-            None => GString::from("{}"),
+            Some(value) => value_gstring(&value),
+            None => empty_object(),
         }
     }
 
@@ -99,10 +92,10 @@ impl MindCampaign {
     #[func]
     pub fn campaign_views_json(&self, planet: GString) -> GString {
         let Some(campaign) = self.campaign.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let name = planet.to_string();
         let active = if name.is_empty() {
@@ -121,7 +114,7 @@ impl MindCampaign {
             campaign.planet_id_by_name(&name)
         };
         let Some(active) = active else {
-            return GString::from("{}");
+            return empty_object();
         };
         let schematics = self.load_schematics(registry);
         // The `findLauncher` actual launch sector: the played sector, cleared
@@ -207,18 +200,14 @@ impl MindCampaign {
                 continue;
             };
             let key = format!("sector.{preset}.description");
-            if self.bundle.get(&key) != key {
+            if self.bundle_lookup(&key).is_some() {
                 view.stats.preset_description_key = Some(key);
             }
         }
         // The map-registry dialogs read `maps` from the same endpoint; keep the
         // built-in rows the fixture path feeds them.
         views.maps = mind_core::ui::campaign::default_map_entries();
-        GString::from(
-            serde_json::to_string(&views)
-                .unwrap_or_else(|_| String::from("{}"))
-                .as_str(),
-        )
+        to_gstring(&views, "{}")
     }
 
     /// Current sector/rules summary.
@@ -361,9 +350,7 @@ impl MindCampaign {
             return false;
         }
         settings_hub::with_settings(|store| store.put_bool("serpulo-remaps-notice", true));
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("remap notice flush failed: {error}");
-        }
+        self.flush_settings("remap notice flush failed");
         true
     }
 
@@ -375,17 +362,14 @@ impl MindCampaign {
     /// off-play record clear.
     #[func]
     pub fn abandon_sector(&mut self) -> bool {
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let played = runtime.session.is_campaign();
-                runtime.abandon_played_sector();
-                host.bind_mut().put_campaign_runtime(runtime);
-                if played {
-                    log::info!("abandon: player cores die in 7 ticks (game-over path)");
-                    return true;
-                }
-            }
+        let played = with_host_runtime(self.host(), |runtime| {
+            let played = runtime.session.is_campaign();
+            runtime.abandon_played_sector();
+            played
+        });
+        if played == Some(true) {
+            log::info!("abandon: player cores die in 7 ticks (game-over path)");
+            return true;
         }
         self.clear_played_sector_record()
     }
@@ -395,16 +379,14 @@ impl MindCampaign {
     /// sector routes through the existing played-sector clear.
     #[func]
     pub fn abandon_sector_at(&mut self, planet: GString, sector: i32) -> bool {
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         let planet_name = planet.to_string();
-        let sector_id = sector as u16;
         let Some(planet_id) = self
             .registry
             .as_ref()
-            .and_then(|registry| registry.planet_by_name(&planet_name))
-            .map(|def| def.id)
+            .and_then(|registry| planet_id_by_name(registry, &planet_name))
         else {
             return false;
         };
@@ -471,9 +453,9 @@ impl MindCampaign {
     /// sector's info record and persists (`saveInfo`); an empty name clears it.
     #[func]
     pub fn set_sector_name(&mut self, planet: GString, sector: i32, name: GString) -> bool {
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         let planet_name = planet.to_string();
         let display = name.to_string();
         let display = (!display.is_empty()).then_some(display);
@@ -481,7 +463,7 @@ impl MindCampaign {
             let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
                 return false;
             };
-            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
                 return false;
             };
             record.info.info.name = display.clone();
@@ -505,9 +487,9 @@ impl MindCampaign {
         icon: GString,
         content_icon: GString,
     ) -> bool {
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         let planet_name = planet.to_string();
         let icon = icon.to_string();
         let content_icon = content_icon.to_string();
@@ -515,7 +497,7 @@ impl MindCampaign {
             let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
                 return false;
             };
-            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
                 return false;
             };
             record.info.info.icon = (!icon.is_empty()).then_some(icon.clone());

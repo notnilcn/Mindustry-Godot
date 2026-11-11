@@ -20,16 +20,16 @@ impl MindCampaign {
     #[func]
     pub fn prime_sector_load(&mut self, planet: GString, sector: i32) -> bool {
         let planet_name = planet.to_string();
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         let Some(campaign) = self.campaign.as_ref() else {
             return false;
         };
         let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
             return false;
         };
-        let Some(record) = campaign.sector(planet_id, sector as u16) else {
+        let Some(record) = campaign.sector(planet_id, sector_id) else {
             return false;
         };
         let extras = mind_core::maps::planet::SectorGenExtras {
@@ -40,7 +40,7 @@ impl MindCampaign {
         let save_file = record
             .save
             .as_deref()
-            .map(|stem| self.sector_save_file(&planet_name, sector as u16, stem));
+            .map(|stem| self.sector_save_file(&planet_name, sector_id, stem));
         let Some(mut host) = self.host() else {
             return false;
         };
@@ -78,16 +78,15 @@ impl MindCampaign {
         // `logic.reset()` (`state = new GameState()`): not a playtest.
         self.playtesting_map = None;
         let planet_name = planet.to_string();
-        if sector < 0 {
+        let Some(sector_id) = sector_arg(i64::from(sector)) else {
             return false;
-        }
+        };
         // `Control.playSector` (`Control.java:437-441`): a launch that replaces
         // a live match writes the outgoing slot first (CG-SECTOR-02). The
         // caller must have done this BEFORE the destination world load (the
         // planet dialog does it via `save_outgoing_sector`; the accelerator in
         // `pump_accelerator_launch`), because by now the host already holds the
         // destination world.
-        let sector_id = sector as u16;
         let Some(mut registry) = self.registry.take() else {
             return false;
         };
@@ -150,8 +149,7 @@ impl MindCampaign {
                 deleted = slot.delete(&NativeFs).is_ok();
             }
             if !deleted {
-                let _ = NativeFs.delete(&file);
-                let _ = NativeFs.delete(&mind_core::io::SaveIo::backup_file_for(&file));
+                delete_save_and_backup(&file);
             }
             self.saves.forget_file(&file);
             // `Time.runTask(10f, () -> ui.showErrorMessage("@save.corrupted"))`.
@@ -456,9 +454,8 @@ impl MindCampaign {
                         sector.info.info.has_core = true;
                     }
                 }
-                let taken = host.bind_mut().take_campaign_runtime();
-                let mut core_items: Option<indexmap::IndexMap<String, i32>> = None;
-                if let Some(mut runtime) = taken {
+                let core_items = with_host_runtime(self.host(), |runtime| {
+                    let mut core_items: Option<indexmap::IndexMap<String, i32>> = None;
                     // Carry the launch ownership back into the runtime copy.
                     runtime.campaign = campaign.clone();
                     if resume {
@@ -509,16 +506,20 @@ impl MindCampaign {
                         .campaign
                         .refresh_sector_import_rates(&registry, planet_id, sector_id);
                     self.session = runtime.session.clone();
-                    host.bind_mut().put_campaign_runtime(runtime);
-                    // H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`).
-                    // The world load spawned the saved units before the session
-                    // rules existed, so a player-team unit came back as
-                    // `GroundAI`; re-derive the controllers now that the
-                    // runtime is installed. A fresh launch has no restored
-                    // units, so the call is a no-op there.
+                    core_items
+                });
+                // H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`).
+                // The world load spawned the saved units before the session
+                // rules existed, so a player-team unit came back as
+                // `GroundAI`; re-derive the controllers now that the runtime
+                // is installed. A fresh launch has no restored units, so the
+                // call is a no-op there.
+                if core_items.is_some()
+                    && let Some(mut host) = self.host()
+                {
                     host.bind_mut().reset_loaded_unit_controllers();
                 }
-                if let Some(items) = core_items
+                if let Some(items) = core_items.flatten()
                     && let Some(mut host) = self.host()
                 {
                     host.bind_mut()
@@ -621,7 +622,7 @@ impl MindCampaign {
                 // while the tile save has everything (CG-SAVE-01).
                 self.persist_sector_record();
                 if let Some(mut host) = self.host() {
-                    let path = format!("user://saves/{save_name}.msav");
+                    let path = Self::slot_user_path(&save_name);
                     // `Saves.saveSector` -> `SaveSlot.save` -> `savePreview()`.
                     self.write_live_slot_preview(std::path::Path::new(&save_name));
                     host.bind_mut()
@@ -657,7 +658,7 @@ impl MindCampaign {
         {
             canonical
         } else {
-            self.paths.saves().join(format!("{stem}.{SAVE_EXTENSION}"))
+            self.slot_file(stem)
         }
     }
 }

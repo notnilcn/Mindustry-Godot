@@ -4,7 +4,6 @@
 //! Campaign lifecycle: exit saves, playtest/reset handling and the clear-data commands.
 //! Upstream: ui/dialogs/PausedDialog.java (runExitSave, checkPlaytest); core/src/mindustry/core/Logic.java (reset); ui/dialogs/SettingsMenuDialog.java (clear data)
 
-use super::service::save_service;
 use super::*;
 
 #[godot_api(secondary)]
@@ -34,12 +33,8 @@ impl MindCampaign {
             && let (Some(file), Some(mut host)) = (current.map(|slot| slot.file), self.host())
         {
             // `Saves.SaveSlot.save` -> `savePreview()` (`@save.quit` path).
-            self.write_live_slot_preview(&file);
-            host.bind_mut()
-                .request_save(GString::from(file.to_string_lossy().as_ref()), false);
-            host.bind_mut().flush_io();
+            self.queue_slot_save(&mut host, &file, None, true, "saved on exit");
             queued = true;
-            log::info!("saved on exit (`{}`)", file.display());
         }
         self.reset_to_menu();
         queued
@@ -207,9 +202,8 @@ impl MindCampaign {
         let Some(mut registry) = self.registry.take() else {
             return false;
         };
-        let Some((planet_id, tree)) = registry
-            .planet_by_name(&name)
-            .map(|def| (def.id, def.tech_tree))
+        let Some((planet_id, tree)) =
+            planet_def(&registry, &name).map(|def| (def.id, def.tech_tree))
         else {
             self.registry = Some(registry);
             log::warn!("clear_planet_research: unknown planet `{name}`");
@@ -249,8 +243,7 @@ impl MindCampaign {
         let Some(id) = self
             .registry
             .as_ref()
-            .and_then(|registry| registry.planet_by_name(&name))
-            .map(|def| def.id)
+            .and_then(|registry| planet_id_by_name(registry, &name))
         else {
             log::warn!("clear_planet_campaign_saves: unknown planet `{name}`");
             return false;
@@ -328,18 +321,17 @@ impl MindCampaign {
         // its tracker) is about to be replaced by the destination world, so
         // mirror the tracker now and write it through the settings store.
         self.sync_service();
-        settings_hub::with_settings(|settings| {
-            let mut store = SettingsUnlockStore::new(settings);
-            save_service(&mut self.service, &mut store);
-        });
-        self.write_live_slot_preview(&file);
+        self.store_service();
         let Some(mut host) = self.host() else {
             return false;
         };
-        host.bind_mut()
-            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
-        host.bind_mut().flush_io();
-        log::info!("saved outgoing sector before launch (`{}`)", file.display());
+        self.queue_slot_save(
+            &mut host,
+            &file,
+            None,
+            true,
+            "saved outgoing sector before launch",
+        );
         true
     }
 
@@ -352,14 +344,13 @@ impl MindCampaign {
         // facade copy for the call and restore it afterwards so `&mut self` is
         // free for the campaign/settings half.
         let registry = self.registry.take();
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                self.persist_sector_record_in(Some(&mut runtime), registry.as_ref());
-                host.bind_mut().put_campaign_runtime(runtime);
-                self.registry = registry;
-                return;
-            }
+        if with_host_runtime(self.host(), |runtime| {
+            self.persist_sector_record_in(Some(runtime), registry.as_ref());
+        })
+        .is_some()
+        {
+            self.registry = registry;
+            return;
         }
         self.persist_sector_record_in(None, registry.as_ref());
         self.registry = registry;
@@ -455,9 +446,7 @@ impl MindCampaign {
         }
         // `put_json` only marks the store dirty; flush so the record is on disk
         // before any restart (the capture path calls this after `pump_runtime`).
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("sector record flush failed: {error}");
-        }
+        self.flush_settings("sector record flush failed");
     }
 
     /// The live runtime's sector record when a host is attached, else the
@@ -467,23 +456,19 @@ impl MindCampaign {
         planet: mind_core::content::PlanetId,
         sector_id: u16,
     ) -> Option<mind_core::io::json::rules::SectorInfo> {
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            let record = taken
+        let facade_record = || {
+            self.campaign
                 .as_ref()
-                .and_then(|runtime| runtime.campaign.sector(planet, sector_id))
-                .map(|sector| sector.info.info.clone());
-            if let Some(runtime) = taken {
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
-            if record.is_some() {
-                return record;
-            }
-        }
-        self.campaign
-            .as_ref()
-            .and_then(|campaign| campaign.sector(planet, sector_id))
-            .map(|sector| sector.info.info.clone())
+                .and_then(|campaign| campaign.sector(planet, sector_id))
+                .map(|sector| sector.info.info.clone())
+        };
+        self.read_live_campaign(|campaign| {
+            campaign
+                .sector(planet, sector_id)
+                .map(|sector| sector.info.info.clone())
+        })
+        .flatten()
+        .or_else(facade_record)
     }
 
     /// Shared `SettingsMenuDialog` clear-campaign-saves body (`only` scopes to
@@ -523,9 +508,7 @@ impl MindCampaign {
                     sector.being_played = false;
                     sector.clear_info(settings, name);
                     let file = paths.sector_save(name, sector.id as u32);
-                    let backup = mind_core::io::SaveIo::backup_file_for(&file);
-                    let _ = NativeFs.delete(&file);
-                    let _ = NativeFs.delete(&backup);
+                    delete_save_and_backup(&file);
                 }
             }
         }) else {

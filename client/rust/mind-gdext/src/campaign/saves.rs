@@ -30,19 +30,14 @@ impl MindCampaign {
         // `if(state.isGame()) current = this`).
         host.bind_mut()
             .write_save_preview(GString::from(slot.as_str()));
-        let file = self
-            .save_paths()
-            .saves()
-            .join(format!("{slot}.{SAVE_EXTENSION}"));
+        let file = self.slot_file(&slot);
         if self.session.phase.is_game() {
             settings_hub::with_settings(|store| {
                 self.saves.set_current_by_file(store, &file);
             });
         }
-        host.bind_mut().request_save(
-            GString::from(format!("user://saves/{slot}.msav").as_str()),
-            false,
-        );
+        host.bind_mut()
+            .request_save(GString::from(Self::slot_user_path(&slot).as_str()), false);
         // `control.saves.addSave(text)` writes at once (`SaveDialog.java:26-31`
         // inside `ui.loadAnd`), and the pause menu that offers it has the sim
         // paused: with the pump halted no IO boundary would ever run the
@@ -80,7 +75,7 @@ impl MindCampaign {
         if slot.is_empty() {
             return false;
         }
-        let path = format!("user://saves/{slot}.msav");
+        let path = Self::slot_user_path(&slot);
         if !FileAccess::file_exists(&path) {
             log::warn!("load_slot: `{path}` does not exist");
             return false;
@@ -94,11 +89,9 @@ impl MindCampaign {
         {
             apply_loaded_meta(&mut self.session, &meta);
             self.saves.total_playtime = meta.time_played;
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
+            let _ = with_host_runtime(self.host(), |runtime| {
                 apply_loaded_meta(&mut runtime.session, &meta);
-                host.bind_mut().put_campaign_runtime(runtime);
-            }
+            });
         } else {
             log::warn!("load_slot: `{path}` meta unavailable; session rules not applied");
         }
@@ -106,7 +99,7 @@ impl MindCampaign {
         // the loaded save is never the current slot, so the autosave cadence,
         // the playtime accrual and the exit save all stay inert and the pause
         // menu keeps `@quit` (CG-SAVE-02).
-        let file = self.paths.saves().join(format!("{slot}.{SAVE_EXTENSION}"));
+        let file = self.slot_file(&slot);
         let time_played = self.saves.total_playtime;
         settings_hub::with_settings(|settings| {
             adopt_loaded_slot(&mut self.saves, settings, &file, time_played);
@@ -265,9 +258,7 @@ impl MindCampaign {
             log::warn!("delete_save_slot `{stem}`: {error}");
             return false;
         }
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("delete_save_slot: settings save failed: {error}");
-        }
+        self.flush_settings("delete_save_slot: settings save failed");
         true
     }
 
@@ -283,9 +274,7 @@ impl MindCampaign {
             return false;
         };
         settings_hub::with_settings(|store| slot.set_name(store, &renamed));
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("rename_save_slot: settings save failed: {error}");
-        }
+        self.flush_settings("rename_save_slot: settings save failed");
         true
     }
 
@@ -307,9 +296,7 @@ impl MindCampaign {
             return false;
         };
         settings_hub::with_settings(|store| slot.set_autosave(store, on));
-        if let Err(error) = settings_hub::save(&self.paths) {
-            log::warn!("set_slot_autosave: settings save failed: {error}");
-        }
+        self.flush_settings("set_slot_autosave: settings save failed");
         true
     }
 
@@ -363,6 +350,44 @@ impl MindCampaign {
         if let Some(mut host) = self.host() {
             host.bind_mut().write_save_preview(GString::from(stem));
         }
+    }
+
+    /// Queues a save of `file` through `host` (`SaveSlot.save`): the preview
+    /// PNG first, then the IO-boundary request, the optional `Saves.saving`
+    /// finish tick, the optional immediate flush and the caller's log line
+    /// (`label` is the whole message prefix, so each call site's log text is
+    /// kept verbatim).
+    pub(super) fn queue_slot_save(
+        &mut self,
+        host: &mut Gd<MindSimHost>,
+        file: &std::path::Path,
+        finish_tick: Option<u64>,
+        flush: bool,
+        label: &str,
+    ) {
+        self.write_live_slot_preview(file);
+        host.bind_mut()
+            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+        if let Some(tick) = finish_tick {
+            self.saving_finish_tick = Some(tick);
+        }
+        if flush {
+            host.bind_mut().flush_io();
+        }
+        log::info!("{label} (`{}`)", file.display());
+    }
+
+    /// `<user://saves>/<stem>.<SAVE_EXTENSION>` on the native filesystem.
+    pub(super) fn slot_file(&self, stem: &str) -> std::path::PathBuf {
+        self.save_paths()
+            .saves()
+            .join(format!("{stem}.{SAVE_EXTENSION}"))
+    }
+
+    /// `user://saves/<stem>.<SAVE_EXTENSION>`: the Godot-facing path the
+    /// `request_save`/`request_load` seams take.
+    pub(super) fn slot_user_path(stem: &str) -> String {
+        format!("user://saves/{stem}.{SAVE_EXTENSION}")
     }
 
     /// `SaveSlot.savePreview` for a slot with no live world: renders the preview

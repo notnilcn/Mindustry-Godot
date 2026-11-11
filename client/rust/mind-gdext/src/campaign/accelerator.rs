@@ -346,7 +346,7 @@ impl MindCampaign {
         let started = self.start_sector_with_loadout(
             GString::from(pending.planet.as_str()),
             pending.sector,
-            GString::from(payload.to_string().as_str()),
+            value_gstring(&payload),
         );
         log::info!(
             "accelerator launch landed on `{}:{}`: {started}",

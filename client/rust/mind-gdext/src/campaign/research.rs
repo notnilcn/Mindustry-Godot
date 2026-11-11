@@ -192,16 +192,10 @@ impl MindCampaign {
         if let Some(registry) = self.registry.as_ref() {
             // Each unlock fires an `UnlockEvent` (`Control.java:160-165`):
             // toast for `showUnlock()` content, palette rebuild for blocks.
-            for content in &unlocked_content {
-                self.push_unlock_toast(registry, *content);
-            }
-            if unlocked_content
-                .iter()
-                .any(|content| content.type_ == ContentType::Block)
-            {
-                // No host bind is held here.
-                let _ = self.base_mut().emit_signal("block_unlocked", &[]);
-            }
+            // The `self.registry` borrow ends before the `&mut self` emit, and
+            // no host bind is held here.
+            self.push_unlock_toasts(registry, &unlocked_content);
+            self.emit_block_unlocked_if_any(&unlocked_content);
         }
         changed
     }
@@ -217,10 +211,10 @@ impl MindCampaign {
     #[func]
     pub fn research_tree_json(&self, root: GString) -> GString {
         let Some(registry) = self.registry.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let Some(campaign) = self.campaign.as_ref() else {
-            return GString::from("{}");
+            return empty_object();
         };
         let tech = registry.tech();
         let requested = root.to_string();
@@ -236,7 +230,7 @@ impl MindCampaign {
             tech.trees.iter().find(|tree| tree.name == requested)
         };
         let Some(tree) = tree else {
-            return GString::from("{}");
+            return empty_object();
         };
 
         let ctx = CampaignObjectiveContext::new(registry, campaign);
@@ -249,7 +243,7 @@ impl MindCampaign {
         let mut order: Vec<TechNodeRef> = Vec::new();
         tech.each(tree.root, &mut |node_ref| order.push(node_ref));
         if order.is_empty() {
-            return GString::from("{}");
+            return empty_object();
         }
         let mut indices: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
         for (index, node_ref) in order.iter().enumerate() {
@@ -506,7 +500,7 @@ impl MindCampaign {
             "bounds": bounds,
             "nodes": nodes_json,
         });
-        GString::from(view.to_string().as_str())
+        value_gstring(&view)
     }
 
     /// `UnlockableContent.unlockedHost()` by content name (G05 T4b hint gates);
@@ -630,11 +624,9 @@ impl MindCampaign {
     /// `bundle("techtree." + name, name)` for a tree/root name.
     fn tree_title(&self, name: &str) -> String {
         let key = format!("techtree.{name}");
-        let value = self.bundle.get(&key);
-        if value == key {
-            name.to_owned()
-        } else {
-            value.to_owned()
+        match self.bundle_lookup(&key) {
+            Some(value) => value.to_owned(),
+            None => name.to_owned(),
         }
     }
 

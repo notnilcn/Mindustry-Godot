@@ -55,7 +55,7 @@ impl MindCampaign {
             .iter()
             .map(|(class, count)| serde_json::json!({"class": class, "count": count}))
             .collect();
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// Total rows dispatched since the last clear.

@@ -72,6 +72,7 @@ use crate::audio::MindAudio;
 use crate::camera::MindCamera2D;
 use crate::editor::MindEditor;
 use crate::fx::MindFx;
+use crate::gdutil::json::{empty_object, to_gstring, value_gstring};
 use crate::settings_hub;
 use crate::sim_host::MindSimHost;
 use crate::ui::root::MindUiRoot;
@@ -83,6 +84,9 @@ use cache::DirMemo;
 pub use events::FiredEvent;
 pub use events::FiredEvents;
 use events::install_event_listeners;
+use runtime::{
+    delete_save_and_backup, planet_def, planet_id_by_name, sector_arg, with_host_runtime,
+};
 use service::load_service;
 
 mod accelerator;
@@ -329,10 +333,8 @@ impl MindCampaign {
                         self.saves.load(&NativeFs, &self.paths, &registry, settings);
                     });
                 }
-                if self.saves.had_serpulo_remaps
-                    && let Err(error) = settings_hub::save(&self.paths)
-                {
-                    log::warn!("sector remap settings flush failed: {error}");
+                if self.saves.had_serpulo_remaps {
+                    self.flush_settings("sector remap settings flush failed");
                 }
                 let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
                 settings_hub::with_settings(|settings| campaign.load_all(settings));

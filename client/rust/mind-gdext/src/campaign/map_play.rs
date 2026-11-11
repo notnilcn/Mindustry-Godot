@@ -31,19 +31,13 @@ impl MindCampaign {
         let map_name = map.to_string();
         let mode_name = mode.to_string();
         let Some(header) = self.resolve_map(&map_name) else {
-            log::warn!("start_map_mode: unknown map `{map_name}`");
-            self.show_error("@map.invalid");
-            return false;
+            return self.fail_map(&format!("start_map_mode: unknown map `{map_name}`"));
         };
         let Some(mode_id) = Gamemode::from_name(&mode_name) else {
-            log::warn!("start_map_mode: unknown mode `{mode_name}`");
-            self.show_error("@map.invalid");
-            return false;
+            return self.fail_map(&format!("start_map_mode: unknown mode `{mode_name}`"));
         };
         if self.campaign.is_none() {
-            log::warn!("start_map_mode: campaign unavailable");
-            self.show_error("@map.invalid");
-            return false;
+            return self.fail_map("start_map_mode: campaign unavailable");
         }
         let path = header.file.display().to_string();
         // `logic.reset(); world.loadMap(map, rules)` (`Control.java:405-406`).
@@ -63,9 +57,7 @@ impl MindCampaign {
             match mind_core::io::json::JsonIo::read::<Rules>(&rules_text) {
                 Ok(rules) => rules,
                 Err(error) => {
-                    log::warn!("start_map_mode: bad rules JSON: {error}");
-                    self.show_error("@map.invalid");
-                    return false;
+                    return self.fail_map(&format!("start_map_mode: bad rules JSON: {error}"));
                 }
             }
         };
@@ -88,24 +80,27 @@ impl MindCampaign {
         };
         if !rules.pvp && cores_of(rules.default_team) == 0 {
             let team = mind_core::game::team::Team::get(rules.default_team).colored_name();
-            log::warn!(
-                "start_map_mode: `{map_name}` has no core for team {}",
-                rules.default_team
+            return self.fail_map_key(
+                &format!(
+                    "start_map_mode: `{map_name}` has no core for team {}",
+                    rules.default_team
+                ),
+                "map.nospawn",
+                &[team.as_str()],
             );
-            self.show_error_key("map.nospawn", &[team.as_str()]);
-            self.set_menu_visible(true);
-            return false;
         } else if rules.pvp && core_teams.len() < 2 {
-            log::warn!("start_map_mode: `{map_name}` has fewer than two core teams");
-            self.show_error("@map.nospawn.pvp");
-            self.set_menu_visible(true);
-            return false;
+            return self.fail_map_key(
+                &format!("start_map_mode: `{map_name}` has fewer than two core teams"),
+                "map.nospawn.pvp",
+                &[],
+            );
         } else if rules.attack_mode && cores_of(map_rules.wave_team) == 0 {
             let team = mind_core::game::team::Team::get(map_rules.wave_team).colored_name();
-            log::warn!("start_map_mode: `{map_name}` has no core for the wave team");
-            self.show_error_key("map.nospawn.attack", &[team.as_str()]);
-            self.set_menu_visible(true);
-            return false;
+            return self.fail_map_key(
+                &format!("start_map_mode: `{map_name}` has no core for the wave team"),
+                "map.nospawn.attack",
+                &[team.as_str()],
+            );
         }
         // `rules.retainContentFields(oldRules); state.rules = rules` happens
         // inside `play_map` (invariant 6), then `logic.play()` + `Trigger.newGame`.
@@ -131,11 +126,7 @@ impl MindCampaign {
                 // defaults to true (`Saves.java:445-447`). The pause menu's
                 // `@save.quit` label and `runExitSave` both read the current
                 // slot (`PausedDialog.java:116`).
-                let file = self.paths.saves().join(format!(
-                    "{}.{}",
-                    sanitize_slot_name(&name),
-                    mind_core::io::fs::SAVE_EXTENSION
-                ));
+                let file = self.slot_file(&sanitize_slot_name(&name));
                 settings_hub::with_settings(|store| {
                     let index = self.saves.set_current_by_file(store, &file);
                     if let Some(slot) = self.saves.get_save_slots().get(index) {
@@ -190,6 +181,22 @@ impl MindCampaign {
 }
 
 impl MindCampaign {
+    /// `start_map_mode`'s invalid-map exit: warn, show `@map.invalid`, fail.
+    fn fail_map(&self, message: &str) -> bool {
+        log::warn!("{message}");
+        self.show_error("@map.invalid");
+        false
+    }
+
+    /// `start_map_mode`'s `World.loadMap` validity exit: warn, show the
+    /// `map.nospawn*` key, restore the menu, fail.
+    fn fail_map_key(&self, message: &str, key: &str, args: &[&str]) -> bool {
+        log::warn!("{message}");
+        self.show_error_key(key, args);
+        self.set_menu_visible(true);
+        false
+    }
+
     /// `Control.playMap`'s control half over an already-loaded world
     /// (`Control.java:407-426`): adopts `rules` as the session rules, runs the
     /// play flow, installs the session runtime and spawns the player. Factored
@@ -217,11 +224,9 @@ impl MindCampaign {
                 let sync = host.bind_mut().sync_campaign_session(&registry, true);
                 self.registry = Some(registry);
                 if sync.is_some() {
-                    let taken = host.bind_mut().take_campaign_runtime();
-                    if let Some(runtime) = taken {
+                    let _ = with_host_runtime(self.host(), |runtime| {
                         self.session = runtime.session.clone();
-                        host.bind_mut().put_campaign_runtime(runtime);
-                    }
+                    });
                     installed = true;
                 }
             }

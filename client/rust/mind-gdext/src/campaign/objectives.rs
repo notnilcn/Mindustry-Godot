@@ -14,17 +14,15 @@ impl MindCampaign {
         if index < 0 {
             return false;
         }
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let completed = runtime
-                    .session
-                    .objectives
-                    .complete(index as usize, &mut runtime.session.rules);
-                self.session.objectives = runtime.session.objectives.clone();
-                host.bind_mut().put_campaign_runtime(runtime);
-                return completed;
-            }
+        if let Some(completed) = with_host_runtime(self.host(), |runtime| {
+            let completed = runtime
+                .session
+                .objectives
+                .complete(index as usize, &mut runtime.session.rules);
+            self.session.objectives = runtime.session.objectives.clone();
+            completed
+        }) {
+            return completed;
         }
         self.session
             .objectives
@@ -62,20 +60,14 @@ impl MindCampaign {
             return GString::from("null");
         }
         let index = index as usize;
-        let Some(mut host) = self.host() else {
+        let Some((completed, countup)) = with_host_runtime(self.host(), |runtime| {
+            let completed = runtime.session.objectives.is_completed(index);
+            let countup = runtime.session.objectives.timer_countup(index);
+            (completed, countup)
+        }) else {
             return GString::from("null");
         };
-        let Some(runtime) = host.bind_mut().take_campaign_runtime() else {
-            return GString::from("null");
-        };
-        let completed = runtime.session.objectives.is_completed(index);
-        let countup = runtime.session.objectives.timer_countup(index);
-        host.bind_mut().put_campaign_runtime(runtime);
-        GString::from(
-            serde_json::json!({"completed": completed, "countup": countup})
-                .to_string()
-                .as_str(),
-        )
+        value_gstring(&serde_json::json!({"completed": completed, "countup": countup}))
     }
 
     /// Live counters `Objective.text()` reads on top of the objective data:
@@ -196,7 +188,7 @@ impl MindCampaign {
             "destroyBlocksProgress".to_owned(),
             serde_json::Value::Object(blocks_progress),
         );
-        GString::from(serde_json::Value::Object(out).to_string().as_str())
+        value_gstring(&serde_json::Value::Object(out))
     }
 
     /// `MapObjectives` world-marker draw list for the running objectives
@@ -330,7 +322,7 @@ impl MindCampaign {
                 rows.push(row);
             }
         }
-        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+        value_gstring(&serde_json::Value::Array(rows))
     }
 
     /// Fog query placeholder (fog state is plan 12 M7 `FogControl`, not yet
@@ -358,14 +350,11 @@ impl MindCampaign {
     /// label (atlas-backed icons arrive with the label pass follow-up).
     fn localized_marker_text(&self, raw: &str) -> String {
         let resolved = match raw.trim().strip_prefix('@') {
-            Some(key) => {
-                let value = self.bundle.get(key);
-                if value.is_empty() || value == key {
-                    raw.to_owned()
-                } else {
-                    value.to_owned()
-                }
-            }
+            Some(key) => match self.bundle_lookup(key) {
+                // The bundle's own empty value also counts as missing here.
+                Some(value) if !value.is_empty() => value.to_owned(),
+                _ => raw.to_owned(),
+            },
             None => raw.to_owned(),
         };
         // Arc markup and `:icon:` tokens stay in: the world-label pass draws
