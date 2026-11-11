@@ -68,7 +68,7 @@ impl MindEditor {
     /// plus each option's getter, class defaults merged).
     #[func]
     pub fn filter_options_json(&self) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let tag = self
@@ -91,7 +91,7 @@ impl MindEditor {
     /// picker's "Default Ores" row).
     #[func]
     pub fn default_ores_json(&self) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let filters = mind_core::maps::filters::default_ore_filters(content);
@@ -102,7 +102,7 @@ impl MindEditor {
     /// accepts (`content.blocks()` + `Boolf<Block>`), in content-id order.
     #[func]
     pub fn filter_blocks_json(&self, predicate: GString) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let Some(predicate) = BlockPredicate::from_name(&predicate.to_string()) else {
@@ -132,14 +132,14 @@ impl MindEditor {
     #[func]
     pub fn generate_preview_texture(&mut self) -> Option<Gd<Texture2D>> {
         if self.palette.is_none() {
-            let content = self.content.as_ref()?;
+            let content = self.content()?;
             let mut palette = BlockPalette::of(content);
             palette.apply_block_colors(&crate::render::minimap::load_block_colors());
             self.palette = Some(palette);
         }
         let snapshot = mind_core::editor::generate::EditorSnapshot::capture(&self.grid);
         let tag = self.editor.tags.get("genfilters").cloned();
-        let content = self.content.as_ref()?;
+        let content = self.content()?;
         let palette = self.palette.as_ref()?;
         let mut filters = mind_core::editor::generate::filters_from_tag(content, tag.as_deref());
         let image = mind_core::editor::generate::generate_preview_with_palette(
@@ -164,7 +164,7 @@ impl MindEditor {
             return false;
         };
         let seed_offset = seed.max(0) as u64;
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         // `World.loadSector` -> `PlanetGenerator.generate` (the structure
@@ -207,7 +207,7 @@ impl MindEditor {
     /// generator, non-empty sectors and `accessible`.
     #[func]
     pub fn sector_planets_json(&self) -> GString {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from("[]");
         };
         let rows: Vec<serde_json::Value> = content
@@ -234,7 +234,7 @@ impl MindEditor {
     /// (`Sector.java:203-205`); `0` when the planet/cell is unknown.
     #[func]
     pub fn sector_size(&self, planet: GString, sector: i64) -> i64 {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return 0;
         };
         let Ok(sector_id) = u16::try_from(sector) else {

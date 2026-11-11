@@ -57,6 +57,7 @@ use mind_stdb::{
     PlayerAction, Roster, RowChange, SessionState, StdbMode, WaveName, parse_player_suffix_from,
 };
 
+use crate::gdutil::json::value_gstring;
 use crate::settings_hub;
 use crate::sim_host::MindSimHost;
 use crate::wiring;
@@ -508,6 +509,11 @@ impl MindNet {
         self.chat_binder = Some(connector.bind::<MyMatchChatTableAccessor>("my_match_chat"));
     }
 
+    /// Runs `f` with the live connector; `None` while offline (single-player).
+    fn with_connector<R>(&mut self, f: impl FnOnce(&mut Connector) -> R) -> Option<R> {
+        Some(f(self.connector.as_mut()?))
+    }
+
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
     /// Emitted from [`Self::notify_session_state`] whenever the state differs
     /// from the last emitted one.
@@ -754,7 +760,7 @@ impl MindNet {
             "ping_ms": probe.ping_ms,
             "matches": matches,
         });
-        GString::from(json.to_string().as_str())
+        value_gstring(&json)
     }
 
     /// The active connector's address in normalized `host[:port]/db` form
@@ -938,7 +944,7 @@ impl MindNet {
     #[func]
     pub fn server_calls_json(&mut self) -> GString {
         let calls = std::mem::take(&mut self.pending_calls);
-        GString::from(serde_json::Value::Array(calls).to_string().as_str())
+        value_gstring(&serde_json::Value::Array(calls))
     }
 
     /// Call-channel diagnostics (queue depth, accepted/rejected/dropped, the
@@ -947,13 +953,13 @@ impl MindNet {
     pub fn call_channel_json(&self) -> GString {
         let mut stats = self.calls.stats_json();
         stats["kicked"] = serde_json::Value::String(self.kicked.clone().unwrap_or_default());
-        GString::from(stats.to_string().as_str())
+        value_gstring(&stats)
     }
 
     /// `my_match_events` rows as a JSON array (the `EventType` bus, GAPS #37).
     #[func]
     pub fn match_events_json(&self) -> GString {
-        GString::from(self.events.to_json().to_string().as_str())
+        value_gstring(&self.events.to_json())
     }
 
     /// `my_match_events` rows with their typed [`mind_stdb::EventType`]
@@ -971,7 +977,7 @@ impl MindNet {
                 "detail": event.detail,
             }));
         }
-        GString::from(serde_json::Value::Array(out).to_string().as_str())
+        value_gstring(&serde_json::Value::Array(out))
     }
 
     /// `my_match_chat` rows as a JSON array of `mind_stdb::ChatLine`
@@ -982,7 +988,7 @@ impl MindNet {
     /// (the log already drops rows the local viewer may not see).
     #[func]
     pub fn chat_json(&self) -> GString {
-        GString::from(chat_facade_json(&self.chat).to_string().as_str())
+        value_gstring(&chat_facade_json(&self.chat))
     }
 
     /// `my_match_events` rows as a JSON array of `mind_stdb::ServerEvent`
@@ -993,7 +999,7 @@ impl MindNet {
     /// debug/UI-inspection variant.
     #[func]
     pub fn events_json(&self) -> GString {
-        GString::from(events_facade_json(&self.events).to_string().as_str())
+        value_gstring(&events_facade_json(&self.events))
     }
 
     /// Local SpacetimeDB identity hex (64 lowercase hex chars), or `""` while
@@ -1017,7 +1023,7 @@ impl MindNet {
     /// `MindUi.player_list_json()`; the UI owns the rendering.
     #[func]
     pub fn players_json(&self) -> GString {
-        GString::from(self.roster.players_json().to_string().as_str())
+        value_gstring(&self.roster.players_json())
     }
 
     /// Ban roster rows (`[{id, lastIP, lastName, reason, ...}]`) built from the
@@ -1030,7 +1036,7 @@ impl MindNet {
     /// D2: the relay schema carries no client addresses).
     #[func]
     pub fn bans_json(&self) -> GString {
-        GString::from(self.roster.bans_json().to_string().as_str())
+        value_gstring(&self.roster.bans_json())
     }
 
     /// Admin roster rows (`[{id, lastIP, lastName, grantedBy, grantedAt}]`)
@@ -1038,14 +1044,14 @@ impl MindNet {
     /// the player list's `open_dialog("admins")` context (`AdminsDialog`).
     #[func]
     pub fn admins_json(&self) -> GString {
-        GString::from(self.roster.admins_json().to_string().as_str())
+        value_gstring(&self.roster.admins_json())
     }
 
     /// Whitelist roster rows (`[{id, lastIP, lastName, addedBy, addedAt}]`)
     /// built from the `all_whitelist` subscription rows (`whitelist_entry`).
     #[func]
     pub fn whitelist_json(&self) -> GString {
-        GString::from(self.roster.whitelist_json().to_string().as_str())
+        value_gstring(&self.roster.whitelist_json())
     }
 
     /// Relay-assigned team for the local player (`relay_member.team`,
@@ -1114,16 +1120,15 @@ impl MindNet {
                     .unwrap_or(false),
             });
         }
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        match connector.publish_match_teams(match_id, teams) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("publish_team_data failed: {error}");
-                false
-            }
-        }
+        self.with_connector(|connector| connector.publish_match_teams(match_id, teams))
+            .map(|result| match result {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("publish_team_data failed: {error}");
+                    false
+                }
+            })
+            .unwrap_or(false)
     }
 
     /// Connected player count (player-list header).
@@ -1157,12 +1162,7 @@ impl MindNet {
             .find(query.as_str())
             .map(|entry| entry.identity)
             .unwrap_or(query);
-        GString::from(
-            self.roster
-                .trace_json(identity.as_str())
-                .to_string()
-                .as_str(),
-        )
+        value_gstring(&self.roster.trace_json(identity.as_str()))
     }
 
     /// Greatest applied `command_id` (checkpoint watermark).
@@ -1344,16 +1344,17 @@ impl MindNet {
         let Some(match_id) = self.session.match_id() else {
             return false;
         };
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        match connector.send_chat(match_id, ChatKind::All, &text.to_string()) {
+        self.with_connector(|connector| {
+            connector.send_chat(match_id, ChatKind::All, &text.to_string())
+        })
+        .map(|result| match result {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("MindNet.send_chat failed: {error}");
                 false
             }
-        }
+        })
+        .unwrap_or(false)
     }
 
     /// Sends a UI result as an opaque `Custom` relay command (plan M3/14).

@@ -90,7 +90,7 @@ impl IPanelContainer for MindWaveGraph {
     }
 
     fn ready(&mut self) {
-        self.editor = self.resolve_editor();
+        self.editor = self.editor();
         // `background(Tex.pane)`; `MindThemeBuilder._nine_patch` falls back to
         // a flat #141419 box when the region is missing.
         match self.nine_patch("pane", 12.0) {
@@ -237,20 +237,14 @@ impl MindWaveGraph {
 }
 
 impl MindWaveGraph {
-    /// The live `MindEditor` facade from the exported path.
-    fn resolve_editor(&self) -> Option<Gd<Node>> {
-        let path = self.editor_path.clone();
-        self.base().get_node_or_null(&path)
-    }
-
-    /// The stored facade, re-resolved when the exported path changed.
+    /// The stored `MindEditor` facade, re-resolved through the exported path
+    /// when it went invalid.
     fn editor(&self) -> Option<Gd<Node>> {
-        if let Some(editor) = &self.editor
-            && editor.is_instance_valid()
-        {
-            return Some(editor.clone());
-        }
-        self.resolve_editor()
+        cached_editor(
+            &self.editor,
+            &self.to_gd().upcast::<Node>(),
+            &self.editor_path,
+        )
     }
 
     /// `MindEditor.wave_graph(from, to)` (`{}` when absent/invalid).

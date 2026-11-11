@@ -28,7 +28,7 @@ impl MindEditor {
     #[func]
     pub fn bannable_content_json(&self, kind: GString) -> GString {
         let empty = "{\"categories\":[],\"rows\":[]}";
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return GString::from(empty);
         };
         let kind = Self::ban_kind(&kind.to_string());
@@ -111,8 +111,7 @@ impl MindEditor {
                 true
             }
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 false
             }
         }

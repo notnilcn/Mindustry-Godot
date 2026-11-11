@@ -111,12 +111,7 @@ impl MindUiRoot {
             let Ok(row) = entry.try_to::<VarDictionary>() else {
                 continue;
             };
-            let field = |key: &str| {
-                row.get(key)
-                    .and_then(|value| value.try_to::<GString>().ok())
-                    .map(|value| value.to_string())
-                    .unwrap_or_default()
-            };
+            let field = |key: &str| dict_text_try_or(&row, key);
             if field("kind") != "save" {
                 continue;
             }

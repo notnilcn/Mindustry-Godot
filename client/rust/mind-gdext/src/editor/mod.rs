@@ -250,6 +250,11 @@ impl MindEditor {
         }
     }
 
+    /// The content registry, or `None` before [`Self::bootstrap`] built it.
+    fn content(&self) -> Option<&ContentRegistry> {
+        self.content.as_ref()
+    }
+
     /// Records a `MapError` for the inspector / UI (`tryCatchMapError`).
     fn set_map_error(&mut self, error: &mind_core::maps::MapError) {
         let (key, message) = try_catch_map_error(error);
@@ -257,10 +262,37 @@ impl MindEditor {
         self.last_error_message = Some(message);
     }
 
+    /// Records a failed load (`@editor.errorload`) for the inspector / UI.
+    fn set_load_error(&mut self, error: impl std::fmt::Display) {
+        self.last_error_key = Some("@editor.errorload".to_owned());
+        self.last_error_message = Some(error.to_string());
+    }
+
     /// Clears the last error after a successful command.
     fn clear_error(&mut self) {
         self.last_error_key = None;
         self.last_error_message = None;
+    }
+
+    /// Runs `f` with the editor facade, a fresh [`WorldEditorGrid`] over the
+    /// owned world and the content registry. The fields are destructured so the
+    /// borrows stay split; `None` before the content boot ran.
+    fn with_world<R>(
+        &mut self,
+        f: impl FnOnce(&mut MapEditor, &mut WorldEditorGrid, &ContentRegistry) -> R,
+    ) -> Option<R> {
+        let Self {
+            content,
+            grid,
+            ecs,
+            hooks,
+            render,
+            editor,
+            ..
+        } = self;
+        let content = content.as_ref()?;
+        let mut world = WorldEditorGrid::new(grid, content, &mut ecs.0, hooks, render);
+        Some(f(editor, &mut world, content))
     }
 
     /// Marks the tile grid as changed (editor-renderer invalidation) and the
@@ -355,7 +387,7 @@ impl MindEditor {
     /// Selects the draw block by content name.
     #[func]
     pub fn set_draw_block(&mut self, name: GString) -> bool {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         match content.block_id(&name.to_string()) {
@@ -465,34 +497,14 @@ impl MindEditor {
     #[func]
     pub fn undo(&mut self) {
         self.mark_tiles_changed();
-        let Some(content) = self.content.as_ref() else {
-            return;
-        };
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        self.editor.undo(&mut world, content);
+        let _ = self.with_world(|editor, world, content| editor.undo(world, content));
     }
 
     /// Redoes one operation.
     #[func]
     pub fn redo(&mut self) {
         self.mark_tiles_changed();
-        let Some(content) = self.content.as_ref() else {
-            return;
-        };
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        self.editor.redo(&mut world, content);
+        let _ = self.with_world(|editor, world, content| editor.redo(world, content));
     }
 
     /// A copy of `editor.tags` (name/description/author/rules/genfilters/...).

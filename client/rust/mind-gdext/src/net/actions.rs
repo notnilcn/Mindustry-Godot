@@ -252,15 +252,14 @@ impl MindNet {
             log::warn!("publish_call_packet: cannot encode {packet:?}");
             return false;
         };
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        match connector.publish_call(match_id, kind, target, payload) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("publish_call failed: {error}");
-                false
-            }
-        }
+        self.with_connector(|connector| connector.publish_call(match_id, kind, target, payload))
+            .map(|result| match result {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("publish_call failed: {error}");
+                    false
+                }
+            })
+            .unwrap_or(false)
     }
 }

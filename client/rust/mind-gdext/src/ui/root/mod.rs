@@ -51,6 +51,9 @@ use godot::prelude::*;
 use super::kit::widgets::factory;
 use super::kit::{self, MindRichLabel, icons, styles};
 use crate::campaign::MindCampaign;
+use crate::gdutil::variant::{
+    dict_bool_try_or, dict_f64_relaxed_or, dict_i64_relaxed_or, dict_text_try_or,
+};
 use crate::platform::MindPlatform;
 use crate::ui::editor_views::MindMapEditorDialog;
 use crate::ui::menu_background::MindMenuBackground;
@@ -446,17 +449,11 @@ impl MindUiRoot {
         };
         // Guard is a temporary: it never spans the UI calls below.
         let result = campaign.bind_mut().check_playtest();
-        let playtest = result
-            .get("playtest")
-            .map(|value| value.try_to::<bool>().unwrap_or(false))
-            .unwrap_or(false);
+        let playtest = dict_bool_try_or(&result, "playtest", false);
         if !playtest {
             return false;
         }
-        let resumed = result
-            .get("resumed")
-            .map(|value| value.try_to::<bool>().unwrap_or(false))
-            .unwrap_or(false);
+        let resumed = dict_bool_try_or(&result, "resumed", false);
         let mut shown = false;
         if resumed && let Some(mut shell) = self.editor_dialog.clone() {
             // `beginEditMap` -> `show()`; the shell hides the standalone menu.

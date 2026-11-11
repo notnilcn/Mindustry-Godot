@@ -108,28 +108,14 @@ impl MindUiRoot {
             return "spine".to_string();
         };
         let state = campaign.bind().get_sector_state();
-        let planet = state
-            .get("planet")
-            .and_then(|value| value.try_to::<GString>().ok())
-            .unwrap_or_default()
-            .to_string();
-        let is_campaign = state
-            .get("campaign")
-            .map(|value| value.try_to::<bool>().unwrap_or(false))
-            .unwrap_or(false);
+        let planet = dict_text_try_or(&state, "planet");
+        let is_campaign = dict_bool_try_or(&state, "campaign", false);
         if is_campaign && !planet.is_empty() {
-            let sector = state
-                .get("sector")
-                .map(|value| value.try_to_relaxed::<i64>().unwrap_or(0))
-                .unwrap_or(0);
+            let sector = dict_i64_relaxed_or(&state, "sector", 0);
             return format!("{planet}-{sector}");
         }
         // I08 T4: the live custom map's name (non-campaign worlds).
-        let map_name = state
-            .get("mapName")
-            .and_then(|value| value.try_to::<GString>().ok())
-            .unwrap_or_default()
-            .to_string();
+        let map_name = dict_text_try_or(&state, "mapName");
         if !map_name.is_empty() {
             return map_name;
         }

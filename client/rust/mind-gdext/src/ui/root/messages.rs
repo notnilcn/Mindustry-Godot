@@ -37,19 +37,13 @@ impl MindUiRoot {
             let Ok(row) = row.try_to::<VarDictionary>() else {
                 continue;
             };
-            let text = row
-                .get("text")
-                .and_then(|value| value.try_to::<GString>().ok())
-                .unwrap_or_default();
+            let text = dict_text_try_or(&row, "text");
             let duration = row
                 .get("duration")
                 .and_then(|value| value.try_to_relaxed::<f32>().ok())
                 .unwrap_or(0.0);
-            let kind = row
-                .get("type")
-                .and_then(|value| value.try_to::<GString>().ok())
-                .unwrap_or_default();
-            match kind.to_string().as_str() {
+            let kind = dict_text_try_or(&row, "type");
+            match kind.as_str() {
                 // `LExecutor.java:1939-1942`: an announce is dropped while an
                 // announcement is already up (`ui.hasAnnouncement()`).
                 "announce" => {
@@ -108,10 +102,7 @@ impl MindUiRoot {
             let Ok(row) = row.try_to::<VarDictionary>() else {
                 continue;
             };
-            let text = row
-                .get("text")
-                .and_then(|value| value.try_to::<GString>().ok())
-                .unwrap_or_default();
+            let text = dict_text_try_or(&row, "text");
             if text.is_empty() {
                 continue;
             }
@@ -119,7 +110,7 @@ impl MindUiRoot {
                 .get("icon")
                 .and_then(|value| value.try_to::<GString>().ok())
                 .unwrap_or_else(|| GString::from("ok"));
-            self.on_toast(text, icon);
+            self.on_toast(GString::from(text.as_str()), icon);
         }
     }
 

@@ -12,7 +12,7 @@ impl MindEditor {
     #[func]
     pub fn processors(&self) -> Array<VarDictionary> {
         let mut out = Array::new();
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return out;
         };
         let Some(processor) = content.block_id("world-processor") else {
@@ -65,7 +65,7 @@ impl MindEditor {
     /// whole map is synthetic (`@editor.worldprocessors.nospace`).
     #[func]
     pub fn add_processor(&mut self) -> bool {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         let Some(processor) = content.block_id("world-processor") else {
@@ -76,14 +76,7 @@ impl MindEditor {
             return false;
         };
         let team = Team::get(1).id;
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        world.set_block(x, y, processor, team, 0);
+        let _ = self.with_world(|_, world, _| world.set_block(x, y, processor, team, 0));
         self.mark_tiles_changed();
         true
     }
@@ -130,7 +123,7 @@ impl MindEditor {
             return false;
         };
         let (xi, yi) = (xi as i32, yi as i32);
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         if self.grid.tiles.getn(xi, yi).is_none() {
@@ -153,14 +146,7 @@ impl MindEditor {
         } else {
             BlockId::AIR
         };
-        let mut world = WorldEditorGrid::new(
-            &mut self.grid,
-            content,
-            &mut self.ecs.0,
-            &self.hooks,
-            &self.render,
-        );
-        world.set_block(xi, yi, replacement, 0, 0);
+        let _ = self.with_world(|_, world, _| world.set_block(xi, yi, replacement, 0, 0));
         self.mark_tiles_changed();
         true
     }

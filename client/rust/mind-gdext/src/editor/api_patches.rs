@@ -372,7 +372,7 @@ impl MindEditor {
     /// `MapEditorDialog.export`: write the map with embedded data assets.
     #[func]
     pub fn export_map(&mut self, path: GString) -> bool {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         let name = self.editor.tags.get("name").cloned().unwrap_or_default();
@@ -411,7 +411,7 @@ impl MindEditor {
     /// `MapEditorDialog.exportImage`: write the color-mapped PNG.
     #[func]
     pub fn export_image(&mut self, path: GString) -> bool {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return false;
         };
         let file = Self::native_path(&path.to_string());
@@ -424,14 +424,12 @@ impl MindEditor {
                     true
                 }
                 Err(error) => {
-                    self.last_error_key = Some("@editor.errorload".to_owned());
-                    self.last_error_message = Some(error.to_string());
+                    self.set_load_error(error);
                     false
                 }
             },
             Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
+                self.set_load_error(error);
                 false
             }
         }
@@ -445,7 +443,7 @@ impl MindEditor {
     /// its milestone.
     #[func]
     pub fn save(&mut self) -> VarDictionary {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return dict(vec![
                 ("ok", false.to_variant()),
                 ("error", GString::from("no content").to_variant()),

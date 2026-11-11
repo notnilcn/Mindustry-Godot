@@ -18,7 +18,7 @@ impl MindEditor {
     #[func]
     pub fn palette_blocks(&self, search: GString) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return out;
         };
         let needle = search.to_string().to_ascii_lowercase();
@@ -33,7 +33,7 @@ impl MindEditor {
     /// One block's editor metadata (`ui_icon`, config/size flags) by name.
     #[func]
     pub fn block_info(&self, name: GString) -> VarDictionary {
-        let Some(content) = self.content.as_ref() else {
+        let Some(content) = self.content() else {
             return VarDictionary::new();
         };
         match content.block_by_name(&name.to_string()) {
