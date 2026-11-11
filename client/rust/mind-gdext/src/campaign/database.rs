@@ -132,7 +132,7 @@ impl MindCampaign {
                 if is_campaign {
                     settings_hub::with_settings(|settings| {
                         let store = SettingsUnlockStore::new(settings);
-                        mind_core::ui::campaign::block_catalog_visible(
+                        mind_core::ui::block_catalog::block_catalog_visible(
                             registry,
                             Some(&store),
                             Some(planet.as_str()),
@@ -140,7 +140,7 @@ impl MindCampaign {
                         )
                     })
                 } else {
-                    mind_core::ui::campaign::block_catalog_visible(
+                    mind_core::ui::block_catalog::block_catalog_visible(
                         registry,
                         None,
                         Some(planet.as_str()),
@@ -152,10 +152,13 @@ impl MindCampaign {
                 if is_campaign {
                     settings_hub::with_settings(|settings| {
                         let store = SettingsUnlockStore::new(settings);
-                        mind_core::ui::campaign::block_catalog_unlocked_for(&store, planet.as_str())
+                        mind_core::ui::block_catalog::block_catalog_unlocked_for(
+                            &store,
+                            planet.as_str(),
+                        )
                     })
                 } else {
-                    mind_core::ui::campaign::block_catalog_for(planet.as_str())
+                    mind_core::ui::block_catalog::block_catalog_for(planet.as_str())
                 }
             }
         };
@@ -193,14 +196,14 @@ impl MindCampaign {
     fn block_visibility_context(
         &self,
         is_campaign: bool,
-    ) -> mind_core::ui::campaign::BlockVisibilityContext {
+    ) -> mind_core::ui::block_catalog::BlockVisibilityContext {
         let host = self.host();
         let rules = host
             .as_ref()
             .and_then(|host| host.bind().live_rules())
             .unwrap_or_else(|| self.session.rules.clone());
         let mut context =
-            mind_core::ui::campaign::BlockVisibilityContext::from_rules(&rules, is_campaign);
+            mind_core::ui::block_catalog::BlockVisibilityContext::from_rules(&rules, is_campaign);
         // `BlockIndexer.blocksPresent` covers floors, overlays and blocks.
         context.core_zone_present = host.as_ref().is_some_and(|host| {
             let guard = host.bind();

@@ -243,7 +243,6 @@ impl MindDialog {
     ///
     /// 40 call sites already pass `210.0` to [`Self::add_close_button`]; this is
     /// the same button without repeating the width.
-    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
     pub fn add_default_close_button(&mut self) {
         self.add_close_button(210.0);
     }
@@ -993,11 +992,9 @@ impl MindDialog {
 /// because W2 consolidates on that key.
 impl MindDialog {
     /// Meta key carrying the request `shown` dispatches on.
-    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
     pub(crate) const REQUEST_META: &'static str = "mind_dialog_request";
 
     /// Request re-running `shown` synchronously with `request` recorded.
-    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
     pub(crate) fn request_refresh(node: &Gd<MindDialog>, request: &str) {
         let mut target = node.clone();
         target.set_meta(Self::REQUEST_META, &GString::from(request).to_variant());
@@ -1005,7 +1002,6 @@ impl MindDialog {
     }
 
     /// Deferred [`Self::request_refresh`] for callbacks that run inside a `MindUi` borrow.
-    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
     pub(crate) fn request_refresh_deferred(node: &Gd<MindDialog>, request: &str) {
         let mut target = node.clone();
         target.set_meta(Self::REQUEST_META, &GString::from(request).to_variant());
@@ -1013,7 +1009,6 @@ impl MindDialog {
     }
 
     /// Reads and clears the pending request (`""` when none is queued).
-    #[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
     pub(crate) fn take_request(dialog: &mut MindDialog) -> String {
         let mut node = dialog.to_gd();
         if !node.has_meta(Self::REQUEST_META) {

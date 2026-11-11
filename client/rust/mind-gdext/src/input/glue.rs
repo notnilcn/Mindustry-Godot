@@ -142,7 +142,7 @@ impl MindInput {
                 (!categories.is_empty()).then_some(categories)
             });
         let categories = live.unwrap_or_else(|| {
-            mind_core::ui::campaign::block_catalog()
+            mind_core::ui::block_catalog::block_catalog()
                 .categories
                 .iter()
                 .map(|category| {

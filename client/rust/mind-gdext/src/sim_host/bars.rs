@@ -7,6 +7,10 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use mind_core::content::registries::blocks::BlockDef;
 
+use super::bar_rows::{
+    BarExtras, GeneratorBars, PayloadLoaderBars, PowerBars, TurretBars, UnitCapBars,
+    building_bar_rows,
+};
 use super::*;
 
 #[godot_api(secondary)]

@@ -19,11 +19,12 @@ strings, and append-only ABIs.
 |---|---|
 | `ui/kit/` | The widget toolkit: `table.rs` (`MindTable`/`MindStack`/`Cell`), `cell.rs` (`CellData`, `Align`), `text.rs` (`MindLabel`/`MindRichLabel`/`MindIconEffect`), `scroll.rs` (`MindScroll`), `styles.rs` (constants + style lookup), `theme.rs` (`MindThemeBuilder`), `icons.rs` (`MindIcons`), `margins.rs`, `widgets/` (interactive widgets + `factory`). |
 | `ui/dialog.rs` | `MindDialog` — the one native root class for every dialog scene, plus the `DialogController` trait. |
-| `ui/dialogs/` | One controller module per dialog, dispatched by registry key. |
+| `ui/dialogs/<group>/` | One controller file per Java dialog class (`<java_snake>.rs`), dispatched by registry key; `mod.rs` owns `dispatch(id)`, group helpers live in `<group>/util.rs`, helpers two or more groups share in `dialogs/common/{defer,facade,prompt}.rs`. |
 | `ui/fragments/` | One native class per fragment scene. |
-| `ui/root.rs` | `MindUiRoot` (layer groups, manifest binding, prompts). |
+| `ui/root/mod.rs` | `MindUiRoot` (layer groups, manifest binding, prompts). |
 | `ui/checks.rs` | Headless oracles (`MindShadersCheck`, `MindUiLayoutCheck`, `MindUiWidgetsCheck`) replacing `client/tools/*.gd`; run through `client/scenes/tools/*.tscn`. |
-| `ui/planet.rs`, `ui/inspector.rs`, `ui/landing.rs`, `ui/menu.rs` | The remaining root modules (`planet_view`, `state_inspector`, `landing_core`, `menu_background`/`menu_flyers`). |
+| `ui/planet/`, `ui/state_inspector.rs`, `ui/landing.rs`, `ui/menu_background.rs`, `ui/menu_flyers.rs` | The remaining root modules (`planet_view` incl. the g3d mesh, `state_inspector`, `landing_core`, the menu background/flyers). |
+| `gdutil/` | `json` (Variant→JSON), `variant` (lenient Variant/`VarDictionary` coercion), `coords` (screen/tile) — the shared coercion layer; new UI code calls these instead of a local copy. |
 
 ## gdext 0.5 / Godot 4.7 patterns
 
@@ -124,6 +125,11 @@ impl DialogController for AboutDialog {
     fn shown(&mut self, dialog: &mut MindDialog) { /* rebuild dynamic rows */ }
 }
 ```
+
+`MindDialog::campaign()` is the dialog-side campaign accessor: the typed
+`campaign_views`/`research_tree`/`launch_plan`/`sector_state` producers are
+preferable to the JSON rows, which now only serve the database/icon-select
+reads. Campaign-group shared helpers live in `dialogs/campaign/util.rs`.
 
 `MindDialog` provides: `title_node`, `content`, `body`, `buttons_row`, `panel`,
 `dialog_id`, `t`, `tm`, `context_value`, `context_string`, `context_int`,

@@ -7,19 +7,21 @@ no wall clock, license/lints) live in [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Layout
 
-| File | Responsibility |
+| File / dir | Responsibility |
 |---|---|
-| `mod.rs` | `Sim`, `Sim::apply`/`command`/`tick`, `checksum_value`, `HintEvents`, `SimSnapshot`, `ChecksumScope`, `ConfigTapKind`. |
+| `mod.rs` | Module root: module declarations, the `pub use` surface (`SimBuilder`, `SimConfig`, `SimClock`, `FixedStepRunner`, `IoSet`, `SimRuntime`, `UnitCommandRuntime`, `WorldApplyRuntime`, …), `SimError`, `SimSnapshot`, `HintEvents`, `ChecksumScope`, `ConfigTapKind`. |
 | `boot.rs` | `SimBuilder`, `BootError`, `TickReport` and `Sim::tick_report`. |
+| `spine/` | The `impl Sim` bodies, one topic per file: `apply`, `command_dispatch`, `tick`, `checksum`, `accessors`, `event_flush`, `placement`, `construct`, `rules_world`, `world_config`, `logic_bridge`, `live_unit_cmd`, `abilities` (`drain_ability_queues_system`, `KIND_BUILDING`). |
+| `query.rs` | Shared `pub(crate)` read helpers: `sorted_by_seq`, `team_of`, `unit_def`, `tile_world`, `dist2` (see the "do not unify" note below). |
 | `schedule.rs` | Frozen `TickSet` (23) / `EntitySet` (12) order, `RunContext`, `schedule_trace`/`render_trace`, `build_sim_schedule`. |
 | `fixed.rs` | `SIM_STEP` and `FixedStepRunner` frame accumulator/catch-up. |
 | `clock.rs` | `SimClock`/`RunQueue`: tick clock, delayed runs, lazy cancellation. |
 | `config.rs` | `SimConfig` knobs (fixed Hz, catch-up, seed, workers, order trace). |
 | `command.rs` | Relay-side `UnitCommandRuntime`; `pack_wire_target`/`resolve_wire_target`. |
 | `world_apply.rs` | Relay-side `WorldApplyRuntime`: inventories, build plans, commanded buildings, digest. |
-| `runtime.rs` | Opt-in plan-07 `SimRuntime`: `BlockTable`/`PowerGrids` install, live place/break/config, post-tick passes. |
-| `unit_runtime.rs` | Opt-in plan-11 `UnitRuntime`: units/bullets/waves, player possession/respawn/payload, scheduled systems. |
-| `builder.rs` | `BuilderPlans`/`UnitBuildPlan`: player build queue and `BuilderComp.updateBuildLogic` pass. |
+| `runtime/` | Opt-in plan-07 `SimRuntime` (`mod.rs`: `SimRuntime`, `SimRuntimeConfig`, re-exports); children `install`, `load`, `passes`, `block_runtime`, `teams`, `tile_ops`, `materialize`, `dynamic_consume`, `campaign`, `hooks`, `tests`. |
+| `unit_runtime/` | Opt-in plan-11 `UnitRuntime` (`mod.rs`: `UnitRuntime`, `unit_by_id`, `TILE_SIZE`, `UNIT_SEQ_BASE`); children `payload_units`, `command_queue`, `deaths`, `install`, `combat_glue`, `player`, `debug`, `physics`, `update`, `systems`, `waves`, `payload_cmds`, `targeting`, `ai_weapons`, `ai/` (AI controller bodies), `ai_arms/` (the `unit_update_system` dispatch arms, one file per kind) and the test modules. |
+| `builder/` | `BuilderPlans`/`UnitBuildPlan` (`mod.rs`) plus `queue`, `checks`, `update`: player build queue and the `BuilderComp.updateBuildLogic` pass. |
 | `fog.rs` | `FogControl` glue: reset on load/rules, per-tick update, static mask, view seams. |
 | `player_items.rs` | Live player-unit item withdraw/deposit/drop with Java range/team checks. |
 | `accelerator.rs` | Interplanetary Accelerator `canLaunch`/launch campaign half. |
@@ -28,10 +30,33 @@ no wall clock, license/lints) live in [`mind-core/AGENTS.md`](../../AGENTS.md).
 | `reset.rs` | `play`/`pause`/`resume`/`reset` flows. |
 | `io_set.rs` | `IoQueue`/`IoSet`/`IoHandler` save-load boundaries, `DeferringIoHandler`. |
 | `dump.rs` | `StateDump` JSON schema and canonical builder. |
+| `test_support.rs` | Test-only fixtures shared by the sim suites (`live_sim_seeded`, `live_sim`, `runtime_sim`, `tick_n`, `place_at`, `place_team1`, `unit_content_block`, `campaign_runtime`, …). |
 | `tests.rs` | Test-only P0 spine/determinism/dump suites. |
-| `combat_tests.rs` | Test-only live combat/unit fixtures shared by sibling test modules (`combat_tests::live_sim`). |
-| `production_tests.rs` | Test-only production/block-runtime suites. |
-| `logic_campaign_tests.rs` | Test-only logic/campaign runtime suites. |
+| `spine_tests/` | Test-only suites split out of `mod.rs`: `logic_sink_tests`, `team_ai_host_tests`, `ability_queue_tests`, `relay_player_team_tests`. |
+| `combat_tests/` | Test-only live combat/unit fixtures (`mod.rs`: `live_sim` and helpers) plus 19 topic files. |
+| `production_tests/` | Test-only production/block-runtime suites (`mod.rs` plus 17 topic files). |
+| `logic_campaign_tests/` | Test-only logic/campaign runtime suites (`mod.rs` plus 7 topic files). |
+
+### The nine core lookups — do not unify
+
+`sim` spells the "find a core" read nine ways on purpose. They differ in predicate, marker and
+tie-break, so a shared helper would change behaviour; keep each local copy (H08 report):
+
+| Function | File | Predicate | Selection / tie-break |
+|---|---|---|---|
+| `has_core_of_team` | `unit_runtime/deaths.rs` | `TeamComp == team` + block content kind `BlockKind::CoreBlock` | `any` (archetype order) |
+| `closest_enemy_core` | `unit_runtime/targeting.rs` | `BuildingComp.team != team`, not derelict, `CoreBuild` marker | min `dist2`, tie `entity.index()` |
+| `closest_core_of_team` | `unit_runtime/targeting.rs` | `CoreBuild` marker + `TeamComp == team` | min `dist2`, tie `entity.index()` |
+| `best_core_for_player` | `unit_runtime/player.rs` | `CoreBuild` + `TeamComp == team`; unsupported-env cores dropped when >1 core | max `size`, then min `dst2` (no index tie-break) |
+| `enemy_core_targets` | `unit_runtime/targeting.rs` | `BuildingComp.team != team`, not derelict, `CoreBuild` marker | `sort_by_key((y, x))` + dedup; spawn tiles appended+dedup when `waves && default_team == team` |
+| `builder::team_core` | `builder/checks.rs` | `CoreBuild` + `TeamComp == team` | lowest `EntitySeq` (`u64::MAX` if missing) |
+| `builder::team_has_core` | `builder/queue.rs` | `team_core(..).is_some()` | delegates |
+| `runtime::team_core_positions` | `runtime/teams.rs` | `CoreBuild` + `TeamComp == team` + `Building` | raw archetype order (unsorted) |
+| `sim::is_own_core` | `spine/placement.rs` | `TeamComp == player_team` + `Building` + block-runtime instance kind `CoreBlock` | bool, first match |
+
+The same rule applies to `building_center`: `unit_runtime/targeting.rs` prefers the stored `Pos`,
+while `logic/executor/unit_control.rs` recomputes `tile * tilesize + block.offset` from `Building`.
+Their fallbacks differ, so both stay (RULES §4).
 
 ## Contracts
 

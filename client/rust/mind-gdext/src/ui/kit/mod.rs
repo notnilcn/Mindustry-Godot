@@ -12,7 +12,7 @@
 //! text and atlas lookups always route through the `MindAssets` autoload so no
 //! call site re-implements the fallback rules.
 
-use godot::classes::{Engine, Node, SceneTree, Texture2D, VBoxContainer};
+use godot::classes::{Engine, Node, SceneTree, Texture2D};
 use godot::obj::Singleton;
 use godot::prelude::*;
 
@@ -168,24 +168,11 @@ pub fn markup_text(raw: &str) -> GString {
 /// Removes and frees every child of `node`.
 ///
 /// Body from `ui/dialogs/batch_f.rs:158` (used by the editor-data batch).
-#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
 pub fn clear_children<T: Inherits<Node>>(node: &mut Gd<T>) {
     let mut parent: Gd<Node> = node.clone().upcast();
     for child in parent.get_children().iter_shared() {
         let mut child = child.clone();
         parent.remove_child(&child);
-        child.queue_free();
-    }
-}
-
-/// Frees every child of `node` without removing it first (the parent is going
-/// away or re-adds them in the same frame).
-///
-/// Body from `ui/fragments/player_list.rs:927`.
-#[allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
-pub fn queue_free_children(node: &Gd<VBoxContainer>) {
-    for child in node.get_children().iter_shared() {
-        let mut child = child.clone();
         child.queue_free();
     }
 }

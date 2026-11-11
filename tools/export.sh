@@ -83,9 +83,9 @@ ensure_packed_assets() {
 #   music/              gdext/audio/streams.rs (music/*)
 #   maps/               gdext/assets/loader.rs (assets_maps_dir, preset maps)
 #   shaders/            gdext/render/shaders.rs (shader.index.json, godot/)
-#   baseparts/          gdext/sim_host.rs (base schematics)
+#   baseparts/          gdext/sim_host/world_load.rs (base schematics)
 #   cursors/            gdext/assets/atlas.rs (cursors/<name>.png)
-#   planets/            gdext/campaign.rs (assets/planets/<name>.json)
+#   planets/            gdext/campaign/planet_view.rs (assets/planets/<name>.json)
 #   contributors        gdext/assets/atlas.rs (contributors file)
 #   sounds.index.json   gdext/assets/audio.rs
 # Never shipped: assets/parity, assets-raw, assets/scripts (Java JS),

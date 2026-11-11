@@ -518,7 +518,7 @@ impl DesktopBridge {
         }
     }
 
-    /// Replaces the catalogue from `mind_core::ui::campaign::block_catalog`.
+    /// Replaces the catalogue from `mind_core::ui::block_catalog`.
     pub fn set_catalog(&mut self, catalog: Vec<Vec<String>>) {
         self.catalog = catalog;
         if self.catalog_category >= self.catalog.len() {

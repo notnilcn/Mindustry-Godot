@@ -20,7 +20,6 @@ type DeferredAction = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
 /// from inside a `MindUi` method, so the answering handler must not call back
 /// into the facade synchronously: `Gd::bind_mut` panics on a re-entrant borrow
 /// (`PAR-0066`).
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 pub(crate) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) {
     let slot: DeferredAction = Rc::new(RefCell::new(Some(Box::new(action))));
     let callable = Callable::from_fn(name, move |_args: &[&Variant]| {
@@ -40,10 +39,8 @@ pub(crate) fn defer_action(name: &'static str, action: impl FnOnce() + 'static) 
 // A boxed one-shot closure; naming the alias would not make the type simpler.
 #[allow(clippy::type_complexity)]
 #[derive(Clone, Default)]
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 pub(crate) struct Deferred(Rc<RefCell<Vec<Box<dyn FnMut()>>>>);
 
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 impl Deferred {
     pub(crate) fn push(&self, action: impl FnMut() + 'static) {
         self.0.borrow_mut().push(Box::new(action));
@@ -61,7 +58,6 @@ impl Deferred {
 ///
 /// `dialog` is `&mut MindDialog` rather than `&Gd<MindDialog>`: every caller
 /// already runs inside `bind_mut`, and re-binding the same object panics.
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 pub(crate) fn install_frame_tick(
     dialog: &mut MindDialog,
     meta_prefix: &str,

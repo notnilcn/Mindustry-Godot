@@ -65,7 +65,7 @@ HELPERS: dict[str, str] = {
     "ui/theme/theme_builder.gd": "ui/kit/theme.rs",
     "ui/layout/tree_layout.gd": "ui/kit/layout.rs",
     "ui/layout/row_tree_layout.gd": "ui/kit/layout.rs",
-    "ui/dialogs/map_list_dialog.gd": "ui/dialogs/batch_campaign2.rs",
+    "ui/dialogs/map_list_dialog.gd": "ui/dialogs/maps/map_list.rs",
     "tools/shaders_check.gd": "ui/checks.rs",
     "tools/ui_layout_check.gd": "ui/checks.rs",
     "tools/ui_widgets_check.gd": "ui/checks.rs",

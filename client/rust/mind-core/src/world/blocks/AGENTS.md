@@ -21,7 +21,7 @@ the repo map is the root [`AGENTS.md`](../../../../../../AGENTS.md).
 | `liquid/` | Conduit/router/junction behaviors, `LiquidNode`, `movement` primitives, `LiquidFlowCache`, bridges. |
 | `heat/` | Erekir heat network: `HeatState`, `HeatConductor`, `HeatCrafter`, `calculate_heat`, producer ramp. |
 | `payloads/` | Payload core (`PayloadRef`, `PayloadHolder`, `PayloadCarried`) plus conveyors, loaders, unloaders, routers, constructors/deconstructors, block producers, sources and voids. |
-| `defense/` | Projector/shield family (`behaviors.rs`, `projectors.rs`, `shields.rs`) and `turrets/` targeting/shooting; turret save lives in `turrets/save.rs`. |
+| `defense/` | Projector/shield family (`behaviors.rs`, `projectors.rs`, `shields.rs`) and `turrets/`, split into `types`/`config`/`ammo`/`targeting`/`behavior`/`advanced`/`update`/`build_turret`/`save`/`math` plus tests. |
 | `units/` | Unit-producing blocks: factories, reconstructors, assemblers/modules, repair tower/turret, cargo loader/unload point. |
 | `production.rs` | Content-dependent production registrations: drills (`DrillBehavior`) and wall miners/plasma bores (`BeamDrillBehavior`) that read the item-hardness/wall-ore tables. |
 

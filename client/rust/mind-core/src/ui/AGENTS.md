@@ -22,7 +22,8 @@ rules are in [`mind-core/AGENTS.md`](../../AGENTS.md); the repo map is the root
 | `builder/ui_relay.rs` | `format: 1` relay codecs (`MenuBuilderShow/Update`, `TextInput`, `InfoPopup`, `WorldLabel`, `WarningToast`, `PingMarker`) and `wire_fixtures`. |
 | `builder/style_lookup.rs` | `StyleLookup`/`StyleKind` resolution plus `scan_style_references` over GDScript/`.tscn`. |
 | `builder/hot_reload.rs` | `.msui` mtime debounce and error-line/source extraction. |
-| `campaign.rs` | Campaign read models (`CampaignViews` and `PlanetView`/`SectorView`/`ResearchView`/`SchematicView`/`LoadoutView`/`CampaignRulesView`/`CampaignCompleteView`/`MapEntryView`) with `vanilla_fixture`/`empty`. |
+| `campaign/` | Campaign read models: `mod.rs` keeps `CampaignViews` (`PlanetView`/`SectorView`/`LoadoutView`/`CampaignRulesView`/`CampaignCompleteView`/`MapEntryView`) with `vanilla_fixture`/`empty` and the `CampaignText` bundle seam; `research_tree.rs`, `launch_plan.rs` and `sector_state.rs` build the typed views the campaign dialogs read (`ResearchTreeView`, `LaunchPlanView`, `SectorStateView`). |
+| `block_catalog.rs` | The block palette catalogue (blocks grouped by category/mode) the block picker reads. |
 | `chat.rs` | `ChatState`, `ChatMode`, `ChatSend`, `Ping` and `check_ping`. |
 | `console.rs` | `ConsoleRegistry`/`ConsoleCommand`/`ConsoleEntry` line dispatch and `help_text`. |
 | `content_stats/` | Content-info (`?`) stat model: `Stats`/`Stat`/`StatCat`/`StatUnit`/`Cell`, base block/item/liquid stats and the `logistics`/`production`/`turret_ammo`/`unit_blocks`/`unit_stats`/`values` bodies. |
@@ -54,7 +55,8 @@ rules are in [`mind-core/AGENTS.md`](../../AGENTS.md); the repo map is the root
 - Builder: `builder::ui_node::{UiNode, UiEntry, UiValue}`, `builder::ui_key::UiKey`,
   `builder::dsl::{parse, DslError}`, `builder::menu_host::{MenuHost, MenuSelection}`,
   `builder::menu_result::MenuResult`, `builder::ui_relay::{RelayCommand, wire_fixtures}`.
-- Models: `campaign::CampaignViews`, `content_stats::Stats`, `hud_text::HudStatus`,
+- Models: `campaign::CampaignViews` and its typed `ResearchTreeView`/`LaunchPlanView`/`SectorStateView`,
+  `content_stats::Stats`, `hud_text::HudStatus`,
   `display::HoverInfo`, `player_list::PlayerListModel`, `file_chooser::FileChooserParams`,
   `prompts::TextInputSpec`, `settings::SettingRow`, `tree_layout::LayoutNode`.
 - Formatting: `text::{render_markup, format_icons, format_amount}`, `stat_display::StatDisplay`.

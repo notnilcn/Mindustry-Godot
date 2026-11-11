@@ -90,26 +90,28 @@ Foundation (`client/rust/mind-gdext/src/ui/`):
 - `dialog.rs` — `MindDialog` base (title/underline/full-dialog/button row,
   show/hide fade, context, campaign helpers, per-dialog signal union,
   `DialogController` trait).
-- `dialogs/` — **59/59 manifest controllers**: `simple` (about, credits,
-  discord, full_text), `misc` (list_select, bans, admins, traces,
-  campaign_complete), `sector` (sector_select, research_root_select, palette),
-  `batch_a` (settings, language, controls, effects, database, content),
-  `batch_b` (paused, restart, join), `batch_c` (planet, onplanet),
-  `batch_campaign2` (research, schematics, loadout, launch_loadout,
-  sector_stats, custom/map_play + the shared `MapListDialog` base),
-  `batch_d` (widget_gallery, editor_import/export, file_chooser, icon_select,
-  editor_menu, editor_map), `batch_e` (map_info, map_resize,
-  map_generate, wave_info, map_objectives, map_locales), `batch_f`
-  (map_processors, map_load, sector_generate, banned_content, map_assets,
-  schematic_info), `batch_g` (picker, mods, mod_browser), `batch_h` (host, load,
-  save, campaign_rules), `batch_i` (custom_rules, editor_maps, canvas_edit),
-  `batch_j` (logic, the full mlog editor + `MindLogicOverlay`).
+- `dialogs/` — **59/59 manifest controllers**, grouped by upstream dialog
+  family (the pre-split `batch_*`/`misc`/`sector`/`simple` files were deleted
+  in C01; `ui/dialogs/mod.rs::controller_for` is the authoritative dispatch
+  order): `menu/` (about, credits, discord, full_text), `settings/`
+  (settings_menu, language, keybind), `database/` (database_dialog,
+  content_info, effects), `game/` (paused, game_over, load), `net/` (host,
+  bans, admins, roster, trace, list_select), `campaign/` (planet/ + onplanet,
+  sector_select, sector_stats, research, research_root_select, launch_loadout,
+  loadout, campaign_rules, campaign_complete), `maps/` (custom_game,
+  map_list, map_play and the shared `MapListDialog` base), `schematics/`
+  (schematics_dialog, schematic_info, files, subdialogs, import_export),
+  `pickers/` (color_picker, file_chooser, icon_select, palette), `editor/`
+  (editor_import/export/menu/map/maps, map_info/resize/generate/load/
+  processors, wave_info, sector_generate, banned_content, map_assets/),
+  `dev/` (widget_gallery), `rules/` (custom_rules/), `logic/` (canvas_edit),
+  `mods/` (mods_dialog, mods_list, mods_detail, mods_import, mod_browser).
 - `fragments/` — all 14 (performance, fade_in, loading, menu, plan_config, hud,
   minimap, placement, block_config, block_inventory, hints, chat, console,
   player_list).
-- Roots and views: `root.rs` (`MindUiRoot`), `planet.rs` (`MindPlanetView`),
+- Roots and views: `root/mod.rs` (`MindUiRoot`), `planet/` (`MindPlanetView`),
   `landing.rs` (`MindLandingCore`), `state_inspector.rs`,
-  `menu_background.rs`, `menu_flyers.rs`, and `editor_views.rs`
+  `menu_background.rs`, `menu_flyers.rs`, and `editor_views/`
   (`MindMapEditorDialog`, `MindMapView`, `MindWaveGraph` on a `PanelContainer`
   base, `MindMapObjectivesCanvas`).
 - `checks.rs` — the `client/tools/*.gd` oracles as native scene roots:

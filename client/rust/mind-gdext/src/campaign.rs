@@ -1,8 +1,9 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `MindCampaign` autoload (plan 12 M8/§3.9): the GDScript-callable campaign
-//! facade.
+//! `MindCampaign` autoload: the Godot-callable campaign facade (the `#[func]`
+//! surface is consumed by the MCP oracle and the native dialogs; no GDScript
+//! ships).
 //!
 //! Campaign state, play flows, objectives, tech and schematics all live in
 //! `mind_core::game`; this node is the thin Godot shell the MCP oracle and the

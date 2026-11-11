@@ -5,6 +5,7 @@
 
 use super::scenario::{read_golden_checksums, write_dump};
 use super::*;
+use crate::stats::percentile;
 
 /// Plan 05 §7.2: `sim_core_reset_play_cycle` — groups/clock/entities must return
 /// to baseline on every `reset`, and `play` must resume the fixed step.
@@ -514,10 +515,4 @@ pub(super) fn cmd_dump(
         json.len()
     );
     Ok(EXIT_PASS)
-}
-
-pub(super) fn percentile(samples: &[u64], percent: usize) -> u64 {
-    debug_assert!(!samples.is_empty());
-    let index = (samples.len() * percent / 100).min(samples.len().saturating_sub(1));
-    samples.get(index).copied().unwrap_or(0)
 }

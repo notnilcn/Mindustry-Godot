@@ -5,19 +5,20 @@
 //         CustomGameDialog,EditorMapsDialog,CampaignCompleteDialog,CampaignRulesDialog}.java
 //         (plan 14 M5).
 
-//! Campaign dialog read models (plan 14 M5).
+//! Campaign dialog read models.
 //!
-//! Godot-free view structs + builders that consume the plan-12 read APIs
+//! Godot-free view structs + builders that consume the core read APIs
 //! (`Universe`/`Campaign`/`Planet`/`Sector`, `CampaignRules`/`Difficulty`,
-//! `Schematics`, `TechStore`, `CampaignStats`). Rust owns the UI: the native
-//! dialogs in `mind-gdext/src/ui/` read the serialized form through the
-//! `MindUi.campaign_views()` / `MindCampaign.campaign_views_json()` seam (there
-//! is no GDScript), and `mind-headless ui campaign` renders the same structs
-//! against a committed golden so the data contract is asserted without Godot or
-//! a live world.
+//! `Schematics`, `TechStore`, `CampaignStats`). Rust owns the UI: the campaign
+//! dialogs in `mind-gdext/src/ui/dialogs/campaign/` consume the typed views
+//! (`campaign/mod.rs`, `research_tree`, `launch_plan`, `sector_state`) through
+//! `MindCampaign`/`MindDialog::campaign()`; the `campaign_views_json()` seam
+//! remains for the database/icon-select reads. `mind-headless ui campaign`
+//! renders the same structs against a committed golden so the data contract is
+//! asserted without Godot or a live world.
 //!
 //! `.tscn` scenes name the native UI classes and carry static layout only; this
-//! module owns the data projection and formatting (plan 14 §3.10 rule 2).
+//! module owns the data projection and formatting.
 
 use serde::Serialize;
 
@@ -32,8 +33,6 @@ use crate::game::sector::Sector;
 use crate::game::tech_tree;
 use crate::game::universe::Campaign;
 use crate::io::json::rules::ExportStat;
-
-pub use crate::ui::block_catalog::*;
 
 mod launch_plan;
 mod research_tree;

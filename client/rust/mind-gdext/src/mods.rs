@@ -1,16 +1,16 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `MindMods` autoload (plan 20 M6/§3.9): the GDScript-callable mod service.
+//! `MindMods` autoload: the Godot-callable mod service.
 //!
 //! Discovery/metadata/dependencies live in `mind_core::mods`; this node is the
 //! thin Godot shell that scans `user://mods`, persists enable flags and exposes
 //! the `list/import/set_enabled/remove/requires_reload/errors/mod_strings` API
-//! plus `mods_changed`/`mod_error` signals for the plan-14 dialogs.
+//! plus `mods_changed`/`mod_error` signals for the mods dialogs.
 //!
-//! The `ModsDialog`/`ModBrowserDialog` widgets themselves are plan 14 (not
-//! landed); the browser's HTTP + `.zip` download stay in GDScript. In-engine
-//! MCP verification is deferred to the orchestrator's single-editor mutex.
+//! The browser's HTTP + `.zip` download stay in this node's import path (there
+//! is no GDScript). In-engine MCP verification is deferred to the orchestrator's
+//! single-editor mutex.
 
 use std::path::PathBuf;
 

@@ -213,39 +213,6 @@ pub fn file_stem(path: &str) -> &str {
     }
 }
 
-/// `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`), item maps
-/// keyed by content name.
-///
-/// Returns the launch resources to stage (`resources.min(capacity)`, the
-/// `max` recomputation from the launcher's stored items minus the schematic
-/// cost, or the destination preset loadout when the destination forbids a
-/// launch loadout) and whether the launcher can pay `requirements +
-/// resources` (`valid`). Delegates to [`launch_plan_full`], which returns the
-/// same two values plus the `total` charge.
-#[allow(clippy::too_many_arguments)]
-pub fn launch_plan(
-    stored: &IndexMap<String, i32>,
-    requirements: &IndexMap<String, i32>,
-    resources: &IndexMap<String, i32>,
-    capacity: i32,
-    max: bool,
-    allow_launch_loadout: bool,
-    preset_loadout: &IndexMap<String, i32>,
-    all_items: &[String],
-) -> (IndexMap<String, i32>, bool) {
-    let plan = launch_plan_full(
-        stored,
-        requirements,
-        resources,
-        capacity,
-        max,
-        allow_launch_loadout,
-        preset_loadout,
-        all_items,
-    );
-    (plan.resources, plan.valid)
-}
-
 /// [`launch_plan_full`]'s result: the staged launch resources, the `total`
 /// charge the launcher must pay and whether it can pay it.
 #[derive(Debug, Clone, PartialEq)]
@@ -258,8 +225,14 @@ pub struct LaunchPlan {
     pub valid: bool,
 }
 
-/// [`launch_plan`] plus the `total` charge (`requirements + resources`), so the
-/// caller that removes the launch cost does not recompute it.
+/// `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`) plus the
+/// `total` charge (`requirements + resources`), so the caller that removes the
+/// launch cost does not recompute it.
+///
+/// Returns the launch resources to stage (`resources.min(capacity)`, the `max`
+/// recomputation from the launcher's stored items minus the schematic cost, or
+/// the destination preset loadout when the destination forbids a launch
+/// loadout), the `total` charge and whether the launcher can pay it (`valid`).
 ///
 /// Upstream: `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`)
 /// and its `total` (`LaunchLoadoutDialog.java:79-84`, `PlanetDialog.playSelected`
@@ -268,8 +241,7 @@ pub struct LaunchPlan {
 /// `launch_total` (`mind-gdext campaign.rs:7515` at 291e30a8; adopted by X01).
 ///
 /// `total` uses the facade `launch_total` shape (zero-amount staged resources
-/// are not entries); `valid` therefore matches [`launch_plan`]'s, since a zero
-/// entry can never fail the `stored >= amount && amount >= 0` test.
+/// are not entries).
 #[allow(clippy::too_many_arguments)]
 pub fn launch_plan_full(
     stored: &IndexMap<String, i32>,
@@ -1292,7 +1264,7 @@ mod tests {
         let requirements = IndexMap::from([("copper".to_owned(), 1000), ("lead".to_owned(), 800)]);
         let resources = IndexMap::new();
         let all_items = vec!["copper".to_owned(), "lead".to_owned()];
-        let (out, valid) = launch_plan(
+        let plan = launch_plan_full(
             &stored,
             &requirements,
             &resources,
@@ -1302,15 +1274,15 @@ mod tests {
             &IndexMap::new(),
             &all_items,
         );
-        assert_eq!(out.get("copper").copied(), Some(2000));
-        assert_eq!(out.get("lead").copied(), Some(1200));
-        assert!(valid, "launcher holds requirements + resources");
+        assert_eq!(plan.resources.get("copper").copied(), Some(2000));
+        assert_eq!(plan.resources.get("lead").copied(), Some(1200));
+        assert!(plan.valid, "launcher holds requirements + resources");
     }
 
     #[test]
     fn launch_plan_invalid_when_short() {
         let requirements = IndexMap::from([("copper".to_owned(), 1000)]);
-        let (out, valid) = launch_plan(
+        let plan = launch_plan_full(
             &IndexMap::new(),
             &requirements,
             &IndexMap::new(),
@@ -1320,8 +1292,8 @@ mod tests {
             &IndexMap::new(),
             &["copper".to_owned()],
         );
-        assert_eq!(out.get("copper").copied(), Some(0));
-        assert!(!valid, "empty launcher cannot pay the schematic cost");
+        assert_eq!(plan.resources.get("copper").copied(), Some(0));
+        assert!(!plan.valid, "empty launcher cannot pay the schematic cost");
     }
 
     #[test]
@@ -1330,7 +1302,7 @@ mod tests {
         // stages the destination preset's map `rules.loadout` instead.
         let stored = IndexMap::from([("copper".to_owned(), 500)]);
         let preset = IndexMap::from([("copper".to_owned(), 50), ("lead".to_owned(), 0)]);
-        let (out, valid) = launch_plan(
+        let plan = launch_plan_full(
             &stored,
             &IndexMap::from([("lead".to_owned(), 25)]),
             &IndexMap::from([("copper".to_owned(), 100)]),
@@ -1340,9 +1312,9 @@ mod tests {
             &preset,
             &["copper".to_owned(), "lead".to_owned()],
         );
-        assert_eq!(out.len(), 1);
-        assert_eq!(out.get("copper").copied(), Some(50));
-        assert!(!valid, "lead 25 is not stored");
+        assert_eq!(plan.resources.len(), 1);
+        assert_eq!(plan.resources.get("copper").copied(), Some(50));
+        assert!(!plan.valid, "lead 25 is not stored");
     }
 
     #[test]
@@ -2026,24 +1998,14 @@ mod tests {
         assert_eq!(campaign.sector(erekir, 0).unwrap().save, None);
     }
 
-    /// `launch_plan_full` keeps `launch_plan`'s outputs and adds the facade
-    /// `launch_total` (zero staged entries omitted).
+    /// `launch_plan_full` returns the staged resources, the `total` charge
+    /// (zero staged entries omitted) and `valid`.
     #[test]
-    fn launch_plan_full_matches_launch_plan_and_total() {
+    fn launch_plan_full_total_and_valid() {
         let stored = IndexMap::from([("copper".to_owned(), 3000), ("lead".to_owned(), 2000)]);
         let requirements = IndexMap::from([("copper".to_owned(), 1000), ("lead".to_owned(), 800)]);
         let resources = IndexMap::from([("copper".to_owned(), 400), ("silicon".to_owned(), 0)]);
         let all_items = vec!["copper".to_owned(), "lead".to_owned()];
-        let (legacy, legacy_valid) = launch_plan(
-            &stored,
-            &requirements,
-            &resources,
-            2000,
-            true,
-            true,
-            &IndexMap::new(),
-            &all_items,
-        );
         let plan = launch_plan_full(
             &stored,
             &requirements,
@@ -2054,8 +2016,6 @@ mod tests {
             &IndexMap::new(),
             &all_items,
         );
-        assert_eq!(plan.resources, legacy);
-        assert_eq!(plan.valid, legacy_valid);
         assert!(plan.valid);
         // Max on: copper 3000-1000 capped at 2000, lead 2000-800=1200.
         assert_eq!(plan.total.get("copper"), Some(&3000));
@@ -2065,16 +2025,6 @@ mod tests {
 
         // A short launcher still reports invalid, and a preset loadout replaces
         // the staged resources.
-        let (legacy, legacy_valid) = launch_plan(
-            &IndexMap::new(),
-            &requirements,
-            &resources,
-            2000,
-            false,
-            false,
-            &IndexMap::from([("copper".to_owned(), 50)]),
-            &all_items,
-        );
         let plan = launch_plan_full(
             &IndexMap::new(),
             &requirements,
@@ -2085,8 +2035,6 @@ mod tests {
             &IndexMap::from([("copper".to_owned(), 50)]),
             &all_items,
         );
-        assert_eq!(plan.resources, legacy);
-        assert_eq!(plan.valid, legacy_valid);
         assert!(!plan.valid);
         assert_eq!(plan.resources.len(), 1);
         assert_eq!(plan.resources.get("copper"), Some(&50));

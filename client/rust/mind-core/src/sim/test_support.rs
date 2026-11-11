@@ -6,7 +6,6 @@
 //! fixtures used (`combat_tests`, `production_tests`, `logic_campaign_tests`)
 //! before W2 adopted them.
 //! Upstream: none (port-only test support).
-#![allow(dead_code)] // adopted in W2
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::Mut;
@@ -186,11 +185,6 @@ pub(crate) fn feed_turret(sim: &mut Sim, turret: Entity, item_name: &str, amount
         );
         transfer::dispatch_handle_item(world, turret, turret, ammo);
     }
-}
-
-/// One live unit spawned at `(x, y)` with rotation 0 (`spawn_live_unit`).
-pub(crate) fn spawn(sim: &mut Sim, name: &str, team: u8, x: f32, y: f32) -> Entity {
-    sim.spawn_live_unit(name, team, x, y, 0.0).expect("unit")
 }
 
 /// `logic_campaign_tests::runtime` (:93): the live campaign runtime.

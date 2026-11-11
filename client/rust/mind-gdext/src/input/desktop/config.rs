@@ -175,11 +175,14 @@ impl DesktopBridge {
         // custom/campaign context (`block_catalog_from`).
         let visibility = {
             let mut context = match rules.as_ref() {
-                Some(rules) => {
-                    mind_core::ui::campaign::BlockVisibilityContext::from_rules(rules, in_campaign)
+                Some(rules) => mind_core::ui::block_catalog::BlockVisibilityContext::from_rules(
+                    rules,
+                    in_campaign,
+                ),
+                None if in_campaign => {
+                    mind_core::ui::block_catalog::BlockVisibilityContext::campaign()
                 }
-                None if in_campaign => mind_core::ui::campaign::BlockVisibilityContext::campaign(),
-                None => mind_core::ui::campaign::BlockVisibilityContext::sandbox(),
+                None => mind_core::ui::block_catalog::BlockVisibilityContext::sandbox(),
             };
             // `indexer.isBlockPresent(Blocks.coreZone)` (`coreZoneOnly`).
             context.core_zone_present =

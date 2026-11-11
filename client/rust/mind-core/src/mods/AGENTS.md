@@ -23,9 +23,9 @@ while Java-class mods stay `Enabled` with an `UnsupportedReason` so JSON/assets 
 | `script.rs` | `ScriptHost`/`ScriptError` seam and `NoScriptHost` (engine name `"none"`). |
 | `server.rs` | Join-handshake values: `ModFingerprint`, `RequiredMods`, `ExternalAssetRef`, `AssetTransport`/sink traits. |
 | `catalog.rs` | `content_catalog` rows (`content_type`, name, `source_mod`) in the server-seed compact order. |
-| `patch/` | `DataPatcher` replace-only JSON patching (`@NoPatch`, planet gating, `unapply`), `collect_mod_patches`/`load_mod_patches`, `fix_content_arrays`. |
+| `patch/` | `DataPatcher` replace-only JSON patching (`@NoPatch`, planet gating, `unapply`), `collect_mod_patches`/`load_mod_patches`, `fix_content_arrays`; children `block`/`content`/`unit` (per-kind patches), `scalar` (the `push_reset` scalar resetters), `load` (file collection), `tests`. |
 | `assets/` | `DataAsset` records + binary codec, sha256 `DataAssetCache`, `ModDataManager` lifecycle and bundle/audio/image appliers. |
-| `json/` | `ContentJsonParser` for the nine content kinds; `classmap.rs` plus GENERATED `classmap_gen.rs`. |
+| `json/` | `ContentJsonParser` for the nine content kinds; children `block`/`unit`/`bullet`/`draw`/`effect`/`consume` (per-kind parse), `content` (shared envelope), `resolve` (reference resolution), `fields` (the `set_*s` field writers), `classmap.rs` plus GENERATED `classmap_gen.rs`, `tests`. |
 
 ## Load flow
 

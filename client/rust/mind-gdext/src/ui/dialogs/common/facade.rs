@@ -11,7 +11,6 @@ use crate::ui::kit;
 use crate::ui::kit::MindLabel;
 
 /// Calls one `MindUi` method (`None` when the facade or method is absent).
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 pub(crate) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
     let mut ui = kit::ui()?;
     if !ui.has_method(method) {
@@ -21,7 +20,6 @@ pub(crate) fn ui_call(method: &str, args: &[Variant]) -> Option<Variant> {
 }
 
 /// One `MindLabel`'s engine handle (text/colour/wrap on a rich label).
-#[allow(dead_code)] // adopted in W2 (docs/PLANS)
 pub(crate) fn rich(label: &Gd<MindLabel>) -> Gd<RichTextLabel> {
     label.clone().upcast()
 }

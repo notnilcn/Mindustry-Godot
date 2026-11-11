@@ -208,7 +208,7 @@ pub(super) fn mods_content_icon(entry: &VarDictionary) -> Gd<Button> {
         let callable = Callable::from_fn("mods_content_info", move |_args: &[&Variant]| {
             let name = content_name.clone();
             defer_action("mods_content_info_now", move || {
-                crate::ui::dialogs::batch_a::open_content_info(&name);
+                crate::ui::dialogs::settings::util::open_content_info(&name);
             });
             Variant::nil()
         });

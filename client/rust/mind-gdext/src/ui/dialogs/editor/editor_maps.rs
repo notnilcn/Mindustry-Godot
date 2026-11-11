@@ -5,9 +5,9 @@
 //! Upstream: ui/dialogs/EditorMapsDialog.java
 
 use crate::ui::dialog::{DialogController, MindDialog};
-use crate::ui::dialogs::batch_campaign2::{
-    MapListState, install_frame_tick, maplist_add_pane_button, maplist_build,
-    maplist_load_settings, maplist_maps, maplist_rebuild, maplist_refresh_registry,
+use crate::ui::dialogs::maps::map_list::{
+    MapListState, maplist_add_pane_button, maplist_build, maplist_load_settings, maplist_maps,
+    maplist_rebuild, maplist_refresh_registry,
 };
 use crate::ui::dialogs::rules::util::*;
 use crate::ui::kit;
@@ -26,8 +26,7 @@ pub(super) fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
 
 /// `EditorMapsDialog`/`ui.editor.show()` default size for New Map.
 const NEW_MAP_SIZE: i32 = 200;
-/// `_batch_d_maps_rebuild`: set by the `editor_map` page after a delete/import
-/// (`batch_d::editor_maps_request_rebuild`).
+/// `_batch_d_maps_rebuild`: set by the `editor_map` page after a delete/import.
 const MAPS_REBUILD_META: &str = "_batch_d_maps_rebuild";
 
 /// `EditorMapsDialog` state: the shared `MapListState` plus the prompt flags
@@ -106,7 +105,16 @@ impl DialogController for EditorMapsDialog {
         maplist_add_pane_button(dialog, "@editor.importmap", "upload", Some(import));
         connect_prompts(dialog, &self.state);
         let deferred = self.state.borrow().list.borrow().deferred.clone();
-        install_frame_tick(dialog, "editor_maps", deferred, || {});
+        // The campaign batch's original meta key/callable name stay verbatim
+        // (UI ABI); callers no longer route through the deleted shim.
+        crate::ui::dialogs::common::defer::install_frame_tick(
+            dialog,
+            "_campaign2_frame_",
+            "campaign2_frame",
+            "editor_maps",
+            deferred,
+            || {},
+        );
     }
 
     fn shown(&mut self, dialog: &mut MindDialog) {

@@ -37,7 +37,7 @@ pub(super) fn content_option_json(
     label: String,
     planet: Option<mind_core::content::PlanetId>,
     unlocked_now: &dyn Fn(&str) -> bool,
-    visibility: &mind_core::ui::campaign::BlockVisibilityContext,
+    visibility: &mind_core::ui::block_catalog::BlockVisibilityContext,
 ) -> serde_json::Value {
     let reference = content.get_by_name(content_type, name);
     let hidden = content_hidden(content, content_type, name, visibility);
@@ -89,7 +89,7 @@ fn content_hidden(
     content: &ContentRegistry,
     content_type: ContentType,
     name: &str,
-    visibility: &mind_core::ui::campaign::BlockVisibilityContext,
+    visibility: &mind_core::ui::block_catalog::BlockVisibilityContext,
 ) -> bool {
     match content_type {
         ContentType::Item => content

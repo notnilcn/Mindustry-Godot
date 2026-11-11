@@ -3,9 +3,9 @@
 //! `io` command bodies: map listing, save/load round-trips, revision/class-id gates and settings checks (plan 04).
 //! Upstream: none (port-only CLI; the oracle has no Java counterpart).
 
-use super::bench::percentile;
 use super::content::boot_content;
 use super::*;
+use crate::stats::percentile;
 
 /// Plan 04 M5 (§7b): parallel meta-only listing of one map/save directory.
 pub(super) fn cmd_io_map_list(dir: &Path, json: bool) -> anyhow::Result<i32> {

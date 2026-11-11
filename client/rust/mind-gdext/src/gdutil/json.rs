@@ -5,8 +5,6 @@
 //!
 //! Upstream: none (port-only; the JSON response shapes the GDScript port returned).
 
-#![allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
-
 use godot::prelude::*;
 
 /// `"{}"` as a GString: the empty-object fallback used by every `*_json` #[func].

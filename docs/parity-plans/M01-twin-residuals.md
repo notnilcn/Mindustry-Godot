@@ -108,7 +108,7 @@ Accept:
 
 ## T5 — Hovered-building info rows — MEDIUM
 
-Round M ported the `ItemTurret` ammo row (`building_consumption_json`, `sim_host.rs:8968`). These
+Round M ported the `ItemTurret` ammo row (`building_consumption_json`, `sim_host/render_blocks.rs:427`). These
 are still open:
 1. **Other consumer rows.** `ConsumeItems`/`ConsumeLiquid`/`ConsumeItemFilter`/`ConsumePower` rows
    on crafters, generators and so on (`BuildingComp.displayConsumption`,

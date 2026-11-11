@@ -13,15 +13,16 @@ workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 |---|---|
 | `src/lib.rs` | Crate root; `run_from_args` parses via `Cli` and dispatches to `exec::run`. |
 | `src/main.rs` | Thin binary over `mind_headless::run_from_args`. |
-| `src/cli.rs` | clap `Cli`/`Command` tree: every subcommand and flag. |
+| `src/cli/` | clap `Cli`/`Command` tree: `mod.rs` keeps the top-level `Cli`/`Command`, one child per family (`campaign`, `render`, `input`, `parity`, …). |
 | `src/args.rs` | Re-exports `mind_core::platform::args` (`LaunchArgs`, `parse`, `data_root`) plus launch-arg tests. |
-| `src/exec.rs` | Dispatch table and the scenario/bench/dump/replay/suite handlers. |
+| `src/exec/` | Dispatch table (`mod.rs`) and the scenario/bench/dump/replay/suite handlers split by family (`bench`, `scenario`, `content`, `editor`, `io`, `maps`, `meta`, `mods`, `world`). |
 | `src/registry.rs` | File-backed `ScenarioFixture` registry (`SCENARIOS`, `find`, `names`, `bench_alias`); name = `{system}_{case}`. |
 | `src/report.rs` | serde report structs (`RunReport`, `TileCheck`, `BenchReport`, `SimReport`, `StdbReport`, IO/content reports). |
+| `src/stats.rs` | Shared report statistics (`percentile`, the index form the bench/stdb/input suites use). |
 | `src/paths.rs` | Marker-based discovery of `scenarios/`, the repo root and `mind-core` (`find_scenarios_dir`, `find_repo_root`, `find_mind_core_dir`). |
 | `src/<system>_scenarios.rs` | Per-system suites: `blocks`, `campaign`, `combat`, `fx`, `input`, `logic`, `mp`, `network`, `render`, `stdb`, `ui`, `units`, `audio`. |
 | `src/parity/` | Harness implementation (`matrix`, `registry`, `golden`, `scenario`, `budgets`, `mcp`, `soak`, `checksum`, `determinism`, `screenshot`, `report`, `desync`, `minitoml`). |
-| `src/server/` | Dedicated server implementation (`server`/`serve`, console, host, socket, admin, autosave, logs). |
+| `src/server/` | Dedicated server implementation (`server`/`serve`, console, host, socket, admin, autosave, logs); `commands/` holds the console command handlers split into `console`, `chat` and `tests`. |
 | `tests/` | Integration golden tests, fixtures and committed scenario goldens. |
 | `bench/` | Committed network baselines (`bench_liquid.json`, `bench_heat.json`, `bench_power.json`). |
 
@@ -64,8 +65,9 @@ workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 `server` boots `ServerState` from `ServerOptions` and runs the console (config, commands, rules,
 autosave, logs, socket). `serve` boots `dedicated::ServeOptions`: a service identity from a token
 file (never a player token), a parsed match config, auto-pause and map rotation. Both are Godot-free.
-Submodules: `config.rs`, `console.rs`, `commands.rs`, `host.rs`, `net_host.rs`, `admin.rs`,
-`rules_file.rs`, `autosave.rs`, `logs.rs`, `socket.rs`, `dedicated.rs`. `net_host::NetHost` boots
+Submodules: `config.rs`, `console.rs`, `commands/{console,chat,tests}.rs`, `host.rs`,
+`net_host.rs`, `admin.rs`, `rules_file.rs`, `autosave.rs`, `logs.rs`, `socket.rs`,
+`dedicated.rs`. `net_host::NetHost` boots
 offline and delegates to the `mind-stdb` connector (reducers plus `MatchSession`) on demand.
 
 ## Key types

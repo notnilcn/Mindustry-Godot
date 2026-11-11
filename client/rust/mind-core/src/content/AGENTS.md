@@ -27,8 +27,8 @@ the lifecycle and data patches. Crate-wide rules are in [`mind-core/AGENTS.md`](
 | `parity.rs` | `GoldenContent`, `AssetManifest`, `audit`, `dump_golden` |
 | `parser_hooks.rs` | Mod/data-patch provider and error-sink traits |
 | `registries/` | Vanilla content modules, `create_base_content`, `create_base_content_bad_order` |
-| `registries/blocks/` | `BlockDef`/`BlockSpec`, `BlockKind`/`BlockFlag`/`BlockGroup`/`BuildVisibility`, `Consume`, `Blocks`, `BlockSink`, one wave module per upstream region |
-| `registries/units/` | `UnitTypeDef`/`UnitSpec`, `UnitKind`, `EntityDefSpec`, weapons/abilities/parts, `UnitSink`, `standard`/`erekir`/`special` waves |
+| `registries/blocks/` | `BlockDef`/`BlockSpec` (`def`), `BlockKind`/`BlockFlag`/`BlockGroup`/`BuildVisibility` (`kind`), `Consume` (`consume`), `Blocks`/`BlockSink` (`mod`), the traits/drawer/loader/spec support files, and one load-wave module per upstream region (`distribution`, `defense`, `turrets`, `turret_parts`, `crafting`, `production`, `power`, `liquid`, `storage`, `payloads`, `campaign`, `environment`, `ore`, `sandbox`, `logic`, `units`, `units_erekir`, `legacy`). |
+| `registries/units/` | `UnitTypeDef`/`UnitSpec`, `UnitKind`, `EntityDefSpec`, `UnitSink` (`mod`), `weapon`, `ability`, `parts`, and the `standard`/`erekir`/`special` waves |
 | `registries/items.rs`, `liquids.rs`, `bullets.rs`, `statuses.rs` | Item/liquid/bullet/status records and load waves |
 | `registries/planets.rs`, `sectors.rs`, `weathers.rs` | Planet/sector/weather records and load waves |
 | `registries/commands.rs`, `stances.rs`, `teams.rs`, `loadouts.rs` | Unit commands/stances, team and starting-loadout tables |

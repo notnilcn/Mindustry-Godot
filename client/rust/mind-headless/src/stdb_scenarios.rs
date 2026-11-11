@@ -22,6 +22,7 @@ use spacetimedb_sdk::{Identity, Timestamp};
 use crate::cli::Cli;
 use crate::paths;
 use crate::report::{StdbBinderReport, StdbOrderReport, StdbReport};
+use crate::stats::percentile;
 
 /// Exit code: success.
 const EXIT_PASS: i32 = 0;
@@ -492,13 +493,4 @@ fn fixture_file(cli: &Cli, kind: StdbScenario) -> anyhow::Result<std::path::Path
         .ok_or_else(|| anyhow!("`{}` is not registered", kind.name()))?;
     let dir = paths::find_scenarios_dir(cli.scenarios_dir.as_deref())?;
     Ok(dir.join(fixture.file_name()))
-}
-
-fn percentile(samples: &[u64], percent: usize) -> u64 {
-    debug_assert!(!samples.is_empty());
-    if samples.is_empty() {
-        return 0;
-    }
-    let index = (samples.len() * percent / 100).min(samples.len().saturating_sub(1));
-    samples.get(index).copied().unwrap_or(0)
 }

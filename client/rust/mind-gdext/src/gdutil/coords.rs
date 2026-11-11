@@ -5,8 +5,6 @@
 //!
 //! Upstream: none (port-only; the browser bridge accepted any JSON number as a tile).
 
-#![allow(dead_code)] // adopted in W2 (docs/PLANS); C01 removes this
-
 /// `(i16::try_from(x), i16::try_from(y))` as one Option; `None` if either is out of range.
 pub fn tile_i16(x: impl TryInto<i16>, y: impl TryInto<i16>) -> Option<(i16, i16)> {
     Some((x.try_into().ok()?, y.try_into().ok()?))
