@@ -402,11 +402,10 @@ impl MindDialog {
         self.base().get_node_or_null(CAMPAIGN_PATH)
     }
 
-    /// The live campaign facade as its typed class (T02's typed accessor).
+    /// The live campaign facade as its typed class (the T02 typed accessor).
     ///
     /// Precedent: `ui/landing.rs` and `ui/root.rs` hold the `#[export]` campaign
     /// handle directly; dialogs only have the spine path.
-    #[allow(dead_code)] // adopted by T02 (docs/PLANS); C01 removes this
     pub fn campaign(&self) -> Option<Gd<crate::campaign::MindCampaign>> {
         self.campaign_node()?
             .try_cast::<crate::campaign::MindCampaign>()
@@ -432,34 +431,6 @@ impl MindDialog {
             return None;
         }
         Some(campaign.call(method, args))
-    }
-
-    /// The whole campaign read-model projection (`{}` when absent).
-    ///
-    /// Reads the planet being played. A dialog opened for another planet (the
-    /// sector select) must use [`Self::campaign_views_for`], because
-    /// `campaign_views_json` projects `planet.sectors` and the unlock/capture
-    /// flags for exactly one planet (`PlanetDialog.java` is planet-scoped).
-    pub fn campaign_views(&self) -> VarDictionary {
-        self.campaign_views_for("")
-    }
-
-    /// The campaign read-model projection for `planet` (a content name; empty
-    /// selects the active planet).
-    pub fn campaign_views_for(&self, planet: &str) -> VarDictionary {
-        self.campaign_json("campaign_views_json", &[GString::from(planet).to_variant()])
-    }
-
-    /// A named section of the campaign read models (`planets`/`sectors`/…).
-    pub fn campaign_section(&self, section: &str) -> VarArray {
-        campaign_section_of(&self.campaign_views(), section)
-    }
-
-    /// [`Self::campaign_section`] for `planet` (a content name; empty selects
-    /// the active planet). `SectorSelectDialog` filters by `context.planet`, so
-    /// its rebuild must read that planet's projection, not the played one.
-    pub fn campaign_section_for(&self, planet: &str, section: &str) -> VarArray {
-        campaign_section_of(&self.campaign_views_for(planet), section)
     }
 
     /// `UI.formatTime`-style playtime (h/m/s) for millisecond values.
@@ -1116,14 +1087,6 @@ fn parse_json_object(json_text: &GString) -> VarDictionary {
     parsed.try_to::<VarDictionary>().unwrap_or_default()
 }
 
-/// One section of a `campaign_views_json` projection (`[]` when absent).
-fn campaign_section_of(views: &VarDictionary, section: &str) -> VarArray {
-    views
-        .get(section)
-        .map(|value| value.to::<VarArray>())
-        .unwrap_or_default()
-}
-
 /// The dialog registry key whose manifest `scene` matches `path`.
 fn manifest_dialog_id(path: &str) -> Option<String> {
     static ENTRIES: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
@@ -1167,22 +1130,5 @@ mod tests {
             return;
         }
         assert!(parse_json_object(&GString::from("")).is_empty());
-    }
-
-    /// `campaign_views_json` is projected per planet; the sector select asks
-    /// for its own planet's `sectors` rows (engine-backed `VarDictionary`, so
-    /// skipped where Godot is not initialised — PAR-0586).
-    #[test]
-    fn campaign_section_extracts_named_rows() {
-        if !godot::sys::is_godot_initialized() {
-            return;
-        }
-        let mut rows = VarArray::new();
-        rows.push(&"a".to_variant());
-        rows.push(&"b".to_variant());
-        let mut views = VarDictionary::new();
-        views.set("sectors", &rows.to_variant());
-        assert_eq!(campaign_section_of(&views, "sectors").len(), 2);
-        assert!(campaign_section_of(&views, "maps").is_empty());
     }
 }

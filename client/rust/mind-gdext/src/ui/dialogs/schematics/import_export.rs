@@ -127,7 +127,7 @@ pub(super) fn schematics_show_export(
     {
         let target = dialog.to_gd();
         let state_for = state.clone();
-        let name = row_str(&row, "name");
+        let name = row.name.clone();
         let callable = Callable::from_fn("schematic_export_file", move |_args: &[&Variant]| {
             let mut node = target.clone();
             let mut bound = node.bind_mut();

@@ -136,7 +136,19 @@ impl MindResearchView {
         let text = Json::stringify(&tree.to_variant());
         match serde_json::from_str::<ResearchTreeView>(&text.to_string()) {
             Ok(view) => self.set_tree_view(&view),
-            Err(error) => log::warn!("[ui] research_tree row shape: {error}"),
+            Err(error) => {
+                log::warn!("[ui] research_tree row shape: {error}");
+                self.set_tree_view(&ResearchTreeView {
+                    root: String::new(),
+                    root_title: String::new(),
+                    root_type: String::new(),
+                    root_icon: String::new(),
+                    roots: Vec::new(),
+                    items: Vec::new(),
+                    bounds: [0.0; 4],
+                    nodes: Vec::new(),
+                });
+            }
         }
     }
 

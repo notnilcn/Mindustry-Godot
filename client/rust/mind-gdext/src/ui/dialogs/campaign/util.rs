@@ -67,6 +67,14 @@ pub(in crate::ui::dialogs) fn campaign_views_live(dialog: &MindDialog) -> Option
     campaign_views_of(dialog, "")
 }
 
+/// The typed schematic library (`CampaignViews.schematics`), empty when the
+/// campaign facade is absent.
+pub(in crate::ui::dialogs) fn schematic_library(dialog: &MindDialog) -> Vec<SchematicView> {
+    campaign_views_of(dialog, "")
+        .map(|views| views.schematics)
+        .unwrap_or_default()
+}
+
 /// The research dialog's typed tree payload (`campaign_research_tree`): the
 /// `research_tree(root)` producer, with `root` empty for the played sector's
 /// tree. `None` when the campaign facade is absent or the tree is missing.
@@ -230,28 +238,6 @@ pub(in crate::ui::dialogs) fn row_i64_or(row: &VarDictionary, key: &str, default
         .filter(|value| value.get_type() != VariantType::NIL)
         .map(|value| to_i64_typed(&value))
         .unwrap_or(default)
-}
-
-/// Reads a JSON array field (empty when missing).
-pub(in crate::ui::dialogs) fn row_arr(row: &VarDictionary, key: &str) -> VarArray {
-    row.get(key)
-        .and_then(|value| value.try_to::<VarArray>().ok())
-        .unwrap_or_default()
-}
-
-/// Reads a JSON object field (empty when missing).
-pub(in crate::ui::dialogs) fn row_dict(row: &VarDictionary, key: &str) -> VarDictionary {
-    row.get(key)
-        .and_then(|value| value.try_to::<VarDictionary>().ok())
-        .unwrap_or_default()
-}
-
-/// Reads the row dictionaries of a JSON array field.
-pub(in crate::ui::dialogs) fn row_rows(row: &VarDictionary, key: &str) -> Vec<VarDictionary> {
-    row_arr(row, key)
-        .iter_shared()
-        .filter_map(|value| value.try_to::<VarDictionary>().ok())
-        .collect()
 }
 
 /// `JSON.stringify(object)`.
