@@ -72,7 +72,7 @@ pub(super) fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> 
         report.passed(),
         report.cases.len()
     );
-    Ok(if report.pass() { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(report.pass()))
 }
 
 /// `parity run --suite <smoke|gate|full> [--phase Pn]`: the in-process suite
@@ -130,7 +130,7 @@ pub(crate) fn run_suite(
             if pass { "PASS" } else { "FAIL" }
         );
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Runs a scenario to completion; optionally collects per-tick checksums.
@@ -362,7 +362,7 @@ pub(super) fn cmd_run(
         group_counts,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Reads one hex checksum per non-empty line (`sim_core_*.checksums`).

@@ -153,7 +153,7 @@ pub(super) fn cmd_io_roundtrip(
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// FNV-1a checksum over a grid's floor/overlay/block layers (row-major).
@@ -250,7 +250,7 @@ pub(super) fn cmd_io_roundtrip_real(
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 04 M8 (§7b/§7d): P50/P95 timings for save/load/meta on the synthetic
@@ -324,12 +324,10 @@ pub(super) fn cmd_io_bench_save(
     }
 
     // Meta-only read.
-    let mut meta_samples = Vec::with_capacity(iters as usize);
-    for _ in 0..iters {
-        let start = Instant::now();
+    let mut meta_samples = time_runs(iters as usize, || {
         let _ = SaveIo::get_meta(&fs, &path)?;
-        meta_samples.push(start.elapsed().as_nanos() as u64);
-    }
+        Ok(())
+    })?;
 
     // Load verification (not timed): last read applies meta + plans and must
     // reproduce the save-side checksum.
@@ -370,7 +368,7 @@ pub(super) fn cmd_io_bench_save(
         ),
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 04 M3 (§7b): revision drift check for every `EntityDefs!` def.
@@ -431,7 +429,7 @@ pub(super) fn cmd_io_check_revisions(
         defs: def_reports,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 04 M3: class-ID drift gate (`entity_class_ids.toml` ↔ registry ↔
@@ -489,7 +487,7 @@ pub(super) fn cmd_io_check_class_ids(
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 04 M1 (§7b): settings set → flush → reload equality, corrupt file →
@@ -567,7 +565,7 @@ pub(super) fn cmd_io_settings(cli: &Cli, json: bool) -> anyhow::Result<i32> {
         pass,
     };
     print_report(&report, json)?;
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 04 M0: meta-only read of a save file written by the IO engine.

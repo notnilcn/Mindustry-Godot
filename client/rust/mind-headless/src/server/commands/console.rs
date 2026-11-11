@@ -248,6 +248,17 @@ pub static COMMANDS: &[CommandSpec] = &[
 /// here as the server-side disposition record.
 pub const UPDATER_NOT_AVAILABLE: &str = "updater not available in this build";
 
+/// Reports a failed command result on the console; returns whether it succeeded.
+fn report_err(state: &mut ServerState, result: Result<(), impl std::fmt::Display>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            state.warn(&error.to_string());
+            false
+        }
+    }
+}
+
 /// Result of a console line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -778,9 +789,9 @@ pub(super) fn cmd_say(state: &mut ServerState, args: &[&str]) {
         state.warn("Usage: say <message...>");
         return;
     }
-    match state.net.say(&message) {
-        Ok(()) => state.info("Server message sent."),
-        Err(error) => state.warn(&error.to_string()),
+    let result = state.net.say(&message);
+    if report_err(state, result) {
+        state.info("Server message sent.");
     }
 }
 
@@ -848,9 +859,9 @@ pub(super) fn cmd_unban(state: &mut ServerState, args: &[&str], verb: &str) {
         state.warn("Usage: unban <ip/ID>");
         return;
     };
-    match state.net.unban(target) {
-        Ok(()) => state.info(&format!("{verb} {target}.")),
-        Err(error) => state.warn(&error.to_string()),
+    let result = state.net.unban(target);
+    if report_err(state, result) {
+        state.info(&format!("{verb} {target}."));
     }
 }
 
@@ -863,12 +874,12 @@ pub(super) fn cmd_admin(state: &mut ServerState, args: &[&str]) {
                 state.warn("Usage: admin add|remove <username/ID...>");
                 return;
             };
-            match state.net.grant(target, on) {
-                Ok(()) => state.info(&format!(
+            let result = state.net.grant(target, on);
+            if report_err(state, result) {
+                state.info(&format!(
                     "{} admin {target}.",
                     if on { "Added" } else { "Removed" }
-                )),
-                Err(error) => state.warn(&error.to_string()),
+                ));
             }
         }
         Some(other) => state.warn(&format!("Unknown admin subcommand: {other}")),
@@ -896,22 +907,22 @@ pub(super) fn cmd_whitelist(state: &mut ServerState, args: &[&str]) {
                 state.warn("Usage: whitelist add|remove <ID>");
                 return;
             };
-            match state.net.whitelist(target, on) {
-                Ok(()) => state.info(&format!(
+            let result = state.net.whitelist(target, on);
+            if report_err(state, result) {
+                state.info(&format!(
                     "{} whitelist for {target}.",
                     if on { "Added" } else { "Removed" }
-                )),
-                Err(error) => state.warn(&error.to_string()),
+                ));
             }
         }
         Some("on") | Some("off") => {
             let on = args[0] == "on";
-            match state.net.set_whitelist_enabled(on) {
-                Ok(()) => state.info(&format!(
+            let result = state.net.set_whitelist_enabled(on);
+            if report_err(state, result) {
+                state.info(&format!(
                     "Whitelist {}.",
                     if on { "enabled" } else { "disabled" }
-                )),
-                Err(error) => state.warn(&error.to_string()),
+                ));
             }
         }
         _ => state.warn("Usage: whitelist add|remove <ID> | on|off"),
@@ -927,15 +938,19 @@ pub(super) fn cmd_playerlimit(state: &mut ServerState, args: &[&str]) {
             };
             state.info(&format!("Player limit: {current}"));
         }
-        Some("off") | Some("0") => match state.net.player_limit(None) {
-            Ok(()) => state.info("Player limit disabled."),
-            Err(error) => state.warn(&error.to_string()),
-        },
+        Some("off") | Some("0") => {
+            let result = state.net.player_limit(None);
+            if report_err(state, result) {
+                state.info("Player limit disabled.");
+            }
+        }
         Some(value) => match value.parse::<u16>() {
-            Ok(limit) if limit > 0 => match state.net.player_limit(Some(limit)) {
-                Ok(()) => state.info(&format!("Player limit set to {limit}.")),
-                Err(error) => state.warn(&error.to_string()),
-            },
+            Ok(limit) if limit > 0 => {
+                let result = state.net.player_limit(Some(limit));
+                if report_err(state, result) {
+                    state.info(&format!("Player limit set to {limit}."));
+                }
+            }
             _ => state.warn("Usage: playerlimit [off/number]"),
         },
     }
@@ -950,9 +965,9 @@ pub(super) fn cmd_ip_ban(state: &mut ServerState, name: &str, args: &[&str]) {
     match args.first().copied() {
         Some("remove") => {
             let target = args.get(1).copied().unwrap_or("");
-            match state.net.unban(target) {
-                Ok(()) => state.info(&format!("Removed ban for {target}.")),
-                Err(error) => state.warn(&error.to_string()),
+            let result = state.net.unban(target);
+            if report_err(state, result) {
+                state.info(&format!("Removed ban for {target}."));
             }
         }
         Some("add") | None => {
@@ -961,9 +976,9 @@ pub(super) fn cmd_ip_ban(state: &mut ServerState, name: &str, args: &[&str]) {
                 state.warn(&format!("Usage: {name} add|remove <ip>"));
                 return;
             }
-            match state.net.ban(kind, target) {
-                Ok(()) => state.info(&format!("Banned {target}.")),
-                Err(error) => state.warn(&error.to_string()),
+            let result = state.net.ban(kind, target);
+            if report_err(state, result) {
+                state.info(&format!("Banned {target}."));
             }
         }
         Some(other) => state.warn(&format!("Unknown {name} subcommand: {other}")),
@@ -977,9 +992,9 @@ pub(super) fn cmd_name_ban(state: &mut ServerState, args: &[&str]) {
                 state.warn("Usage: name-ban add <regex>");
                 return;
             };
-            match state.net.ban(BanKind::Name, target) {
-                Ok(()) => state.info(&format!("Banned name pattern {target}.")),
-                Err(error) => state.warn(&error.to_string()),
+            let result = state.net.ban(BanKind::Name, target);
+            if report_err(state, result) {
+                state.info(&format!("Banned name pattern {target}."));
             }
         }
         Some("remove") => {
@@ -987,9 +1002,9 @@ pub(super) fn cmd_name_ban(state: &mut ServerState, args: &[&str]) {
                 state.warn("Usage: name-ban remove <regex>");
                 return;
             };
-            match state.net.unban(target) {
-                Ok(()) => state.info(&format!("Removed name ban {target}.")),
-                Err(error) => state.warn(&error.to_string()),
+            let result = state.net.unban(target);
+            if report_err(state, result) {
+                state.info(&format!("Removed name ban {target}."));
             }
         }
         Some("clear") => {

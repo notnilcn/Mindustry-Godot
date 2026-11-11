@@ -185,9 +185,7 @@ pub(super) fn cmd_world_bench_gen(
         ..WorldParams::default()
     };
     let mut grid = WorldGrid::new(width, height);
-    let mut samples = Vec::with_capacity(iters as usize);
-    for _ in 0..iters {
-        let start = Instant::now();
+    let mut samples = time_runs(iters as usize, || {
         match generator {
             "simplex" => {
                 let mut g = SimplexGenerator::new(seed);
@@ -199,8 +197,8 @@ pub(super) fn cmd_world_bench_gen(
             }
             other => return Err(anyhow!("unknown generator `{other}`")),
         }
-        samples.push(start.elapsed().as_nanos() as u64);
-    }
+        Ok(())
+    })?;
     samples.sort_unstable();
     let p = |q: f64| -> f64 {
         let index = ((samples.len() as f64 - 1.0) * q).round() as usize;
@@ -563,5 +561,5 @@ pub(super) fn cmd_world_multiblock(
     if json || dump.is_none() {
         println!("{text}");
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }

@@ -57,7 +57,7 @@ pub(super) fn cmd_assets_index(atlas: &Path, probes: &[String]) -> anyhow::Resul
         "probes": probe_reports,
     });
     println!("{}", serde_json::to_string_pretty(&report)?);
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Minimal shape of `build/assets/region_inventory.json` (plan 03 M3).
@@ -267,7 +267,7 @@ pub(super) fn cmd_assets_bundle_diff(dir: &Path, json: bool) -> anyhow::Result<i
             errors
         );
     }
-    Ok(if errors == 0 { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(errors == 0))
 }
 
 /// Plan 03 M8/M10 `assets sounds-check`: the registry equals the recursive
@@ -330,7 +330,7 @@ pub(super) fn cmd_assets_sounds_check(root: Option<&Path>, json: bool) -> anyhow
             log::error!("assets sounds-check: missing file for sound `{name}`");
         }
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Recursively collects `*.ogg`/`*.mp3` paths under `dir` (sorted).
@@ -407,7 +407,7 @@ pub(super) fn cmd_assets_fallback_boot(atlas: &Path, json: bool) -> anyhow::Resu
             log::error!("assets fallback-boot: oversized region `{name}`");
         }
     }
-    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+    Ok(exit_code(pass))
 }
 
 /// Plan 03 §7.1b `assets migrate-check`: the vendored trees match
