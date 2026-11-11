@@ -14,6 +14,7 @@ use super::ai::follow::update_flying_follow_ai;
 use super::ai::ground::{GroundAiRules, update_ground_ai};
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
+use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_weapons::{
     AiWeaponCtx, AiWeaponsState, command_ai_weapon_pass, logic_ai_weapon_pass, update_ai_weapons,
 };
@@ -807,8 +808,7 @@ pub fn unit_update_system(world: &mut World) {
                 }
             }
         } else if slot.kind == AiKind::NoAi {
-            // `NoAI.updateUnit(){}`: the dummy never runs a controller (the
-            // kinematics/environment tail still runs, as in Java `Unit.update`).
+            no_ai_arm();
         } else {
             let flying = slot.kind == AiKind::Flying
                 || world
