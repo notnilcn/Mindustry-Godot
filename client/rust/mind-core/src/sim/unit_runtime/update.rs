@@ -14,6 +14,7 @@ use super::ai::follow::update_flying_follow_ai;
 use super::ai::ground::{GroundAiRules, update_ground_ai};
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
+use super::ai_arms::assembler::assembler_arm;
 use super::ai_arms::boost::boost_arm;
 use super::ai_arms::cargo::cargo_arm;
 use super::ai_arms::no_ai::no_ai_arm;
@@ -644,35 +645,7 @@ pub fn unit_update_system(world: &mut World) {
         } else if slot.kind == AiKind::Cargo {
             cargo_arm(world, &mut runtime, entity, team);
         } else if slot.kind == AiKind::Assembler {
-            // `AssemblerAI` (`AssemblerAI.java:11-24`, H01 T13): hold at the
-            // arranged spot and face the locked angle.
-            let state = world
-                .get::<crate::ai::types::assembler::AssemblerAi>(entity)
-                .copied()
-                .unwrap_or_default();
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                crate::ai::types::assembler::update_assembler(&mut ctx, entity, &state);
-            }
-            if let Some(mut stored) =
-                world.get_mut::<crate::ai::types::assembler::AssemblerAi>(entity)
-            {
-                *stored = state;
-            } else if world.get_entity(entity).is_ok() {
-                world.entity_mut(entity).insert(state);
-            }
+            assembler_arm(world, &mut runtime, entity, team);
         } else if slot.kind == AiKind::Logic {
             // `LogicAI` (T1): `AIController.updateUnit` runs
             // `updateTargeting()` (weapons) before `updateMovement()`.

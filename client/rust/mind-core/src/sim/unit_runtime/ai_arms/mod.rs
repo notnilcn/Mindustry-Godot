@@ -12,6 +12,7 @@
 
 use super::*;
 
+pub(super) mod assembler;
 pub(super) mod boost;
 pub(super) mod cargo;
 pub(super) mod no_ai;
