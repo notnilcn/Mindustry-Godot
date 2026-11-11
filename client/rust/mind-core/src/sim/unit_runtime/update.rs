@@ -20,8 +20,9 @@ use super::ai_arms::cargo::cargo_arm;
 use super::ai_arms::ground_flying::ground_flying_arm;
 use super::ai_arms::no_ai::no_ai_arm;
 use super::ai_arms::player::player_arm;
+use super::ai_arms::suicide::suicide_arm;
 use super::ai_weapons::{
-    AiWeaponCtx, AiWeaponsState, command_ai_weapon_pass, logic_ai_weapon_pass, update_ai_weapons,
+    AiWeaponCtx, command_ai_weapon_pass, logic_ai_weapon_pass, update_ai_weapons,
 };
 use super::command_queue::pop_live_command_queue;
 use super::deaths::has_core_of_team;
@@ -498,75 +499,7 @@ pub fn unit_update_system(world: &mut World) {
                 },
             );
         } else if slot.kind == AiKind::Suicide {
-            // `SuicideAI.updateUnit` (`ai/types/suicide.rs`): ram the nearest
-            // hostile in a straight line (terrain ignored) and fire the
-            // close-range death weapon (`shootCone 180`).
-            let mount_target = {
-                let pos = world.get::<Pos>(entity).copied();
-                let def = world
-                    .get::<UnitTypeComp>(entity)
-                    .and_then(|comp| runtime.content.unit(comp.type_id));
-                match (pos, def) {
-                    (Some(pos), Some(def)) => queries.closest_target(
-                        world,
-                        team,
-                        pos.x,
-                        pos.y,
-                        def.max_range.max(def.range),
-                        def.target_air,
-                        def.target_ground,
-                        true,
-                        def.target_under_blocks,
-                    ),
-                    _ => None,
-                }
-            };
-            if let Some(mut state) = world.get_mut::<AiWeaponsState>(entity) {
-                state.main_target = mount_target;
-                state.retarget = 0.0;
-            } else if world.get_entity(entity).is_ok() {
-                world.entity_mut(entity).insert(AiWeaponsState {
-                    main_target: mount_target,
-                    retarget: 0.0,
-                    ..AiWeaponsState::default()
-                });
-            }
-            update_ai_weapons(
-                world,
-                &runtime.content,
-                &queries,
-                entity,
-                team,
-                AiWeaponCtx {
-                    main_target: mount_target,
-                    retarget: false,
-                    flying_find: false,
-                    core_override: None,
-                    should_shoot: true,
-                    ..Default::default()
-                },
-            );
-            let mut state = crate::ai::types::suicide::SuicideAi {
-                unit: Some(entity),
-                target: mount_target,
-                suicidal: false,
-            };
-            {
-                let UnitRuntime {
-                    content,
-                    grid,
-                    pathfinder,
-                    ..
-                } = &mut runtime;
-                let mut ctx = crate::ai::ai_controller::AiCtx {
-                    world,
-                    grid,
-                    content,
-                    pathfinder,
-                    team,
-                };
-                let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
-            }
+            suicide_arm(world, &mut runtime, &queries, entity, team);
         } else if slot.kind == AiKind::Builder && !builder_falls_back(world, team) {
             builder_arm(world, &mut runtime, &queries, entity, team);
         } else if slot.kind == AiKind::Boost {

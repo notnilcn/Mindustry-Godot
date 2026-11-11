@@ -19,3 +19,4 @@ pub(super) mod cargo;
 pub(super) mod ground_flying;
 pub(super) mod no_ai;
 pub(super) mod player;
+pub(super) mod suicide;
