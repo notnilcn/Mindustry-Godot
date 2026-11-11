@@ -389,12 +389,11 @@ impl DataPatcher {
                 return;
             };
             let reset = set.clone();
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(reference.id)) {
-                        reset(block, original);
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(reference.id)) {
+                    reset(block, original);
+                }
+            });
         }
         if let Some(block) = registry.block_mut(BlockId::new(reference.id)) {
             set(block, new);
@@ -438,12 +437,11 @@ impl DataPatcher {
                 return;
             };
             if self.mark_used(reference, "requirements") {
-                self.resetters
-                    .push(Box::new(move |r: &mut ContentRegistry| {
-                        if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                            block.requirements = original;
-                        }
-                    }));
+                self.push_reset(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.requirements = original;
+                    }
+                });
             }
             if let Some(block) = registry.block_mut(BlockId::new(raw)) {
                 for (index, stack) in edits {
@@ -468,12 +466,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "requirements") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.requirements = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.requirements = original;
+                }
+            });
         }
         if let Some(block) = registry.block_mut(BlockId::new(raw)) {
             match mode {
@@ -560,12 +557,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "plans") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.unit_plans = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.unit_plans = original;
+                }
+            });
         }
         if let Some(block) = registry.block_mut(BlockId::new(raw)) {
             match mode {
@@ -660,12 +656,11 @@ impl DataPatcher {
         }
 
         if self.mark_used(reference, "upgrades") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.reconstructor_upgrades = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.reconstructor_upgrades = original;
+                }
+            });
         }
         if let Some(block) = registry.block_mut(BlockId::new(raw)) {
             if let Some(pairs) = replace {
@@ -795,16 +790,15 @@ impl DataPatcher {
         };
         let raw = id.raw();
         if self.mark_used(reference, "consumes") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.consumes = original.0.clone();
-                        block.has_power = original.1;
-                        block.has_items = original.2;
-                        block.accepts_items = original.3;
-                        block.has_liquids = original.4;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.consumes = original.0.clone();
+                    block.has_power = original.1;
+                    block.has_items = original.2;
+                    block.accepts_items = original.3;
+                    block.has_liquids = original.4;
+                }
+            });
         }
         let remove = map.get("remove").and_then(Value::as_str);
         let power = map.get("power").and_then(Value::as_f64).map(|v| v as f32);
@@ -906,12 +900,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "attributes") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.attributes = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.attributes = original;
+                }
+            });
         }
         let mut updates: Vec<(String, f32)> = Vec::new();
         if let Some(key) = field.strip_prefix("attributes.") {
@@ -952,12 +945,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "drillMultipliers") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
-                        block.drill_multipliers = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                    block.drill_multipliers = original;
+                }
+            });
         }
         let mut updates: Vec<(ItemId, f32)> = Vec::new();
         let mut removals: Vec<ItemId> = Vec::new();

@@ -41,31 +41,29 @@ impl<'a> ContentJsonParser<'a> {
                     return None;
                 };
                 let mut spec = DrawerSpec::for_kind(kind);
-                for (field, target) in [
-                    ("spinSprite", &mut spec.spin_sprite),
-                    ("drawPlan", &mut spec.draw_plan),
-                    ("buildingRotate", &mut spec.building_rotate),
-                ] {
-                    if let Some(value) = field_bool(object, field) {
-                        *target = value;
-                    }
-                }
-                for (field, target) in [
-                    ("x", &mut spec.x),
-                    ("y", &mut spec.y),
-                    ("rotation", &mut spec.rotation),
-                    ("rotateSpeed", &mut spec.rotate_speed),
-                    ("layer", &mut spec.layer),
-                    ("alpha", &mut spec.alpha),
-                    ("scale", &mut spec.scale),
-                    ("pulse", &mut spec.pulse),
-                    ("pulseScl", &mut spec.pulse_scl),
-                    ("flameRadius", &mut spec.flame_radius),
-                ] {
-                    if let Some(value) = field_f32(object, field) {
-                        *target = value;
-                    }
-                }
+                set_bools(
+                    object,
+                    &mut [
+                        ("spinSprite", &mut spec.spin_sprite),
+                        ("drawPlan", &mut spec.draw_plan),
+                        ("buildingRotate", &mut spec.building_rotate),
+                    ],
+                );
+                set_f32s(
+                    object,
+                    &mut [
+                        ("x", &mut spec.x),
+                        ("y", &mut spec.y),
+                        ("rotation", &mut spec.rotation),
+                        ("rotateSpeed", &mut spec.rotate_speed),
+                        ("layer", &mut spec.layer),
+                        ("alpha", &mut spec.alpha),
+                        ("scale", &mut spec.scale),
+                        ("pulse", &mut spec.pulse),
+                        ("pulseScl", &mut spec.pulse_scl),
+                        ("flameRadius", &mut spec.flame_radius),
+                    ],
+                );
                 if let Some(value) = field_f32(object, "heatPulse") {
                     spec.pulse = value;
                 }
@@ -174,77 +172,74 @@ impl<'a> ContentJsonParser<'a> {
                 DrawPartKind::RegionPart
             });
         let mut part = DrawPartSpec::for_kind(kind);
-        for (field, target) in [
-            ("under", &mut part.under),
-            ("turretShading", &mut part.turret_shading),
-            ("mirror", &mut part.mirror),
-            ("outline", &mut part.outline),
-            ("drawRegion", &mut part.draw_region),
-            ("heatLight", &mut part.heat_light),
-            ("clampProgress", &mut part.clamp_progress),
-            ("replaceOutline", &mut part.replace_outline),
-            ("followRotation", &mut part.follow_rotation),
-            ("circle", &mut part.circle),
-            ("hollow", &mut part.hollow),
-            ("tri", &mut part.tri),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("weaponIndex", &mut part.weapon_index),
-            ("recoilIndex", &mut part.recoil_index),
-            ("sides", &mut part.sides),
-            ("circles", &mut part.circles),
-            ("shapes", &mut part.shapes),
-        ] {
-            if let Some(value) = field_i32(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("layer", &mut part.layer),
-            ("layerOffset", &mut part.layer_offset),
-            ("heatLayerOffset", &mut part.heat_layer_offset),
-            ("outlineLayerOffset", &mut part.outline_layer_offset),
-            ("x", &mut part.x),
-            ("y", &mut part.y),
-            ("xScl", &mut part.x_scl),
-            ("yScl", &mut part.y_scl),
-            ("rotation", &mut part.rotation),
-            ("originX", &mut part.origin_x),
-            ("originY", &mut part.origin_y),
-            ("moveX", &mut part.move_x),
-            ("moveY", &mut part.move_y),
-            ("growX", &mut part.grow_x),
-            ("growY", &mut part.grow_y),
-            ("moveRot", &mut part.move_rot),
-            ("heatLightOpacity", &mut part.heat_light_opacity),
-            ("radius", &mut part.radius),
-            ("radiusTo", &mut part.radius_to),
-            ("stroke", &mut part.stroke),
-            ("strokeTo", &mut part.stroke_to),
-            ("rotateSpeed", &mut part.rotate_speed),
-            ("phase", &mut part.phase),
-            ("minStroke", &mut part.min_stroke),
-            ("innerScl", &mut part.inner_scl),
-            ("innerRadScl", &mut part.inner_rad_scl),
-            ("rotMove", &mut part.rot_move),
-            ("spinSpeed", &mut part.spin_speed),
-            ("triLength", &mut part.tri_length),
-            ("triLengthTo", &mut part.tri_length_to),
-            ("haloRadius", &mut part.halo_radius),
-            ("haloRadiusTo", &mut part.halo_radius_to),
-            ("shapeRotation", &mut part.shape_rotation),
-            ("shapeMoveRot", &mut part.shape_move_rot),
-            ("haloRotateSpeed", &mut part.halo_rotate_speed),
-            ("haloRotation", &mut part.halo_rotation),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
+        set_bools(
+            object,
+            &mut [
+                ("under", &mut part.under),
+                ("turretShading", &mut part.turret_shading),
+                ("mirror", &mut part.mirror),
+                ("outline", &mut part.outline),
+                ("drawRegion", &mut part.draw_region),
+                ("heatLight", &mut part.heat_light),
+                ("clampProgress", &mut part.clamp_progress),
+                ("replaceOutline", &mut part.replace_outline),
+                ("followRotation", &mut part.follow_rotation),
+                ("circle", &mut part.circle),
+                ("hollow", &mut part.hollow),
+                ("tri", &mut part.tri),
+            ],
+        );
+        set_i32s(
+            object,
+            &mut [
+                ("weaponIndex", &mut part.weapon_index),
+                ("recoilIndex", &mut part.recoil_index),
+                ("sides", &mut part.sides),
+                ("circles", &mut part.circles),
+                ("shapes", &mut part.shapes),
+            ],
+        );
+        set_f32s(
+            object,
+            &mut [
+                ("layer", &mut part.layer),
+                ("layerOffset", &mut part.layer_offset),
+                ("heatLayerOffset", &mut part.heat_layer_offset),
+                ("outlineLayerOffset", &mut part.outline_layer_offset),
+                ("x", &mut part.x),
+                ("y", &mut part.y),
+                ("xScl", &mut part.x_scl),
+                ("yScl", &mut part.y_scl),
+                ("rotation", &mut part.rotation),
+                ("originX", &mut part.origin_x),
+                ("originY", &mut part.origin_y),
+                ("moveX", &mut part.move_x),
+                ("moveY", &mut part.move_y),
+                ("growX", &mut part.grow_x),
+                ("growY", &mut part.grow_y),
+                ("moveRot", &mut part.move_rot),
+                ("heatLightOpacity", &mut part.heat_light_opacity),
+                ("radius", &mut part.radius),
+                ("radiusTo", &mut part.radius_to),
+                ("stroke", &mut part.stroke),
+                ("strokeTo", &mut part.stroke_to),
+                ("rotateSpeed", &mut part.rotate_speed),
+                ("phase", &mut part.phase),
+                ("minStroke", &mut part.min_stroke),
+                ("innerScl", &mut part.inner_scl),
+                ("innerRadScl", &mut part.inner_rad_scl),
+                ("rotMove", &mut part.rot_move),
+                ("spinSpeed", &mut part.spin_speed),
+                ("triLength", &mut part.tri_length),
+                ("triLengthTo", &mut part.tri_length_to),
+                ("haloRadius", &mut part.halo_radius),
+                ("haloRadiusTo", &mut part.halo_radius_to),
+                ("shapeRotation", &mut part.shape_rotation),
+                ("shapeMoveRot", &mut part.shape_move_rot),
+                ("haloRotateSpeed", &mut part.halo_rotate_speed),
+                ("haloRotation", &mut part.halo_rotation),
+            ],
+        );
         for (field, target) in [
             ("heatColor", &mut part.heat_color),
             ("color", &mut part.color),

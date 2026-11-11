@@ -149,12 +149,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "immunities") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
-                        unit.immunities = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                    unit.immunities = original;
+                }
+            });
         }
         if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
             match mode {
@@ -220,12 +219,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "weapons") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
-                        unit.weapons = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                    unit.weapons = original;
+                }
+            });
         }
         let bullets_before = registry.bullets().len();
         let mut parser = crate::mods::json::ContentJsonParser::new();
@@ -316,12 +314,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "abilities") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
-                        unit.abilities = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                    unit.abilities = original;
+                }
+            });
         }
         let mut parser = crate::mods::json::ContentJsonParser::new();
         let mut created = Vec::with_capacity(entries.len());
@@ -402,12 +399,11 @@ impl DataPatcher {
                     return;
                 };
                 if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
-                    self.resetters
-                        .push(Box::new(move |r: &mut ContentRegistry| {
-                            if let Some(bullet) = r.bullet_mut(bullet) {
-                                bullet.$f = original;
-                            }
-                        }));
+                    self.push_reset(move |r: &mut ContentRegistry| {
+                        if let Some(bullet) = r.bullet_mut(bullet) {
+                            bullet.$f = original;
+                        }
+                    });
                 }
                 if let Some(bullet) = registry.bullet_mut(bullet) {
                     bullet.$f = new;
@@ -423,12 +419,11 @@ impl DataPatcher {
                     return;
                 };
                 if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
-                    self.resetters
-                        .push(Box::new(move |r: &mut ContentRegistry| {
-                            if let Some(bullet) = r.bullet_mut(bullet) {
-                                bullet.$f = original;
-                            }
-                        }));
+                    self.push_reset(move |r: &mut ContentRegistry| {
+                        if let Some(bullet) = r.bullet_mut(bullet) {
+                            bullet.$f = original;
+                        }
+                    });
                 }
                 if let Some(bullet) = registry.bullet_mut(bullet) {
                     bullet.$f = new;
@@ -444,12 +439,11 @@ impl DataPatcher {
                     return;
                 };
                 if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
-                    self.resetters
-                        .push(Box::new(move |r: &mut ContentRegistry| {
-                            if let Some(bullet) = r.bullet_mut(bullet) {
-                                bullet.$f = original;
-                            }
-                        }));
+                    self.push_reset(move |r: &mut ContentRegistry| {
+                        if let Some(bullet) = r.bullet_mut(bullet) {
+                            bullet.$f = original;
+                        }
+                    });
                 }
                 if let Some(bullet) = registry.bullet_mut(bullet) {
                     bullet.$f = new;
@@ -512,12 +506,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "targetFlags") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
-                        unit.target_flags = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                    unit.target_flags = original;
+                }
+            });
         }
         if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
             match mode {
@@ -550,12 +543,11 @@ impl DataPatcher {
             return;
         };
         if self.mark_used(reference, "type") {
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| {
-                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
-                        unit.entity_def = original;
-                    }
-                }));
+            self.push_reset(move |r: &mut ContentRegistry| {
+                if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                    unit.entity_def = original;
+                }
+            });
         }
         if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
             unit.entity_def = def;

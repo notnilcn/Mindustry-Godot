@@ -32,35 +32,32 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(cost) = field_f32(object, "cost") {
             item.cost = cost;
         }
-        for (field, target) in [
-            ("explosiveness", &mut item.explosiveness),
-            ("flammability", &mut item.flammability),
-            ("radioactivity", &mut item.radioactivity),
-            ("charge", &mut item.charge),
-            ("healthScaling", &mut item.health_scaling),
-            ("frameTime", &mut item.frame_time),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("lowPriority", &mut item.low_priority),
-            ("buildable", &mut item.buildable),
-            ("hidden", &mut item.hidden),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("frames", &mut item.frames),
-            ("transitionFrames", &mut item.transition_frames),
-        ] {
-            if let Some(value) = field_i32(object, field) {
-                *target = value;
-            }
-        }
+        set_f32s(
+            object,
+            &mut [
+                ("explosiveness", &mut item.explosiveness),
+                ("flammability", &mut item.flammability),
+                ("radioactivity", &mut item.radioactivity),
+                ("charge", &mut item.charge),
+                ("healthScaling", &mut item.health_scaling),
+                ("frameTime", &mut item.frame_time),
+            ],
+        );
+        set_bools(
+            object,
+            &mut [
+                ("lowPriority", &mut item.low_priority),
+                ("buildable", &mut item.buildable),
+                ("hidden", &mut item.hidden),
+            ],
+        );
+        set_i32s(
+            object,
+            &mut [
+                ("frames", &mut item.frames),
+                ("transitionFrames", &mut item.transition_frames),
+            ],
+        );
         self.apply_unlock_fields(registry, file, object, &mut item.unlock);
         self.warn_unknown(file, "item", object, ITEM_FIELDS);
         registry
@@ -81,9 +78,7 @@ impl<'a> ContentJsonParser<'a> {
         let mut plans = Vec::with_capacity(entries.len());
         for entry in entries {
             let Some(plan) = entry.as_object() else {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `plans` entries must be objects"
-                )));
+                parse_err!("{file}: `plans` entries must be objects");
             };
             let unit = plan.get("unit").and_then(Value::as_str).ok_or_else(|| {
                 ContentParseError::new(format!("{file}: unit plan is missing `unit`"))
@@ -114,9 +109,7 @@ impl<'a> ContentJsonParser<'a> {
         let mut plans = Vec::with_capacity(entries.len());
         for entry in entries {
             let Some(plan) = entry.as_object() else {
-                return Err(ContentParseError::new(format!(
-                    "{file}: `plans` entries must be objects"
-                )));
+                parse_err!("{file}: `plans` entries must be objects");
             };
             let unit = plan.get("unit").and_then(Value::as_str).ok_or_else(|| {
                 ContentParseError::new(format!("{file}: assembler plan is missing `unit`"))
@@ -125,9 +118,7 @@ impl<'a> ContentJsonParser<'a> {
             if let Some(Value::Array(stacks)) = plan.get("requirements") {
                 for stack in stacks {
                     let Some(map) = stack.as_object() else {
-                        return Err(ContentParseError::new(format!(
-                            "{file}: assembler plan requirements must be objects"
-                        )));
+                        parse_err!("{file}: assembler plan requirements must be objects");
                     };
                     let raw = map.get("item").and_then(Value::as_str).ok_or_else(|| {
                         ContentParseError::new(format!(
@@ -162,9 +153,7 @@ impl<'a> ContentJsonParser<'a> {
                             amount,
                         }
                     } else {
-                        return Err(ContentParseError::new(format!(
-                            "{file}: unknown assembler payload `{raw}`"
-                        )));
+                        parse_err!("{file}: unknown assembler payload `{raw}`");
                     };
                     payloads.push(payload);
                 }
@@ -194,32 +183,30 @@ impl<'a> ContentJsonParser<'a> {
             .and_then(parse_color)
             .unwrap_or(Rgba::WHITE);
         let mut liquid = Liquid::new(&name, color, &self.bundle, self.store);
-        for (field, target) in [
-            ("temperature", &mut liquid.temperature),
-            ("heatCapacity", &mut liquid.heat_capacity),
-            ("viscosity", &mut liquid.viscosity),
-            ("explosiveness", &mut liquid.explosiveness),
-            ("flammability", &mut liquid.flammability),
-            ("particleSpacing", &mut liquid.particle_spacing),
-            ("boilPoint", &mut liquid.boil_point),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("gas", &mut liquid.gas),
-            ("blockReactive", &mut liquid.block_reactive),
-            ("coolant", &mut liquid.coolant),
-            ("moveThroughBlocks", &mut liquid.move_through_blocks),
-            ("incinerable", &mut liquid.incinerable),
-            ("capPuddles", &mut liquid.cap_puddles),
-            ("hidden", &mut liquid.hidden),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_f32s(
+            object,
+            &mut [
+                ("temperature", &mut liquid.temperature),
+                ("heatCapacity", &mut liquid.heat_capacity),
+                ("viscosity", &mut liquid.viscosity),
+                ("explosiveness", &mut liquid.explosiveness),
+                ("flammability", &mut liquid.flammability),
+                ("particleSpacing", &mut liquid.particle_spacing),
+                ("boilPoint", &mut liquid.boil_point),
+            ],
+        );
+        set_bools(
+            object,
+            &mut [
+                ("gas", &mut liquid.gas),
+                ("blockReactive", &mut liquid.block_reactive),
+                ("coolant", &mut liquid.coolant),
+                ("moveThroughBlocks", &mut liquid.move_through_blocks),
+                ("incinerable", &mut liquid.incinerable),
+                ("capPuddles", &mut liquid.cap_puddles),
+                ("hidden", &mut liquid.hidden),
+            ],
+        );
         if let Some(color) = object.get("gasColor").and_then(parse_color) {
             liquid.gas_color = color;
         }
@@ -277,39 +264,37 @@ impl<'a> ContentJsonParser<'a> {
         let name = self.locate_name(registry, ContentType::Status, stem, object);
         self.read_bundle(object, ContentType::Status, &name);
         let mut status = StatusEffect::new(&name, &self.bundle, self.store);
-        for (field, target) in [
-            ("damageMultiplier", &mut status.damage_multiplier),
-            ("healthMultiplier", &mut status.health_multiplier),
-            ("speedMultiplier", &mut status.speed_multiplier),
-            ("reloadMultiplier", &mut status.reload_multiplier),
-            ("buildSpeedMultiplier", &mut status.build_speed_multiplier),
-            ("dragMultiplier", &mut status.drag_multiplier),
-            ("transitionDamage", &mut status.transition_damage),
-            ("damage", &mut status.damage),
-            ("intervalDamageTime", &mut status.interval_damage_time),
-            ("intervalDamage", &mut status.interval_damage),
-            ("effectChance", &mut status.effect_chance),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("disarm", &mut status.disarm),
-            ("intervalDamagePierce", &mut status.interval_damage_pierce),
-            ("parentizeEffect", &mut status.parentize_effect),
-            ("permanent", &mut status.permanent),
-            ("reactive", &mut status.reactive),
-            ("dynamic", &mut status.dynamic),
-            ("show", &mut status.show),
-            ("applyExtend", &mut status.apply_extend),
-            ("parentizeApplyEffect", &mut status.parentize_apply_effect),
-            ("outline", &mut status.outline),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_f32s(
+            object,
+            &mut [
+                ("damageMultiplier", &mut status.damage_multiplier),
+                ("healthMultiplier", &mut status.health_multiplier),
+                ("speedMultiplier", &mut status.speed_multiplier),
+                ("reloadMultiplier", &mut status.reload_multiplier),
+                ("buildSpeedMultiplier", &mut status.build_speed_multiplier),
+                ("dragMultiplier", &mut status.drag_multiplier),
+                ("transitionDamage", &mut status.transition_damage),
+                ("damage", &mut status.damage),
+                ("intervalDamageTime", &mut status.interval_damage_time),
+                ("intervalDamage", &mut status.interval_damage),
+                ("effectChance", &mut status.effect_chance),
+            ],
+        );
+        set_bools(
+            object,
+            &mut [
+                ("disarm", &mut status.disarm),
+                ("intervalDamagePierce", &mut status.interval_damage_pierce),
+                ("parentizeEffect", &mut status.parentize_effect),
+                ("permanent", &mut status.permanent),
+                ("reactive", &mut status.reactive),
+                ("dynamic", &mut status.dynamic),
+                ("show", &mut status.show),
+                ("applyExtend", &mut status.apply_extend),
+                ("parentizeApplyEffect", &mut status.parentize_apply_effect),
+                ("outline", &mut status.outline),
+            ],
+        );
         if let Some(color) = object.get("color").and_then(parse_color) {
             status.color = color;
         }
@@ -376,28 +361,26 @@ impl<'a> ContentJsonParser<'a> {
             })
             .unwrap_or(WeatherKind::Plain);
         let mut weather = WeatherDef::new(&name, kind, &self.bundle, self.store);
-        for (field, target) in [
-            ("duration", &mut weather.duration),
-            ("opacityMultiplier", &mut weather.opacity_multiplier),
-            ("soundVol", &mut weather.sound_vol),
-            ("soundVolMin", &mut weather.sound_vol_min),
-            ("soundVolOscMag", &mut weather.sound_vol_osc_mag),
-            ("soundVolOscScl", &mut weather.sound_vol_osc_scl),
-            ("statusDuration", &mut weather.status_duration),
-        ] {
-            if let Some(value) = field_f32(object, field) {
-                *target = value;
-            }
-        }
-        for (field, target) in [
-            ("hidden", &mut weather.hidden),
-            ("statusAir", &mut weather.status_air),
-            ("statusGround", &mut weather.status_ground),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_f32s(
+            object,
+            &mut [
+                ("duration", &mut weather.duration),
+                ("opacityMultiplier", &mut weather.opacity_multiplier),
+                ("soundVol", &mut weather.sound_vol),
+                ("soundVolMin", &mut weather.sound_vol_min),
+                ("soundVolOscMag", &mut weather.sound_vol_osc_mag),
+                ("soundVolOscScl", &mut weather.sound_vol_osc_scl),
+                ("statusDuration", &mut weather.status_duration),
+            ],
+        );
+        set_bools(
+            object,
+            &mut [
+                ("hidden", &mut weather.hidden),
+                ("statusAir", &mut weather.status_air),
+                ("statusGround", &mut weather.status_ground),
+            ],
+        );
         if let Some(sound) = object.get("sound").and_then(Value::as_str) {
             weather.sound = Some(sound.to_owned());
         }
@@ -415,38 +398,36 @@ impl<'a> ContentJsonParser<'a> {
         }
         if let Some(particle) = weather.particle.as_mut() {
             // Parse only the ported `ParticleWeatherFields` subset.
-            for (field, target) in [
-                ("yspeed", &mut particle.yspeed),
-                ("xspeed", &mut particle.xspeed),
-                ("padding", &mut particle.padding),
-                ("sizeMin", &mut particle.size_min),
-                ("sizeMax", &mut particle.size_max),
-                ("density", &mut particle.density),
-                ("minAlpha", &mut particle.min_alpha),
-                ("maxAlpha", &mut particle.max_alpha),
-                ("force", &mut particle.force),
-                ("noiseScale", &mut particle.noise_scale),
-            ] {
-                if let Some(value) = field_f32(object, field) {
-                    *target = value;
-                }
-            }
+            set_f32s(
+                object,
+                &mut [
+                    ("yspeed", &mut particle.yspeed),
+                    ("xspeed", &mut particle.xspeed),
+                    ("padding", &mut particle.padding),
+                    ("sizeMin", &mut particle.size_min),
+                    ("sizeMax", &mut particle.size_max),
+                    ("density", &mut particle.density),
+                    ("minAlpha", &mut particle.min_alpha),
+                    ("maxAlpha", &mut particle.max_alpha),
+                    ("force", &mut particle.force),
+                    ("noiseScale", &mut particle.noise_scale),
+                ],
+            );
             if let Some(color) = object.get("color").and_then(parse_color) {
                 particle.color = color;
             }
         }
         if let Some(rain) = weather.rain.as_mut() {
-            for (field, target) in [
-                ("yspeed", &mut rain.yspeed),
-                ("xspeed", &mut rain.xspeed),
-                ("padding", &mut rain.padding),
-                ("density", &mut rain.density),
-                ("stroke", &mut rain.stroke),
-            ] {
-                if let Some(value) = field_f32(object, field) {
-                    *target = value;
-                }
-            }
+            set_f32s(
+                object,
+                &mut [
+                    ("yspeed", &mut rain.yspeed),
+                    ("xspeed", &mut rain.xspeed),
+                    ("padding", &mut rain.padding),
+                    ("density", &mut rain.density),
+                    ("stroke", &mut rain.stroke),
+                ],
+            );
             if let Some(color) = object.get("color").and_then(parse_color) {
                 rain.color = color;
             }
@@ -519,20 +500,19 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(value) = field_f32(object, "startWaveTimeMultiplier") {
             sector.start_wave_time_multiplier = value;
         }
-        for (field, target) in [
-            ("addStartingItems", &mut sector.add_starting_items),
-            ("noLighting", &mut sector.no_lighting),
-            ("isLastSector", &mut sector.is_last_sector),
-            ("requireUnlock", &mut sector.require_unlock),
-            ("showHidden", &mut sector.show_hidden),
-            ("attackAfterWaves", &mut sector.attack_after_waves),
-            ("showSectorLandInfo", &mut sector.show_sector_land_info),
-            ("outline", &mut sector.outline),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_bools(
+            object,
+            &mut [
+                ("addStartingItems", &mut sector.add_starting_items),
+                ("noLighting", &mut sector.no_lighting),
+                ("isLastSector", &mut sector.is_last_sector),
+                ("requireUnlock", &mut sector.require_unlock),
+                ("showHidden", &mut sector.show_hidden),
+                ("attackAfterWaves", &mut sector.attack_after_waves),
+                ("showSectorLandInfo", &mut sector.show_sector_land_info),
+                ("outline", &mut sector.outline),
+            ],
+        );
         if let Some(value) = field_i32(object, "outlineRadius") {
             sector.outline_radius = value;
         }
@@ -577,24 +557,23 @@ impl<'a> ContentJsonParser<'a> {
         {
             planet.cloud_mesh = Some(kind);
         }
-        for (field, target) in [
-            ("bloom", &mut planet.bloom),
-            ("accessible", &mut planet.accessible),
-            ("visible", &mut planet.visible),
-            ("hasAtmosphere", &mut planet.has_atmosphere),
-            ("updateLighting", &mut planet.update_lighting),
-            ("allowLaunchSchematics", &mut planet.allow_launch_schematics),
-            ("allowLaunchLoadout", &mut planet.allow_launch_loadout),
-            ("allowSectorInvasion", &mut planet.allow_sector_invasion),
-            ("allowWaves", &mut planet.allow_waves),
-            ("prebuildBase", &mut planet.prebuild_base),
-            ("allowCampaignRules", &mut planet.allow_campaign_rules),
-            ("drawOrbit", &mut planet.draw_orbit),
-        ] {
-            if let Some(value) = field_bool(object, field) {
-                *target = value;
-            }
-        }
+        set_bools(
+            object,
+            &mut [
+                ("bloom", &mut planet.bloom),
+                ("accessible", &mut planet.accessible),
+                ("visible", &mut planet.visible),
+                ("hasAtmosphere", &mut planet.has_atmosphere),
+                ("updateLighting", &mut planet.update_lighting),
+                ("allowLaunchSchematics", &mut planet.allow_launch_schematics),
+                ("allowLaunchLoadout", &mut planet.allow_launch_loadout),
+                ("allowSectorInvasion", &mut planet.allow_sector_invasion),
+                ("allowWaves", &mut planet.allow_waves),
+                ("prebuildBase", &mut planet.prebuild_base),
+                ("allowCampaignRules", &mut planet.allow_campaign_rules),
+                ("drawOrbit", &mut planet.draw_orbit),
+            ],
+        );
         if let Some(value) = field_i32(object, "startSector") {
             planet.start_sector = value.max(0) as u32;
         }

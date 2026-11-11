@@ -8,7 +8,43 @@
 use super::*;
 
 impl DataPatcher {
+    /// Records a reverse action that [`DataPatcher::unapply`] runs in reverse order.
+    pub(super) fn push_reset(&mut self, reset: impl FnOnce(&mut ContentRegistry) + 'static) {
+        self.resetters.push(Box::new(reset));
+    }
+
     // ---- generic scalar helpers ----
+
+    /// Shared body of the typed setters: mode check, parse, record the original,
+    /// push a resetter, then write the new value.
+    #[allow(clippy::too_many_arguments)]
+    fn set_scalar<T: Copy + 'static>(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        field: &str,
+        value: &Value,
+        mode: FieldMode,
+        parse: fn(&Value) -> Option<T>,
+        get: impl FnOnce(&ContentRegistry) -> Option<T>,
+        set: impl Fn(&mut ContentRegistry, T) + Clone + 'static,
+    ) {
+        if mode != FieldMode::Set {
+            self.warn(format!("array suffix is invalid on `{field}`"));
+            return;
+        }
+        let Some(new) = parse(value) else {
+            return;
+        };
+        if self.mark_used(reference, field) {
+            let Some(original) = get(registry) else {
+                return;
+            };
+            let reset = set.clone();
+            self.push_reset(move |r: &mut ContentRegistry| reset(r, original));
+        }
+        set(registry, new);
+    }
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn set_i32(
@@ -21,22 +57,16 @@ impl DataPatcher {
         get: impl FnOnce(&ContentRegistry) -> Option<i32>,
         set: impl Fn(&mut ContentRegistry, i32) + Clone + 'static,
     ) {
-        if mode != FieldMode::Set {
-            self.warn(format!("array suffix is invalid on `{field}`"));
-            return;
-        }
-        let Some(new) = value.as_i64().map(|v| v as i32) else {
-            return;
-        };
-        if self.mark_used(reference, field) {
-            let Some(original) = get(registry) else {
-                return;
-            };
-            let reset = set.clone();
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| reset(r, original)));
-        }
-        set(registry, new);
+        self.set_scalar(
+            registry,
+            reference,
+            field,
+            value,
+            mode,
+            |v| v.as_i64().map(|v| v as i32),
+            get,
+            set,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -50,22 +80,16 @@ impl DataPatcher {
         get: impl FnOnce(&ContentRegistry) -> Option<f32>,
         set: impl Fn(&mut ContentRegistry, f32) + Clone + 'static,
     ) {
-        if mode != FieldMode::Set {
-            self.warn(format!("array suffix is invalid on `{field}`"));
-            return;
-        }
-        let Some(new) = value.as_f64().map(|v| v as f32) else {
-            return;
-        };
-        if self.mark_used(reference, field) {
-            let Some(original) = get(registry) else {
-                return;
-            };
-            let reset = set.clone();
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| reset(r, original)));
-        }
-        set(registry, new);
+        self.set_scalar(
+            registry,
+            reference,
+            field,
+            value,
+            mode,
+            |v| v.as_f64().map(|v| v as f32),
+            get,
+            set,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -79,22 +103,16 @@ impl DataPatcher {
         get: impl FnOnce(&ContentRegistry) -> Option<bool>,
         set: impl Fn(&mut ContentRegistry, bool) + Clone + 'static,
     ) {
-        if mode != FieldMode::Set {
-            self.warn(format!("array suffix is invalid on `{field}`"));
-            return;
-        }
-        let Some(new) = value.as_bool() else {
-            return;
-        };
-        if self.mark_used(reference, field) {
-            let Some(original) = get(registry) else {
-                return;
-            };
-            let reset = set.clone();
-            self.resetters
-                .push(Box::new(move |r: &mut ContentRegistry| reset(r, original)));
-        }
-        set(registry, new);
+        self.set_scalar(
+            registry,
+            reference,
+            field,
+            value,
+            mode,
+            Value::as_bool,
+            get,
+            set,
+        );
     }
 
     // ---- shared parsing ----
