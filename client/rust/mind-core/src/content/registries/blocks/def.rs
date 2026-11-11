@@ -553,25 +553,15 @@ impl BlockDef {
         let mut research_cost_multipliers =
             Vec::with_capacity(spec.research_cost_multipliers.len());
         for (name, multiplier) in &spec.research_cost_multipliers {
-            let item = registry
-                .item_id(name)
-                .ok_or_else(|| ContentError::UnknownName((*name).to_owned()))?;
+            let item = need(registry.item_id(name), name)?;
             research_cost_multipliers.push((item, *multiplier));
         }
         let item_drop = match spec.item_drop {
-            Some(name) => Some(
-                registry
-                    .item_id(name)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(registry.item_id(name), name)?),
             None => None,
         };
         let liquid_drop = match spec.liquid_drop {
-            Some(name) => Some(
-                registry
-                    .liquid_id(name)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(registry.liquid_id(name), name)?),
             None => None,
         };
         // `OreBlock.java:22,40` (`setup`): an ore's `mapColor` is its item's
@@ -587,12 +577,10 @@ impl BlockDef {
         // `Floor.status`/`statusDuration`/`dragMultiplier`/`damageTaken`
         // (G01 T13).
         let floor_status = match spec.floor_status {
-            Some(name) => Some(
-                registry
-                    .status_by_name(name)
-                    .map(|record| record.id)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(
+                registry.status_by_name(name).map(|record| record.id),
+                name,
+            )?),
             None => None,
         };
         let floor_status_duration = spec.floor_status_duration.unwrap_or(60.0);
@@ -602,18 +590,12 @@ impl BlockDef {
         // `Floor.blendGroup` (`Floor.java:62`); `None` resolves to this block in
         // `init_self` (the id is assigned after `from_spec`).
         let blend_group = match spec.blend_group {
-            Some(name) => Some(
-                registry
-                    .block_id(name)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(registry.block_id(name), name)?),
             None => None,
         };
         let mut unit_plans = Vec::with_capacity(spec.unit_plans.len());
         for plan in &spec.unit_plans {
-            let unit = registry
-                .unit_id(plan.unit)
-                .ok_or_else(|| ContentError::UnknownName(plan.unit.to_owned()))?;
+            let unit = need(registry.unit_id(plan.unit), plan.unit)?;
             let mut requirements = Vec::with_capacity(plan.requirements.len());
             for stack in &plan.requirements {
                 requirements.push(resolve_item(registry, stack)?);
@@ -626,30 +608,20 @@ impl BlockDef {
         }
         let mut reconstructor_upgrades = Vec::with_capacity(spec.upgrades.len());
         for (from, to) in &spec.upgrades {
-            let from = registry
-                .unit_id(from)
-                .ok_or_else(|| ContentError::UnknownName((*from).to_owned()))?;
-            let to = registry
-                .unit_id(to)
-                .ok_or_else(|| ContentError::UnknownName((*to).to_owned()))?;
+            let from = need(registry.unit_id(from), from)?;
+            let to = need(registry.unit_id(to), to)?;
             reconstructor_upgrades.push((from, to));
         }
         let mut assembler_plans = Vec::with_capacity(spec.assembler_plans.len());
         for plan in &spec.assembler_plans {
-            let unit = registry
-                .unit_id(plan.unit)
-                .ok_or_else(|| ContentError::UnknownName(plan.unit.to_owned()))?;
+            let unit = need(registry.unit_id(plan.unit), plan.unit)?;
             let mut payloads = Vec::with_capacity(plan.payloads.len());
             for payload in &plan.payloads {
                 let item = if payload.block {
-                    let id = registry
-                        .block_id(payload.name)
-                        .ok_or_else(|| ContentError::UnknownName(payload.name.to_owned()))?;
+                    let id = need(registry.block_id(payload.name), payload.name)?;
                     ContentRef::block(id)
                 } else {
-                    let id = registry
-                        .unit_id(payload.name)
-                        .ok_or_else(|| ContentError::UnknownName(payload.name.to_owned()))?;
+                    let id = need(registry.unit_id(payload.name), payload.name)?;
                     ContentRef::of(ContentType::Unit, id)
                 };
                 payloads.push(PayloadStack::new(item, payload.amount));
@@ -695,9 +667,7 @@ impl BlockDef {
         }
         let mut output_liquids = Vec::with_capacity(spec.output_liquids.len());
         for stack in &spec.output_liquids {
-            let liquid = registry
-                .liquid_id(stack.liquid)
-                .ok_or_else(|| ContentError::UnknownName(stack.liquid.to_owned()))?;
+            let liquid = need(registry.liquid_id(stack.liquid), stack.liquid)?;
             output_liquids.push((liquid, stack.amount));
         }
         let mut separator_results = Vec::with_capacity(spec.separator_results.len());
@@ -706,26 +676,14 @@ impl BlockDef {
         }
         let mut blocked_items = Vec::with_capacity(spec.blocked_items.len());
         for name in &spec.blocked_items {
-            blocked_items.push(
-                registry
-                    .item_id(name)
-                    .ok_or_else(|| ContentError::UnknownName((*name).to_owned()))?,
-            );
+            blocked_items.push(need(registry.item_id(name), name)?);
         }
         let pump_liquid = match spec.pump_liquid {
-            Some(name) => Some(
-                registry
-                    .liquid_id(name)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(registry.liquid_id(name), name)?),
             None => None,
         };
         let output_item = match spec.output_item {
-            Some(name) => Some(
-                registry
-                    .item_id(name)
-                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
-            ),
+            Some(name) => Some(need(registry.item_id(name), name)?),
             None => None,
         };
         // `Block.lightRadius`/`lightColor` (`Block.java:344,350` + the class and
@@ -1067,14 +1025,18 @@ impl BlockDef {
     }
 }
 
+/// Resolves a name-based content reference, mapping a miss to
+/// [`ContentError::UnknownName`] (`ContentParser`'s "no content named …").
+pub(super) fn need<T>(value: Option<T>, name: &str) -> Result<T, ContentError> {
+    value.ok_or_else(|| ContentError::UnknownName(name.to_owned()))
+}
+
 /// Resolves a generated item stack spec.
 pub(super) fn resolve_item(
     registry: &ContentRegistry,
     spec: &StackSpec,
 ) -> Result<ItemStack, ContentError> {
-    let item = registry
-        .item_id(spec.item)
-        .ok_or_else(|| ContentError::UnknownName(spec.item.to_owned()))?;
+    let item = need(registry.item_id(spec.item), spec.item)?;
     Ok(ItemStack::new(item, spec.amount))
 }
 
@@ -1107,9 +1069,7 @@ pub(super) fn resolve_consume(
             optional,
             update,
         } => {
-            let liquid = registry
-                .liquid_id(liquid)
-                .ok_or_else(|| ContentError::UnknownName(liquid.to_owned()))?;
+            let liquid = need(registry.liquid_id(liquid), liquid)?;
             Ok(ConsumeSpec {
                 consume: Consume::Liquid { liquid, amount },
                 optional,
@@ -1124,9 +1084,7 @@ pub(super) fn resolve_consume(
         } => {
             let mut out = Vec::with_capacity(stacks.len());
             for stack in &stacks {
-                let liquid = registry
-                    .liquid_id(stack.liquid)
-                    .ok_or_else(|| ContentError::UnknownName(stack.liquid.to_owned()))?;
+                let liquid = need(registry.liquid_id(stack.liquid), stack.liquid)?;
                 out.push(LiquidStack::new(liquid, stack.amount));
             }
             Ok(ConsumeSpec {

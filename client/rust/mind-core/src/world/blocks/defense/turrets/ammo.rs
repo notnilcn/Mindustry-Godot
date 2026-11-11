@@ -15,14 +15,14 @@ use crate::world::plan::BuildPlan;
 use super::math::{cheating, position};
 use super::{
     AmmoEntry, LiquidAmmo, PayloadContent, PayloadStack, TurretAmmo, TurretConfig, TurretKind,
-    TurretState,
+    TurretState, turret,
 };
 
 // ---- ammo ----
 
 /// `TurretBuild.peekAmmo`: the bullet that the next `use_ammo` returns.
 pub fn peek_ammo(world: &World, e: Entity) -> Option<BulletId> {
-    let state = world.get::<TurretState>(e)?;
+    let state = turret(world, e)?;
     peek_ammo_state(state, world, e)
 }
 
@@ -56,7 +56,7 @@ pub(super) fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> 
 /// (`Power` resolves the def from the runtime content because the ammo enum
 /// keeps only the bullet id).
 pub fn peek_ammo_range_change(world: &World, e: Entity) -> f32 {
-    let Some(state) = world.get::<TurretState>(e) else {
+    let Some(state) = turret(world, e) else {
         return 0.0;
     };
     peek_ammo_range_change_of(state, world, e)
@@ -128,10 +128,7 @@ pub fn peek_ammo_min_range_change_of(state: &TurretState, world: &World, e: Enti
 /// peekAmmo().rangeChange`, the range used by targeting, the range circle, the
 /// fog radius and the logic `@range` sensor.
 pub fn turret_range(world: &World, e: Entity) -> f32 {
-    world
-        .get::<TurretState>(e)
-        .map_or(0.0, |state| state.config.range)
-        + peek_ammo_range_change(world, e)
+    turret(world, e).map_or(0.0, |state| state.config.range) + peek_ammo_range_change(world, e)
 }
 
 /// [`turret_range`] for callers that already hold the dispatched state.
@@ -195,7 +192,7 @@ pub fn logic_target_position(
 
 /// `TurretBuild.hasAmmo`, including the "swap a usable entry to the back" rule.
 pub fn has_ammo(world: &World, e: Entity) -> bool {
-    let Some(state) = world.get::<TurretState>(e) else {
+    let Some(state) = turret(world, e) else {
         return false;
     };
     has_ammo_state(state, world, e)
@@ -303,7 +300,7 @@ pub(super) fn can_consume(
 
 /// `ItemTurretBuild.acceptItem`.
 pub fn accept_item(world: &World, e: Entity, item: ItemId) -> bool {
-    let Some(state) = world.get::<TurretState>(e) else {
+    let Some(state) = turret(world, e) else {
         return false;
     };
     let TurretAmmo::Item(ammo) = &state.config.ammo else {
@@ -346,7 +343,7 @@ pub fn handle_item(world: &mut World, e: Entity, item: ItemId) {
 
 /// `LiquidTurretBuild.acceptLiquid`.
 pub fn accept_liquid(world: &World, e: Entity, liquid: LiquidId) -> bool {
-    let Some(state) = world.get::<TurretState>(e) else {
+    let Some(state) = turret(world, e) else {
         return false;
     };
     let TurretAmmo::Liquid(ammo) = &state.config.ammo else {
@@ -390,8 +387,7 @@ pub fn handle_liquid(world: &mut World, e: Entity, liquid: LiquidId, amount: f32
         .map(|inst| inst.def.liquid_capacity);
     let capacity = match block_capacity {
         Some(capacity) if capacity > 0.0 => capacity,
-        _ => world
-            .get::<TurretState>(e)
+        _ => turret(world, e)
             .map(|state| match &state.config.ammo {
                 TurretAmmo::Liquid(_) => 60.0f32,
                 _ if state.config.uses_coolant() => 20.0,
@@ -406,7 +402,7 @@ pub fn handle_liquid(world: &mut World, e: Entity, liquid: LiquidId, amount: f32
 
 /// `PayloadTurretBuild.acceptPayload`.
 pub fn accept_payload(world: &World, e: Entity, payload: PayloadRef) -> bool {
-    let Some(state) = world.get::<TurretState>(e) else {
+    let Some(state) = turret(world, e) else {
         return false;
     };
     let TurretAmmo::Payload(ammo) = &state.config.ammo else {

@@ -25,9 +25,99 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("mind-sim-io-{tag}-{}.msav", std::process::id()))
 }
 
+/// A temp save path that removes the file on drop (and clears a stale file
+/// before the test starts), so a panic mid-test cannot leave a save behind.
+struct TempSave {
+    path: std::path::PathBuf,
+}
+
+impl TempSave {
+    fn new(tag: &str) -> Self {
+        let path = temp_path(tag);
+        let _ = std::fs::remove_file(&path);
+        Self { path }
+    }
+}
+
+impl std::ops::Deref for TempSave {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl AsRef<std::path::Path> for TempSave {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TempSave {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Fresh `size`x`size` sim with the block + unit runtimes installed and the
+/// boot [`SimIoHandler`] registered.
+fn io_sim_sized(size: i32) -> Sim {
+    let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("block runtime");
+    sim.install_unit_runtime().expect("unit runtime");
+    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+    sim
+}
+
+/// Canonical 64x64 live sim for the save/load tests.
+fn io_sim() -> Sim {
+    io_sim_sized(64)
+}
+
+/// Fresh `size`x`size` sim with only the block runtime installed.
+fn io_sim_blocks(size: i32) -> Sim {
+    let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("block runtime");
+    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+    sim
+}
+
+/// Fresh `size`x`size` sim with no runtime installed (tile grid only).
+fn io_sim_tiles(size: i32) -> Sim {
+    let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
+    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+    sim
+}
+
+/// Runs one queued save through the `IoSet::Capture` boundary and asserts the
+/// single response is `Ok`.
+fn save(sim: &mut Sim, path: &std::path::Path) {
+    sim.request_save(path, false);
+    sim.tick().expect("capture tick");
+    let responses = sim.take_io_responses();
+    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+    assert_eq!(responses[0].status, IoStatus::Ok);
+}
+
+/// Runs one queued load through the `IoSet::Apply` boundary and asserts the
+/// single response is `Ok`.
+fn load(sim: &mut Sim, path: &std::path::Path) {
+    sim.request_load(path);
+    sim.tick().expect("apply tick");
+    let responses = sim.take_io_responses();
+    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+}
+
+/// A save immediately followed by its load at two consecutive IO boundaries.
+fn save_then_load(sim: &mut Sim, path: &std::path::Path) {
+    save(sim, path);
+    load(sim, path);
+}
+
 #[test]
 fn live_sim_save_then_load_roundtrips_the_tile_grid() {
-    let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+    let mut sim = io_sim_tiles(8);
     let wall = sim.content().id("stone-wall").expect("stone-wall");
     sim.apply(Command::Place {
         x: 2,
@@ -35,28 +125,16 @@ fn live_sim_save_then_load_roundtrips_the_tile_grid() {
         block: wall,
     })
     .expect("place");
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("roundtrip");
+    save(&mut sim, &path);
     assert!(path.is_file(), "save file written");
 
     // Wipe the tile, then load it back at the next Apply boundary.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
     assert_eq!(sim.grid.block_at(TilePos::new(2, 3)), Some(BlockId::AIR));
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    load(&mut sim, &path);
     assert_eq!(sim.grid.block_at(TilePos::new(2, 3)), Some(wall));
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// L02 T4 (PAR-0377): the save meta carries `state.map.name()`
@@ -65,16 +143,12 @@ fn live_sim_save_then_load_roundtrips_the_tile_grid() {
 /// (`Map.java:151-153`) and `logic.reset()` drops it.
 #[test]
 fn save_meta_mapname_is_the_loaded_map() {
-    let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+    let mut sim = io_sim_tiles(8);
     assert_eq!(sim.map_name(), "Unknown", "emptyMap before any load");
     sim.set_map_name("Ancient Caldera");
 
-    let path = temp_path("mapname");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+    let path = TempSave::new("mapname");
+    save(&mut sim, &path);
     let mut content = boot_registry().expect("content");
     let bytes = std::fs::read(&path).expect("save bytes");
     let save = decode_save_bytes(&bytes, &mut content).expect("decodes");
@@ -85,14 +159,11 @@ fn save_meta_mapname_is_the_loaded_map() {
     );
 
     sim.set_map_name("");
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+    load(&mut sim, &path);
     assert_eq!(sim.map_name(), "Ancient Caldera", "restored from mapname");
 
     sim.reset();
     assert_eq!(sim.map_name(), "Unknown", "logic.reset() -> emptyMap");
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A live-runtime building (plan 07 `Building` + modules) must write a
@@ -100,8 +171,7 @@ fn save_meta_mapname_is_the_loaded_map() {
 /// the auto-save round trip (EV-0037).
 #[test]
 fn live_runtime_core_save_then_load_roundtrips() {
-    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("runtime");
+    let mut sim = io_sim_blocks(16);
     let core = sim.content().id("core-shard").expect("core-shard");
     sim.apply(Command::Place {
         x: 5,
@@ -109,26 +179,14 @@ fn live_runtime_core_save_then_load_roundtrips() {
         block: core,
     })
     .expect("place core");
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("live-core-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-core-roundtrip");
+    save(&mut sim, &path);
     assert!(path.is_file(), "save file written");
 
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
     assert_eq!(sim.grid.block_at(TilePos::new(5, 5)), Some(core));
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// PAR-0161: a live save round-trips the per-kind bodies — the drill keeps
@@ -141,8 +199,7 @@ fn live_save_restores_drill_and_sorter_bodies() {
             .expect("configure");
     }
 
-    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
+    let mut sim = io_sim_blocks(16);
     let drill = sim
         .content()
         .id("mechanical-drill")
@@ -176,23 +233,13 @@ fn live_save_restores_drill_and_sorter_bodies() {
         8,
         crate::determinism::ConfigValue::Content("copper".to_owned()),
     );
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("drill-sorter-bodies");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("drill-sorter-bodies");
+    save(&mut sim, &path);
 
     // Wipe the live world; the load must rebuild the per-kind bodies.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
 
     let drill_entity = sim.grid.tile(4, 4).build.expect("drill respawned");
     let state = sim
@@ -218,17 +265,13 @@ fn live_save_restores_drill_and_sorter_bodies() {
         }
         other => panic!("sorter config lost: {other:?}"),
     }
-
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn load_of_a_missing_file_is_a_failed_response() {
-    let mut sim = Sim::new(1, 4, 4, BlockId::AIR, BlockId::AIR);
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
-    let path = temp_path("missing");
-    let _ = std::fs::remove_file(&path);
-    sim.request_load(&path);
+    let mut sim = io_sim_tiles(4);
+    let path = TempSave::new("missing");
+    sim.request_load(&*path);
     sim.tick().expect("apply tick");
     let responses = sim.take_io_responses();
     assert_eq!(responses.len(), 1);
@@ -272,9 +315,7 @@ fn decode_save_bytes_carries_units_tags_and_markers() {
     });
     session.wavetime = 1234.5;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
@@ -282,15 +323,9 @@ fn decode_save_bytes_carries_units_tags_and_markers() {
         .expect("spawn 1");
     sim.spawn_live_unit("dagger", 1, 48.0, 40.0, 0.0)
         .expect("spawn 2");
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("decode-units");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("decode-units");
+    save(&mut sim, &path);
 
     let bytes = std::fs::read(&path).expect("save bytes");
     let mut content = boot_registry().expect("content");
@@ -301,8 +336,6 @@ fn decode_save_bytes_carries_units_tags_and_markers() {
         Some("1234.5"),
         "wavetime tag carried"
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// T9: revision 3 saves the real `spawnedByCore` flag, so a default-team
@@ -329,9 +362,7 @@ fn apply_decoded_entities_skips_core_units() {
         unit_cap_variable: false,
         ..Rules::default()
     });
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
@@ -341,14 +372,9 @@ fn apply_decoded_entities_skips_core_units() {
     let _ = alpha;
     sim.spawn_live_unit("dagger", 1, 120.0, 100.0, 0.0)
         .expect("dagger");
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("decode-core-unit");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("decode-core-unit");
+    save(&mut sim, &path);
 
     let bytes = std::fs::read(&path).expect("save bytes");
     let mut content = boot_registry().expect("content");
@@ -380,8 +406,6 @@ fn apply_decoded_entities_skips_core_units() {
         }
     }
     assert_eq!(names, vec!["alpha".to_owned(), "dagger".to_owned()]);
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// T9: `spawnedByCore` default-team units are skipped on respawn; v1/v2
@@ -774,9 +798,7 @@ fn live_unit_class_id_is_reserved() {
 /// as a unit chunk (`SaveVersion.java:425-439`).
 #[test]
 fn entity_count_matches_written_chunks() {
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     let first = sim
         .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
         .expect("dagger 1");
@@ -798,14 +820,9 @@ fn entity_count_matches_written_chunks() {
             animation: 0.0,
         },
     ));
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("entity-count");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("entity-count");
+    save(&mut sim, &path);
 
     let bytes = std::fs::read(&path).expect("save bytes");
     let mut content = boot_registry().expect("content");
@@ -822,8 +839,6 @@ fn entity_count_matches_written_chunks() {
         1,
         "one dagger restored"
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// H04 T9: revision 3 round-trips elevation, the carried item, statuses,
@@ -834,9 +849,7 @@ fn unit_rev3_round_trip() {
     use crate::entities::comp::unit::comp::{ItemsComp, ShieldComp, StatusComp, StatusEntry};
     use crate::sim::builder::{BuilderPlans, UnitBuildPlan};
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     let entity = sim
         .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
         .expect("dagger");
@@ -882,14 +895,9 @@ fn unit_rev3_round_trip() {
         )]),
         ..Default::default()
     });
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("unit-rev3");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("unit-rev3");
+    save(&mut sim, &path);
 
     let bytes = std::fs::read(&path).expect("save bytes");
     let mut content = boot_registry().expect("content");
@@ -911,8 +919,6 @@ fn unit_rev3_round_trip() {
     assert_eq!(unit.plans.len(), 1);
     assert_eq!(unit.plans[0].block, BlockId::STONE_WALL);
     assert_eq!((unit.plans[0].x, unit.plans[0].y), (10, 12));
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A live save must carry real meta (`tick`/`playtime`) and the entities
@@ -927,9 +933,7 @@ fn unit_rev3_round_trip() {
 fn unit_abilities_and_tether_round_trip() {
     use crate::combat::abilities::AbilityComp;
     use crate::entities::comp::unit::comp::UnitTetherComp;
-    let mut sim = Sim::new(1, 48, 48, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(48);
     let oct = sim
         .spawn_live_unit("oct", 2, 120.0, 120.0, 0.0)
         .expect("oct");
@@ -953,15 +957,8 @@ fn unit_abilities_and_tether_round_trip() {
         .entity_mut(child)
         .insert(UnitTetherComp { spawner: Some(oct) });
     let oct_seq = sim.ecs.0.get::<crate::ecs::EntitySeq>(oct).expect("seq").0;
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
-    let path = temp_path("abilities-tether-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+    let path = TempSave::new("abilities-tether-roundtrip");
+    save_then_load(&mut sim, &path);
 
     let find = |sim: &Sim, name: &str| {
         let runtime = sim.unit_runtime().expect("runtime");
@@ -1002,14 +999,11 @@ fn unit_abilities_and_tether_round_trip() {
         Some(oct_seq),
         "the restored spawner id"
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn live_sim_save_then_load_restores_entities_and_meta() {
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(32);
     let core = sim.content().id("core-shard").expect("core-shard");
     sim.apply(Command::Place {
         x: 5,
@@ -1023,15 +1017,9 @@ fn live_sim_save_then_load_restores_entities_and_meta() {
     sim.spawn_live_unit("dagger", 1, 64.0, 64.0, 0.0)
         .expect("spawn unit");
     sim.set_save_playtime(4321);
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("live-entities-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-entities-roundtrip");
+    save(&mut sim, &path);
 
     let meta = SaveIo::get_meta(&NativeFs, &path).expect("meta");
     assert_eq!(meta.time_played, 4321, "host playtime lands in the meta");
@@ -1044,17 +1032,11 @@ fn live_sim_save_then_load_restores_entities_and_meta() {
 
     // Wipe the live world; the load must rebuild it from the file.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
     assert_eq!(sim.grid.block_at(TilePos::new(5, 5)), Some(core));
     assert_eq!(sim.group_counts().get("build"), Some(&1));
     assert_eq!(sim.group_counts().get("unit"), Some(&1));
     assert!(sim.tick_count() >= saved_tick, "tick header resumes");
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// PAR-0249: a core holding `i32::MAX / 2` item stacks (the `fillItems`
@@ -1065,9 +1047,7 @@ fn live_sim_save_then_load_restores_entities_and_meta() {
 fn live_sim_save_then_load_keeps_oversized_item_stacks() {
     use crate::world::modules::ItemModule;
 
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(32);
     let core = sim.content().id("core-shard").expect("core-shard");
     sim.apply(Command::Place {
         x: 5,
@@ -1099,24 +1079,14 @@ fn live_sim_save_then_load_keeps_oversized_item_stacks() {
         items.set(silicon, huge);
         assert_eq!(items.total(), expected_total, "Java int wrap (set)");
     }
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("live-oversized-items-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-oversized-items-roundtrip");
+    save(&mut sim, &path);
 
     // Wipe the live world; the load rebuilds the core and must not panic
     // on the overflow the sum of the two stacks produces in `apply_base`.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
 
     let entity = sim
         .grid
@@ -1132,8 +1102,6 @@ fn live_sim_save_then_load_keeps_oversized_item_stacks() {
     let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
     assert_eq!(items.remove(copper, 1), 1);
     assert_eq!(items.total(), expected_total.wrapping_sub(1));
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// H09 T11: the `static-fog-data` custom chunk (`FogControl.java:97,
@@ -1147,9 +1115,7 @@ fn live_save_keeps_static_fog() {
     use crate::game::runtime::CampaignRuntime;
     use crate::game::universe::Campaign;
 
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     let campaign = {
         let content = &sim.unit_runtime().expect("rt").content;
         Campaign::from_registry(content, &EmptyNeighborhood)
@@ -1182,23 +1148,13 @@ fn live_save_keeps_static_fog() {
         before.iter().any(|discovered| *discovered),
         "the unit discovered tiles"
     );
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("live-static-fog");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-static-fog");
+    save(&mut sim, &path);
 
     // Wipe the live world; the load must restore the fog from the chunk.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
     for (index, (x, y)) in sample.iter().enumerate() {
         assert_eq!(
             sim.fog_discovered(1, *x, *y),
@@ -1206,8 +1162,6 @@ fn live_save_keeps_static_fog() {
             "discovered ({x}, {y}) round-trips"
         );
     }
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// PAR-0138: a live save round-trips the carried payload stack (revision 2
@@ -1216,9 +1170,7 @@ fn live_save_keeps_static_fog() {
 fn live_save_keeps_unit_payloads() {
     use crate::entities::comp::unit::comp::{CarriedPayload, UnitPayloads};
 
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(32);
     let mega = sim
         .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
         .expect("mega");
@@ -1237,22 +1189,12 @@ fn live_save_keeps_unit_payloads() {
         .clone();
     assert!(matches!(before.as_slice(), [CarriedPayload::Unit { .. }]));
 
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
-    let path = temp_path("live-unit-payloads");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-unit-payloads");
+    save(&mut sim, &path);
 
     // Wipe the live world; the load must restore the carried stack.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
 
     let mega_id = sim
         .unit_runtime()
@@ -1281,8 +1223,6 @@ fn live_save_keeps_unit_payloads() {
         Some(before),
         "the carried stack survived the round-trip"
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// GAPS #23 / PAR-0518: a unit carried by a payload block round-trips a
@@ -1296,9 +1236,7 @@ fn live_save_keeps_block_unit_payload() {
     use crate::entities::comp::{Health, Unit};
     use crate::world::blocks::payloads::{CarriedUnit, PayloadHolder};
 
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(32);
     let source = sim
         .world_block_id("payload-source")
         .expect("payload-source");
@@ -1351,22 +1289,12 @@ fn live_save_keeps_block_unit_payload() {
         "carried unit is not in Groups.unit before the save"
     );
 
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
-    let path = temp_path("live-block-unit-payload");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-block-unit-payload");
+    save(&mut sim, &path);
 
     // Wipe the live world; the load must restore the carried unit.
     sim.grid.fill(BlockId::AIR, BlockId::AIR);
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
 
     let source_e = sim
         .grid
@@ -1405,17 +1333,13 @@ fn live_save_keeps_block_unit_payload() {
             .get::<PayloadHolder>(source_e)
             .is_some_and(|holder| holder.payload == Some(payload))
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// PAR-0090: a live save keeps fires and puddles and the load restores
 /// them with the same tile/amount/time.
 #[test]
 fn live_sim_save_keeps_fires_and_puddles() {
-    let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim_sized(32);
     let mut rng = crate::determinism::SimRng::new(5);
     let fire = crate::combat::fires::create(&mut sim.ecs.0, 7, 7, &mut rng).expect("fire");
     {
@@ -1435,15 +1359,9 @@ fn live_sim_save_keeps_fires_and_puddles() {
         assert!(puddle.is_some(), "puddle deposited");
         world.insert_non_send(runtime);
     }
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("live-fires-puddles-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
+    let path = TempSave::new("live-fires-puddles-roundtrip");
+    save(&mut sim, &path);
     let fire_before = sim
         .ecs
         .0
@@ -1457,11 +1375,7 @@ fn live_sim_save_keeps_fires_and_puddles() {
         .find_map(|entity| entity.get::<crate::combat::puddles::PuddleState>().copied())
         .expect("puddle state");
 
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    load(&mut sim, &path);
 
     let fires: Vec<crate::combat::fires::FireState> = sim
         .ecs
@@ -1494,8 +1408,6 @@ fn live_sim_save_keeps_fires_and_puddles() {
         puddles[0].amount,
         puddle_before.amount
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// I01 T10: the unit's `EntitySeq` (written as the chunk id,
@@ -1505,9 +1417,7 @@ fn live_sim_save_keeps_fires_and_puddles() {
 #[test]
 fn unit_ids_round_trip_through_save() {
     let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     let first = sim
         .spawn_live_unit("dagger", 2, 40.0, 40.0, 0.0)
         .expect("first dagger");
@@ -1517,21 +1427,9 @@ fn unit_ids_round_trip_through_save() {
     let first_seq = sim_seq(&sim, first).expect("first seq");
     let second_seq = sim_seq(&sim, second).expect("second seq");
     assert_ne!(first_seq, second_seq, "distinct ids");
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("unit-ids");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
-
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one load response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    let path = TempSave::new("unit-ids");
+    save_then_load(&mut sim, &path);
 
     // Every restored unit kept its saved id, in saved order.
     let restored: Vec<(u64, String)> = sim
@@ -1574,8 +1472,6 @@ fn unit_ids_round_trip_through_save() {
         .expect("third dagger");
     let third_seq = sim_seq(&sim, third).expect("third seq");
     assert!(third_seq > max, "allocator bumped ({third_seq} > {max})");
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// I01 T10: `UnitCargoLoaderBuild`'s save body (the tethered unit id,
@@ -1584,9 +1480,7 @@ fn unit_ids_round_trip_through_save() {
 #[test]
 fn cargo_loader_relinks_unit_after_load() {
     let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     // Place on team 1: derelict (team 0) buildings are disabled by
     // `checkAllowUpdate` and would never reach `updateTile`.
     sim.ecs
@@ -1617,19 +1511,9 @@ fn cargo_loader_relinks_unit_after_load() {
             .expect("loader state");
         state.unit = Some(manifold);
     }
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("cargo-loader-relink");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok);
-
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    let path = TempSave::new("cargo-loader-relink");
+    save_then_load(&mut sim, &path);
 
     let loader_entity = sim.grid.tile(8, 8).build.expect("loader respawned");
     let state = sim
@@ -1647,8 +1531,6 @@ fn cargo_loader_relinks_unit_after_load() {
         Some(manifold_seq),
         "relinked to the saved unit id"
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// I01 T10: the cargo loader body stays stream-aligned with the following
@@ -1657,9 +1539,7 @@ fn cargo_loader_relinks_unit_after_load() {
 /// building" blocker).
 #[test]
 fn save_with_cargo_loader_reads_next_building() {
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     sim.ecs
         .0
         .get_resource_mut::<crate::world::limits::BuildRules>()
@@ -1694,19 +1574,9 @@ fn save_with_cargo_loader_reads_next_building() {
             .expect("drill state");
         state.progress = 77.5;
     }
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("cargo-loader-next-building");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok);
-
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    let path = TempSave::new("cargo-loader-next-building");
+    save_then_load(&mut sim, &path);
 
     let drill_entity = sim.grid.tile(12, 12).build.expect("drill respawned");
     let state = sim
@@ -1719,8 +1589,6 @@ fn save_with_cargo_loader_reads_next_building() {
         "drill body aligned after the loader body: {}",
         state.progress
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// I01 T11: the assembler save body (`UnitAssembler.java:756-789`):
@@ -1731,9 +1599,7 @@ fn assembler_save_round_trip() {
     use crate::world::blocks::units::{AssemblerPayload, UnitAssembler, payload_content_ref};
 
     let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
-    let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
-    sim.install_block_runtime().expect("block runtime");
-    sim.install_unit_runtime().expect("unit runtime");
+    let mut sim = io_sim();
     sim.ecs
         .0
         .get_resource_mut::<crate::world::limits::BuildRules>()
@@ -1784,20 +1650,9 @@ fn assembler_save_round_trip() {
             2,
         );
     }
-    sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
 
-    let path = temp_path("assembler-roundtrip");
-    let _ = std::fs::remove_file(&path);
-    sim.request_save(&path, false);
-    sim.tick().expect("capture tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses.len(), 1, "one save response: {responses:?}");
-    assert_eq!(responses[0].status, IoStatus::Ok);
-
-    sim.request_load(&path);
-    sim.tick().expect("apply tick");
-    let responses = sim.take_io_responses();
-    assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+    let path = TempSave::new("assembler-roundtrip");
+    save_then_load(&mut sim, &path);
 
     let assembler_entity = sim.grid.tile(12, 12).build.expect("assembler respawned");
     let state = sim
@@ -1841,6 +1696,4 @@ fn assembler_save_round_trip() {
         "block payload count restored"
     );
     assert_eq!(state.stored.total(), 5);
-
-    let _ = std::fs::remove_file(&path);
 }

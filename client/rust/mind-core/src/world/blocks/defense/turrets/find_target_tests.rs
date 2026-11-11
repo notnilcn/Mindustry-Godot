@@ -5,6 +5,7 @@
 //! Upstream: none (port-only; turret target tests)
 
 use super::tests::set_unit_elevation;
+use super::types::{turret as state_of, turret_mut as state_of_mut};
 use super::*;
 use crate::combat::harness::CombatHarness;
 use crate::entities::comp::Health;
@@ -28,11 +29,7 @@ fn armed_turret(
         .unwrap_or_else(|| panic!("turret `{name}`"));
     let item = harness.content().item_id(item_name).expect(item_name);
     let bullet = harness.content().bullet_names()[bullet_name];
-    let mut state = harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
-        .expect("turret state");
+    let state = state_of_mut(&mut harness.build.world, turret).expect("turret state");
     state.ammo.push(AmmoEntry {
         item,
         bullet,
@@ -125,7 +122,7 @@ fn ripple_min_range_clamps_bullet_lifetime() {
     // Target inside the 50-unit minimum range.
     let target = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
     {
-        let mut state = harness.build.world.get_mut::<TurretState>(turret).unwrap();
+        let state = state_of_mut(&mut harness.build.world, turret).unwrap();
         state.target = Some(target);
         state.target_pos = (tx + 40.0, ty);
     }
@@ -187,10 +184,7 @@ fn find_target_uses_tracking_range() {
     );
     // 460 px: outside the tracking range too.
     harness.build.world.get_mut::<Pos>(tracked).unwrap().x = tx + 460.0;
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .unwrap()
         .target_timer = 0.0;
     harness.update_turrets_only();
@@ -226,10 +220,7 @@ fn new_target_interval_applies_with_a_target() {
     );
     // With a target in range the retarget interval becomes 40.
     harness.spawn_test_unit(tx + 100.0, ty, 2, Vec::new());
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .unwrap()
         .target_timer = 0.0;
     harness.update_turrets_only();
@@ -346,10 +337,7 @@ fn ground_only_turret_rejects_mid_band_elevation() {
     );
     // A truly grounded unit at the same distance is still targeted.
     let grounded = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
-    harness
-        .build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut harness.build.world, turret)
         .expect("state")
         .target_timer = 0.0;
     harness.update_turrets_only();
@@ -465,7 +453,7 @@ fn cheating_gives_infinite_ammo() {
         .bullet_by_name("breach_beryllium")
         .expect("ammo");
     {
-        let mut state = h.build.world.get_mut::<TurretState>(turret).expect("state");
+        let state = state_of_mut(&mut h.build.world, turret).expect("state");
         state.ammo.push(AmmoEntry {
             item: tungsten,
             bullet,
@@ -499,7 +487,7 @@ fn cheating_item_turret_auto_fills_on_placement() {
     let duo = h.content().block_id("duo").expect("duo");
     assert!(h.place(4, 4, duo, 1, true), "place duo");
     let turret = h.build_at(4, 4).expect("turret building");
-    let state = h.build.world.get::<TurretState>(turret).expect("state");
+    let state = state_of(&h.build.world, turret).expect("state");
     assert_eq!(state.total_ammo, 2, "first ammo type auto-filled");
     assert_eq!(state.ammo.len(), 1);
     assert_eq!(
@@ -531,7 +519,7 @@ fn cheating_bypasses_heat_efficiency_floor() {
     );
     h.build.world.entity_mut(turret).insert(state);
     install_cheat_rules(&mut h, 1);
-    let state = h.build.world.get::<TurretState>(turret).expect("state");
+    let state = state_of(&h.build.world, turret).expect("state");
     assert_eq!(
         update_efficiency_multiplier(&h.build.world, turret, 1.0, state, &config),
         1.0,
@@ -566,9 +554,7 @@ fn liquid_turret_targets_fires() {
     assert!(h.place(3, 8, wall, 0, true));
     let blocked_fire =
         crate::combat::fires::create(&mut h.build.world, 3, 8, &mut h.rng).expect("fire");
-    h.build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut h.build.world, turret)
         .expect("state")
         .target_timer = 0.0;
     h.update_turrets_only();
@@ -598,9 +584,7 @@ fn liquid_turret_ignores_fire_with_flammable_ammo() {
         liquids.current_liquid = oil;
     }
     let _fire = crate::combat::fires::create(&mut h.build.world, 10, 8, &mut h.rng);
-    h.build
-        .world
-        .get_mut::<TurretState>(turret)
+    state_of_mut(&mut h.build.world, turret)
         .expect("state")
         .target_timer = 0.0;
     h.update_turrets_only();
@@ -638,7 +622,7 @@ fn tractor_beam_damages_through_shields_and_ignores_ground() {
     // A grounded unit at the same distance must be ignored.
     let ground = h.spawn_test_unit(tx, ty + 60.0, 2, Vec::new());
     {
-        let mut state = h.build.world.get_mut::<TurretState>(turret).expect("state");
+        let state = state_of_mut(&mut h.build.world, turret).expect("state");
         state.retarget_timer = 0.0;
         state.target_timer = 0.0;
         state.rotation = 90.0;

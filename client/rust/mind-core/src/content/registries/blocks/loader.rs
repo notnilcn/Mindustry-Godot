@@ -47,10 +47,7 @@ impl BlockSink for RegistrySink<'_> {
         let id = self.registry.add_block(def)?;
         // `<floor>.asFloor().decoration = this` (`Blocks.java:705-822`).
         for floor in decorates {
-            let floor_id = self
-                .registry
-                .block_id(floor)
-                .ok_or_else(|| ContentError::UnknownName(floor.to_owned()))?;
+            let floor_id = need(self.registry.block_id(floor), floor)?;
             if let Some(def) = self.registry.block_mut(floor_id) {
                 def.decoration = id;
             }
