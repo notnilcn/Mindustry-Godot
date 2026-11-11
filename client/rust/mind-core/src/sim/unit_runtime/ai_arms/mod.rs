@@ -10,4 +10,7 @@
 //! the weapons pass and the shock mines stay in `update.rs`.
 //! Upstream: core/src/mindustry/entities/comp/UnitComp.java (update)
 
+use super::*;
+
 pub(super) mod no_ai;
+pub(super) mod player;

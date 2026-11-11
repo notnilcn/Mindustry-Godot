@@ -15,6 +15,7 @@ use super::ai::ground::{GroundAiRules, update_ground_ai};
 use super::ai::hug::update_hug_ai;
 use super::ai::{builder_falls_back, resolve_command_kind};
 use super::ai_arms::no_ai::no_ai_arm;
+use super::ai_arms::player::player_arm;
 use super::ai_weapons::{
     AiWeaponCtx, AiWeaponsState, command_ai_weapon_pass, logic_ai_weapon_pass, update_ai_weapons,
 };
@@ -142,9 +143,7 @@ pub fn unit_update_system(world: &mut World) {
         }
 
         if slot.kind == AiKind::Player {
-            // `Player` possession: the host-uploaded axis drives the unit
-            // (`DesktopInput.updateMovement`); no target acquisition or pathing.
-            crate::ai::types::player::update_player(world, &runtime.grid, &runtime.content, entity);
+            player_arm(world, &mut runtime, entity);
         } else if slot.kind == AiKind::Command {
             // `CommandAI.updateUnit` -> `defaultBehavior`/`commandController`
             // (T10a/T10b: MinerAI/RepairAI).
