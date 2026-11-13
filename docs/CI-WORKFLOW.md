@@ -74,7 +74,7 @@ tools/run-cpu-intensive-task.sh --history 20
 | `--cargo-run` | `cargo run` (e.g. a `mind-headless` command) |
 | `--godot` | `bash tools/godot.sh` (headless one-shots, **not** an editor session) |
 | `--pack` | `bash tools/pack.sh` (defaults to `pack`) |
-| `--parity` / `--pcam-parity` | `tools/parity.sh` / `tools/pcam_parity.sh` |
+| `--parity` | `tools/parity.sh` |
 | `--export` | `tools/export.sh` |
 | `--goldens` | `tools/regen_goldens.sh` |
 | `--stdb` | `server/build.sh` |
@@ -104,7 +104,7 @@ The heavy entry points source `tools/lib/cpu-guard.sh` and re-exec through the
 wrapper when they are not already under the lock:
 
 `tools/ci.sh`, `tools/build.sh`, `tools/pack.sh`, `tools/parity.sh`,
-`tools/pcam_parity.sh`, `tools/export.sh`, `tools/regen_goldens.sh`,
+`tools/export.sh`, `tools/regen_goldens.sh`,
 `server/build.sh`, `everything_you_need.sh`.
 
 So `bash tools/build.sh` is safe too — it waits like any other task. Nested

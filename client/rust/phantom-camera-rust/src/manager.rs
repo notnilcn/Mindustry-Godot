@@ -2,8 +2,8 @@
 //
 //! `PhantomCameraManager` — the addon's registry singleton.
 //!
-//! Ported from `scripts/managers/phantom_camera_manager.gd` (190 L, oracle at
-//! `parity/pcam_oracle/phantom_camera/`). Line anchors:
+//! Ported from `scripts/managers/phantom_camera_manager.gd` (190 L, upstream
+//! addon 0.11.0.3). Line anchors:
 //!
 //! * signals `:9-37`
 //! * registry lists `:43-46`, read-only accessors `:54-68`, `screen_size` `:70`

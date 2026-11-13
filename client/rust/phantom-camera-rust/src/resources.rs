@@ -2,10 +2,9 @@
 //
 //! Resource classes of the Phantom Camera port.
 //!
-//! Ported from the GDScript oracle (v0.11.0.3, read-only at
-//! `parity/pcam_oracle/phantom_camera/`):
+//! Ported from the upstream GDScript (v0.11.0.3):
 //!
-//! | Class | Oracle file | Anchors |
+//! | Class | Upstream file | Anchors |
 //! |---|---|---|
 //! | [`PhantomCameraTween`] | `scripts/resources/tween_resource.gd` (41 L) | enums `:11-32`, exports `:35-41` |
 //! | [`Camera3DResource`] | `scripts/resources/camera_3d_resource.gd` (110 L) | enums `:11-20`, setters `:23-99`, `_validate_property` `:102-110` |

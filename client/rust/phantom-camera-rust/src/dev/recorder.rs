@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-//! `PcamRecorder` — the parity harness observer (`tools/pcam_parity.sh`).
+//! `PcamRecorder` — a standalone camera-rig JSONL recorder for offline debugging.
 //!
-//! No oracle counterpart: the upstream addon has no recording node, so this file
-//! ports nothing. It is the *measurement* half of the parity harness, deliberately
-//! kept out of `pcam2d`/`pcam3d`/`host` so it can observe **either** backend —
-//! the GDScript oracle installed by `tools/pcam_parity.sh --baseline` or the Rust
+//! No upstream counterpart: the upstream addon has no recording node, so this file
+//! ports nothing. It is deliberately kept out of `pcam2d`/`pcam3d`/`host` so it
+//! can observe **either** backend — an upstream GDScript backend or the Rust
 //! classes in this crate. Every Phantom Camera access is therefore duck-typed
 //! through `Object::try_call()`; this module must never import `crate::pcam2d`,
 //! `crate::pcam3d` or `crate::host` (they are written by other owners), and it
 //! must work when those classes are not registered at all.
 //!
-//! Oracle anchors for the state sampled here (the frame pipeline whose observable
+//! Upstream anchors for the state sampled here (the frame pipeline whose observable
 //! behaviour is the thing being compared):
 //! - `scripts/phantom_camera_host/phantom_camera_host.gd:850-903` —
 //!   `_process` / `_tween_follow_checker`: `process_logic(delta)`,
@@ -84,8 +83,8 @@ use std::rc::Rc;
 use godot::classes::{Camera2D, Camera3D, Engine, ProjectSettings};
 use godot::prelude::*;
 
-/// Schema tag written into the header line; `tools/pcam_compare.py` refuses a
-/// stream it does not know.
+/// Schema tag written into the header line; a consumer that does not know it
+/// should refuse the stream.
 pub const SCHEMA: &str = "pcam-record/v1";
 
 /// Signals tapped on the active Phantom Camera. `has_signal()` gates each one, so

@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-11T05:34:04Z",
+  "updated": "2026-11-13T08:27:21Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1696,6 +1696,33 @@
       "repro": "tools/run-cpu-intensive-task.sh --ci",
       "expected": "every stage green: fmt/clippy/cargo-check/cargo-test, parity 115/115, goldens --check no drift, spine T0 4/4, godot build+import, shaders/ui-layout/ui-widgets/dialog-sweep checks failed=0, boundary audit clean",
       "risk": "Whole-programme sweep: the dialog group tree + deleted batch shims (dialog-sweep/ui-widgets), the sim/game module splits (goldens/spine), and the ledger rewrites (parity report consumers). Run the Godot gates in the main checkout only after all W5 merges.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261113-082721",
+      "created_at": "2026-11-13T08:27:21Z",
+      "agent": "cleanup-gdscript",
+      "branch": "main",
+      "head": "b7ee3c9a",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 319,
+      "area": "client/addons/phantom_camera_rust",
+      "summary": "Drop all GDScript/C# sources and retire the pcam parity harness",
+      "files": [
+        "client/project.godot",
+        "tools/ci.sh",
+        "tools/run-cpu-intensive-task.sh",
+        "parity/golden_manifest.json"
+      ],
+      "gates": [
+        "godot-import",
+        "cargo-check",
+        "cargo-test"
+      ],
+      "repro": "bash tools/run-cpu-intensive-task.sh --godot --headless --path client --editor --quit",
+      "expected": "Godot imports/parses with no 'Failed to load'/'Cannot open' errors; cargo test -p phantom-camera-rust passes",
+      "risk": "project.godot lost the McpRuntimeAutoload autoload and the [editor_plugins]/[dotnet] sections; the addon probe scene moved from dev/ to the addon root; ci.sh probe path and the wrapper --pcam-parity flag were updated",
+      "notes": "Removed 117 .gd/.gd.uid/.cs/.cs.uid files, parity/pcam_oracle, parity/pcam_golden, parity/pcam_parity_report.md, tools/pcam_parity.sh, tools/pcam_compare.py, addon examples/ + fonts/ + dev/ (probe_check.tscn moved to the addon root), and 18 pcam entries from parity/golden_manifest.json. Rust changes are comment-only.",
       "status": "pending"
     }
   ]

@@ -3,10 +3,9 @@
 //! Noise emitter nodes — the trauma grow/duration/decay state machine that
 //! feeds `PhantomCameraManager.noise_2d_emitted` / `noise_3d_emitted`.
 //!
-//! Ported from the GDScript oracle (v0.11.0.3, read-only at
-//! `parity/pcam_oracle/phantom_camera/`):
+//! Ported from the upstream GDScript (v0.11.0.3):
 //!
-//! | Class | Oracle file | Anchors |
+//! | Class | Upstream file | Anchors |
 //! |---|---|---|
 //! | [`PhantomCameraNoiseEmitter2D`] | `scripts/phantom_camera/phantom_camera_noise_emitter_2d.gd` (264 L) | exports `:20-59`, `_play` setter `:66-83`, `_enter_tree` `:116-117`, `_process` `:120-156`, `_set_layer` `:159-171`, public API `:179-197`, setters `:204-262` |
 //! | [`PhantomCameraNoiseEmitter3D`] | `scripts/phantom_camera/phantom_camera_noise_emitter_3d.gd` (265 L) | exports `:20-62`, `_play` setter `:68-85`, `_enter_tree` `:118-119`, `_process` `:122-156`, `_set_layer` `:159-171`, public API `:178-198`, setters `:205-263` |

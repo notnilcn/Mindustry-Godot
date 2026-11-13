@@ -50,7 +50,7 @@ tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent 
 - The lock is one `flock` under `<git-common-dir>/mindustry-cpu-queue/`, shared by
   every worktree of the repo. `--no-wait` exits `75`; `--timeout SECS` bounds the
   wait; `--history` shows recent runs. `MIND_CPU_QUEUE_DIR` overrides the state dir.
-- `tools/ci.sh`, `build.sh`, `pack.sh`, `parity.sh`, `pcam_parity.sh`, `export.sh`,
+- `tools/ci.sh`, `build.sh`, `pack.sh`, `parity.sh`, `export.sh`,
   `regen_goldens.sh`, `server/build.sh` and `everything_you_need.sh` re-exec through
   the wrapper, so a direct `bash tools/build.sh` also queues. Nested *scripts*
   detect `MIND_CPU_QUEUE_HELD` and never take the lock twice; a nested
@@ -184,7 +184,6 @@ serialization explicit.
 | [`client/rust/mind-headless/AGENTS.md`](client/rust/mind-headless/AGENTS.md) | Scenarios, goldens, benches, parity harness, dedicated server modes. |
 | [`client/rust/mind-stdb/AGENTS.md`](client/rust/mind-stdb/AGENTS.md) | Connector lifecycle, subscription waves, table binders, command relay. |
 | [`client/rust/mind-tools/AGENTS.md`](client/rust/mind-tools/AGENTS.md) | Offline asset pipeline: migrate, pack, icons, sounds, shaders, mods classmap. |
-| [`client/addons/open_godot_mcp/AGENTS.md`](client/addons/open_godot_mcp/AGENTS.md) | Editor plugin and runtime autoload for MCP inspection and playtesting. |
 | [`parity/AGENTS.md`](parity/AGENTS.md) | Registries, goldens, screenshots, ledgers and `parity` harness rules. |
 | [`server/AGENTS.md`](server/AGENTS.md) | Module map, publish/bindings workflow, protocol sync. |
 | [`server/spacetimedb/AGENTS.md`](server/spacetimedb/AGENTS.md) | Tables, reducers, views, relay/chat/admin/campaign schema ABI. |

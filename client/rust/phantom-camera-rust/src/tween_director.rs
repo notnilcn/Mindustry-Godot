@@ -4,7 +4,7 @@
 //! decides which `PhantomCameraTween` a transition uses.
 //!
 //! Ported from `scripts/phantom_camera/phantom_camera_tween_director.gd` (60 L,
-//! oracle at `parity/pcam_oracle/phantom_camera/`). Line anchors:
+//! upstream addon 0.11.0.3). Line anchors:
 //!
 //! * export `:21-24`
 //! * `_pcam_manager` `:31`

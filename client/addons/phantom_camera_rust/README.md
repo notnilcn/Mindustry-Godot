@@ -4,17 +4,17 @@ Rust GDExtension port of [Phantom Camera](https://github.com/ramokz/phantom-came
 (MIT, Marcus Skov) for Godot 4.7, shipped as a self-contained second GDExtension library next to
 `mind-gdext`.
 
-The addon is now consumed by the client: `client/project.godot` autoloads
-`PhantomCameraManager` from `phantom_camera_manager.tscn`, and the ported demo scenes under
-`examples/` name the native classes directly (`type="PhantomCamera2D"`, …) with no GDScript
-bindings.
+The addon is consumed by the client: `client/project.godot` autoloads `PhantomCameraManager` from
+`phantom_camera_manager.tscn`, and scenes name the native classes directly (`type="PhantomCamera2D"`,
+…). The GDScript/C# upstream tree is no longer in this checkout; the Rust port owns the canonical
+class names.
 
 ## Install / build
 
 ```bash
 bash tools/build.sh                                  # also builds phantom-camera-rust
 godot4 --headless --path client --editor --quit       # refresh .godot/extension_list.cfg
-godot4 --headless --path client res://addons/phantom_camera_rust/dev/probe_check.tscn
+godot4 --headless --path client res://addons/phantom_camera_rust/probe_check.tscn
 ```
 
 Library: `res://bin/rust/{debug,release}/[lib]phantom_camera_rust.{dll,so,dylib}`.
@@ -33,47 +33,40 @@ Library: `res://bin/rust/{debug,release}/[lib]phantom_camera_rust.{dll,so,dylib}
 | `PhantomCameraTweenDirector` | `Node` | data container consulted by the host |
 | `TweenDirectorResource` | `Resource` | From/To matching for conditional tweens |
 | `Camera3DResource` | `Resource` | `Camera3D` overrides applied on activation |
-| `PcamRustProbe` | `Node` | port/upstream version + registered-class list (harness smoke check) |
-| `PcamRecorder` (dev) | `Node` | parity recorder, see `tools/pcam_parity.sh` |
+| `PcamRustProbe` | `Node` | port/upstream version + registered-class list (loading smoke check) |
+| `PcamRecorder` (dev) | `Node` | per-frame camera telemetry recorder for offline debugging |
 
 All exported property names, defaults, signal names/arities, `#[func]` signatures and enum integer
-values match the GDScript original: the demo scenes are the ABI test.
+values match the upstream GDScript addon.
 
 ## Scope
 
-Ported: every runtime behavior the 18 demo scenes exercise, including the tween/easing math
-(Godot's `Tween.interpolate_value` table, verified numerically) and the oracle's `_smooth_damp`.
+Ported: every runtime behavior the 18 upstream demo scenes exercised, including the tween/easing
+math (Godot's `Tween.interpolate_value` table, verified numerically) and `_smooth_damp`.
 
 Not ported, deliberately:
 
-- **Editor layer** — `plugin.gd`, the inspector plugin, the 3D gizmo plugins, the bottom-panel
-  viewfinder dock, the self-updating updater panel, themes and icons. None of it is on a game path,
-  and it is all editor UI rather than camera behavior. `show_viewfinder_in_play` exists as a stored
-  property and is inert.
+- **Editor layer** — the inspector plugin, the 3D gizmo plugins, the bottom-panel viewfinder dock,
+  the self-updating updater panel, themes and icons. None of it is on a game path, and it is all
+  editor UI rather than camera behavior. `show_viewfinder_in_play` exists as a stored property and
+  is inert.
 - **`@tool` niceties** — `_validate_property` inspector hiding, `_get_configuration_warnings`,
   frame-preview `_draw`, gizmo line drawing, the "Align with view" tool buttons.
-- **C# facade files** — the oracle's 12 `.cs` files were never Godot scripts and are not compiled
-  in this project.
+- **C# facade files** — the upstream `.cs` files were never Godot scripts and are not compiled in
+  this project.
 
 Behavioral quirks preserved on purpose (parity includes bugs): the 3D `FRAMED` dead branch whose
 "rotation changed" comparison is unreachable, the host tween diff reading two wrong `_prev_cam_*`
 values, the inert `keep_aspect` override, and 2D `FRAMED`'s incremental (not absolute) dead-zone
-mutation. Each is marked with a `// parity:` comment naming the oracle line.
+mutation. Each is marked with a `// parity:` comment naming the upstream line.
 
-## Parity benchmark
+## Parity status
 
-`parity/pcam_oracle/phantom_camera/` holds the unmodified GDScript addon as the oracle (it lives
-outside `client/` because its `class_name`s would hide the native classes).
-
-```bash
-bash tools/pcam_parity.sh --baseline    # install oracle, record per-frame goldens
-bash tools/pcam_parity.sh --candidate   # record the Rust build
-bash tools/pcam_parity.sh --compare     # diff telemetry + signal stream
-```
-
-Both sides run the *same* demo scenes and the *same* demo driver scripts
-(`examples/scripts/**` is byte-identical to the oracle's), so a diff isolates the addon
-implementation.
+The in-engine port was validated against the upstream GDScript addon with a dedicated harness
+(`tools/pcam_parity.sh`, per-frame telemetry + signal-stream goldens under `parity/pcam_golden/`).
+That harness and the vendored GDScript oracle were retired when the repository dropped GDScript and
+C# sources; the recorded results stay in git history (`tools/pcam_parity.sh`,
+`parity/pcam_golden/`, `parity/pcam_parity_report.md`). The Rust port is the sole implementation now.
 
 ## Layout
 
@@ -81,7 +74,5 @@ implementation.
 |---|---|
 | `phantom_camera_rust.gdextension` | library mapping |
 | `phantom_camera_manager.tscn` | the autoload node |
-| `examples/` | 18 demo scenes + 2 sub-scenes, models, UI, tween resources, textures, driver scripts |
-| `fonts/` | `Nunito-{Black,Regular}.ttf` used by the demos |
-| `dev/` | `abi_dump.gd`, `easing_dump.gd`, `rewrite_examples.py` (scene port), `verify_examples.py` (port gate), `record.tscn`, `probe_check.tscn` |
-| `PORT-PLAN.md` | port contract; `AGENTS.md` | contributor rules |
+| `probe_check.tscn` | library-loaded smoke check (`PcamRustProbe`) |
+| `PORT-PLAN.md` | port contract (contributor rules: `AGENTS.md`) |

@@ -6,13 +6,12 @@ The Godot project for Mindustry-Godot. Gameplay behavior and the UI layer live i
 
 | Path | Responsibility |
 |---|---|
-| `project.godot` | Project file: main scene `res://scenes/game.tscn`, `mobile` rendering method, Jolt 3D physics, the `McpRuntimeAutoload`/`MindAssets`/`MindMods`/`StdbConnector`/`MindUi`/`MindHud` autoloads, and the sole enabled editor plugin `open_godot_mcp`. |
+| `project.godot` | Project file: main scene `res://scenes/game.tscn`, `mobile` rendering method, Jolt 3D physics, and the `PhantomCameraManager`/`MindAssets`/`MindMods`/`StdbConnector`/`MindUi`/`MindHud` autoloads. |
 | `mind.gdextension` | Maps `gdext_rust_init` (minimum compatibility 4.7) to `res://bin/rust/{debug,release}/…mind_gdext…`; `tools/build.sh` produces that library. |
 | `shaders/` | Ported Godot shaders (`default`, `water`, `fog`, `planet`, `shield`, `buildbeam`, …), one `.gdshader` per effect. |
 | `audio/bus_layout.json` | Declarative bus table (`Master`, `Music`, `Sound`, `UI`) matching the `MindAudio` buses. |
 | `scenes/tools/` | Native headless UI oracles: `{shaders,ui_widgets,ui_layout,dialog_sweep}_check.tscn` root on `MindShadersCheck`/`MindUiWidgetsCheck`/`MindUiLayoutCheck`/`MindDialogSweepCheck` (`rust/mind-gdext/src/ui/checks.rs`); repo build/gate scripts live in the root `tools/` and are documented in [`tools/AGENTS.md`](../tools/AGENTS.md). `client/tools/` is gone with the GDScript port. |
-| `addons/open_godot_mcp/` | Editor plugin and runtime autoload that back MCP inspection and in-engine playtesting; see its [`AGENTS.md`](addons/open_godot_mcp/AGENTS.md). |
-| `addons/phantom_camera_rust/` | Phantom Camera 0.11.0.3 ported to Rust (crate `rust/phantom-camera-rust/`): the second GDExtension library, `[autoload] PhantomCameraManager`, and the ported 2D/3D demo scenes used as the parity benchmark. Guide: [`AGENTS.md`](addons/phantom_camera_rust/AGENTS.md). The original GDScript addon moved out of the project to `../parity/pcam_oracle/phantom_camera/` (it is the read-only parity oracle, and its `class_name`s would collide with the native classes). |
+| `addons/phantom_camera_rust/` | Phantom Camera 0.11.0.3 ported to Rust (crate `rust/phantom-camera-rust/`): the second GDExtension library and the `[autoload] PhantomCameraManager` node. Guide: [`AGENTS.md`](addons/phantom_camera_rust/AGENTS.md). |
 | `scenarios/` | Generated mirror of the repo-root `scenarios/` (see **Invariants**); gitignored. |
 | `bin/`, `.godot/` | Build output and editor import cache; gitignored. |
 | `rust/` | Cargo workspace behind the GDExtension; crate map, lints and Rust gates live in [`rust/AGENTS.md`](rust/AGENTS.md). Build it with `tools/build.sh`, never from inside the editor. |
@@ -24,7 +23,7 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 | Path | What lives there |
 |---|---|
 | `scenes/game.tscn` | Main scene (`Spine`): `SimHost`, `Input`, `MindAudio`, `World/*` render nodes, the `Mind*` Rust facades, `Planet/PlanetView`, and `Ui/{MenuBackground,EditorDialog,UiRoot,StateInspector}`. Its spine nodes carry the `node_paths`-wired `#[export]` deps (see **Invariants**). |
-| `scenes/autoloads/` | One `.tscn` per scene autoload (`mind_assets`, `mind_mods`, `stdb_connector`, `mind_ui`, `mind_hud`); each root node is the matching native `Mind*` class. `McpRuntimeAutoload` is a script autoload from the addon (also injected at editor startup). |
+| `scenes/autoloads/` | One `.tscn` per scene autoload (`mind_assets`, `mind_mods`, `stdb_connector`, `mind_ui`, `mind_hud`); each root node is the matching native `Mind*` class. |
 | `scenes/editor/` | Map-editor shell and tool scenes rooted on native classes: `map_editor_dialog`, `map_view`, `wave_graph`, `map_objectives_canvas`, `wave_info_dialog`, `banned_content_dialog`, `sector_generate_dialog`, plus the map info/load/resize/locales/objectives/processors/generate dialogs and `data/map_assets_dialog`. |
 | `scenes/ui/*.tscn` | `ui_root.tscn` (five layer groups plus a static instance of every manifest dialog/fragment), `state_inspector.tscn` (read-only spine overlay), `planet_view.tscn`. |
 | `scenes/ui/dialogs/` | 48 manifest dialog `.tscn` files plus `mind_dialog_base.tscn`, the shared shell every dialog inherits. |
@@ -88,4 +87,4 @@ godot4 --headless --path client res://scenes/tools/ui_layout_check.tscn   # Mind
 godot4 --headless --path client res://scenes/tools/dialog_sweep_check.tscn # every manifest dialog builds/shows/hides
 ```
 
-`tools/ci.sh` runs the full local gate (composition in [`tools/AGENTS.md`](../tools/AGENTS.md)); in-engine checks run through the `open_godot_mcp` addon — load the `playtest` skill for the launch flow, node map and pid-stamped recipes.
+`tools/ci.sh` runs the full local gate (composition in [`tools/AGENTS.md`](../tools/AGENTS.md)); in-engine checks launch the client headlessly with `tools/godot.sh`.

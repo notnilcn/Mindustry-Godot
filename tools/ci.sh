@@ -121,8 +121,7 @@ say "cargo test -p mind-core --features msav-import"
 cargo test --manifest-path "$MANIFEST" -p mind-core --features msav-import
 
 # Phantom Camera port: the easing/smoothing unit tests are Godot-free (they check
-# the oracle's `_smooth_damp`); the in-engine parity benchmark
-# (`tools/pcam_parity.sh`) is too slow for this gate and stays manual/nightly.
+# the upstream `_smooth_damp`).
 say "cargo test -p phantom-camera-rust"
 cargo test --manifest-path "$MANIFEST" -p phantom-camera-rust
 
@@ -217,11 +216,11 @@ echo "  godot headless import clean"
 # The Phantom Camera port is a second GDExtension library: a stale
 # `.godot/extension_list.cfg`, a missing cdylib or a clashing class name all show
 # up here first. `PcamRustProbe::ready` prints the registered class count, so the
-# grep fails when the library did not load at all. `bash tools/pcam_parity.sh`
-# proves behavior; this only proves the loading path.
+# grep fails when the library did not load at all. This only proves the loading
+# path.
 say "godot: phantom camera addon class registration"
-if ! bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/dev/probe_check.tscn >"$GODOT_LOG" 2>&1; then
-  echo "FAIL: res://addons/phantom_camera_rust/dev/probe_check.tscn (PcamRustProbe)" >&2
+if ! bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/probe_check.tscn >"$GODOT_LOG" 2>&1; then
+  echo "FAIL: res://addons/phantom_camera_rust/probe_check.tscn (PcamRustProbe)" >&2
   tail -n 40 "$GODOT_LOG" >&2
   exit 1
 fi

@@ -3,10 +3,9 @@
 //! `phantom_camera_rust` — a Rust GDExtension port of the Phantom Camera addon
 //! (`client/addons/phantom_camera/`, v0.11.0.3) for Godot 4.7.
 //!
-//! Ported from: `addons/phantom_camera/scripts/**` (Marcus Skov, MIT — see the
-//! preserved `LICENSE` beside the oracle tree). The original GDScript addon was
-//! relocated to `parity/pcam_oracle/phantom_camera/` and is now the read-only
-//! parity oracle; this crate is the shipped implementation.
+//! Ported from: `addons/phantom_camera/scripts/**` (Marcus Skov, MIT). The
+//! original GDScript addon was later removed from this checkout; this crate is
+//! the shipped implementation.
 //!
 //! Class names, exported property names, signal signatures and enum values are
 //! the scene ABI (`*.tscn` files name classes and store properties as strings),

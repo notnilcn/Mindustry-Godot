@@ -13,9 +13,9 @@ vendored addon metadata.
 | `bevy_ecs` | 0.19.1 (exact pin) | MIT OR Apache-2.0 | https://github.com/bevyengine/bevy | ECS backing the authoritative simulation |
 | SpacetimeDB module crates (`spacetimedb`) | 2.10.1 (server module, lands with M5) | BSL-1.1 — see note below | https://github.com/clockworklabs/SpacetimeDB | Rust stored-module framework for `server/spacetimedb` |
 | SpacetimeDB Rust SDK (`spacetimedb-sdk`) | 2.10.1 (exact pin; used by `mind-stdb` now) | BSL-1.1 — see note below | https://github.com/clockworklabs/SpacetimeDB | Client connection, subscriptions and reducer calls |
-| Open Godot MCP addon | 0.1.10 | MIT | https://github.com/masteryee-labs/Open-Godot-MCP | Editor/game MCP bridge used for in-engine verification |
+| Open Godot MCP addon | 0.1.10 | MIT | https://github.com/masteryee-labs/Open-Godot-MCP | Editor/game MCP bridge used for in-engine verification. The vendored tree is no longer in this checkout (deleted in `b7ee3c9a`); this row stands while the external MCP tooling is still used. |
 | BlastBullets2D | vendored addon (`client/addons/blastbullets2d`) | MIT | https://github.com/nikoladevelops/godot-blast-bullets-2d | Retained candidate for bulk bullet FX (evaluated in plans 10/17); unused at P0. The tree is no longer in this checkout (deleted in `7d875a34`); this row stands until the plan references are retired. |
-| Phantom Camera | 0.11.0.3 | MIT | https://github.com/ramokz/phantom-camera | Camera tweening/rig addon. **Ported to Rust** in `client/rust/phantom-camera-rust/` and shipped by `client/addons/phantom_camera_rust/` (MIT terms preserved in the crate headers and the oracle's `LICENSE`); the unmodified GDScript tree is retained read-only at `parity/pcam_oracle/phantom_camera/` as the parity oracle. |
+| Phantom Camera | 0.11.0.3 | MIT | https://github.com/ramokz/phantom-camera | Camera tweening/rig addon. **Ported to Rust** in `client/rust/phantom-camera-rust/` and shipped by `client/addons/phantom_camera_rust/`; MIT terms are preserved in the crate headers. The upstream GDScript tree was the parity oracle until the pcam harness was retired, and is no longer in this checkout. |
 
 ## SpacetimeDB license note
 

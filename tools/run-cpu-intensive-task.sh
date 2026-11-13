@@ -24,7 +24,6 @@
 #   --godot               tools/godot.sh (headless one-shots, NOT an editor session)
 #   --pack                tools/pack.sh (defaults to `pack`)
 #   --parity              tools/parity.sh
-#   --pcam-parity         tools/pcam_parity.sh
 #   --export              tools/export.sh
 #   --goldens             tools/regen_goldens.sh
 #   --stdb                server/build.sh
@@ -128,7 +127,6 @@ CPU-intensive tasks (one at a time):
   --godot            tools/godot.sh (headless one-shots)
   --pack             tools/pack.sh (defaults to `pack`)
   --parity           tools/parity.sh
-  --pcam-parity      tools/pcam_parity.sh
   --export           tools/export.sh
   --goldens          tools/regen_goldens.sh
   --stdb             server/build.sh
@@ -280,7 +278,6 @@ while (( $# > 0 )); do
     --godot) TASK=godot; TASK_NAME=godot; shift; TASK_ARGS=("$@"); break ;;
     --pack) TASK=pack; TASK_NAME=pack; shift; TASK_ARGS=("$@"); break ;;
     --parity) TASK=parity; TASK_NAME=parity; shift; TASK_ARGS=("$@"); break ;;
-    --pcam-parity) TASK=pcam-parity; TASK_NAME=pcam-parity; shift; TASK_ARGS=("$@"); break ;;
     --export) TASK=export; TASK_NAME=export; shift; TASK_ARGS=("$@"); break ;;
     --goldens) TASK=goldens; TASK_NAME=goldens; shift; TASK_ARGS=("$@"); break ;;
     --stdb) TASK=stdb; TASK_NAME=stdb; shift; TASK_ARGS=("$@"); break ;;
@@ -378,7 +375,6 @@ case "$TASK" in
     fi
     ;;
   parity) TASK_CMD=(bash "$REPO_ROOT/tools/parity.sh") ;;
-  pcam-parity) TASK_CMD=(bash "$REPO_ROOT/tools/pcam_parity.sh") ;;
   export) TASK_CMD=(bash "$REPO_ROOT/tools/export.sh") ;;
   goldens) TASK_CMD=(bash "$REPO_ROOT/tools/regen_goldens.sh") ;;
   stdb) TASK_CMD=(bash "$REPO_ROOT/server/build.sh") ;;
