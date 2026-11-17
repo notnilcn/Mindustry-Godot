@@ -39,6 +39,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,6 +64,17 @@ jobs:
       - name: cargo check (workspace)
         shell: bash
         run: cargo check --manifest-path client/rust/Cargo.toml --workspace
+
+      # The Phantom Camera addon is a submodule with its own Cargo workspace, so
+      # the client-workspace gates above do not reach it.
+      - name: cargo fmt/clippy/check/test (phantom-camera-rust addon)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path client/addons/phantom_camera_rust/Cargo.toml --all -- --check
+          cargo clippy --manifest-path client/addons/phantom_camera_rust/Cargo.toml --workspace --all-targets -- -D warnings
+          cargo check --manifest-path client/addons/phantom_camera_rust/Cargo.toml --workspace
+          cargo test --manifest-path client/addons/phantom_camera_rust/Cargo.toml
 
       - name: cargo test -p mind-core
         shell: bash
@@ -179,6 +192,8 @@ jobs:
       GODOT_VERSION: 4.7.2
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -190,10 +205,11 @@ jobs:
           sudo apt-get install -y pkg-config libssl-dev unzip
 
       # mind.gdextension expects res://bin/rust/<profile>/libmind_gdext.so on
-      # Linux; building here (debug profile) is what makes the editor import
-      # below load the extension successfully.
-      - name: Build GDExtension (client/bin/rust/debug/libmind_gdext.so)
-        run: cargo build --manifest-path client/rust/Cargo.toml -p mind-gdext --target-dir client/bin/rust
+      # Linux and the addon's .gdextension expects its library under
+      # res://addons/phantom_camera_rust/bin/<profile>/; tools/build.sh builds
+      # both (the checkout step above pulls the submodule).
+      - name: Build GDExtensions (mind-gdext + phantom camera addon)
+        run: bash tools/build.sh
 
       - name: Download pinned Godot 4.7.2 (standard)
         run: |
@@ -232,6 +248,8 @@ jobs:
       GODOT_VERSION: 4.7.2
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:

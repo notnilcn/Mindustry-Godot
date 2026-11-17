@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Rebuilds the Rust GDExtension (`tools/build.sh`) whenever the Rust workspace
-# under client/rust/ changes. Prefers inotifywait; falls back to a polling loop
-# when it is absent. Build output (client/rust/target, client/bin) is ignored so
-# the loop never retriggers itself.
+# Rebuilds the Rust GDExtensions (`tools/build.sh`) whenever the Rust workspace
+# under client/rust/ or the Phantom Camera addon (its own submodule workspace at
+# client/addons/phantom_camera_rust/) changes. Prefers inotifywait; falls back to
+# a polling loop when it is absent. Build output (client/rust/target,
+# client/bin, addon target/bin) is ignored so the loop never retriggers itself.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WATCH_DIR="$REPO_ROOT/client/rust"
+WATCH_DIRS=(
+  "$REPO_ROOT/client/rust"
+  "$REPO_ROOT/client/addons/phantom_camera_rust"
+)
 BUILD_SCRIPT="$REPO_ROOT/tools/build.sh"
 
 run_build() {
@@ -20,11 +24,11 @@ run_build() {
 }
 
 if command -v inotifywait >/dev/null 2>&1; then
-  echo "[watch] watching $WATCH_DIR with inotifywait (Ctrl+C to stop)"
+  echo "[watch] watching ${WATCH_DIRS[*]} with inotifywait (Ctrl+C to stop)"
   # `-m` keeps the monitor open; paths under target/ or bin/ are dropped before
   # the extension check so their generated files never cause a rebuild loop.
   inotifywait -q -m -r -e modify,create,delete,move \
-    --format '%w%f' "$WATCH_DIR" |
+    --format '%w%f' "${WATCH_DIRS[@]}" |
     while IFS= read -r path; do
       case "$path" in
         */target/* | */bin/*) continue ;;
@@ -36,7 +40,7 @@ if command -v inotifywait >/dev/null 2>&1; then
 else
   echo "[watch] inotifywait unavailable; polling every 2s (Ctrl+C to stop)"
   snapshot() {
-    find "$WATCH_DIR" -type f \( -name '*.rs' -o -name '*.toml' \) \
+    find "${WATCH_DIRS[@]}" -type f \( -name '*.rs' -o -name '*.toml' \) \
       -not -path '*/target/*' -not -path '*/bin/*' \
       -printf '%T@ %p\n' 2>/dev/null | sort
   }

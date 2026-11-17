@@ -35,6 +35,13 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 source "$REPO_ROOT/tools/lib/cpu-guard.sh"
 mind_cpu_guard bootstrap "$REPO_ROOT/everything_you_need.sh" "$@"
 
+# The Phantom Camera addon is vendored as a git submodule; a fresh clone has an
+# empty directory until it is initialized. Do it before the guarded build.
+if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
+  echo "== [0/5] initialize submodules =="
+  git -C "$REPO_ROOT" submodule update --init --recursive
+fi
+
 RELEASE=0
 PACK=1
 STDB=0
@@ -68,24 +75,31 @@ if [[ "$RELEASE" -eq 1 ]]; then
   CARGO_BUILD_ARGS+=(--release)
 fi
 
-echo "== [1/4] build mind-gdext + mind-headless =="
+echo "== [1/5] build mind-gdext + mind-headless =="
 cargo "${CARGO_BUILD_ARGS[@]}" ${CARGO_ARGS[@]+"${CARGO_ARGS[@]}"}
 
+echo "== [2/5] build phantom-camera-rust addon =="
+ADDON_BUILD_ARGS=()
+if [[ "$RELEASE" -eq 1 ]]; then
+  ADDON_BUILD_ARGS+=(--release)
+fi
+env -u CARGO_TARGET_DIR bash "$REPO_ROOT/client/addons/phantom_camera_rust/tools/build.sh" "${ADDON_BUILD_ARGS[@]}"
+
 if [[ "$PACK" -eq 1 ]]; then
-  echo "== [2/4] pack runtime assets -> assets/ =="
+  echo "== [3/5] pack runtime assets -> assets/ =="
   bash "$REPO_ROOT/tools/pack.sh" pack
 else
-  echo "== [2/4] asset pack skipped (--no-pack) =="
+  echo "== [3/5] asset pack skipped (--no-pack) =="
 fi
 
-echo "== [3/4] sync scenarios -> client/scenarios =="
+echo "== [4/5] sync scenarios -> client/scenarios =="
 bash "$REPO_ROOT/tools/sync_scenarios.sh"
 
 if [[ "$STDB" -eq 1 ]]; then
-  echo "== [4/4] publish SpacetimeDB module + regenerate bindings =="
+  echo "== [5/5] publish SpacetimeDB module + regenerate bindings =="
   bash "$REPO_ROOT/server/build.sh"
 else
-  echo "== [4/4] SpacetimeDB bindings already checked in (skip; pass --stdb to regenerate) =="
+  echo "== [5/5] SpacetimeDB bindings already checked in (skip; pass --stdb to regenerate) =="
 fi
 
 if [[ "$IMPORT" -eq 1 ]]; then
@@ -94,5 +108,6 @@ if [[ "$IMPORT" -eq 1 ]]; then
 fi
 
 echo
-echo "done: shared library is in client/bin/rust/<profile>/."
+echo "done: shared libraries are in client/bin/rust/<profile>/ and"
+echo "      client/addons/phantom_camera_rust/bin/<profile>/."
 echo "      open client/project.godot, or run: tools/godot.sh"

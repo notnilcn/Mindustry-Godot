@@ -14,7 +14,7 @@
 #
 # Tasks (the remaining arguments are forwarded to the underlying command):
 #   --ci                  full local gate (tools/ci.sh); the CI fixer's job
-#   --build               tools/build.sh (mind-gdext + mind-headless)
+#   --build               tools/build.sh (mind-gdext + mind-headless + Phantom Camera addon)
 #   --cargo-build         cargo build --manifest-path client/rust/Cargo.toml
 #   --cargo-test          cargo test  --manifest-path client/rust/Cargo.toml
 #   --cargo-check         cargo check --manifest-path client/rust/Cargo.toml
@@ -117,7 +117,7 @@ list_tasks() {
   cat <<'EOF'
 CPU-intensive tasks (one at a time):
   --ci               full local gate (tools/ci.sh)
-  --build            tools/build.sh (GDExtension + headless oracle)
+  --build            tools/build.sh (GDExtensions + headless oracle)
   --cargo-build      cargo build (workspace)
   --cargo-test       cargo test (workspace)
   --cargo-check      cargo check (workspace)

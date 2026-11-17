@@ -67,7 +67,7 @@ tools/run-cpu-intensive-task.sh --history 20
 | Task flag | Runs |
 |---|---|
 | `--ci` | `bash tools/ci.sh` |
-| `--build` | `bash tools/build.sh` (GDExtension + headless oracle) |
+| `--build` | `bash tools/build.sh` (GDExtension + headless oracle + Phantom Camera addon) |
 | `--cargo-build` / `--cargo-test` / `--cargo-check` | `cargo …` against `client/rust/Cargo.toml` |
 | `--cargo-fmt` | `cargo fmt --all` (in place; add `-- --check` to check) |
 | `--cargo-clippy` | `cargo clippy --workspace --all-targets` |
@@ -242,7 +242,8 @@ to the checkout path, not just the sources — but that is the per-package work 
 - **`unset CARGO_TARGET_DIR` before the post-merge gate.** `tools/ci.sh` and its cargo stages
   inherit the variable, so a gate started from the wave shell builds into the wave cache instead of
   `main`'s warm `client/rust/target`. `tools/build.sh` is unaffected: it passes `--target-dir
-  client/bin/rust` explicitly.
+  client/bin/rust` explicitly and runs the addon's own build script with `CARGO_TARGET_DIR`
+  unset (that script installs from `<addon>/target/<profile>`).
 - **Never copy or hardlink-clone a `target/`.** There is no reflink on this ext4 volume, so a copy
   is a real 24G write per worktree; and cargo rewrites artifact and fingerprint files in place, so
   a hardlinked inode can corrupt the checkout it was cloned from.
@@ -308,7 +309,7 @@ automatically.
 | `summary` | One line: what landed. Required. |
 | `area` | Subsystem/path, e.g. `client/rust/mind-gdext/src/ui`, `server/spacetimedb`. |
 | `files` | Changed files (comma-separated or repeat `--files`). |
-| `gates` | Likely affected stages: `fmt`, `clippy`, `cargo-check`, `cargo-test`, `parity`, `goldens`, `spine`, `bench`, `godot-build`, `godot-import`, `shaders-check`, `ui-layout-check`, `ui-widgets-check`, `dialog-sweep`, `boundary`, `stdb-check`, `stdb-bindings`. |
+| `gates` | Likely affected stages: `fmt`, `clippy`, `cargo-check`, `cargo-test`, `parity`, `goldens`, `spine`, `bench`, `godot-build`, `godot-import`, `shaders-check`, `ui-layout-check`, `ui-widgets-check`, `dialog-sweep`, `boundary`, `stdb-check`, `stdb-bindings`, `addon` (Phantom Camera submodule: its own fmt/clippy/check/test and probe scene). |
 | `repro` | Command that exercises the change locally. |
 | `expected` | What a passing result looks like. |
 | `risk` | What could break, or the first thing to inspect on failure. |

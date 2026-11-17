@@ -6,7 +6,7 @@
     "record": "one entry per landed change/batch: files, likely gates, reproduction command and expected result",
     "wipe": "archived and reset by tools/ci.sh at run start"
   },
-  "updated": "2026-11-13T08:27:21Z",
+  "updated": "2026-11-17T06:01:43Z",
   "entries": [
     {
       "id": "CP-20261110-102126",
@@ -1723,6 +1723,47 @@
       "expected": "Godot imports/parses with no 'Failed to load'/'Cannot open' errors; cargo test -p phantom-camera-rust passes",
       "risk": "project.godot lost the McpRuntimeAutoload autoload and the [editor_plugins]/[dotnet] sections; the addon probe scene moved from dev/ to the addon root; ci.sh probe path and the wrapper --pcam-parity flag were updated",
       "notes": "Removed 117 .gd/.gd.uid/.cs/.cs.uid files, parity/pcam_oracle, parity/pcam_golden, parity/pcam_parity_report.md, tools/pcam_parity.sh, tools/pcam_compare.py, addon examples/ + fonts/ + dev/ (probe_check.tscn moved to the addon root), and 18 pcam entries from parity/golden_manifest.json. Rust changes are comment-only.",
+      "status": "pending"
+    },
+    {
+      "id": "CP-20261117-060143",
+      "created_at": "2026-11-17T06:01:43Z",
+      "agent": "submodule-layout",
+      "branch": "main",
+      "head": "b95b502f",
+      "worktree": "/home/clintonnguyen/g/code_examples/Mindustry-Godot",
+      "dirty_files": 42,
+      "area": "client/addons/phantom_camera_rust",
+      "summary": "Vendor the Phantom Camera addon as a pinned submodule (own workspace); build/gate it from the new layout",
+      "files": [
+        ".gitmodules",
+        "client/addons/phantom_camera_rust",
+        "client/rust/Cargo.toml",
+        "client/rust/Cargo.lock",
+        "tools/build.sh",
+        "tools/ci.sh",
+        "tools/watch.sh",
+        "tools/refactor/api_surface.py",
+        "everything_you_need.sh",
+        ".github/workflows/ci.yml",
+        "client/AGENTS.md",
+        "client/rust/AGENTS.md",
+        "tools/AGENTS.md",
+        "docs/CI-WORKFLOW.md"
+      ],
+      "gates": [
+        "fmt",
+        "clippy",
+        "cargo-check",
+        "cargo-test",
+        "godot-build",
+        "godot-import",
+        "addon"
+      ],
+      "repro": "bash tools/build.sh && bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/dev/probe_check.tscn",
+      "expected": "Both workspaces pass fmt/clippy/check/test; tools/build.sh installs client/addons/phantom_camera_rust/bin/debug/libphantom_camera_rust.so; probe logs '[phantom_camera_rust] loaded: ... 13 classes'",
+      "risk": "Fresh clones/CI must run 'git submodule update --init --recursive' (checkout needs submodules: true); the addon library path moved from res://bin/rust to res://addons/phantom_camera_rust/bin; addon build script installs from <addon>/target so CARGO_TARGET_DIR is unset around it",
+      "notes": "Addon repo pinned at c240867 (notnilcn/godot-phantom-camera-rust, already pushed). The old client/rust/phantom-camera-rust crate is removed from the workspace.",
       "status": "pending"
     }
   ]

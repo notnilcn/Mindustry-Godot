@@ -160,7 +160,7 @@ python3 tools/ci_pending.py list
 
 ```bash
 ./everything_you_need.sh    # first checkout: Rust build + asset pack + scenario sync
-tools/build.sh              # rebuild mind-gdext + mind-headless, sync scenarios
+tools/build.sh              # rebuild mind-gdext + mind-headless + the Phantom Camera addon, sync scenarios
 bash tools/pack.sh pack     # regenerate the runtime asset tree under assets/
 tools/run-cpu-intensive-task.sh --ci   # full local gate (queued; the CI fixer runs this)
 bash tools/godot.sh         # launch the client (-e opens the editor)

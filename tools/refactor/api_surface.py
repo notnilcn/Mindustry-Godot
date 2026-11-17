@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 
-ROOTS = sys.argv[1:] or ["client/rust/mind-gdext/src", "client/rust/phantom-camera-rust/src"]
+ROOTS = sys.argv[1:] or ["client/rust/mind-gdext/src", "client/addons/phantom_camera_rust/rust"]
 IMPL_RE = re.compile(r"^\s*impl\s+(?:[\w:]+\s+for\s+)?(\w+)\b")
 CLASS_RE = re.compile(r"#\[derive\([^)]*GodotClass")
 STRUCT_RE = re.compile(r"^\s*pub(?:\([^)]*\))?\s+struct\s+(\w+)|^\s*struct\s+(\w+)")

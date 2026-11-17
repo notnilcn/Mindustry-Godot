@@ -29,6 +29,9 @@ source "$REPO_ROOT/tools/lib/cpu-guard.sh"
 mind_cpu_guard ci "$REPO_ROOT/tools/ci.sh" "$@"
 
 MANIFEST="client/rust/Cargo.toml"
+# The Phantom Camera addon is its own repository (a submodule) with its own
+# Cargo workspace, so the main-workspace stages above/below do not cover it.
+ADDON_MANIFEST="client/addons/phantom_camera_rust/Cargo.toml"
 
 # Baseline refresh (2026-11-09): the 2026-10-09 baseline (p50 235 / p99 301 ns)
 # predates a month of landed simulation work and no longer matches this tree.
@@ -104,11 +107,20 @@ python3 "$REPO_ROOT/tools/ci_pending.py" begin-run \
 say "cargo fmt (workspace --check)"
 cargo fmt --manifest-path "$MANIFEST" --all -- --check
 
+say "cargo fmt (phantom-camera-rust addon --check)"
+cargo fmt --manifest-path "$ADDON_MANIFEST" --all -- --check
+
 say "cargo clippy (workspace --all-targets -- -D warnings)"
 cargo clippy --manifest-path "$MANIFEST" --workspace --all-targets -- -D warnings
 
+say "cargo clippy (phantom-camera-rust addon --all-targets -- -D warnings)"
+cargo clippy --manifest-path "$ADDON_MANIFEST" --workspace --all-targets -- -D warnings
+
 say "cargo check (workspace)"
 cargo check --manifest-path "$MANIFEST" --workspace
+
+say "cargo check (phantom-camera-rust addon workspace)"
+cargo check --manifest-path "$ADDON_MANIFEST" --workspace
 
 say "cargo test -p mind-core"
 cargo test --manifest-path "$MANIFEST" -p mind-core
@@ -122,8 +134,8 @@ cargo test --manifest-path "$MANIFEST" -p mind-core --features msav-import
 
 # Phantom Camera port: the easing/smoothing unit tests are Godot-free (they check
 # the upstream `_smooth_damp`).
-say "cargo test -p phantom-camera-rust"
-cargo test --manifest-path "$MANIFEST" -p phantom-camera-rust
+say "cargo test -p phantom-camera-rust (addon manifest)"
+cargo test --manifest-path "$ADDON_MANIFEST"
 
 # Plan 23 §7f: matrix + registry drift + T0 catalog smoke. Read-only, no
 # Godot/GPU. `--tests` turns on the "every landed matrix row resolves" gate.
@@ -219,8 +231,8 @@ echo "  godot headless import clean"
 # grep fails when the library did not load at all. This only proves the loading
 # path.
 say "godot: phantom camera addon class registration"
-if ! bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/probe_check.tscn >"$GODOT_LOG" 2>&1; then
-  echo "FAIL: res://addons/phantom_camera_rust/probe_check.tscn (PcamRustProbe)" >&2
+if ! bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/dev/probe_check.tscn >"$GODOT_LOG" 2>&1; then
+  echo "FAIL: res://addons/phantom_camera_rust/dev/probe_check.tscn (PcamRustProbe)" >&2
   tail -n 40 "$GODOT_LOG" >&2
   exit 1
 fi
