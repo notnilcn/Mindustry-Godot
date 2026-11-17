@@ -100,6 +100,12 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [[ ! -f "$ADDON_MANIFEST" ]]; then
+  echo "ci.sh: missing addon checkout at $ADDON_MANIFEST" >&2
+  echo "       run: git submodule update --init --recursive" >&2
+  exit 1
+fi
+
 say "ci-pending: archive batch + reset (run $CI_RUN_ID)"
 python3 "$REPO_ROOT/tools/ci_pending.py" begin-run \
   --run-id "$CI_RUN_ID" --log "$CI_RUN_DIR/ci.log"
