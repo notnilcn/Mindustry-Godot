@@ -1,3 +1,6 @@
 [submodule "client/addons/phantom_camera_rust"]
 	path = client/addons/phantom_camera_rust
 	url = https://github.com/notnilcn/godot-phantom-camera-rust
+[submodule "tools/ai-tools"]
+	path = tools/ai-tools
+	url = https://github.com/notnilcn/ai-tools
