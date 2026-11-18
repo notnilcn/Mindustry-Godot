@@ -100,8 +100,8 @@ def fresh_doc() -> dict[str, Any]:
         ),
         "policy": {
             "full_gate": (
-                "tools/run-cpu-intensive-task.sh --ci, owned by the CI fixer; "
-                "do not run the full gate after every edit"
+                "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci, "
+                "owned by the CI fixer; do not run the full gate after every edit"
             ),
             "record": (
                 "one entry per landed change/batch: files, likely gates, "

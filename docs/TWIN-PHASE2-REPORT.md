@@ -3,7 +3,7 @@
 
 Phase 2 ran three orchestrators in parallel worktrees after the phase-1 queue
 close-out (see [`TWIN-PHASE1-REPORT.md`](TWIN-PHASE1-REPORT.md)). Each one ran a
-checker → record/claim → fixer loop against the shared `TWIN-VERIFICATION.json`,
+checker → record/status → fixer loop against the shared `TWIN-VERIFICATION.json`,
 with one Godot session per branch; multiplayer stayed deferred.
 
 ## Result
@@ -21,7 +21,7 @@ Every fix below is `reference-verified` on Java-source-derived unit tests plus
 
 Gates on merged `main`: `bash tools/build.sh` exit 0, `cargo test -p mind-core`
 exit 0 (2844 lib tests + all integration binaries), `bash tools/parity.sh`
-exit 0 (goldens PASS, smoke 4/4), `python3 tools/twin_verification.py check` ok
+exit 0 (goldens PASS, smoke 4/4), `python3 tools/ai-tools/twin/twin_verify.py check --root .` ok
 (467 items).
 
 ## Fixed

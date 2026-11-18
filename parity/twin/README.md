@@ -21,6 +21,11 @@ order. `similarity` is `100 * (1 - changed_fraction)` for the action pair,
 rounded to one decimal; a low percentage can still be a structured-state pass
 (the retired ledger classified many twin pairs as presentation only).
 
-Generate/refresh with `tools/twin_verification.py images` (Pillow +
-`pillow-avif-plugin`; AVIF quality 70). Prune the replaced source PNG/diff
-artifacts with `tools/twin_verification.py prune --apply`.
+Canonical sets are refreshed from the fresh pair captured for a
+`twin-verified` item under `runs/<PAR-ID>/{java,godot}/`. Convert each frame to
+AVIF with Pillow and `pillow-avif-plugin` (quality 70), write the files into
+`parity/twin/<PAR-ID>/{java,godot}/`, and list both legs in the registry
+`images` object in the same order. The packaged validator
+(`python3 tools/ai-tools/twin/twin_verify.py check --root .`) checks that every
+listed file exists. Delete superseded PNG/diff artifacts from `runs/` by hand
+after the registry points at the new AVIF pair.

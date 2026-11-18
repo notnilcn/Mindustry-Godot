@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # Twin counterpart: Mindustry (Java)
 
-The twin-verification workflow in [`tools/ai-tools/twin/`](ai-tools/twin/)
-verifies the port in this repository (`Mindustry-Godot`, the Godot/Rust client)
-against the non-Godot reference below. Read this file before starting a twin
-walk; the generic workflow intentionally contains no repo-specific paths.
+The twin-verification workflow lives in [`tools/ai-tools/twin/`](ai-tools/twin/).
+It verifies this repository (`Mindustry-Godot`, the Godot/Rust port) against the
+non-Godot reference below. Read this file before starting a twin walk: the
+generic workflow intentionally contains no repo-specific paths.
 
 ## Identity
 
@@ -23,6 +23,22 @@ walk; the generic workflow intentionally contains no repo-specific paths.
 
 The counterpart checkout is deliberately outside this repository. Never add it
 as a submodule, never write into it, and never let a run mutate its git state.
+
+The registry declares the legs:
+
+```json
+"legs": { "reference": "java", "port": "godot" }
+```
+
+`twin_verify.py` reads that object; `twin_item.sh` takes the leg names from
+`TWIN_REFERENCE_LEG`/`TWIN_PORT_LEG`, so export them once per shell (or prefix
+every capture). In a `parity-session.sh` worktree, `TWIN_REGISTRY` and
+`TWIN_RUNS` already point at the main checkout; never symlink the registry
+(atomic replace would fork it).
+
+```bash
+export TWIN_REFERENCE_LEG=java TWIN_PORT_LEG=godot
+```
 
 ## Reading the counterpart
 
@@ -45,21 +61,25 @@ Mapping rules:
   platform projects. Read them read-only when the item's acceptance criteria
   are behavioural.
 
-## Driving the reference leg
+## Driving the legs
 
 The Java leg is real: launch the jar, normalize the window, drive it with input,
 and capture frames. The repo-side helpers are the source of truth:
 
-- [`docs/TWIN-CONTINUATION.md`](../docs/TWIN-CONTINUATION.md) — launch command,
-  Xvfb display, bridge, and profile backup/restore.
+- [`docs/TWIN-CONTINUATION.md`](../docs/TWIN-CONTINUATION.md) — Linux launch
+  command, Xvfb display, bridge and profile backup/restore.
 - [`docs/TWIN-WINDOWS.md`](../docs/TWIN-WINDOWS.md) — Windows environment and the
   PowerShell launch recipe.
-- [`tools/twin.sh`](twin.sh) — sourced Linux Java+Godot walk helpers
-  (`twin_launch`, `JW`/`JM`/`JD`/`JK`/`JS`, `twin_stop`).
+- [`tools/twin.sh`](twin.sh) — sourced **drivers** used by the packaged
+  workflow: `twin_launch`/`twin_place_java`/`twin_stop`, `JW`/`JM`/`JD`/`JK`/`JS`
+  for the Java leg and `GC`/`GW`/`GK`/`GS`/`GE`/`GP` for the Godot leg.
 - [`tools/windows/java_leg.py`](windows/java_leg.py) — Windows driver
   (`launch`, `move`, `shot`, `click`, `key`, `text`, `stop`).
-- [`tools/gmcp.py`](gmcp.py), [`tools/twin_item.sh`](twin_item.sh) —
-  port-leg capture and per-item evidence.
+- [`tools/gmcp.py`](gmcp.py) — Godot MCP shell driver (also used by
+  `tools/session-play.sh`).
+
+`twin.sh` is a driver, not a second workflow: the registry, statuses, evidence
+layout and checker/fixer loop come from the packaged workflow.
 
 Rules for the reference leg:
 
@@ -75,7 +95,7 @@ Rules for the reference leg:
 
 ## Evidence mapping
 
-| Generic workflow | This repo |
+| Packaged workflow | This repo |
 |---|---|
 | `runs/<ITEM>/<reference-leg>/` | `runs/<ITEM>/java/` |
 | `runs/<ITEM>/<port-leg>/` | `runs/<ITEM>/godot/` |
@@ -85,10 +105,30 @@ Rules for the reference leg:
 The registry, statuses, per-item evidence layout and checker/fixer loop are
 defined in [`tools/ai-tools/twin/WORKFLOW.md`](ai-tools/twin/WORKFLOW.md).
 
-The checked-in `TWIN-VERIFICATION.json` predates the generic `legs` object.
-Point the generic validator at its concrete leg names explicitly:
+Use the packaged helper for every evidence path:
 
 ```bash
-TWIN_REFERENCE_LEG=java TWIN_PORT_LEG=godot \
-  python3 tools/ai-tools/twin/twin_verify.py check --root .
+# Create runs/<ITEM>/{java,godot}, write the run report and capture a frame.
+tools/ai-tools/twin/twin_item.sh dir PAR-0042
+tools/ai-tools/twin/twin_item.sh note PAR-0042 run "compared title bar; matches"
+
+# Linux: capture through the sourced drivers. The helper exports TWIN_SHOT_PATH.
+tools/ai-tools/twin/twin_item.sh capture port PAR-0042 01-action -- \
+  bash -c 'source tools/twin.sh && GS 01-action'
+tools/ai-tools/twin/twin_item.sh capture reference PAR-0042 01-action -- \
+  bash -c 'source tools/twin.sh && JS 01-action'
+
+# Windows: the driver writes exactly the path the helper passed.
+tools/ai-tools/twin/twin_item.sh capture reference PAR-0042 01-action -- \
+  bash -c 'python tools/windows/java_leg.py shot --out "$TWIN_SHOT_PATH"'
+```
+
+Validate and advance the registry with the packaged tool (no lock-protected
+transaction helper is needed; `set-status` replaces the file atomically):
+
+```bash
+python3 tools/ai-tools/twin/twin_verify.py check --root .
+python3 tools/ai-tools/twin/twin_verify.py next --root .
+python3 tools/ai-tools/twin/twin_verify.py set-status PAR-0042 reference-verified \
+  --note "compared title bar; matches"
 ```

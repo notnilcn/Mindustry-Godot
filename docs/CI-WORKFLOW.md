@@ -4,9 +4,9 @@
 This repo is developed by several agents at once. Two rules keep that safe on a
 single laptop and keep the expensive gates useful:
 
-1. **Only one CPU-intensive task runs at a time.** `ci.sh`, `cargo build`,
+1. **Only one resource-intensive task runs at a time.** `ci.sh`, `cargo build`,
    `cargo test`, asset packs, parity gates and headless Godot batches all go
-   through `tools/run-cpu-intensive-task.sh`, which serializes them on one
+   through `tools/ai-tools/resource-gate/run-resource-intensive-task.sh`, which serializes them on one
    kernel lock. A second invocation waits its turn; it does not compete.
 2. **The full gate is batched, not run after every edit.** Agents run targeted
    checks while they work and append an entry to [`CI_PENDING.json`](../CI_PENDING.json).
@@ -19,7 +19,7 @@ costs the session.
 
 ## The queue
 
-`tools/run-cpu-intensive-task.sh` is the only sanctioned way to start heavy
+`tools/ai-tools/resource-gate/run-resource-intensive-task.sh` is the only sanctioned way to start heavy
 work. It takes an exclusive `flock`, records the holder, runs the task with the
 lock held, and releases it on exit (including signals). Waiting tasks are
 listed, and the start/finish events are appended to a history file.
@@ -28,15 +28,16 @@ State lives in the **git common directory**, so agents in separate
 `git worktree`s queue against the main checkout instead of running in parallel:
 
 ```
-<git-common-dir>/mindustry-cpu-queue/
+<git-common-dir>/resource-queue/
   lock              # the flock target
   holder            # task/pid/started/cwd/host/command of the running task
   waiters/          # one file per queued pid
   history.jsonl     # start/finish events with durations and exit codes
 ```
 
-`MIND_CPU_QUEUE_DIR` overrides the location (absolute, or relative to the repo
-root); without git the fallback is `runs/cpu-queue/`. The CI run records are
+`RESOURCE_QUEUE_DIR` overrides the location (absolute, or relative to the repo
+root); the legacy `MIND_CPU_QUEUE_DIR` name still works. Without git the
+fallback is `runs/resource-queue/`. The CI run records are
 separate, under `runs/ci/` (see below).
 
 Worktrees share the lock and queue history, but `CI_PENDING.json` and `runs/ci/`
@@ -49,19 +50,19 @@ which is the part that prevents the crash.
 
 ```bash
 # Full local gate (the CI fixer's job; queues behind any running build)
-tools/run-cpu-intensive-task.sh --ci
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci
 
 # Targeted checks while developing (also queued)
-tools/run-cpu-intensive-task.sh --cargo-build -p mind-gdext
-tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib
-tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings
-tools/run-cpu-intensive-task.sh --cargo-fmt -- --check
-tools/run-cpu-intensive-task.sh --godot --headless --path client --quit
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-build -p mind-gdext
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-clippy -- -D warnings
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-fmt -- --check
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit
 
 # Arbitrary command under the lock, and queue inspection
-tools/run-cpu-intensive-task.sh --cmd -- bash tools/pack.sh pack
-tools/run-cpu-intensive-task.sh --status
-tools/run-cpu-intensive-task.sh --history 20
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/pack.sh pack
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --status
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --history 20
 ```
 
 | Task flag | Runs |
@@ -108,13 +109,13 @@ wrapper when they are not already under the lock:
 `server/build.sh`, `everything_you_need.sh`.
 
 So `bash tools/build.sh` is safe too — it waits like any other task. Nested
-calls (`ci.sh` → `build.sh` → `pack.sh`) inherit `MIND_CPU_QUEUE_HELD` and do
+calls (`ci.sh` → `build.sh` → `pack.sh`) inherit `RESOURCE_QUEUE_HELD` and do
 not try to take the lock again, which would deadlock. That re-entrancy lives in
-`cpu-guard.sh`, not in the wrapper: `run-cpu-intensive-task.sh` itself always
+`cpu-guard.sh`, not in the wrapper: `run-resource-intensive-task.sh` itself always
 takes the lock, so a nested wrapper call hangs (see **Wave sweeps**). `--help`
 bypasses the queue.
 
-`MIND_CPU_QUEUE_DISABLE=1` runs a task without the lock. It exists only to debug
+`RESOURCE_QUEUE_DISABLE=1` runs a task without the lock. It exists only to debug
 the queue itself; it does not excuse parallel heavy work.
 
 ### What is deliberately outside the lock
@@ -126,8 +127,32 @@ the queue itself; it does not excuse parallel heavy work.
 - Cheap commands: `git`, reads, `python3 tools/ci_pending.py …`, a single
   `cargo fmt` on one file, log tails.
 
-If a heavy task is not in the list above, add the guard and a wrapper task
-rather than running it bare (see **Extending this**).
+If a heavy task is not in the list above, source the guard and add a task
+flag in the packaged wrapper (or use `--cmd` until it exists) rather than
+running it bare (see **Extending this**).
+
+## Wave guard (resource monitor)
+
+The packaged queue also ships a monitor that watches CPU, RAM, disk use and
+unmanaged writes. The orchestrator defines the limits once and then runs it
+before a wave:
+
+```bash
+tools/ai-tools/resource-gate/resource-monitor.sh \
+  --cpu-percent 85 --ram-percent 85 --disk-percent 90 --streak 3 --init
+tools/ai-tools/resource-gate/resource-monitor.sh --log runs/resource-monitor.log
+```
+
+- Limits are saved to `tools/ai-tools/.resource-monitor-limits` (submodule
+  scratch; untracked) and reused until `--init` is passed again.
+- `--once` samples the machine once without taking the monitor lock; `--json`
+  emits one JSON object per sample.
+- While it runs, the monitor prints `recommended_parallel_subagents`. After the
+  configured streak over any limit it writes `.tmp/resource-monitor/alert.json`
+  and exits `3`. Stop spawning, reduce width 6 → 4 → 2 → 1, kill only the
+  process trees you started, and restart after two clean samples.
+- Processes under the queue lock are exempt from the CPU/RAM/disk checks, so a
+  running build does not trip the monitor.
 
 ## Wave sweeps (parallel subagents)
 
@@ -150,15 +175,15 @@ reservation: six independent orchestrator calls compete with the agents still lo
 single acquisition has a deterministic order, so the rows are comparable.
 
 **Nested `run` calls deadlock; do not "fix" the driver that way.** The wrapper always takes the
-flock on entry. `MIND_CPU_QUEUE_HELD` only stops `cpu-guard.sh` from re-execing a heavy script —
-`run-cpu-intensive-task.sh` itself never checks it, so a second `run` inside `--cmd` waits for the
+flock on entry. `RESOURCE_QUEUE_HELD` only stops `cpu-guard.sh` from re-execing a heavy script —
+`run-resource-intensive-task.sh` itself never checks it, so a second `run` inside `--cmd` waits for the
 lock its own parent holds (verified: the inner call exits `75` on its timeout while the outer holds
 the lock). Inside the single acquisition, call `cargo` directly: the lock is already held, and the
-wrapper has exported `PATH` and `MIND_CPU_QUEUE_HELD`.
+wrapper has exported `PATH` and `RESOURCE_QUEUE_HELD`.
 
 ```bash
 # orchestrator, from $MAIN, after every package of the wave has reported
-tools/run-cpu-intensive-task.sh --cmd -- bash -c '
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash -c '
 set -u
 mkdir -p /tmp/wave-sweep
 run_stage() {
@@ -324,7 +349,7 @@ fixer can still start from the log.
 ### Lifecycle
 
 ```
-agent: ci_pending.py add ──► CI_PENDING.json ──► ci fixer: run-cpu-intensive-task.sh --ci
+agent: ci_pending.py add ──► CI_PENDING.json ──► ci fixer: run-resource-intensive-task.sh --ci
                                                         │
                                      ci.sh begin-run ───┤ archive to runs/ci/<run-id>/pending.json
                                                         │ reset CI_PENDING.json
@@ -372,9 +397,9 @@ Its loop:
 
 1. Read `AGENTS.md`, `tools/AGENTS.md`, this document, `CI_PENDING.json`, and
    `runs/ci/last-run.json` if the live file is empty.
-2. Check `tools/run-cpu-intensive-task.sh --status`; the wrapper queues anyway,
+2. Check `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --status`; the wrapper queues anyway,
    but the status explains a long wait.
-3. Run `tools/run-cpu-intensive-task.sh --ci`.
+3. Run `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci`.
 4. **Pass** → report. `CI_PENDING.json` is already reset; the archive is the
    record of what was tested.
 5. **Fail** → open `runs/ci/last-run.json`, read `stage`, `exit_code`, `log` and
@@ -403,7 +428,7 @@ Its loop:
 
 ### Fixer guardrails
 
-- One gate at a time; the queue enforces it, and `MIND_CPU_QUEUE_DISABLE` is not
+- One gate at a time; the queue enforces it, and `RESOURCE_QUEUE_DISABLE` is not
   for production work.
 - Do not weaken or delete tests, lints, budgets or gates to get green.
 - Never hand-edit generated outputs (`client/bin/`, `client/.godot/`,
@@ -416,8 +441,9 @@ Its loop:
 ## Extending this
 
 - **New heavy script:** source `tools/lib/cpu-guard.sh` after `REPO_ROOT`, call
-  `mind_cpu_guard <name> "$REPO_ROOT/<script>" "$@"`, add a task flag in
-  `tools/run-cpu-intensive-task.sh`, and add a row to `tools/AGENTS.md`.
+  `mind_cpu_guard <name> "$REPO_ROOT/<script>" "$@"`, add a task flag to the
+  packaged wrapper (submodule), add a row to
+  `tools/RESOURCE_INTENSIVE_TASKS_CATALOGUE.md`, and add a row to `tools/AGENTS.md`.
 - **New gate:** add a `say`/command stage to `tools/ci.sh` (the stage label is
   what the fixer sees in `run.json`), add the gate name to the `--gates`
   vocabulary above, and update `tools/AGENTS.md`.
@@ -428,11 +454,11 @@ Its loop:
 
 | Variable | Effect |
 |---|---|
-| `MIND_CPU_QUEUE_DIR` | Queue state directory (default: `<git-common-dir>/mindustry-cpu-queue`). |
-| `MIND_CPU_QUEUE_TIMEOUT` | Default `--timeout` seconds. |
-| `MIND_CPU_QUEUE_QUIET` | Default `--quiet` (`1`). |
-| `MIND_CPU_QUEUE_DISABLE` | `1` = run without the lock (debugging only). |
-| `MIND_CPU_QUEUE_HELD` | Internal re-entrancy marker; never set it by hand. |
+| `RESOURCE_QUEUE_DIR` | Queue state directory (default: `<git-common-dir>/resource-queue`). |
+| `RESOURCE_QUEUE_TIMEOUT` | Default `--timeout` seconds. |
+| `RESOURCE_QUEUE_QUIET` | Default `--quiet` (`1`). |
+| `RESOURCE_QUEUE_DISABLE` | `1` = run without the lock (debugging only). |
+| `RESOURCE_QUEUE_HELD` | Internal re-entrancy marker; never set it by hand. |
 | `MIND_CI_PENDING_FILE` | Override the live pending file path. |
 | `MIND_CI_RUNS_DIR` | Override `runs/ci` for run records. |
 | `MIND_CI_RUN_ID` | Override the run id (UTC timestamp-pid by default). |

@@ -13,6 +13,7 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 | `parity/` | Oracle registries, sha256 goldens, screenshots, audit ledgers and gate reports. |
 | `server/` | SpacetimeDB `mindustry_godot` module and publish/bindings tooling. |
 | `tools/` | Build, pack, verify, launch and parity scripts. |
+| `tools/ai-tools/` | Packaged twin-verification and resource-gate workflow submodule: `resource-gate/run-resource-intensive-task.sh`, `resource-gate/resource-monitor.sh`, `twin/`. |
 | `docs/` | Implementation plans, round summaries and platform handoffs. |
 | `bench/` | Recorded performance baselines behind `parity/bench_budgets.json`. |
 | `.github/` | CI workflows: `ci.yml`, `parity-nightly.yml`. |
@@ -22,7 +23,7 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 
 - `client/bin/`, `client/.godot/`, `client/rust/target/`, `server/spacetimedb/target/`, `build/` — build and import caches (`tools/build.sh`, `bash tools/pack.sh`); `client/scenarios/` — mirror of `scenarios/` (`bash tools/sync_scenarios.sh`).
 - `assets/sprites/sprites*.png`, `sprites.atlas.json`, `fallback/`, `block_colors.png`, `assets/icons/icon_codes.json`, `assets/icons/icons.properties`, `assets/sounds.index.json`, `assets/locales/`, `assets/shaders/godot/`, `assets/shaders/shader.index.json`, `assets/parity/region_names.txt` — atlas/index outputs (`bash tools/pack.sh pack`); `assets/ASSET_PROVENANCE.md` — `mind-tools migrate` output; `client/rust/mind-stdb/src/module_bindings/` — `spacetime generate` output (`bash server/build.sh`).
-- `runs/`, `parity-java-home/`, `screenshots_for_ai/`, `client/assets/version.properties`, `.opencode/` session state (the tracked `.opencode/agents/` definitions are source), `.claude/worktrees/` — transient outputs and session state; the worktrees are stale duplicates, ignore them. `runs/ci/` holds per-run gate records (see below); the CPU queue state lives in `<git-common-dir>/mindustry-cpu-queue/`.
+- `runs/`, `parity-java-home/`, `screenshots_for_ai/`, `client/assets/version.properties`, `.opencode/` session state (the tracked `.opencode/agents/` definitions are source), `.claude/worktrees/` — transient outputs and session state; the worktrees are stale duplicates, ignore them. `runs/ci/` holds per-run gate records (see below); the resource-queue state lives in `<git-common-dir>/resource-queue/`.
 
 ## Global invariants
 
@@ -30,31 +31,31 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 - Toolchain: Rust `1.98.1` (`rust-toolchain.toml`), Godot `4.7.x` (`4.7.2` recommended).
 - Rust owns behavior and the native UI (`client/rust/mind-gdext/src/ui/`); scenes only name the classes and never mutate simulation state. **All non-addon code is `.rs` or `.tscn`**: there is no hand-written GDScript outside vendored addons, no `.gd`/`.gd.uid` file, and no `script = ExtResource(...)` on a non-addon scene. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
 - ABIs are append-only: content IDs, entity field order, UI manifests, STDB schema and bindings. Never hand-edit generated outputs.
-- Only one CPU-intensive task at a time: route builds, tests and gates through `tools/run-cpu-intensive-task.sh` (see **CPU-intensive work** below).
+- Only one resource-intensive task at a time: route builds, tests and gates through `tools/ai-tools/resource-gate/run-resource-intensive-task.sh` (see **Resource-intensive work** below).
 
-## CPU-intensive work: one at a time
+## Resource-intensive work: one at a time
 
 Never run two heavy jobs concurrently — a full `ci.sh` racing a `cargo build` has
 crashed the dev laptop. Every build, test, gate, asset pack, export and headless
-Godot batch is serialized by `tools/run-cpu-intensive-task.sh`; a second call
+Godot batch is serialized by `tools/ai-tools/resource-gate/run-resource-intensive-task.sh`; a second call
 waits its turn, it does not compete.
 
 ```bash
-tools/run-cpu-intensive-task.sh --ci                  # full gate (the CI fixer runs this)
-tools/run-cpu-intensive-task.sh --cargo-build -p mind-gdext
-tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib
-tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings
-tools/run-cpu-intensive-task.sh --status              # holder, waiters, recent history
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci                  # full gate (the CI fixer runs this)
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-build -p mind-gdext
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-clippy -- -D warnings
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --status              # holder, waiters, recent history
 ```
 
-- The lock is one `flock` under `<git-common-dir>/mindustry-cpu-queue/`, shared by
+- The lock is one `flock` under `<git-common-dir>/resource-queue/`, shared by
   every worktree of the repo. `--no-wait` exits `75`; `--timeout SECS` bounds the
-  wait; `--history` shows recent runs. `MIND_CPU_QUEUE_DIR` overrides the state dir.
+  wait; `--history` shows recent runs. `RESOURCE_QUEUE_DIR` overrides the state dir.
 - `tools/ci.sh`, `build.sh`, `pack.sh`, `parity.sh`, `export.sh`,
   `regen_goldens.sh`, `server/build.sh` and `everything_you_need.sh` re-exec through
   the wrapper, so a direct `bash tools/build.sh` also queues. Nested *scripts*
-  detect `MIND_CPU_QUEUE_HELD` and never take the lock twice; a nested
-  `run-cpu-intensive-task.sh` call still does, and deadlocks (see **Parallel
+  detect `RESOURCE_QUEUE_HELD` and never take the lock twice; a nested
+  `run-resource-intensive-task.sh` call still does, and deadlocks (see **Parallel
   subagents**).
 - Not queued: an interactive `tools/godot.sh` editor/game session (it would hold the
   lock for hours) and `tools/mcp-smoke.sh` (needs the editor). Still do not run
@@ -84,6 +85,11 @@ The lock makes heavy work safe, not free: a fresh worktree has no
   that worktree; do not bisect the merged wave and never edit another agent's
   worktree. A branch with its own commits cannot be fast-forwarded: the owning
   agent rebases.
+- **The orchestrator runs the packaged resource monitor before dispatching a wave**
+  (`tools/ai-tools/resource-gate/resource-monitor.sh`, limits set once with
+  `--cpu-percent/--ram-percent/--disk-percent/--streak --init`) and keeps the
+  wave at its `recommended_parallel_subagents`; see
+  [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) "Wave guard".
 - **Share one `CARGO_TARGET_DIR` across the wave** instead of copying `target/`
   (24G per worktree, and hardlink clones corrupt cargo's in-place writes). Do not
   nest `run` calls inside the sweep — the wrapper takes the lock on entry, so a
@@ -162,7 +168,7 @@ python3 tools/ci_pending.py list
 ./everything_you_need.sh    # first checkout: Rust build + asset pack + scenario sync
 tools/build.sh              # rebuild mind-gdext + mind-headless + the Phantom Camera addon, sync scenarios
 bash tools/pack.sh pack     # regenerate the runtime asset tree under assets/
-tools/run-cpu-intensive-task.sh --ci   # full local gate (queued; the CI fixer runs this)
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci   # full local gate (queued; the CI fixer runs this)
 bash tools/godot.sh         # launch the client (-e opens the editor)
 ```
 
@@ -188,6 +194,8 @@ serialization explicit.
 | [`server/AGENTS.md`](server/AGENTS.md) | Module map, publish/bindings workflow, protocol sync. |
 | [`server/spacetimedb/AGENTS.md`](server/spacetimedb/AGENTS.md) | Tables, reducers, views, relay/chat/admin/campaign schema ABI. |
 | [`tools/AGENTS.md`](tools/AGENTS.md) | Script reference, environment overrides, CI gate contents, export layout. |
+| [`tools/RESOURCE_INTENSIVE_TASKS_CATALOGUE.md`](tools/RESOURCE_INTENSIVE_TASKS_CATALOGUE.md) | Task flags, queue controls and wave rules for the packaged resource gate. |
+| [`tools/TWIN_COUNTERPART.md`](tools/TWIN_COUNTERPART.md) | Java reference checkout, `java`/`godot` legs and capture commands for the packaged twin workflow. |
 
 ## Routing hints
 
@@ -195,5 +203,5 @@ serialization explicit.
 - Godot scene, dialog, widget or theme: `client/AGENTS.md`.
 - Networking: `server/spacetimedb/AGENTS.md` for schema/reducers, `client/rust/mind-stdb/AGENTS.md` for the client.
 - Asset pipeline, atlas or icons: `client/rust/mind-tools/AGENTS.md`.
-- Parity evidence: `parity/AGENTS.md` and `TWIN-VERIFICATION.json` (minimal items: `title`/`status`/`similarity`/`fork`/`action`/`images`, plus paired recipes and gaps); in-engine checks use the `playtest` skill, Java↔Godot walks use `parity-eval`.
+- Parity evidence: `parity/AGENTS.md` and `TWIN-VERIFICATION.json` (minimal items: `title`/`status`/`similarity`/`fork`/`action`/`images`, plus paired recipes and gaps). In-engine checks use the `playtest` skill. Java↔Godot walks use the packaged workflow in `tools/ai-tools/twin/`: read `tools/TWIN_COUNTERPART.md` first, then `WORKFLOW.md`, and drive the legs with `parity-eval`/`tools/twin.sh`.
 - Full local CI, a red gate, or handing a pending batch to the CI fixer: [`docs/CI-WORKFLOW.md`](docs/CI-WORKFLOW.md) and [`docs/CI-FIXER-PROMPT.md`](docs/CI-FIXER-PROMPT.md).

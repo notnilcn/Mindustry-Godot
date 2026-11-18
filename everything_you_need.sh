@@ -30,18 +30,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resolve cargo/godot even from non-login shells (CI); harmless when already on PATH.
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
-# Serialize with every other CPU-heavy task (docs/CI-WORKFLOW.md).
-# shellcheck source=tools/lib/cpu-guard.sh
-source "$REPO_ROOT/tools/lib/cpu-guard.sh"
-mind_cpu_guard bootstrap "$REPO_ROOT/everything_you_need.sh" "$@"
-
-# The Phantom Camera addon is vendored as a git submodule; a fresh clone has an
-# empty directory until it is initialized. Do it before the guarded build.
-if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
-  echo "== [0/5] initialize submodules =="
-  git -C "$REPO_ROOT" submodule update --init --recursive
-fi
-
 RELEASE=0
 PACK=1
 STDB=0
@@ -60,10 +48,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Both workflow submodules are needed before the guarded build: the resource
+# queue lives in tools/ai-tools, and the Phantom Camera addon is built in step 2.
+# A fresh clone has empty directories until this runs.
+if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
+  echo "== [0/5] initialize submodules =="
+  git -C "$REPO_ROOT" submodule update --init --recursive
+fi
+
 command -v cargo >/dev/null 2>&1 || {
   echo "everything_you_need.sh: cargo not found. Install Rust (https://rustup.rs) and retry." >&2
   exit 1
 }
+
+# Serialize with every other resource-intensive task (docs/CI-WORKFLOW.md).
+# shellcheck source=tools/lib/cpu-guard.sh
+source "$REPO_ROOT/tools/lib/cpu-guard.sh"
+mind_cpu_guard bootstrap "$REPO_ROOT/everything_you_need.sh" "$@"
 
 CARGO_BUILD_ARGS=(
   build

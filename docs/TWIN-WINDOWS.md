@@ -4,7 +4,10 @@
 The Linux environment in [`TWIN-CONTINUATION.md`](TWIN-CONTINUATION.md) no longer
 exists: no X display, no Xvfb, no `window_ctl.py`, no `runs/archive/**`. This page
 is the Windows equivalent of that page's **Environment** section. The workflow,
-statuses and evidence layout are unchanged ([`TWIN-RUNS.md`](TWIN-RUNS.md)).
+statuses and evidence layout come from the packaged workflow
+([`tools/ai-tools/twin/WORKFLOW.md`](../tools/ai-tools/twin/WORKFLOW.md)) and
+[`TWIN-RUNS.md`](TWIN-RUNS.md); the repo-specific capture commands are in
+[`tools/TWIN-COUNTERPART.md`](../tools/TWIN_COUNTERPART.md).
 
 Repo root: `C:\Users\Clinton\g\code_examples\Mindustry-Godot` (branch `main`).
 
@@ -101,13 +104,20 @@ already exists. Back the folder up before profile surgery and restore it after.
 - PowerShell stamp: `Get-Date -Format 'yyyyMMdd-HHmmss'`.
 - Archived pairs are AVIF at 1152x648; Pillow 12.1.1 reads them:
   `python -c "from PIL import Image; Image.open(p).convert('RGB').save(out)"`.
-- `tools/twin_item.sh` is bash. Only `dir`/`note`/`log` are portable (and only
-  under Git Bash, `C:\Program Files\Git\bin\bash.exe` — **never** the WSL
-  `C:\Windows\system32\bash.exe`, which sees a different filesystem);
-  `godot-shot`/`java-shot` assume the Linux helpers, so create the folders and
-  copy frames directly instead.
-- `python tools\twin_verification.py check` must stay `ok: 450 items …` after
-  every status edit.
+- The packaged helper is
+  `tools/ai-tools/twin/twin_item.sh` (`dir`/`stamp`/`capture`/`note`/`log`). It
+  is bash, so run it under Git Bash (`C:\Program Files\Git\bin\bash.exe` —
+  **never** the WSL `C:\Windows\system32\bash.exe`, which sees a different
+  filesystem). `capture` exports the target path as `$TWIN_SHOT_PATH`; on
+  Windows the Java driver is
+  `python tools/windows/java_leg.py shot --out "$TWIN_SHOT_PATH"` and the Godot
+  frame is copied from the `godot_screenshot game` response path.
+- Export the leg names before capture:
+  `export TWIN_REFERENCE_LEG=java TWIN_PORT_LEG=godot`.
+- Validate and edit the registry with the packaged tool:
+  `python tools/ai-tools/twin/twin_verify.py check --root .` and
+  `python tools/ai-tools/twin/twin_verify.py set-status <ITEM> <status>`.
+  Report the live count printed by `twin_verify.py stats --root .`.
 
 ## Guardrails
 

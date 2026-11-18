@@ -4,6 +4,8 @@
 State at **2026-11-03, 02:00 local**: `main` is committed and clean at `f5676f53`
 plus the phase-2 queue commit. **266 / 467 items terminal** (261
 `reference-verified`, 5 `twin-verified`); the session started at 23/450.
+The counts on this page are historical — read the live queue with
+`python3 tools/ai-tools/twin/twin_verify.py stats --root .`.
 
 Read first:
 
@@ -44,17 +46,19 @@ Read first:
 ```bash
 bash tools/parity-session.sh                 # Xvfb :10 + editor + bridge 6970
 tools/godot.sh -e                            # or open the editor directly
-python3 tools/twin_tx.py list --nonterminal --tsv   # the queue
-python3 tools/twin_tx.py show PAR-0465              # one item
-bash tools/build.sh && bash tools/parity.sh         # build + oracle gate
+python3 tools/ai-tools/twin/twin_verify.py next --root .   # first non-terminal item
+python3 tools/ai-tools/twin/twin_verify.py stats --root .  # status counts
+python3 tools/ai-tools/twin/twin_verify.py list --status mismatch --root .
+bash tools/build.sh && bash tools/parity.sh         # build + oracle gate (self-queues)
 cargo test --manifest-path client/rust/Cargo.toml -p mind-core
-python3 tools/twin_verification.py check            # queue validity
+python3 tools/ai-tools/twin/twin_verify.py check --root .  # queue validity
 ```
 
-`TWIN-VERIFICATION.json` must only be edited through `tools/twin_tx.py` (flock +
-atomic replace, byte-stable serialisation); it is symlinked into session
-worktrees so parallel agents share one queue. Evidence lives under
-`runs/PAR-####/` (gitignored, never `runs/archive/**`).
+`TWIN-VERIFICATION.json` is edited only through
+`tools/ai-tools/twin/twin_verify.py set-status` (exclusive lock + atomic
+replace); `check` validates it. Evidence is created with the packaged
+`twin_item.sh` under `runs/PAR-####/` (gitignored, never `runs/archive/**`);
+export `TWIN_REFERENCE_LEG=java TWIN_PORT_LEG=godot` before capturing.
 
 Suggested opening prompt:
 
@@ -63,7 +67,7 @@ Suggested opening prompt:
 > Read `AGENTS.md`, `docs/TWIN-PHASE2-REPORT.md` and `docs/TWIN-RUNS.md`, then
 > pick the highest-value non-terminal items: start with PAR-0465/0466/0467,
 > then the `fixing` draw residuals and the `mismatch` layout deltas. Use
-> `python3 tools/twin_tx.py` for every queue edit, run `bash tools/build.sh` and
-> the affected tests before committing, and mark an item `reference-verified`
-> only with Java-source/oracle evidence, `twin-verified` only with a fresh
-> Java+Godot frame pair.
+> `python3 tools/ai-tools/twin/twin_verify.py` for every queue edit, run
+> `bash tools/build.sh` and the affected tests before committing, and mark an
+> item `reference-verified` only with Java-source/oracle evidence,
+> `twin-verified` only with a fresh Java+Godot frame pair.

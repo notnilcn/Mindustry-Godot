@@ -66,7 +66,7 @@ and every `docs/PLANS/moves/*.tsv`.
    Compare with the baseline in 00-README (sim_host 13.5k, unit_runtime 9.5k, campaign 8.3k, …).
 8. **CI hand-off.** Add one `CI_PENDING.json` entry covering the whole programme, with gates
    `fmt,clippy,cargo-check,cargo-test,parity,goldens,spine,godot-build,godot-import,shaders-check,ui-layout-check,ui-widgets-check,dialog-sweep,boundary`.
-   Then the CI fixer runs `tools/run-cpu-intensive-task.sh --ci` ([`docs/CI-FIXER-PROMPT.md`](../CI-FIXER-PROMPT.md)).
+   Then the CI fixer runs `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci` ([`docs/CI-FIXER-PROMPT.md`](../CI-FIXER-PROMPT.md)).
 9. Decide with the user whether `tools/refactor/` stays (it is useful for future splits) or goes.
 
 ## Done when

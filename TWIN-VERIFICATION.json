@@ -1,6 +1,14 @@
 {
-  "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-07T04:39:20Z",
+  "schema": "ai-tools/twin-verification@1",
+  "updated": "2026-11-18T11:51:54Z",
+  "legs": {
+    "reference": "java",
+    "port": "godot"
+  },
+  "terminal_statuses": [
+    "reference-verified",
+    "twin-verified"
+  ],
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -2179,7 +2187,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0010 01-chooser",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0010 01-chooser -- bash -c 'source tools/twin.sh && JS 01-chooser'",
               "note": "chooser frame: cards (253,120) 320x320 gap 6, caption glyph 448/468, OK bottom 640"
             }
           }
@@ -2290,7 +2298,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0010 01-chooser",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0010 01-chooser -- bash -c 'source tools/twin.sh && GS 01-chooser'",
               "note": "chooser frame: caption glyph 448/468, cards y 120"
             }
           }
@@ -5316,7 +5324,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 01-planet-fork"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/ai-tools/twin/twin_item.sh capture reference PAR-0018 01-planet-fork -- bash -c 'source tools/twin.sh && JS 01-planet-fork'"
             }
           }
         ],
@@ -5616,7 +5624,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 02-hover-ground-zero"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/ai-tools/twin/twin_item.sh capture reference PAR-0018 02-hover-ground-zero -- bash -c 'source tools/twin.sh && JS 02-hover-ground-zero'"
             }
           },
           {
@@ -5634,7 +5642,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 03-click-ground-zero"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/ai-tools/twin/twin_item.sh capture reference PAR-0018 03-click-ground-zero -- bash -c 'source tools/twin.sh && JS 03-click-ground-zero'"
             }
           },
           {
@@ -5658,7 +5666,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0018 01-planet-fork"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0018 01-planet-fork -- bash -c 'source tools/twin.sh && GS 01-planet-fork'"
             }
           },
           {
@@ -5703,7 +5711,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0018 02-hover-ground-zero"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0018 02-hover-ground-zero -- bash -c 'source tools/twin.sh && GS 02-hover-ground-zero'"
             }
           },
           {
@@ -5801,7 +5809,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0018 03-click-ground-zero"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0018 03-click-ground-zero -- bash -c 'source tools/twin.sh && GS 03-click-ground-zero'"
             }
           },
           {
@@ -5869,7 +5877,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/twin_item.sh java-shot PAR-0019 01-fork-planet-page"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/ai-tools/twin/twin_item.sh capture reference PAR-0019 01-fork-planet-page -- bash -c 'source tools/twin.sh && JS 01-fork-planet-page'"
             }
           }
         ],
@@ -6062,7 +6070,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0019 01-fork-planet-page"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0019 01-fork-planet-page -- bash -c 'source tools/twin.sh && GS 01-fork-planet-page'"
             }
           }
         ]
@@ -6084,7 +6092,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/twin_item.sh java-shot PAR-0019 02-launched-ground-zero"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/ai-tools/twin/twin_item.sh capture reference PAR-0019 02-launched-ground-zero -- bash -c 'source tools/twin.sh && JS 02-launched-ground-zero'"
             }
           }
         ],
@@ -6148,7 +6156,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0019 02-launched-ground-zero"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0019 02-launched-ground-zero -- bash -c 'source tools/twin.sh && GS 02-launched-ground-zero'"
             }
           }
         ]
@@ -16056,7 +16064,7 @@
         "cargo test -p mind-core --lib -> 3114 passed, 0 failed",
         "cargo test -p mind-gdext --lib accelerator -> 4 passed",
         "cargo check -p mind-gdext -> clean",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0 (MindWorldRenderer ready, 43 bands, no script/class errors)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0 (MindWorldRenderer ready, 43 bands, no script/class errors)",
         "client/rust/mind-core/src/render/accelerator.rs",
         "client/rust/mind-core/src/world/blocks/campaign/accelerator.rs",
         "client/rust/mind-gdext/src/render/accelerator.rs"
@@ -16522,7 +16530,7 @@
         "cargo test -p mind-gdext --lib audio -> 15 passed",
         "cargo check -p mind-gdext -> ok",
         "cargo fmt --all -- --check -> exit 0",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0"
       ],
       "action": {
         "godot": [
@@ -16541,7 +16549,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit"
             }
           }
         ]
@@ -16814,7 +16822,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps::tests::map_patches"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib maps::tests::map_patches"
             }
           }
         ]
@@ -17072,7 +17080,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib factory::tests"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib factory::tests"
             }
           }
         ]
@@ -17774,7 +17782,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::tests::splash"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::tests::splash"
             }
           }
         ]
@@ -17903,8 +17911,8 @@
         "cargo test -p mind-gdext --lib light => 3 passed (block_light_sources_use_the_block_light_fields, floor_light_sources_follow_the_java_table, stamp_is_brightest_at_the_center)",
         "cargo test -p mind-core --lib => 2923 passed, 0 failed, 4 ignored",
         "cargo check -p mind-gdext => ok",
-        "tools/run-cpu-intensive-task.sh --build => ok",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit => exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build => ok",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit => exit 0"
       ],
       "acceptance": "cargo test -p mind-core asserting BlockDef light_radius/light_color per Java override (impact-reactor 115, landing-pad 90/#eab678, accelerator 70/accent, nuclear-reactor 60/#7f19ea, mend/overdrive 50, differential-generator 195, steam-generator 130) plus a mind-gdext light_sources test that a placed impact-reactor yields radius 115; live: a lit custom game shows the 115 px glow and the landing-pad #eab678 tint.",
       "claimed_by": "hx-host",
@@ -18086,7 +18094,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "$REPO/tools/twin_item.sh java-shot PAR-0468 01-action",
+              "cmd": "$REPO/tools/ai-tools/twin/twin_item.sh capture reference PAR-0468 01-action -- bash -c 'source tools/twin.sh && JS 01-action'",
               "note": "capture 1152x648"
             }
           }
@@ -18364,7 +18372,7 @@
             "tool": "godot_screenshot",
             "params": {
               "action": "game",
-              "note": "capture 1152x648, then tools/twin_item.sh godot-shot PAR-0468 01-action"
+              "note": "capture 1152x648, then tools/ai-tools/twin/twin_item.sh capture port PAR-0468 01-action -- bash -c 'source tools/twin.sh && GS 01-action'"
             }
           }
         ]
@@ -18530,7 +18538,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "cd $REPO && tools/twin_item.sh java-shot PAR-0469 01-action"
+              "cmd": "cd $REPO && tools/ai-tools/twin/twin_item.sh capture reference PAR-0469 01-action -- bash -c 'source tools/twin.sh && JS 01-action'"
             },
             "note": "capture the 1152x648 Java verdict frame"
           }
@@ -19579,7 +19587,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "cd $REPO && tools/twin_item.sh godot-shot PAR-0469 01-action"
+              "cmd": "cd $REPO && tools/ai-tools/twin/twin_item.sh capture port PAR-0469 01-action -- bash -c 'source tools/twin.sh && GS 01-action'"
             },
             "note": "capture the 1152x648 Godot verdict frame"
           }
@@ -19615,7 +19623,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0470 00-state",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0470 00-state -- bash -c 'source tools/twin.sh && JS 00-state'",
               "note": "state before the walk: sandbox game running"
             }
           }
@@ -19636,7 +19644,7 @@
           {
             "tool": "note",
             "params": {
-              "text": "Built once by the orchestrator (tools/run-cpu-intensive-task.sh --build exit 0); editor pid 438295, bridge 6970; res://scenes/game.tscn played, runtime_connected, pid 438491, viewport 1152x648."
+              "text": "Built once by the orchestrator (tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build exit 0); editor pid 438295, bridge 6970; res://scenes/game.tscn played, runtime_connected, pid 438491, viewport 1152x648."
             }
           },
           {
@@ -19662,7 +19670,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0470 01-paused"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0470 01-paused -- bash -c 'source tools/twin.sh && JS 01-paused'"
             }
           },
           {
@@ -19682,7 +19690,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0470 02-rules-clean"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0470 02-rules-clean -- bash -c 'source tools/twin.sh && JS 02-rules-clean'"
             }
           },
           {
@@ -19695,7 +19703,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0470 01-action"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0470 01-action -- bash -c 'source tools/twin.sh && JS 01-action'"
             }
           },
           {
@@ -20018,7 +20026,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0470 01-action"
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0470 01-action -- bash -c 'source tools/twin.sh && GS 01-action'"
             }
           },
           {
@@ -20191,7 +20199,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "cd $REPO && tools/twin_item.sh java-shot PAR-0471 01-action"
+              "cmd": "cd $REPO && tools/ai-tools/twin/twin_item.sh capture reference PAR-0471 01-action -- bash -c 'source tools/twin.sh && JS 01-action'"
             },
             "note": "1152x648 Java verdict frame: idle lancer + adjacent power-source, full Power hover bar, orange noOutput status diamond"
           }
@@ -20572,7 +20580,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "cd $REPO && tools/twin_item.sh godot-shot PAR-0471 01-action"
+              "cmd": "cd $REPO && tools/ai-tools/twin/twin_item.sh capture port PAR-0471 01-action -- bash -c 'source tools/twin.sh && GS 01-action'"
             },
             "note": "1152x648 Godot verdict frame: idle lancer + adjacent power-source + orange noOutput status diamond"
           }
@@ -20655,7 +20663,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0472 01-action",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0472 01-action -- bash -c 'source tools/twin.sh && JS 01-action'",
               "note": "1152x648 Java frame captured BEFORE mouseup: translucent Pal.accent box (250,150)-(750,430) over the core + 'Command Mode / [no units]' -> runs/PAR-0472/java/20261106-083850-01-action.png"
             }
           },
@@ -20754,7 +20762,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0472 01-action",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0472 01-action -- bash -c 'source tools/twin.sh && GS 01-action'",
               "note": "1152x648 Godot frame while held: translucent accent box (250,150)-(750,430) + 'Command Mode [no units]' -> runs/PAR-0472/godot/20261106-082033-01-action.png"
             }
           },
@@ -20855,7 +20863,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh java-shot PAR-0473 01-action",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture reference PAR-0473 01-action -- bash -c 'source tools/twin.sh && JS 01-action'",
               "note": "1152x648 Java frame: placement top table shows 'Core: Nucleus' + icon + red Health bar + Capacity: 13k above the palette (PlacementFragment.hovered() -> hoverTile.build -> BuildingComp.display)"
             }
           }
@@ -21075,7 +21083,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/twin_item.sh godot-shot PAR-0473 01-action",
+              "cmd": "tools/ai-tools/twin/twin_item.sh capture port PAR-0473 01-action -- bash -c 'source tools/twin.sh && GS 01-action'",
               "note": "1152x648 Godot frame: placement top table shows 'Core: Nucleus' + icon + red Health bar + Capacity: 13k above the palette, same position/size as the Java frame"
             }
           }
@@ -21155,7 +21163,7 @@
           {
             "tool": "note",
             "params": {
-              "text": "headless verification log runs/PAR-0475/headless-20261106.log; repro: tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib shield"
+              "text": "headless verification log runs/PAR-0475/headless-20261106.log; repro: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib shield"
             }
           }
         ]
@@ -21204,7 +21212,7 @@
           {
             "tool": "note",
             "params": {
-              "text": "headless verification log runs/PAR-0476/headless-20261106.log; repro: tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib shock_mine"
+              "text": "headless verification log runs/PAR-0476/headless-20261106.log; repro: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib shock_mine"
             }
           }
         ]
@@ -27567,7 +27575,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib maps"
             }
           }
         ]
@@ -27603,7 +27611,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib maps"
             }
           }
         ]
@@ -27638,7 +27646,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib maps"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib maps"
             }
           }
         ]
@@ -27680,7 +27688,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib sectors"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib sectors"
             }
           }
         ]
@@ -27694,7 +27702,7 @@
       "fix": "Documented the Java-vs-port submission order and the exact dense-id slot table (ids 67-74) on register_sector_submissions; added sector_submission_order_is_pinned which records the current ids (246=67, 244=68, 242=69, 243=70, 247=71, 245=72, 27=73, 202=74, fallenVessel=75, geothermalStronghold=76, cruxscape=77, onset=78).",
       "evidence": [
         "cargo test -p mind-core --lib sectors: 6 passed, 0 failed (sector_submission_order_is_pinned, presets_resolve)",
-        "tools/run-cpu-intensive-task.sh --parity --check: structural registries + golden sha256 pass"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --parity --check: structural registries + golden sha256 pass"
       ],
       "notes": [
         {
@@ -28336,7 +28344,7 @@
           {
             "tool": "note",
             "params": {
-              "text": "headless verification log runs/PAR-0526/defense-20261106.log; repro: tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib defense"
+              "text": "headless verification log runs/PAR-0526/defense-20261106.log; repro: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib defense"
             }
           }
         ]
@@ -28474,7 +28482,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::lightning"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib combat::lightning"
             }
           }
         ]
@@ -28519,7 +28527,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib world::blocks::defense::turrets"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib world::blocks::defense::turrets"
             }
           }
         ]
@@ -28564,7 +28572,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib erekir_turret_ammo_rebalanced"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib erekir_turret_ammo_rebalanced"
             }
           }
         ]
@@ -28609,7 +28617,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib cheating_"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib cheating_"
             }
           }
         ]
@@ -28654,7 +28662,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::kinds::continuous"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib combat::bullet::kinds::continuous"
             }
           }
         ]
@@ -28699,7 +28707,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib liquid_turret_"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib liquid_turret_"
             }
           }
         ]
@@ -28744,7 +28752,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib tractor_beam"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib tractor_beam"
             }
           }
         ]
@@ -28789,7 +28797,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::misc::tests && tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::misc::tests && tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -28838,7 +28846,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -28882,7 +28890,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
             }
           }
         ]
@@ -28929,7 +28937,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -28976,19 +28984,19 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib voices"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib voices"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib streams"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib streams"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib audio -- --skip audio_stream_name_uses_the_dp_prefix"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib audio -- --skip audio_stream_name_uses_the_dp_prefix"
             }
           }
         ]
@@ -29006,7 +29014,7 @@
         "cargo check -p mind-gdext: ok",
         "cargo clippy -p mind-gdext --all-targets -- -D warnings: ok",
         "cargo fmt --all --check: ok",
-        "tools/run-cpu-intensive-task.sh --build: ok; godot --headless --path client --quit: exit 0",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build: ok; godot --headless --path client --quit: exit 0",
         "client/rust/mind-gdext/src/audio/voices.rs:386-600 (SoundLoopTable + tests)",
         "client/rust/mind-gdext/src/audio/hooks.rs (BurstDrill/LaunchPad formulas + tests)",
         "client/rust/mind-gdext/src/audio/mod.rs:715-760 (LoopInstance per-key path)"
@@ -29421,7 +29429,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29436,7 +29444,7 @@
         "client/rust/mind-gdext/src/ui/dialogs/net/join/mod.rs:504 (JoinVersion, join_build_cmp, join_version_line, join_safe_connect, join_abort_on_version, probe/public match readers)",
         "net/join/mod.rs:323-338 (row version label) and 2412-2427 + 2441-2456 (safeConnect gates)",
         "cargo test -p mind-gdext --lib ui::dialogs::batch_b::tests -> 3 passed",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (join builds/shows/hides)"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (join builds/shows/hides)"
       ],
       "notes": [
         {
@@ -29464,7 +29472,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29506,7 +29514,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29548,7 +29556,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29590,7 +29598,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29647,7 +29655,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29722,7 +29730,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29795,7 +29803,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -29945,7 +29953,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib behavior"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib behavior"
             }
           }
         ]
@@ -29987,7 +29995,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib consumers"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib consumers"
             }
           }
         ]
@@ -30038,7 +30046,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
             }
           }
         ]
@@ -30080,7 +30088,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib abilities"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib abilities"
             }
           }
         ]
@@ -30129,7 +30137,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib blocks::"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib blocks::"
             }
           }
         ]
@@ -30234,7 +30242,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib achievement && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib game::service && tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib game::runtime::tests"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib achievement && tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib game::service && tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib game::runtime::tests"
             }
           }
         ]
@@ -30295,7 +30303,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -30307,10 +30315,10 @@
       "source": "GAPS.md#39",
       "fix": "gx/ui UI half of PAR-0122: MindUi.player_list_json()/player_count()/player_trace_json() now read MindNet; MindUi.player_action() forwards to MindNet.player_action (2-arg) and new MindUi.player_action_with() to MindNet.player_action_with (team:<id> also accepted through the old 2-arg signal ABI). fragments/player_list.rs rebuilt to PlayerListFragment.java v146: players/players.single count header, search filter (stripColors), team+admin sorted scroll rows with team-coloured avatar/admin glyph, per-row menu overlay with Ban/Kick/Trace/Team/Admin buttons (confirm prompts for ban/kick/admin/unadmin via MindUi.show_confirm), inline team chooser -> player_action_with(team), votekick hammer row -> show_text_input(VOTE_MIN_PLAYERS=3) -> chat_send(/votekick <name> <reason>), footer now opens the registered bans/admins dialogs (was server.bans/server.admins), @players.notfound empty state, toggle gated on MindNet.session_state in_game/snapshot_sync. Trace: the row Trace button reads player_trace_json and opens traces with {player, trace}; dialogs/misc.rs TraceDialog maps the roster trace (identity->@trace.id, names, sessions->timesJoined, kicks.len->timesKicked; relay has no IP/locale/modded/mobile columns) and still accepts a Java PlayerInfo info dictionary.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player -> 17 passed, 0 failed (runs/PAR-0567/mind-gdext-tests.log: all 23 player_list/ui_host/misc tests ok; the full suite still has 17 pre-existing engine-dependent failures unrelated to these files)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0 (runs/PAR-0567/cargo-check.log)",
-        "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (runs/PAR-0567/dialog-sweep.log)",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0, no SCRIPT ERROR/panic (runs/PAR-0567/headless-boot.log)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib player -> 17 passed, 0 failed (runs/PAR-0567/mind-gdext-tests.log: all 23 player_list/ui_host/misc tests ok; the full suite still has 17 pre-existing engine-dependent failures unrelated to these files)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext -> exit 0 (runs/PAR-0567/cargo-check.log)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: failed=0 (runs/PAR-0567/dialog-sweep.log)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0, no SCRIPT ERROR/panic (runs/PAR-0567/headless-boot.log)",
         "cargo clippy -p mind-gdext --all-targets --no-deps -- -D warnings: no findings in the changed files (remaining findings are pre-existing in batch_a/batch_e/sim_host/batch_b/render + misc.rs dispatch default)"
       ],
       "notes": [
@@ -30344,7 +30352,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib input"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib input"
             }
           }
         ]
@@ -30362,7 +30370,7 @@
         "cargo test -p mind-core --lib input: 161 passed (finish_line_touch place/break, confirm_plans_result, Breaking mode preserved)",
         "cargo test -p mind-gdext --lib mobile: 2 passed (gesture screen->world, mobile caps)",
         "cargo check -p mind-gdext exit 0",
-        "tools/run-cpu-intensive-task.sh --build exit 0",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build exit 0",
         "godot --headless boot exit 0",
         "godot --headless dialog_sweep_check failed=0",
         "cargo fmt clean"
@@ -30398,7 +30406,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
             }
           }
         ]
@@ -30412,7 +30420,7 @@
       "evidence": [
         "cargo test -p mind-gdext --lib render -> 64 passed (12 new light tests)",
         "cargo check -p mind-gdext",
-        "headless boot: tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0"
+        "headless boot: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0"
       ],
       "notes": [
         {
@@ -30445,7 +30453,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib planet"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib planet"
             }
           }
         ]
@@ -30492,7 +30500,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::load"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::load"
             }
           }
         ]
@@ -30534,7 +30542,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib block_kind_data"
             }
           }
         ]
@@ -30579,7 +30587,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib content::"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib content::"
             }
           }
         ]
@@ -30623,13 +30631,13 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::schematics::files::tests::schematic"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::schematics::files::tests::schematic"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -30644,8 +30652,8 @@
       "evidence": [
         "cargo check -p mind-gdext -> exit 0 (no warnings from batch_campaign2.rs)",
         "cargo test -p mind-gdext --lib ui::dialogs::schematics::files::tests::schematic -> 8 passed, 0 failed (free_path sanitize/suffix, label add/remove/replace, tag swap bounds, available-tags order, icon-tag PUA detection, clipboard bXNjaAB gate, empty-name gate, schematic.tagged count)",
-        "dialog sweep: tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: ok schematics: button row exists / shows / hides (fade completes) / reshows; failed=0",
-        "headless boot: tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0",
+        "dialog sweep: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn -> DIALOGCHECK: ok schematics: button row exists / shows / hides (fade completes) / reshows; failed=0",
+        "headless boot: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0",
         "rustfmt --edition 2024 --check client/rust/mind-gdext/src/ui/dialogs/batch_campaign2.rs -> clean",
         "Java twin (screenshot pair for the tag editor/edit/import/export sub-dialogs) not captured: headless fix pass"
       ],
@@ -30675,19 +30683,19 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_items"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib team_items"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib core_snapshot_sums_the_team_pool"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib core_snapshot_sums_the_team_pool"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib team_has_item_reads"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib team_has_item_reads"
             }
           }
         ]
@@ -30924,7 +30932,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib campaign"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib campaign"
             }
           }
         ]
@@ -30938,7 +30946,7 @@
       "evidence": [
         "cargo test -p mind-gdext --lib campaign -> 25 passed / 4 pre-existing ui::dialogs::batch_campaign2 Godot-FFI failures; new service_injection_roundtrips_through_the_unlock_store + service_rows_json_cover_every_stat_and_achievement green",
         "cargo check -p mind-gdext (tests) clean",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit -> exit 0, log shows MindCampaign ready (14 save slot(s), 0 achievement(s))"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit -> exit 0, log shows MindCampaign ready (14 save slot(s), 0 achievement(s))"
       ],
       "notes": [
         {
@@ -30966,7 +30974,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib planet_bodies"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib planet_bodies"
             }
           }
         ]
@@ -31008,7 +31016,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib sim_host::tests"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib sim_host::tests"
             }
           }
         ]
@@ -31050,7 +31058,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::light"
             }
           }
         ]
@@ -31062,10 +31070,10 @@
       "gap": "MindFx.view_lights only collected PrimKind::Light circles, so the one vanilla effect body that uses the line-form Drawf.light -- Fx.pointBeam (Fx.java:152-160: Drawf.light(e.x, e.y, pos.x, pos.y, 20f, e.color, 0.6f*e.fout())) -- was rendered as a circle light at the beam origin (the core body emits emit.light as a stand-in). Fx.lightning (Fx.java:189-206) and Fx.chainLightning/chainEmp (Fx.java:2877-2949) add NO light in Java, so the packet premise that they need line lights is wrong for the Java oracle.",
       "fix": "render.rs forwards MindFx.view_light_lines() into LightRenderer::update -> forward_fx_light_lines -> LightBuffer::add_line every frame (LightRenderer.line semantics: stroke, tint, folded alpha); FxLightLine is now pub. fx.rs build_fx_program already drops the pointBeam circle-light prim, so the row is the only light that effect emits. Zero-stroke rows are dropped by add_line (no-area quad).",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::light (13 passed, incl. fx_line_lights_reach_the_light_buffer)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib fx::tests (8 passed)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
-        "tools/run-cpu-intensive-task.sh --build + --godot --headless --path client --quit (exit 0)"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::light (13 passed, incl. fx_line_lights_reach_the_light_buffer)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib fx::tests (8 passed)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build + --godot --headless --path client --quit (exit 0)"
       ],
       "notes": [
         {
@@ -31263,7 +31271,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib batch_f"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib batch_f"
             }
           }
         ]
@@ -31304,7 +31312,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -31345,7 +31353,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib mods"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib mods"
             }
           }
         ]
@@ -31387,7 +31395,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib render::draw_desc"
             }
           }
         ]
@@ -31404,7 +31412,7 @@
         "cargo test -p mind-gdext --lib render (66 passed)",
         "cargo check -p mind-gdext",
         "cargo fmt --all -- --check",
-        "headless boot tools/run-cpu-intensive-task.sh --godot --headless --path client --quit (exit 0)"
+        "headless boot tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit (exit 0)"
       ],
       "notes": [
         {
@@ -31432,7 +31440,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib render::tiled"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib render::tiled"
             }
           }
         ]
@@ -31512,7 +31520,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans"
             }
           }
         ]
@@ -31524,13 +31532,13 @@
       "gap": "GAPS #47 (PAR-0472 closed only the RTS command drag box). Verified missing at HEAD 179144d7: (1) DesktopInput.drawTop has no F-selection copy rect (DesktopInput.java:133-145 drawSelection) and no B rebuild-select rect (InputHandler.java:1724-1752 drawRebuildSelection); PlacementView exposes no selection state. (2) The F-copy paste preview plans (selectPlans, DesktopInput.java:175-185 drawPlan/drawOverPlan) are tracked in DesktopBridge but never drawn: render/plans.rs draws only the break rect, queued plans and the cursor ghost. (3) drawOverlapCheck (InputHandler.java:1499-1516) has no port at all: no enemy-blocker corners and no dashed warning line. (4) drawOtherBuildPlans (InputHandler.java:1392-1440) has no port; only TeamData.plans ghosts are drawn (BlockRenderer.drawDestroyed).",
       "fix": "Visual half landed on top of the mc geometry. PlacementView gains selection: Option<(SelectionShow,(i32,i32))> (latched schem_start + F/B held flags mirrored from key edges + place mode + text focus, via selection_show) and select_plans (paste ghosts). MindSimHost gains append-only placement_blocker (world::build::get_enemy_overlap + BuildingComp origin/size + entities::comp::Building.was_visible, fog-off => visible), rebuild_highlight_tiles (mc rebuild_selection_tiles over derelict_repair_plan), place_range_check. render/plans.rs draws in packet order: break rect, queued plans, F/B rect (accent/sap back at y-1 + front stroke 2) plus rebuild corners (team ghost plans via plan_world_rect overlap, then derelicts), selectPlans paste ghosts, cursor/line ghost + drawPlace ranges, drawOverlapCheck corners + new DrawCmd::DashLine (canvas::dash_line: Lines.dashLine divisions, Pal.gray stroke 3 then colour stroke 1), destroyed ghosts. Residuals: drawSelection size text (java withText) not drawn; selectPlans drawOverPlan config-top pass not ported; drawOtherBuildPlans other-player plans still need net preview-plan sync (mc other_plan_* left unwired); Java draws the F/B rect at Layer.overlayUI above the plan layer, the port draws it below the paste/cursor ghosts (single-pass deviation documented in code).",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans (5 passed)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib render::canvas (2 passed, dash_line_segments_match_arc)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop::tests (26 passed incl. placement_view_reports_held_selection, key_edges_refresh_the_selection_held_flags, placement_view_reports_select_plans)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib placement (41 passed)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
-        "tools/run-cpu-intensive-task.sh --build",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit (exit 0)"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::plans (5 passed)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib render::canvas (2 passed, dash_line_segments_match_arc)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop::tests (26 passed incl. placement_view_reports_held_selection, key_edges_refresh_the_selection_held_flags, placement_view_reports_select_plans)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib placement (41 passed)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit (exit 0)"
       ],
       "notes": [
         {
@@ -31541,7 +31549,7 @@
         {
           "at": "2026-11-07T01:15:12Z",
           "by": "hx-render3",
-          "text": "Headless fix pass 2026-11-07 (mg-w8 @ 25721387): the four GAPS #47 residuals now have a production draw path: (1) F copy rect + B rebuild rect with their corners, (2) selectPlans paste ghosts, (3) drawOverlapCheck corners + dashed line, (4) other players plans still blocked on net preview-plan sync (not a render hook). Geometry is unit-tested in mc (41 placement tests) and the gdext draw assembly is covered by 8 new focused tests; cargo check/build and headless boot pass. NOT visually confirmed in-engine (packet forbids interactive Godot/MCP): run tools/run-cpu-intensive-task.sh --build then a Java-vs-Godot twin walk to confirm pixels - the F rect needs 2+ tiles dragged with F held, B needs a derelict/ghost plan in the box, and the overlap warning needs Rules.placeRangeCheck (Erekir default) + an enemy blocker."
+          "text": "Headless fix pass 2026-11-07 (mg-w8 @ 25721387): the four GAPS #47 residuals now have a production draw path: (1) F copy rect + B rebuild rect with their corners, (2) selectPlans paste ghosts, (3) drawOverlapCheck corners + dashed line, (4) other players plans still blocked on net preview-plan sync (not a render hook). Geometry is unit-tested in mc (41 placement tests) and the gdext draw assembly is covered by 8 new focused tests; cargo check/build and headless boot pass. NOT visually confirmed in-engine (packet forbids interactive Godot/MCP): run tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build then a Java-vs-Godot twin walk to confirm pixels - the F rect needs 2+ tiles dragged with F held, B needs a derelict/ghost plan in the box, and the overlap warning needs Rules.placeRangeCheck (Erekir default) + an enemy blocker."
         }
       ]
     },
@@ -31563,7 +31571,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::chat"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::chat"
             }
           }
         ]
@@ -31600,7 +31608,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::toasts"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::toasts"
             }
           }
         ]
@@ -31635,7 +31643,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::kit::rows"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::kit::rows"
             }
           }
         ]
@@ -31671,13 +31679,13 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib service"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext"
             }
           }
         ]
@@ -31689,8 +31697,8 @@
       "source": "GAPS.md#69",
       "fix": "mind-core/src/service.rs: added default GameService methods (submit_score seam; delete_achievement/has_achievement aliases forwarding to clear_achievement/is_achieved so LocalGameService keeps its real local behavior; guarded open_link/open_file via is_safe_external_link/is_openable_file; logged export_data/import_data no-ops), LINK_SCHEMES + the two guards, and NullService completeness/guard tests. MindPlatform open_link/open_file host probes reuse the same guards.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib service -> 17 passed, 0 failed (2026-11-07 09:37 AEST)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib service -> 17 passed, 0 failed (2026-11-07 09:37 AEST)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
       ],
       "notes": [
         {
@@ -31718,7 +31726,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless --lib"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-headless --lib"
             }
           }
         ]
@@ -31764,7 +31772,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib platform"
             }
           }
         ]
@@ -31776,8 +31784,8 @@
       "source": "GAPS.md#70",
       "fix": "mind-core/src/platform/perf.rs: PerfCounter state machine over math::WindowedMean(120) with the 100 ms value refresh (add/begin/end/end_subtract/check_update/begin_part/end_part/finish_parts/value_ms/latest_value_ns/raw_value_ms/raw_value_ns), PerfCounterKind::ALL/DISPLAYED in upstream order, PerfCounters::finish_frame (ClientLauncher.update other-aggregation) and an injected PerfClock. mind-gdext MindPlatform::process samples the frame delta into the frame counter and get_perf_stats() reports fps/process/physics/navigation/memory plus all 14 raw counters.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed, 0 failed (perf suite included, 2026-11-07)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed, 0 failed (perf suite included, 2026-11-07)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
       ],
       "notes": [
         {
@@ -31805,13 +31813,13 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib platform"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib platform::"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib platform::"
             }
           }
         ]
@@ -31823,9 +31831,9 @@
       "source": "GAPS.md#70",
       "fix": "mind-core/src/platform/gpu.rs: IntelGpuCheck marker init/was_intel with the process cache and Windows gating; NvGpuInfo over an injected GlQueries returning Option/None when GL_NVX_gpu_memory_info is absent. mind-core/src/platform/update.rs: BeControl.active gate, release JSON parse + asset selection, newBuild > Version.build, UpdateStatus (updateAvailable/updateBuild/updateUrl), read_build_info for an on-disk version.properties. mind-gdext platform: boot records the GPU vendor marker (read previous first), get_gpu_info(), get_update_status(), dev_check_update_json(); platform/crash.rs gpu bad-error classification + exact upstream notices.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed (gpu/update suites included, 2026-11-07)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib platform:: -> 5 passed (crash/update host tests)",
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core --lib platform -> 46 passed (gpu/update suites included, 2026-11-07)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib platform:: -> 5 passed (crash/update host tests)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext -> exit 0"
       ],
       "notes": [
         {
@@ -31949,7 +31957,7 @@
         "cargo test -p mind-core --lib accelerator (17 passed)",
         "cargo test -p mind-core --lib lightning (22 passed, incl. view_polyline)",
         "cargo check -p mind-gdext clean",
-        "tools/run-cpu-intensive-task.sh --build + --godot --headless --path client --quit exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build + --godot --headless --path client --quit exit 0"
       ],
       "action": {
         "godot": [
@@ -32041,7 +32049,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32053,14 +32061,14 @@
       "source": "GAPS.md#34,GAPS.md#39,GAPS.md#40",
       "fix": "MindUi.admin_action now normalizes the roster verb (unban/unadmin + Java unbanPlayerID/unAdminPlayer spellings) and dispatches through MindNet.player_action (the same reducer seam as player_action); the admin_action signal remains a fallback seam and the call returns false without a relay so no row is faked removed. Bans/Admins roster rows are dropped only on a confirmed+accepted action and stay filtered when the dialog is re-shown (RosterState.removed). PlayerListFragment now reads MindNet.local_identity_hex/local_admin/my_team: the per-row menu follows Java's net.server() || (player.admin && (!user.admin || user == player)) gate, the votekick hammer is its else-branch (client, >=3 players, teammate, not self/admin), Bans/Admins footer buttons disable for clients, row actions target the full identity (labels stay usernames), and the Trace row sends AdminAction.trace before opening the dialog. Binding.chat (Enter) now routes to Effect::ToggleFragment(\"chat\") and MindChatFragment.toggle no-ops while the console fragment is shown; the /a tab was already gated by MindNet.local_admin.",
       "evidence": [
-        "tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib admin_verbs (5 ui_host tests)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::misc (12)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::player_list (12)",
-        "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop (24, incl. chat_binding_routes_to_the_fragment_toggle)",
-        "tools/run-cpu-intensive-task.sh --build",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib admin_verbs (5 ui_host tests)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::dialogs::misc (12)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib ui::fragments::player_list (12)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib input::desktop (24, incl. chat_binding_routes_to_the_fragment_toggle)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build",
         "dialog_sweep_check.tscn: DIALOGCHECK: failed=0",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit: exit 0",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit: exit 0",
         "cargo fmt --all --check: clean"
       ],
       "notes": [
@@ -32105,7 +32113,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32164,7 +32172,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32223,7 +32231,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32281,7 +32289,7 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32339,13 +32347,13 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib player"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn"
             }
           }
         ]
@@ -32359,7 +32367,7 @@
         "cargo test -p mind-gdext --lib player (25 passed; input::desktop::tests::player_list_binding_routes_to_the_fragment_toggle)",
         "cargo test -p mind-gdext --lib net:: (15 passed)",
         "cargo check -p mind-gdext",
-        "tools/run-cpu-intensive-task.sh --build (mind-gdext .so rebuilt)",
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build (mind-gdext .so rebuilt)",
         "headless res://scenes/tools/dialog_sweep_check.tscn: DIALOGCHECK: failed=0",
         "headless boot: godot --headless --path client --quit exit 0"
       ],
@@ -32486,19 +32494,19 @@
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-stdb --lib"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-stdb --lib"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib net::"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib net::"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib player"
+              "cmd": "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib player"
             }
           }
         ]
@@ -32565,7 +32573,7 @@
       "evidence": [
         "cargo test -p mind-gdext --lib logic_view => 3 passed (camera/selection/ping mapping, AIR->null, empty ping label)",
         "cargo check -p mind-gdext => ok",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit => exit 0"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit => exit 0"
       ]
     },
     "PAR-0613": {
@@ -32751,7 +32759,7 @@
       "evidence": [
         "cargo test -p mind-gdext --lib display_context => 1 passed (notdef box shape + print_center)",
         "cargo check -p mind-gdext => ok",
-        "tools/run-cpu-intensive-task.sh --godot --headless --path client --quit => exit 0 (no get_texture_image errors)"
+        "tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client --quit => exit 0 (no get_texture_image errors)"
       ]
     }
   },

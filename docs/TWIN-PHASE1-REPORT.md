@@ -131,15 +131,15 @@ previews). 217 batch items remain `reference-verified`.
 cd /home/clintonnguyen/g/code_examples/Mindustry-Godot
 bash tools/build.sh                          # after any Rust edit
 bash tools/parity-session.sh --stop && bash tools/parity-session.sh   # extension is mmap'd
-python3 tools/twin_tx.py list --nonterminal --tsv
-python3 tools/twin_tx.py show PAR-0442
-python3 tools/twin_tx.py claim PAR-0442 --agent orch2
-python3 tools/twin_tx.py set  PAR-0442 --status twin-verified --similarity N --field evidence="runs/PAR-0442/..."
+python3 tools/ai-tools/twin/twin_verify.py next --root .
+python3 tools/ai-tools/twin/twin_verify.py list --status mismatch --root .
+# claim/release are retired; one checker owns an item at a time
+python3 tools/ai-tools/twin/twin_verify.py set-status PAR-0442 twin-verified --similarity N --note "evidence=runs/PAR-0442/..."
 cargo test --manifest-path client/rust/Cargo.toml -p mind-core
 bash tools/parity.sh                          # headless oracle (goldens + smoke)
-python3 tools/twin_verification.py check      # after queue edits
+python3 tools/ai-tools/twin/twin_verify.py check --root .      # after queue edits
 # live legs: MCP bridge 6970, godot_game play {"scene":"res://scenes/game.tscn"},
-# evidence via tools/twin_item.sh dir|godot-shot|java-shot|note|log
+# evidence via export TWIN_REFERENCE_LEG=java TWIN_PORT_LEG=godot; tools/ai-tools/twin/twin_item.sh dir|capture|note|log
 ```
 
 Reference frames for this session live under `runs/PAR-####/` (gitignored,
@@ -150,4 +150,4 @@ never under `runs/archive/**`).
 - `bash tools/build.sh` — ok (mind-gdext + mind-headless, scenarios synced).
 - `cargo test -p mind-core` — ok, 2833 lib tests + all integration binaries pass.
 - `bash tools/parity.sh` — ok (goldens PASS, smoke 4/4, exit 0).
-- `python3 tools/twin_verification.py check` — run before the hand-off commit.
+- `python3 tools/ai-tools/twin/twin_verify.py check --root .` — run before the hand-off commit.

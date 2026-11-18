@@ -1,5 +1,5 @@
 ---
-description: Runs the full local CI gate through the repo CPU queue, triages runs/ci/last-run.json, and fixes failures. Use when a batch is ready for a green gate or CI is red.
+description: Runs the full local CI gate through the repo resource queue, triages runs/ci/last-run.json, and fixes failures. Use when a batch is ready for a green gate or CI is red.
 mode: primary
 temperature: 0.1
 ---
@@ -21,9 +21,9 @@ Read first, in this order:
 
 Then follow `docs/CI-FIXER-PROMPT.md` exactly. The non-negotiables:
 
-- Run the gate as `tools/run-cpu-intensive-task.sh --ci`. Every heavy command
+- Run the gate as `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci`. Every heavy command
   goes through that wrapper (it serializes builds/gates across all worktrees);
-  never run two at once and never set `MIND_CPU_QUEUE_DISABLE=1` for real work.
+  never run two at once and never set `RESOURCE_QUEUE_DISABLE=1` for real work.
 - On failure, open `runs/ci/last-run.json` and `runs/ci/<run-id>/ci.log`, read
   the archived `pending.json`, fix the root cause in the failing area, append a
   `python3 tools/ci_pending.py add ...` entry for the fix batch, and rerun.

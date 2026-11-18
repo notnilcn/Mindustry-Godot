@@ -2578,14 +2578,15 @@ Run: runs/20261014-s3-verify3/.
   (20-60 s) before `godot_health check` / `godot_editor_read state`.
 - Run: `runs/PAR-0010/` (final editor pid 3329233).
 
-## 2026-11-02 — PAR-0010 fixer: `tools/twin_item.sh godot-shot --full` is broken (`--max-width`)
+## 2026-11-02 — PAR-0010 fixer: per-item `godot-shot --full` was broken (`--max-width`)
 
-- Symptom: `tools/twin_item.sh godot-shot PAR-0010 01-chooser --full` exits 2 with
+- Symptom: the then-current per-item helper's `godot-shot … --full` form exited 2 with
   `gmcp.py: error: unrecognized arguments: --max-width`.
 - Cause: the `--full` branch appends `--max-width 0`, but `tools/gmcp.py` only accepts `--screenshot`
   (`--eval`, `--text`, `--batch`, …); there is no size flag.
 - Fix: capture without `--full` — `gmcp.py --screenshot` already writes the full 1152x648 viewport (verified
-  byte-identical `sha256` to `godot_screenshot game` output). The helper's `--full` flag needs a follow-up.
+  byte-identical `sha256` to `godot_screenshot game` output). The packaged
+  `tools/ai-tools/twin/twin_item.sh capture` has no size flag, so the broken branch is gone.
 - Run: `runs/PAR-0010/godot/20261102-114441-01-chooser.png`.
 
 ## 2026-11-02 — PAR-0011 checker: archived AVIF references need the parity venv's Pillow

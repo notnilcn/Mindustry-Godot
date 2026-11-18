@@ -19,10 +19,13 @@ agent that follows instructions literally: they name each file, item and check.
 
 A wave starts only after **every** package of the previous wave has merged into `main`.
 Exceptions are noted per package. The packages inside one wave own **disjoint files**, so any
-subset of a wave can run concurrently and merge in any order. The CPU queue
-(`tools/run-cpu-intensive-task.sh`) serializes builds across worktrees, so concurrency only buys
+subset of a wave can run concurrently and merge in any order. The resource queue
+(`tools/ai-tools/resource-gate/run-resource-intensive-task.sh`) serializes builds across worktrees, so concurrency only buys
 wall clock while the checks stay scoped. Run **at most 4–6 agents at once**; more agents just queue
-behind the lock. Start with the campaign packages (listed first in each wave).
+behind the lock. Before dispatching, run the packaged
+`tools/ai-tools/resource-gate/resource-monitor.sh` (see
+[`docs/CI-WORKFLOW.md`](../CI-WORKFLOW.md) "Wave guard") and keep the width at its
+`recommended_parallel_subagents`. Start with the campaign packages (listed first in each wave).
 
 **A wave closes with a sweep, not with a merge.** The orchestrator runs the broad gates over the
 wave's worktrees — one queue acquisition, one row per worktree — and merges only the rows that
@@ -138,7 +141,7 @@ touched: they are ABI.
 
 1. **Before W0:** make sure the user's in-flight work is committed or stashed by the user. Do
    not stash it yourself. Make sure `main` builds: run
-   `tools/run-cpu-intensive-task.sh --cargo-check --workspace`.
+   `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check --workspace`.
 2. For each package: create its worktree (rules §1), pin its branch, and point the wave at the
    shared artifact cache (rules §1). Give the agent `01-RULES.md` plus the package file. Wait for
    its report in `docs/PLANS/reports/<ID>.md`.
@@ -151,23 +154,23 @@ touched: they are ABI.
    agent rebases onto `main` and re-runs its checks.
 4. Merge the green branch into `main`: `git merge --no-ff refactor/<ID>`. On a conflict, a package
    broke the ownership matrix; send it back, do not hand-resolve. After the merge, run
-   `tools/run-cpu-intensive-task.sh --cargo-check --workspace` to catch merge interactions.
+   `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check --workspace` to catch merge interactions.
 5. Add the report's CI entry: `python3 tools/ci_pending.py add …`, copied from the report's
    "CI_PENDING entry" block.
 6. After the **last merge of each wave**, run the wave gate in the main checkout, then remove the
    worktrees (`git worktree remove ../mg-<ID>`) and the shared wave target directory
    (`<git-common-dir>/mindustry-wave-target`):
    ```bash
-   tools/run-cpu-intensive-task.sh --cargo-fmt -- --check
-   tools/run-cpu-intensive-task.sh --cargo-clippy -- -D warnings
-   tools/run-cpu-intensive-task.sh --cargo-test -p mind-core
-   tools/run-cpu-intensive-task.sh --cargo-test -p mind-headless
-   tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib
-   tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens
-   tools/run-cpu-intensive-task.sh --goldens --check
-   tools/run-cpu-intensive-task.sh --build
-   tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn   # expect DIALOGCHECK: failed=0
-   tools/run-cpu-intensive-task.sh --godot --headless --path client res://scenes/tools/ui_widgets_check.tscn    # expect UICHECK: failed=0
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-fmt -- --check
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-clippy -- -D warnings
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-core
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-headless
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --goldens --check
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/dialog_sweep_check.tscn   # expect DIALOGCHECK: failed=0
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --path client res://scenes/tools/ui_widgets_check.tscn    # expect UICHECK: failed=0
    python3 tools/refactor/api_surface.py | diff docs/PLANS/baseline/api_surface.txt -   # empty unless a package documented an addition
    ```
    The full `--ci` gate belongs to the CI fixer after W5 ([`docs/CI-WORKFLOW.md`](../CI-WORKFLOW.md)).

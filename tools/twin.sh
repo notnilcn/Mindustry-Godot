@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# twin.sh — sourced Java+Godot twin-walk helpers (J10 T1).
+# twin.sh — sourced Java+Godot drivers for the packaged twin workflow.
 #
-# Encodes the 2026-10-16 ad-hoc round-J walk (docs/J-round-twin-verification.md)
-# as reusable bash functions, so the twin walk is reproducible from a script
-# instead of hand-typed shell. Source it from a bash shell in the checkout you
-# are driving:
+# The workflow itself (registry, statuses, evidence layout, checker/fixer loop)
+# lives in tools/ai-tools/twin/ and docs/TWIN-RUNS.md. This file only supplies
+# the repo-specific input, capture and launch helpers those procedures call.
+#
+# Source it from a bash shell in the checkout you are driving:
 #
 #   source tools/twin.sh 5          # session 5: display :14, bridge 7010
 #   source tools/twin.sh            # session inferred from the worktree name
 #                                   # (<repo>-sessionN -> N, else 1)
 #
 # Environment overrides (set before sourcing):
-#   TWIN_RUN=<dir>            run dir for evidence (default runs/<stamp>-s<N>-twin)
+#   TWIN_RUN=<dir>            scratch dir for logs/diffs (default runs/<stamp>-s<N>-twin)
+#   TWIN_SHOT_PATH=<file>     when set, JS/GS write this exact path (used by
+#                             tools/ai-tools/twin/twin_item.sh capture)
 #   TWIN_DISPLAY=:14          X display for the Java leg
 #   OPEN_GODOT_MCP_PORT       bridge port for the Godot leg (default 6970+10(N-1))
 #   TWIN_JHOME=<dir>          Java data dir (default <checkout>/parity-java-home)
@@ -42,7 +45,8 @@
 #   JM x y              move the pointer (hover)
 #   JD x1 y1 x2 y2 [button] [ms]   drag
 #   JK key NAME [ms] / JK keydown NAME / JK keyup NAME
-#   JS name             raise + capture the window -> $RUN/java/name.png
+#   JS name             raise + capture the window -> $TWIN_RUN/java/name.png
+#                       (TWIN_SHOT_PATH overrides the path)
 #   JT 'text' [@Key ...]  type into Java by XSendEvent (tools/java_xkeys.py):
 #                       XTEST keys never reach Java on the session Xvfb
 #                       (the X focus stays on Godot); focus the field with JW
@@ -58,7 +62,8 @@
 #   GT 'text'                  type into the focused Control (gmcp --text: one
 #                              unicode key press+release per char; L01 T4).
 #                              Focus the field with GC first; GK Backspace clears
-#   GS name                    game screenshot -> $RUN/godot/name.png
+#   GS name                    game screenshot -> $TWIN_RUN/godot/name.png
+#                              (TWIN_SHOT_PATH overrides the path)
 #   GE 'expr'                  single-statement eval (gmcp --eval)
 #   GP x y                     warp the REAL pointer over the embedded game
 #                              (hover UI; origin from the game window's xwininfo)
@@ -367,13 +372,14 @@ JK() { # JK key NAME [hold_ms] | JK keydown NAME | JK keyup NAME
   fi
 }
 
-JS() { # JS name — raise + capture into $RUN/java/name.png
+JS() { # JS name — raise + capture; TWIN_SHOT_PATH overrides the output path
   local name="${1:?JS name}"
-  mkdir -p "$TWIN_RUN/java"
+  local out="${TWIN_SHOT_PATH:-$TWIN_RUN/java/$name.png}"
+  mkdir -p "$(dirname -- "$out")"
   twin_java_raise
   sleep 0.2
   DISPLAY="$TWIN_DISPLAY" timeout 30 "$TWIN_PARITY_PY" "$TWIN_SKILL_SCRIPTS/capture_screen.py" \
-    --window-title "$TWIN_JAVA_TITLE" --output "$TWIN_RUN/java/$name.png"
+    --window-title "$TWIN_JAVA_TITLE" --output "$out"
 }
 
 JT() { # JT 'text'|@Keysym ... — keys to the Java window by XSendEvent
@@ -435,10 +441,11 @@ GT() { # GT 'text' — type into the GUI focus owner (real key events, L01 T4)
   twin_gmcp --text "${1:?GT 'text'}"
 }
 
-GS() { # GS name — game screenshot into $RUN/godot/name.png
+GS() { # GS name — game screenshot; TWIN_SHOT_PATH overrides the output path
   local name="${1:?GS name}"
-  mkdir -p "$TWIN_RUN/godot"
-  twin_gmcp --screenshot "$TWIN_RUN/godot/$name.png"
+  local out="${TWIN_SHOT_PATH:-$TWIN_RUN/godot/$name.png}"
+  mkdir -p "$(dirname -- "$out")"
+  twin_gmcp --screenshot "$out"
 }
 
 GE() { # GE 'expr' — single-statement eval (gmcp --eval)

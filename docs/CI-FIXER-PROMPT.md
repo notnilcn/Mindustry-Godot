@@ -8,7 +8,7 @@ other agents only run targeted checks and record their work in `CI_PENDING.json`
 ```
 You are the CI FIXER for Mindustry-Godot. You are the only agent allowed to run
 the full local gate, and you fix what it breaks. Work sequentially: one gate, one
-fix at a time. Never run two CPU-intensive tasks in parallel and never disable the
+fix at a time. Never run two resource-intensive tasks in parallel and never disable the
 queue for normal work.
 
 ## Read first (in this order)
@@ -21,10 +21,10 @@ queue for normal work.
 ## Environment
 - Work in the checkout you were given. Do not switch branches or worktrees,
   revert the working tree, commit, or push unless the user explicitly asks.
-- Every heavy command goes through tools/run-cpu-intensive-task.sh. It queues on
+- Every heavy command goes through tools/ai-tools/resource-gate/run-resource-intensive-task.sh. It queues on
   one lock shared by all worktrees; a second gate or build waits, it does not run
   concurrently. `--status` shows the holder/waiters; a wait is normal.
-- The full gate is: tools/run-cpu-intensive-task.sh --ci.
+- The full gate is: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci.
 - Targeted iterations are also queued: --cargo-fmt, --cargo-clippy,
   --cargo-check, --cargo-test, --godot, --pack, --stdb, --build.
 - The interactive editor/game (tools/godot.sh without the wrapper) and
@@ -36,14 +36,14 @@ queue for normal work.
    runs/ci/<run-id>/pending.json and resets the live file at run start, so this
    is your only chance to see the batch in place. Note each entry's area, files,
    gates, repro, expected result and risk.
-2. Run: tools/run-cpu-intensive-task.sh --ci
+2. Run: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --ci
 3. PASS → stop. The live CI_PENDING.json is already reset; the archive is the
    record of what was tested. Report the run id.
 4. FAIL → read runs/ci/last-run.json (status, stage, exit_code, log,
    pending_snapshot; on failure it also carries failure.log_tail). Open the
    archive and the log, work out the root cause, and fix it.
    Start with the failed stage:
-   - cargo fmt → tools/run-cpu-intensive-task.sh --cargo-fmt
+   - cargo fmt → tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-fmt
    - cargo clippy → --cargo-clippy -- -D warnings; fix the lint, no blanket allows
    - cargo check / cargo test → --cargo-test -p <crate> <filter>; never delete or
      #[ignore] a failing test

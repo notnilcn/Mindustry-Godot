@@ -1,12 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # Resource-intensive tasks catalogue
 
-Every resource-intensive task in this repository runs one at a time through
+Every resource-intensive task in this repository runs one at a time through the
+packaged queue at
 [`tools/ai-tools/resource-gate/run-resource-intensive-task.sh`](ai-tools/resource-gate/run-resource-intensive-task.sh).
-The existing `tools/run-cpu-intensive-task.sh` remains supported; when it is
-present both wrappers use the same lock state under
-`<git-common-dir>/mindustry-cpu-queue/`, so a build started through one blocks
-the other.
+The wrapper and its wave monitor live in the `tools/ai-tools` submodule; this
+page only records the repo-specific task map and wave rules.
 
 ## Tasks
 
@@ -41,9 +40,29 @@ the other.
 | `--quiet` | Suppress the start/finish lines. |
 | `--dry-run` | Print the resolved command without taking the lock. |
 
-State defaults to `<git-common-dir>/mindustry-cpu-queue/` (the same directory as
-`tools/run-cpu-intensive-task.sh`). Override it with `RESOURCE_QUEUE_DIR` or the
-legacy `MIND_CPU_QUEUE_DIR`.
+State defaults to `<git-common-dir>/resource-queue/`. Override it with
+`RESOURCE_QUEUE_DIR`; the legacy `MIND_CPU_QUEUE_DIR` name is still accepted.
+
+## Wave guard
+
+Before dispatching a wave of subagents, the orchestrator runs the packaged
+monitor and keeps the wave at the width it recommends:
+
+```bash
+tools/ai-tools/resource-gate/resource-monitor.sh \
+  --cpu-percent 85 --ram-percent 85 --disk-percent 90 --streak 3 --init
+tools/ai-tools/resource-gate/resource-monitor.sh --log runs/resource-monitor.log
+```
+
+`--init` saves the limits to `tools/ai-tools/.resource-monitor-limits` (in the
+submodule's ignored scratch area) and exits; later runs read them. `--once`
+samples the current machine without taking the monitor lock. While the monitor
+runs it prints a `recommended_parallel_subagents` value and, after the
+configured streak over any limit, writes an alert JSON under
+`.tmp/resource-monitor/alert.json` and exits `3`. Stop spawning, cut the width
+6 → 4 → 2 → 1, kill only the process trees you started, and restart the monitor
+after two clean samples. Queued work is exempt from the monitor's CPU/RAM/disk
+checks, so a running build does not trigger it.
 
 ## Wave rules
 
@@ -57,6 +76,7 @@ legacy `MIND_CPU_QUEUE_DIR`.
 - Share one `CARGO_TARGET_DIR` across the wave instead of copying `target/`.
 - A heavy task that is already running means wait. Do not run "a quick one"
   beside it, kill the holder, or disable the queue.
-- Adding a new heavy entry point means adding a row here and a task flag in the
-  wrapper; the task must re-exec through the wrapper (or source the repo's
-  existing guard) rather than run directly.
+- A new heavy entry point must source `tools/lib/cpu-guard.sh` (or re-exec the
+  packaged wrapper itself), add a row here, and add a task flag upstream in the
+  packaged wrapper. A one-off command can use `--cmd` without changing the
+  wrapper.

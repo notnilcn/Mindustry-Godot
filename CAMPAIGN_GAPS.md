@@ -996,8 +996,8 @@ a full campaign run would need one Java+Godot pass per finding.
 ### Enqueued twin items
 
 All in-engine-verified findings and the highest-value code-confirmed ones were
-enqueued through `tools/twin_tx.py` (the only sanctioned writer of
-`TWIN-VERIFICATION.json`). `mismatch` items carry the fresh Godot+Java call
+enqueued through the packaged `tools/ai-tools/twin/twin_verify.py`
+(`set-status`; the only sanctioned writer of `TWIN-VERIFICATION.json`). `mismatch` items carry the fresh Godot+Java call
 chains; `seeded` items carry the code evidence and a `source` anchor back here.
 
 | CG | PAR | Status | CG | PAR | Status |

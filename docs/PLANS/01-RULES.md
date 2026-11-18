@@ -13,7 +13,7 @@ Shorthand used in every package:
 - `$MAIN` is `/home/clintonnguyen/g/code_examples/Mindustry-Godot` (the main checkout).
 - `$WT` is your worktree.
 - `BASE` is the plan base commit `291e30a8`. Line numbers in the plans are at `BASE`.
-- `run` means `tools/run-cpu-intensive-task.sh`. Always run it from `$WT`.
+- `run` means `tools/ai-tools/resource-gate/run-resource-intensive-task.sh`. Always run it from `$WT`.
 
 ## §1 Worktree, branch, commits
 
@@ -63,7 +63,9 @@ ends; it sits outside every checkout, so removing a worktree does not reclaim it
 The queue serializes heavy work; it does not make it free, and it does not by itself say which
 agent broke a build. Two rules give both.
 
-**Run only the checks your package needs, from your worktree.** Your worktree is the attribution
+**Run only the checks your package needs, from your worktree.** The orchestrator runs the packaged
+resource monitor before a wave (`tools/ai-tools/resource-gate/resource-monitor.sh`; see
+[`docs/CI-WORKFLOW.md`](../CI-WORKFLOW.md) "Wave guard"). Your worktree is the attribution
 boundary: the orchestrator routes a red result back to the worktree it came from, so a red result
 you report is one you own.
 

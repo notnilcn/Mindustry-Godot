@@ -20,10 +20,10 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# One full gate at a time. Invoked directly, ci.sh re-execs through the repo-wide
-# CPU queue; when it is already running under the queue (or calls build.sh /
-# server/build.sh internally) MIND_CPU_QUEUE_HELD makes those nested scripts run
-# without trying to take the lock again. See docs/CI-WORKFLOW.md.
+# One full gate at a time. Invoked directly, ci.sh re-execs through the packaged
+# resource queue; when it is already running under the queue (or calls build.sh
+# / server/build.sh internally) RESOURCE_QUEUE_HELD makes those nested scripts
+# run without trying to take the lock again. See docs/CI-WORKFLOW.md.
 # shellcheck source=tools/lib/cpu-guard.sh
 source "$REPO_ROOT/tools/lib/cpu-guard.sh"
 mind_cpu_guard ci "$REPO_ROOT/tools/ci.sh" "$@"

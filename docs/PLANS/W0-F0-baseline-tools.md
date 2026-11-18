@@ -199,10 +199,10 @@ Both scripts are read-only and need no build. See docs/PLANS/01-RULES.md §6.
 7. Record the test inventory baseline. These are slow, so run them through the queue, one at a time:
    ```bash
    for c in mind-core mind-headless; do
-     tools/run-cpu-intensive-task.sh --cargo-test -p $c -- --list 2>/dev/null \
+     tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p $c -- --list 2>/dev/null \
        | grep -E ': (test|bench)$' | sort > docs/PLANS/baseline/tests-$c.txt
    done
-   tools/run-cpu-intensive-task.sh --cargo-test -p mind-gdext --lib -- --list 2>/dev/null \
+   tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-test -p mind-gdext --lib -- --list 2>/dev/null \
        | grep -E ': (test|bench)$' | sort > docs/PLANS/baseline/tests-mind-gdext.txt
    wc -l docs/PLANS/baseline/tests-*.txt
    ```
@@ -212,8 +212,8 @@ Both scripts are read-only and need no build. See docs/PLANS/01-RULES.md §6.
    needed for cargo tests). Write it into the report, and note it in RULES §1 for the orchestrator.
 8. Run the golden checks once and paste the result into the report, so later drift is
    attributable:
-   `tools/run-cpu-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens` and
-   `tools/run-cpu-intensive-task.sh --goldens --check`.
+   `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-run -q -p mind-headless -- parity goldens` and
+   `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --goldens --check`.
 9. Write `docs/PLANS/reports/F0.md` (RULES §7). Use `--gates fmt` for the CI entry; the scripts are Python only.
 
 ## Done when

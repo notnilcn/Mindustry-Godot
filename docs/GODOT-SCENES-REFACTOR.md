@@ -198,12 +198,12 @@ code) — untouched.
 ## 7. Verification
 
 ```bash
-tools/run-cpu-intensive-task.sh --cargo-check -p mind-gdext                  # typecheck (queued)
-tools/run-cpu-intensive-task.sh --cmd -- \                                   # scoped clippy (baseline allow)
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cargo-check -p mind-gdext                  # typecheck (queued)
+tools/ai-tools/resource-gate/run-resource-intensive-task.sh --cmd -- \                                   # scoped clippy (baseline allow)
   cargo clippy --manifest-path client/rust/Cargo.toml -p mind-gdext --all-targets -- -D warnings -A clippy::collapsible_if
 cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check            # formatting (cheap)
 godot --headless --path client --quit-after 180 res://scenes/game.tscn       # headless boot
-#   queued: tools/run-cpu-intensive-task.sh --godot --headless --quit-after 180 res://scenes/game.tscn
+#   queued: tools/ai-tools/resource-gate/run-resource-intensive-task.sh --godot --headless --quit-after 180 res://scenes/game.tscn
 # after the pass only the deferred buckets may remain:
 grep -rn '"/root/Spine' --include="*.rs" client/rust/mind-gdext/src | wc -l
 grep -rn '"\.\./'      --include="*.rs" client/rust/mind-gdext/src | wc -l
@@ -220,7 +220,7 @@ camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host
 
 **Actual verification (S5 closeout, 2026-11-05).** Recorded from the orchestrator's runs (S5 did not re-run them):
 
-- `tools/run-cpu-intensive-task.sh --build` — exit 0 (39 s).
+- `tools/ai-tools/resource-gate/run-resource-intensive-task.sh --build` — exit 0 (39 s).
 - Headless `godot --headless --path client --quit-after 240 res://scenes/game.tscn` — exit 0; **0** `missing required`
   warnings; 0 `ERROR`/`SCRIPT ERROR` lines.
 - One-off SceneTree probe (no repo file added) over all 16 wired nodes' exported refs — `CHECKED 16 nodes, null deps: 0`.

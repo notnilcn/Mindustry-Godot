@@ -14,10 +14,11 @@
 # bridge 6970. `--session N` (N >= 2) prepares a parallel session in the
 # sibling worktree `../Mindustry-Godot-sessionN` on display :(9+N) and bridge
 # 6970+10(N-1), with session-local MCP wiring (PATH shims + `opencode.json` in
-# the worktree). The twin-verification file (`TWIN-VERIFICATION.json`) and
-# `runs/` stay shared with the main checkout through symlinks, so writes and
-# reference frames are visible to every session; everything else is
-# per-session.
+# the worktree). The twin-verification file (`TWIN-VERIFICATION.json`) is
+# addressed through `TWIN_REGISTRY` in the main checkout and `runs/` is
+# symlinked to it, so writes and reference frames are visible to every session;
+# everything else is per-session. The registry itself is never symlinked: the
+# packaged validator replaces the path it is given.
 #
 # The Java reference is NOT started here: the parity-eval skill §0 launches it
 # per run (detached, with parity-java-home/), and a session must never have two
@@ -159,6 +160,13 @@ fi
 WAYLAND_DIR="$RUNTIME/wayland"
 RUNS="$SESSION_REPO/runs"
 
+# The packaged twin tools write the registry path they are given with an atomic
+# replace, so the registry must not be a symlink into the main checkout: that
+# would replace the link and fork the queue. Point TWIN_REGISTRY at the main
+# checkout instead; the twin evidence root is shared the same way.
+export TWIN_REGISTRY="$MAIN_REPO/TWIN-VERIFICATION.json"
+export TWIN_RUNS="$MAIN_REPO/runs"
+
 if [ "$session" -eq 1 ] && [ "$REPO_ROOT" != "$MAIN_REPO" ]; then
   die "this is a session worktree; run with --session N (or from the main checkout)"
 fi
@@ -167,30 +175,6 @@ mkdir -p "$RUNTIME"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 # --- shared artifacts (session N >= 2) ---------------------------------------
-
-# link_shared <path> <relative target>: point a worktree path at the main
-# checkout's file. A freshly checked-out tracked file that matches main is
-# replaced; a local copy that differs is preserved under the runtime dir.
-link_shared() {
-  local path="$1" target="$2" base
-  base="$(basename "$path")"
-  if [ -L "$path" ]; then
-    [ "$(readlink "$path")" = "$target" ] || ln -sfn "$target" "$path"
-    return 0
-  fi
-  if [ -e "$path" ]; then
-    if [ -e "$MAIN_REPO/$base" ] && cmp -s "$path" "$MAIN_REPO/$base"; then
-      rm -f "$path"
-      ln -s "$target" "$path"
-    else
-      log "WARNING: $path differs from main; keeping it at $RUNTIME/shared-$base.local and linking to main"
-      mv "$path" "$RUNTIME/shared-$base.local"
-      ln -s "$target" "$path"
-    fi
-  else
-    ln -s "$target" "$path"
-  fi
-}
 
 session_prepare() {
   # 1) git worktree on its own branch. A registered worktree whose directory
@@ -259,15 +243,16 @@ session_prepare() {
     cp -a --reflink=auto "$MAIN_REPO/parity-java-home" "$SESSION_REPO/parity-java-home"
   fi
 
-  # 4) shared queue and run store: one twin file, one flock, one set of
-  #    reference frames across sessions. `runs/` is gitignored, so a symlink is invisible
-  #    to git; `TWIN-VERIFICATION.json` is tracked, so hide the symlink from
-  #    status/add with skip-worktree.
-  link_shared "$SESSION_REPO/TWIN-VERIFICATION.json" "../Mindustry-Godot/TWIN-VERIFICATION.json"
-  link_shared "$SESSION_REPO/TWIN-VERIFICATION.json.lock" "../Mindustry-Godot/TWIN-VERIFICATION.json.lock"
+  # 4) shared run store: one set of reference frames across sessions. `runs/`
+  #    is gitignored, so a symlink is invisible to git. Do NOT symlink
+  #    TWIN-VERIFICATION.json: twin_verify.py set-status replaces the path it
+  #    is given, so a symlink would become a fork of the queue. TWIN_REGISTRY
+  #    (exported above) points every session at the main checkout's registry.
   [ -e "$SESSION_REPO/runs" ] || ln -s "../Mindustry-Godot/runs" "$SESSION_REPO/runs"
-  if git -C "$SESSION_REPO" ls-files --error-unmatch TWIN-VERIFICATION.json >/dev/null 2>&1; then
-    git -C "$SESSION_REPO" update-index --skip-worktree -- TWIN-VERIFICATION.json
+  if [ -L "$SESSION_REPO/TWIN-VERIFICATION.json" ]; then
+    git -C "$SESSION_REPO" update-index --no-skip-worktree -- TWIN-VERIFICATION.json 2>/dev/null || true
+    rm -f "$SESSION_REPO/TWIN-VERIFICATION.json"
+    git -C "$SESSION_REPO" checkout -- TWIN-VERIFICATION.json 2>/dev/null || true
   fi
 
   # 5) session-local Godot MCP wiring. The opencode project config overrides
@@ -293,7 +278,7 @@ EOF
   exclude="$(git -C "$SESSION_REPO" rev-parse --git-path info/exclude 2>/dev/null || true)"
   if [ -n "$exclude" ]; then
     mkdir -p "$(dirname "$exclude")"
-    for pat in /opencode.json /runs /TWIN-VERIFICATION.json.lock; do
+    for pat in /opencode.json /runs; do
       grep -qxF "$pat" "$exclude" 2>/dev/null || echo "$pat" >>"$exclude"
     done
   fi
@@ -509,7 +494,7 @@ cat <<EOF
 EOF
 if [ "$session" -ge 2 ]; then
   cat <<EOF
-  twin file:    shared with main (${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json, symlinked)
+  twin registry: ${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json   (TWIN_REGISTRY)
   runs:         shared with main (${MAIN_REPO#"$WORKSPACE_ROOT"/}/runs, symlinked)
   java home:    $SESSION_REPO/parity-java-home   (isolated copy)
   MCP shims:    $SHIM_DIR   (open-godot-mcp; prepended to PATH by --run)
@@ -518,7 +503,7 @@ if [ "$session" -ge 2 ]; then
 EOF
 else
   cat <<EOF
-  twin file:    ${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json   (items: fork/action/images/status/similarity)
+  twin registry: ${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json   (items: fork/action/images/status/similarity)
   run prefix:   '${MAIN_REPO#"$WORKSPACE_ROOT"/}/runs/'
   prompts:      ${MAIN_REPO#"$WORKSPACE_ROOT"/}/WORKFLOW_PROMPTS.md
 EOF
