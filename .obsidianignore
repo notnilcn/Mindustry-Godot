@@ -1,0 +1,7 @@
+target/
+server/target/
+spikes/
+tools/
+client/.godot/
+/client/bin/
+*.pdb
