@@ -16,6 +16,22 @@ versions from the project on every task.
 
 Every name, number and file in an example below is made up for illustration.
 
+## Design intent
+
+The shape this skill aims at is a **functional core with an imperative shell.**
+
+- The core is plain Rust that knows nothing about the engine: functions and types that
+  take plain values and return plain values, with no nodes, no engine calls and no I/O
+  inside them.
+- The shell is thin: the Rust node classes and the scene tree hold objects, read input,
+  ask the core what should happen, and apply the answer to the world.
+
+The payoff is that rules can be tested without a running game, and a change to a rule
+stays clear of the string-bound surface in §3.
+
+This states intent; it does not add permission. The rules below still say how to get
+there, and §1 still governs breaking one.
+
 ## 1. Precedence and deviations
 
 - An explicit instruction from the user wins over this skill. So do the project's own
@@ -28,6 +44,8 @@ Every name, number and file in an example below is made up for illustration.
 - Never put the justification for a deviation in a code comment. That recreates the thing
   §2 removes.
 - "It was easier" and "the surrounding code already does it" are not justifications.
+- The design intent is not a rule to deviate from, and citing it licenses nothing. A
+  report of the form `Deviation: design intent.` is not acceptable.
 - Creating nodes in code for one of the reasons in §4, and defining a custom node type,
   are not deviations. Their justifications go in the file header, as §4 and §2 describe.
 
@@ -383,11 +401,42 @@ Hook names below are the Rust virtuals; they map to Godot's underscore-prefixed 
 
 **Scenes declare, Rust decides.**
 
+- The scene tree and the Rust node classes are the shell. "Push logic into plain Rust"
+  moves rules out of nodes into the core; it never moves composition out of scenes into
+  code.
 - A scene holds composition, property values and connections. Its root node's class and
   the scene are one unit; read them together.
 - Nodes are declared in scenes, not created in code, except as §4 allows.
 - Edit `.tscn` text minimally and in the shape the editor writes. Keep resource ids
   consistent within the file. Never invent a UID; omit it and let the editor assign one.
+
+**Never silently override what the editor shows.**
+
+- Any value a scene author can see and set in the Inspector belongs to the scene: a
+  built-in property such as `visible`, `layer`, `process_priority` or `mouse_filter`, an
+  exported property, and the properties of nodes declared in a scene. By default, code
+  must not overwrite it at load, in `ready` or at any other time. What runs must be what
+  the Inspector shows.
+- Setting a value in construction is fine, because that only sets the default the scene
+  starts from and stored scene values still apply after it.
+- Do not add an exported property that duplicates a built-in property and then copy one
+  onto the other. A "start visible" export forced onto `visible` in `ready` gives the
+  author two settings for one thing, and the one they can see loses. Use the built-in
+  property.
+- Code may still change a value as its own behavior, such as a toggle key showing a
+  panel, a pause hiding a menu or an animation moving a node. Doing that in response to
+  something happening is not overriding.
+- Forcing a value regardless of what the scene says, only to reach a starting state, is a
+  deviation (§1), and needs a justification in the report. Make the force visible to the
+  author too, with a configuration warning, or a scene-stored value the code reads
+  instead of replacing.
+
+| Don't | Do |
+|---|---|
+| `set_visible(false)` in `ready` so an overlay starts hidden | store `visible = false` in the scene, or make it the default in construction |
+| an exported "start visible" flag copied onto `visible` in `ready` | use `visible` itself |
+| force `layer` or `process_priority` to a literal in `ready` | set the default in construction; let the scene's value win |
+| quietly reset an exported value the author set because the code "needs" another one | a configuration warning saying which value is required, or read and respect it |
 
 | Don't | Do |
 |---|---|
@@ -420,6 +469,46 @@ Hook names below are the Rust virtuals; they map to Godot's underscore-prefixed 
 | a node quietly does nothing when its target is unassigned | a configuration warning: "Assign a target." |
 | an autoload that adjusts the player, the enemies and the UI | an autoload that plays music and owns only its own state |
 
+**Reference other nodes through exports, not lookups.**
+
+**A node that needs another node in the tree — an owner, a target, a child it drives, a
+node it connects to — never looks it up in code. The scene assigns it through an exported
+property, or the code that already holds it passes it in; a lookup needs a justification
+below.**
+
+- Export a typed reference where the binding supports one; an exported path is the
+  fallback, not the default.
+- A reference passed in from outside is not a lookup. If a parent, spawner or caller
+  already holds the node, take it as a parameter.
+- No hardcoded or computed node paths, scene-unique names, name searches, group or type
+  scans, or tree walks.
+- A lookup is justified only when no scene owns both ends: a set whose members are created
+  in code (§4) or chosen after authoring, where they cannot be handed over one by one; a
+  cross-scene system such as a debug overlay or an autoload; or tooling and tests that
+  inspect arbitrary trees. Report it as a deviation (§1).
+- Handle an unassigned exported reference as the boundary rules below require: warn the
+  scene author and return, never `unwrap`.
+
+| Don't | Do |
+|---|---|
+| `get_node("../HealthBar")` in `ready` | export a reference to the health bar; the scene assigns it |
+| a node looks up its own declared child by path | export a reference to the child; the scene assigns it |
+| a group scan to find the player | the common ancestor hands the player's reference to whoever needs it |
+| a signal connected through a node looked up by path | export a reference to the node; connect through it |
+| a helper that finds a node from a path string | a helper that takes the node as a parameter |
+
+Justified lookups:
+
+- `Deviation: node references (§5) at the pickup magnet. Pickups are created after the
+  scene is authored by systems that do not know which collector will reach them, so it
+  queries the group on a timer rather than every frame.`
+- `Deviation: node references (§5) at the debug overlay. It attaches to whichever scene is
+  loaded and has no authored scene of its own; it finds the inspected node once and drops
+  the handle when the scene changes.`
+- `Deviation: node references (§5) at the scene-loading test. The test loads a scene and
+  inspects its nodes to verify composition, so no export can be assigned before the scene
+  exists.`
+
 **Use the right hook.**
 
 - Construction runs first, exported values are applied after it, then `ready`. Never read
@@ -441,7 +530,9 @@ Hook names below are the Rust virtuals; they map to Godot's underscore-prefixed 
 
 **Cross the engine boundary carefully.**
 
-- Look a node up once and keep the handle. No path lookups per frame.
+- Export a node reference rather than looking it up (above). Where a lookup is justified,
+  keep it out of per-frame code: look it up once and keep the handle, or query on a timer
+  for a changing set.
 - Anything a scene supplies can be missing: an unassigned exported reference, a child
   that was renamed. Handle the absent case; do not `unwrap` it.
 - A panic is a bug, never control flow.
@@ -453,7 +544,7 @@ Hook names below are the Rust virtuals; they map to Godot's underscore-prefixed 
 
 | Don't | Do |
 |---|---|
-| look a child up by path inside `process` | look it up in `ready`; keep the handle |
+| look a child up by path inside `process` | export a reference to it; if a lookup is justified, do it once in `ready` and keep the handle |
 | `unwrap` an exported reference the scene may not have assigned | handle the missing case: warn the scene author and return |
 | panic to say "no target found" | return `Option` |
 | emit a signal partway through changing state its listeners will read back | finish the change, then emit |
@@ -482,10 +573,16 @@ Hook names below are the Rust virtuals; they map to Godot's underscore-prefixed 
       nothing that expires.
 - [ ] No node is created in code that a scene could have declared, and every node that is
       created in code is justified in its file's header.
+- [ ] Every node reference is assigned by the scene through an exported property, or is a
+      justified lookup reported as a deviation.
 - [ ] Dependents were counted, in Rust and in scenes, for every shared thing touched.
 - [ ] Every renamed, removed or retyped name was searched for in scene and resource files.
 - [ ] No exported default or enum order changed by accident.
+- [ ] No code overwrites a scene's Inspector values just to reach a starting state, and
+      any forced value is reported as a deviation.
 - [ ] Behavior sits in the smallest module or scene that can own it.
+- [ ] New rules went into plain Rust that can be tested without a running game, rather
+      than into a node's methods.
 - [ ] The build passes, and the affected scenes were loaded in the engine. If you could
       not run the engine, the report says so instead of claiming the scenes work.
 - [ ] Every deviation from this skill is reported with its justification.
